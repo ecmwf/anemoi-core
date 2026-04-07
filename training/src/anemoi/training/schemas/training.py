@@ -395,7 +395,6 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -455,6 +454,8 @@ class BaseTrainingSchema(BaseModel):
     "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]
     "List of metrics"
+    model_modifier: dict | None = Field(default=None)
+    "Model modifier configuration for weight loading, freezing, and fine-tuning."
     ensemble_size_per_device: PositiveInt = 1
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
