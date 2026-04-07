@@ -21,7 +21,6 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from pytorch_lightning.utilities.types import LRSchedulerConfig
 from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
 from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch_geometric.data import HeteroData
@@ -1093,9 +1092,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if not getattr(optimization, "lr_scheduler", None):
             return optimizer
 
-        pl_scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
-        pl_lr_scheduler = LRSchedulerConfig(scheduler=pl_scheduler, **(optimization.pl_lr_scheduler or {}))
-        return [optimizer], [pl_lr_scheduler]
+        scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
+        scheduler_config = {"scheduler": scheduler, **(optimization.pl_lr_scheduler or {})}
+        return [optimizer], [scheduler_config]  # type: ignore
 
     @staticmethod
     def log_optimizer(optimizer: torch.optim.Optimizer) -> None:
