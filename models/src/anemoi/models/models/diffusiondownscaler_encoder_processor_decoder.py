@@ -328,9 +328,6 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         Overrides parent to properly handle dictionary of per-dataset residual configs.
         """
-        import torch.nn as nn
-        from hydra.utils import instantiate
-
         if isinstance(residual_config, Mapping) and "_target_" not in residual_config:
             # Per-dataset configs provided
             self.residual = nn.ModuleDict()
@@ -1082,13 +1079,19 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         target_ds = self._decoder_datasets[0]
         source_ds = self._residual_pairs.get(target_ds, None)
 
+        if source_ds is None:
+            raise ValueError(
+                f"No residual source found for target dataset '{target_ds}'. "
+                f"Check residual_prediction config: {self._residual_pairs}"
+            )
+
         out = self.add_interp_to_state(
             x_in_interp,
             out,
             post_processors,
             post_processors_tendencies,
             target_dataset=target_ds,
-            source_dataset=source_ds or self._decoder_datasets[0],
+            source_dataset=source_ds,
         )
 
         # Gather if needed
@@ -1101,22 +1104,6 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             )
 
         return out
-
-    def _get_preconditioning(self, sigma: dict[str, torch.Tensor], sigma_data: torch.Tensor) -> tuple[
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor],
-        dict[str, torch.Tensor],
-    ]:
-        """Compute preconditioning factors."""
-        c_skip, c_out, c_in, c_noise = {}, {}, {}, {}
-        for dataset_name, sigma_i in sigma.items():
-            c_skip[dataset_name] = sigma_data**2 / (sigma_i**2 + sigma_data**2)
-            c_out[dataset_name] = sigma_i * sigma_data / (sigma_i**2 + sigma_data**2) ** 0.5
-            c_in[dataset_name] = 1.0 / (sigma_data**2 + sigma_i**2) ** 0.5
-            c_noise[dataset_name] = sigma_i.log() / 4.0
-
-        return c_skip, c_out, c_in, c_noise
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
