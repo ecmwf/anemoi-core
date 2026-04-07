@@ -29,7 +29,6 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.interface import ModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -48,6 +47,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
