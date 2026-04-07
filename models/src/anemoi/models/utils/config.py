@@ -11,7 +11,7 @@
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.models.utils.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 
 
 # This function retrieves the configuration for multiple datasets, supporting both new and old config formats.

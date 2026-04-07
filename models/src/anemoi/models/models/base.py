@@ -43,6 +43,7 @@ class BaseGraphModel(nn.Module):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        projection_data: dict | None = None,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -56,12 +57,18 @@ class BaseGraphModel(nn.Module):
             Data statistics
         graph_data : HeteroData
             Graph definition
+        projection_data : dict, optional
+            Per-dataset projection metadata (truncation/multiscale edge names)
+            resolved by ``ProjectionCreator``. When provided, edge names are
+            passed directly to ``TruncatedConnection`` rather than derived at
+            runtime from the graph config.
         """
         super().__init__()
         if type(model_config) is dict and not OmegaConf.is_config(model_config):
             model_config = OmegaConf.create(model_config)
 
         self._graph_data = graph_data
+        self._projection_data = projection_data or {}
         self.data_indices = data_indices
         self.statistics = statistics
 
@@ -238,16 +245,19 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: Any) -> None:
         self.residual = torch.nn.ModuleDict()
-        truncation_projection_config = (
-            None if self._graph_projection_configs is None else self._graph_projection_configs.get("truncation")
-        )
         for dataset_name in self.dataset_names:
+            dataset_projection = self._projection_data.get(dataset_name)
+            extra_kwargs: dict = {}
+            if dataset_projection is not None:
+                extra_kwargs = {
+                    "truncation_down_edges_name": dataset_projection.truncation_down_edges_name,
+                    "truncation_up_edges_name": dataset_projection.truncation_up_edges_name,
+                    "edge_weight_attribute": dataset_projection.truncation_edge_weight_attribute,
+                }
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
-                dataset_name=dataset_name,
-                dataset_names=self.dataset_names,
-                truncation_projection_config=truncation_projection_config,
+                **extra_kwargs,
             )
 
     def _build_named_node_attributes_graph(self) -> HeteroData:

@@ -16,14 +16,12 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import multiscale_loss_matrices_graph as derive_multiscale_loss_matrices_graph
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
-from anemoi.models.utils.projection_helpers import (
-    multiscale_loss_matrices_graph as derive_multiscale_loss_matrices_graph,
-)
 from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)

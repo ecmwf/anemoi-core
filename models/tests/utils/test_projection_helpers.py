@@ -11,13 +11,13 @@ import pytest
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.models.utils.projection_helpers import get_graph_node_names
-from anemoi.models.utils.projection_helpers import multiscale_loss_matrices_graph
-from anemoi.models.utils.projection_helpers import projection_edge_name
-from anemoi.models.utils.projection_helpers import projection_node_name
-from anemoi.models.utils.projection_helpers import residual_projection_edge_names
-from anemoi.models.utils.projection_helpers import residual_projection_truncation_node_name
-from anemoi.models.utils.projection_helpers import uses_fused_dataset_graph
+from anemoi.graphs.projection_helpers import get_graph_node_names
+from anemoi.graphs.projection_helpers import multiscale_loss_matrices_graph
+from anemoi.graphs.projection_helpers import projection_edge_name
+from anemoi.graphs.projection_helpers import projection_node_name
+from anemoi.graphs.projection_helpers import residual_projection_edge_names
+from anemoi.graphs.projection_helpers import residual_projection_truncation_node_name
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 
 
 @pytest.fixture

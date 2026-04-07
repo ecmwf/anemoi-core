@@ -195,6 +195,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata=metadata,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
+            projection_data=projection_data,
             config=config,
         )
         self.config = config
