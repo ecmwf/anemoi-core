@@ -25,25 +25,22 @@ from pydantic import ValidationError
 from pydantic import model_validator
 from pydantic_core import PydanticCustomError
 
-from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
-from anemoi.utils.schemas import BaseModel
-
-from .schema_utils import apply_schema_defaults
-from .schema_utils import resolve_and_prune_undeclared_interpolation_anchors
-from .validation_errors import ConfigValidationError
-from .validation_errors import format_validation_error
-
 # to make these available at runtime for pydantic, bug should be resolved in
 # future versions (see https://github.com/astral-sh/ruff/issues/7866)
-from anemoi.graphs.schemas.base_graph import BaseGraphSchema  # noqa: TCH001
-from anemoi.models.schemas.models import ModelSchema  # noqa: TCH001
+from anemoi.graphs.schemas.base_graph import BaseGraphSchema
+from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
+from anemoi.models.schemas.models import ModelSchema
+from anemoi.utils.schemas import BaseModel
 
-from .data import DataSchema  # noqa: TCH001
-from .dataloader import DataLoaderSchema  # noqa: TCH001
-from .diagnostics import DiagnosticsSchema  # noqa: TCH001
-from .system import SystemSchema  # noqa: TCH001
-from .training import TrainingSchema  # noqa: TCH001
-
+from .data import DataSchema  # noqa: TC001
+from .dataloader import DataLoaderSchema  # noqa: TC001
+from .diagnostics import DiagnosticsSchema  # noqa: TC001
+from .schema_utils import apply_schema_defaults
+from .schema_utils import resolve_and_prune_undeclared_interpolation_anchors
+from .system import SystemSchema  # noqa: TC001
+from .training import TrainingSchema  # noqa: TC001
+from .validation_errors import ConfigValidationError
+from .validation_errors import format_validation_error
 
 LOGGER = logging.getLogger(__name__)
 

@@ -168,10 +168,14 @@ def _resolve_union_model(
         except Exception:  # noqa: BLE001
             return None
         return next(
-            (ann for arg in get_args(annotation)
-             for ann, meta in [_unwrap_annotated(arg)]
-             if isinstance(ann, type) and issubclass(ann, PydanticBaseModel)
-             and any(getattr(m, "tag", None) == tag for m in meta)),
+            (
+                ann
+                for arg in get_args(annotation)
+                for ann, meta in [_unwrap_annotated(arg)]
+                if isinstance(ann, type)
+                and issubclass(ann, PydanticBaseModel)
+                and any(getattr(m, "tag", None) == tag for m in meta)
+            ),
             None,
         )
     if not isinstance(value, DictConfig | dict):
@@ -519,7 +523,6 @@ def undeclared_interpolation_anchor_paths(
     return _undeclared_anchor_paths(refs, config, schema)
 
 
-
 def prune_undeclared_interpolation_anchors(config: DictConfig, paths: list[tuple[str, ...]]) -> None:
     """Delete the given anchor paths from *config* in-place."""
     for path in _minimize_paths(paths):
@@ -551,11 +554,9 @@ def resolve_and_prune_undeclared_interpolation_anchors(
     anchor_paths = _undeclared_anchor_paths(refs, config, schema)
     OmegaConf.resolve(config)
     prune_undeclared_interpolation_anchors(config, anchor_paths)
-    extra = _minimize_paths([
-        _schema_root_of_path(path, schema)
-        for path in all_paths
-        if not _path_in_schema(path, schema)
-    ])
+    extra = _minimize_paths(
+        [_schema_root_of_path(path, schema) for path in all_paths if not _path_in_schema(path, schema)],
+    )
     prune_undeclared_interpolation_anchors(config, extra)
 
 
