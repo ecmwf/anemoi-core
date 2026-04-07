@@ -77,8 +77,6 @@ class BaseMapper(nn.Module, ABC):
 
         self.proc = NotImplemented
 
-        self.offload_layers(cpu_offload)
-
     def offload_layers(self, cpu_offload):
         if cpu_offload:
             self.proc = nn.ModuleList([offload_wrapper(x) for x in self.proc])
@@ -149,6 +147,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -177,6 +176,11 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -199,6 +203,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.num_chunks = num_chunks
@@ -209,6 +214,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             in_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
             out_channels=hidden_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             edge_dim=edge_dim,
             qk_norm=qk_norm,
@@ -498,10 +504,12 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -520,6 +528,8 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int, optional
+            Must remain ``None`` for forward graph-transformer mappers.
         num_chunks : int
             Number of chunks to split into
         num_heads: int
@@ -528,6 +538,11 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool
@@ -541,6 +556,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         edge_pre_mlp: bool, by default False
             Allow for edge feature mixing
         """
+        assert out_channels_dst is None, "GraphTransformerForwardMapper does not support out_channels_dst."
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
@@ -552,10 +568,12 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
+            attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
@@ -620,6 +638,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
@@ -649,6 +668,11 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         initialise_data_extractor_zero : bool, default False:
@@ -676,10 +700,12 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
+            attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.node_data_extractor = nn.Sequential(
@@ -760,6 +786,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.emb_edges = MLP(
@@ -899,6 +926,7 @@ class GNNForwardMapper(GNNBaseMapper):
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.proc = GraphConvMapperBlock(
@@ -996,6 +1024,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.proc = GraphConvMapperBlock(
@@ -1065,6 +1094,230 @@ class GNNBackwardMapper(GNNBaseMapper):
         return x_dst
 
 
+class PointWiseMapper(BaseMapper, ABC):
+    """PointWise Mapper from hidden -> data or data -> hidden."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
+        layer_kernels: dict | None = None,
+    ):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
+            layer_kernels=layer_kernels,
+        )
+
+    @staticmethod
+    def _node_partition(shapes: list[list[int]] | list[int]) -> list[int]:
+        if shapes and isinstance(shapes[0], int):
+            return [shapes[0]]
+        return [shape[0] for shape in shapes]
+
+    def mapper_forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+    ) -> PairTensor:
+        shapes_src, shapes_dst = shard_shapes
+        assert self._node_partition(shapes_src) == self._node_partition(shapes_dst), (
+            f"Source and destination must have the same node partition for {self.__class__.__name__}, "
+            f"but got src={self._node_partition(shapes_src)} and dst={self._node_partition(shapes_dst)}."
+        )
+
+        x_dst, shapes_dst = self.pre_process(
+            x=x,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+        )
+
+        x_dst = self.post_process(
+            x_dst=x_dst,
+            shapes_dst=shapes_dst,
+            model_comm_group=model_comm_group,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+        )
+
+        return x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
+        **kwargs,
+    ) -> PairTensor:
+        return maybe_checkpoint(
+            self.mapper_forward,
+            self.gradient_checkpointing,
+            x=x,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes,
+            model_comm_group=model_comm_group,
+            x_src_is_sharded=x_src_is_sharded,
+            x_dst_is_sharded=x_dst_is_sharded,
+            keep_x_dst_sharded=keep_x_dst_sharded,
+            **kwargs,
+        )
+
+
+class PointWiseForwardMapper(PointWiseMapper):
+    """PointWise Mapper from data -> hidden."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
+        layer_kernels: dict | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
+            layer_kernels=layer_kernels,
+        )
+        self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+
+    def pre_process(
+        self,
+        x: tuple[torch.Tensor, torch.Tensor],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        model_comm_group=None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+    ):
+        shapes_src, shapes_dst = shard_shapes
+        x_src = x[0]
+        if not x_src_is_sharded:
+            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
+        x_src = self.emb_nodes_src(x_src)
+        return x_src, change_channels_in_shape(shapes_dst, self.hidden_dim)
+
+    def post_process(
+        self, x_dst: torch.Tensor, shapes_dst=None, model_comm_group=None, keep_x_dst_sharded: bool = False
+    ):
+        return x_dst
+
+    def forward(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+        keep_x_dst_sharded: bool = False,
+        edge_shard_shapes: Optional[tuple] = None,
+        **kwargs,
+    ) -> PairTensor:
+        x_dst = super().forward(
+            x,
+            batch_size,
+            shard_shapes,
+            edge_attr,
+            edge_index,
+            model_comm_group,
+            x_src_is_sharded,
+            x_dst_is_sharded,
+            keep_x_dst_sharded,
+            edge_shard_shapes,
+            **kwargs,
+        )
+        return x[0], x_dst
+
+
+class PointWiseBackwardMapper(PointWiseMapper):
+    """PointWise Mapper from hidden -> data."""
+
+    def __init__(
+        self,
+        *,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        out_channels_dst: int,
+        initialise_data_extractor_zero: bool = False,
+        cpu_offload: bool = False,
+        gradient_checkpointing: bool = True,
+        layer_kernels: dict | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            in_channels_src=in_channels_src,
+            in_channels_dst=in_channels_dst,
+            hidden_dim=hidden_dim,
+            cpu_offload=cpu_offload,
+            gradient_checkpointing=gradient_checkpointing,
+            layer_kernels=layer_kernels,
+        )
+        self.out_channels_dst = out_channels_dst
+
+        LayerNorm = self.layer_factory.LayerNorm
+        Linear = self.layer_factory.Linear
+        self.node_data_extractor = nn.Sequential(
+            LayerNorm(normalized_shape=self.hidden_dim),
+            Linear(self.hidden_dim, self.out_channels_dst),
+        )
+        if initialise_data_extractor_zero:
+            for module in self.node_data_extractor.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.constant_(module.weight, 0.0)
+                    if module.bias is not None:
+                        nn.init.constant_(module.bias, 0.0)
+
+    def pre_process(
+        self,
+        x: tuple[torch.Tensor, torch.Tensor],
+        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        model_comm_group=None,
+        x_src_is_sharded: bool = False,
+        x_dst_is_sharded: bool = False,
+    ):
+        shapes_src, shapes_dst = shard_shapes
+        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
+        x_src = x[0]
+        if not x_src_is_sharded:
+            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
+        return x_src, change_channels_in_shape(shapes_dst, self.out_channels_dst)
+
+    def post_process(self, x_dst: torch.Tensor, shapes_dst, model_comm_group=None, keep_x_dst_sharded: bool = False):
+        x_dst = self.node_data_extractor(x_dst)
+        if not keep_x_dst_sharded:
+            x_dst = gather_tensor(x_dst, 0, shapes_dst, model_comm_group)
+        return x_dst
+
+
 class TransformerBaseMapper(BaseMapper, ABC):
     """Transformer Base Mapper from hidden -> data or data -> hidden."""
 
@@ -1078,6 +1331,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
+        attn_channels: Optional[int] = None,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
@@ -1087,6 +1341,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        **kwargs,
     ) -> None:
         """Initialize TransformerBaseMapper.
 
@@ -1102,6 +1357,11 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Output channels of the destination node, by default None
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to the hidden dimension. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1129,11 +1389,13 @@ class TransformerBaseMapper(BaseMapper, ABC):
             num_chunks=num_chunks,
             layer_kernels=layer_kernels,
             cpu_offload=cpu_offload,
+            **kwargs,
         )
 
         self.proc = TransformerMapperBlock(
             num_channels=hidden_dim,
             hidden_dim=mlp_hidden_ratio * hidden_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
             layer_kernels=self.layer_factory,
@@ -1158,6 +1420,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         x_src_is_sharded: bool = False,
         x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
     ) -> PairTensor:
 
         x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
@@ -1173,6 +1436,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             (shapes_src, shapes_dst),
             batch_size,
             model_comm_group,
+            cond=cond,
         )
 
         x_dst = self.post_process(
@@ -1222,6 +1486,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -1247,6 +1512,11 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Output channels of the destination node, by default None
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to the hidden dimension. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1276,6 +1546,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             cpu_offload=cpu_offload,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            attn_channels=attn_channels,
             window_size=window_size,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
@@ -1283,6 +1554,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            **kwargs,
         )
 
         self.emb_nodes_src = nn.Linear(self.in_channels_src, self.hidden_dim)
@@ -1346,6 +1618,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -1371,6 +1644,11 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Output channels of the destination node, by default None
         mlp_hidden_ratio: int
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to the hidden dimension. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -1400,6 +1678,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             cpu_offload=cpu_offload,
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
+            attn_channels=attn_channels,
             window_size=window_size,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
@@ -1407,6 +1686,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            **kwargs,
         )
 
         self.node_data_extractor = nn.Sequential(
