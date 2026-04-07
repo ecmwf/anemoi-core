@@ -245,7 +245,9 @@ class TrajectoryDataset(BaseAnemoiReader):
     @property
     def trajectory_ids(self) -> list[str]:
         trajectory_length_seconds = self.trajectory_length * frequency_to_seconds(self.frequency)
-        return (self.dates - np.datetime64(self.trajectory_start, "s")) // np.timedelta64(trajectory_length_seconds, "s")
+        return (self.dates - np.datetime64(self.trajectory_start, "s")) // np.timedelta64(
+            trajectory_length_seconds, "s",
+        )
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
