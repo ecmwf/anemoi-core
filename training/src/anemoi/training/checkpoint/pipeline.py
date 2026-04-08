@@ -25,12 +25,12 @@ Example
 -------
 >>> from anemoi.training.checkpoint import CheckpointPipeline, CheckpointContext
 >>> from anemoi.training.checkpoint.sources import LocalSource
->>> from anemoi.training.checkpoint.loaders import WeightsOnlyLoader
+>>> from anemoi.training.checkpoint.loading import LoadingStrategy
 >>>
 >>> # Build a pipeline manually
 >>> pipeline = CheckpointPipeline([
 ...     LocalSource(path='/tmp/checkpoint.pt'),
-...     WeightsOnlyLoader(strict=False)
+...     # Add a loading strategy here
 ... ])
 >>>
 >>> # Or build from Hydra config
@@ -39,7 +39,7 @@ Example
 ...     'stages': [
 ...         {'_target_': 'anemoi.training.checkpoint.sources.LocalSource',
 ...          'path': '/tmp/checkpoint.pt'},
-...         {'_target_': 'anemoi.training.checkpoint.loaders.WeightsOnlyLoader',
+...         {'_target_': 'anemoi.training.checkpoint.loading.LoadingStrategy',
 ...          'strict': False}
 ...     ]
 ... })
@@ -435,6 +435,10 @@ class CheckpointPipeline:
                 context.update_metadata(**{f"stage_{i}_{stage_name}": "completed"})
 
             except Exception as e:
+                # Always re-raise MemoryError — never swallow it
+                if isinstance(e, MemoryError):
+                    raise
+
                 from .exceptions import CheckpointError
 
                 # Enhance error with pipeline context
@@ -472,14 +476,46 @@ class CheckpointPipeline:
 
                 LOGGER.warning("Continuing pipeline despite error in %s", stage_info)
 
+        # Safety check: if a source stage was configured but the model still
+        # has random weights (no loading strategy actually applied them),
+        # raise rather than silently returning an uninitialised model.
+        self._verify_weights_loaded(context)
+
         LOGGER.info("Pipeline execution completed")
         return context
+
+    def _verify_weights_loaded(self, context: CheckpointContext) -> None:
+        """Raise if a source was configured but weights were never loaded.
+
+        This prevents silently proceeding with a randomly-initialised model
+        when ``continue_on_error=True`` swallowed the loading failure.
+        """
+        has_source = any("Source" in s.__class__.__name__ for s in self.stages)
+        if not has_source:
+            return
+
+        model = context.model
+        if model is None:
+            return
+
+        if not getattr(model, "weights_initialized", False):
+            from .exceptions import CheckpointLoadError
+
+            msg = (
+                "A checkpoint source stage was configured but the model's "
+                "weights were never loaded (weights_initialized is False). "
+                "This usually means the loading strategy stage failed or was "
+                "missing. Refusing to proceed with random weights."
+            )
+            LOGGER.error(msg)
+            raise CheckpointLoadError(None, RuntimeError(msg))
 
     def execute_sync(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute pipeline stages synchronously.
 
         This is a convenience method for synchronous execution,
-        wrapping the async execution in asyncio.run().
+        wrapping the async execution in asyncio.run(). If an event
+        loop is already running (e.g. in Jupyter), uses a thread pool.
 
         Parameters
         ----------
@@ -491,6 +527,18 @@ class CheckpointPipeline:
         CheckpointContext
             Final processed context
         """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Inside existing event loop (e.g. Jupyter) — run in a thread
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, self.execute_async(initial_context))
+                return future.result()
         return asyncio.run(self.execute_async(initial_context))
 
     async def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
@@ -528,11 +576,8 @@ class CheckpointPipeline:
         >>> # In sync context:
         >>> result = asyncio.run(pipeline.execute(context))
         """
-        if self.async_execution:
-            return await self.execute_async(initial_context)
-        # For sync execution in async context
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.execute_sync, initial_context)
+        # execute() is already async, so always use execute_async
+        return await self.execute_async(initial_context)
 
     def add_stage(self, stage: Union[PipelineStage, DictConfig, dict]) -> None:
         """Add a stage to the pipeline.
