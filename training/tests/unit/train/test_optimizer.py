@@ -1,6 +1,7 @@
 import pytest
 import torch
 from omegaconf import OmegaConf
+from pytorch_lightning.utilities.types import LRSchedulerConfig
 from pytest_mock import MockerFixture
 from timm.scheduler import CosineLRScheduler
 
@@ -27,7 +28,6 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
     module.log_optimizer = BaseGraphModule.log_optimizer
     module.lr_scheduler_step = BaseGraphModule.lr_scheduler_step.__get__(module)
     module.current_epoch = 0
-    module._lr_scheduler_interval = "epoch"
     module.trainer = mocker.MagicMock()
     module.trainer.global_step = 0
 
@@ -110,17 +110,16 @@ def test_create_timm_scheduler_defaults_to_step_interval(
             "warmup_t": 100,
         },
     )
-    mocked_module.config.training.optimization.pl_lr_scheduler = None
+    mocked_module.config.training.optimization.pl_lr_scheduler = OmegaConf.create({"interval": "step"})
 
     optimizers, schedulers = mocked_module.configure_optimizers()
     optimizer = optimizers[0]
     scheduler_dict = schedulers[0]
 
     assert isinstance(optimizer, torch.optim.Adam)
-    assert isinstance(scheduler_dict.scheduler, CosineLRScheduler)
-    assert scheduler_dict.scheduler.optimizer is optimizer
-    assert scheduler_dict.interval == "epoch"
-    assert mocked_module._lr_scheduler_interval == "step"
+    assert isinstance(scheduler_dict["scheduler"], CosineLRScheduler)
+    assert scheduler_dict["scheduler"].optimizer is optimizer
+    assert scheduler_dict["interval"] == "step"
 
 
 def test_lr_scheduler_step_uses_step_update_for_step_interval(
@@ -132,7 +131,7 @@ def test_lr_scheduler_step_uses_step_update_for_step_interval(
     step_update = mocker.patch.object(scheduler, "step_update")
     step = mocker.patch.object(scheduler, "step")
     mocked_module.trainer.global_step = 123
-    mocked_module._lr_scheduler_interval = "step"
+    mocked_module.trainer.lr_scheduler_configs = [LRSchedulerConfig(scheduler=scheduler, interval="step")]
 
     mocked_module.lr_scheduler_step(scheduler)
 
@@ -149,7 +148,7 @@ def test_lr_scheduler_step_uses_epoch_step_for_epoch_interval(
     step_update = mocker.patch.object(scheduler, "step_update")
     step = mocker.patch.object(scheduler, "step")
     mocked_module.current_epoch = 4
-    mocked_module._lr_scheduler_interval = "epoch"
+    mocked_module.trainer.lr_scheduler_configs = [LRSchedulerConfig(scheduler=scheduler, interval="epoch")]
 
     mocked_module.lr_scheduler_step(scheduler)
 

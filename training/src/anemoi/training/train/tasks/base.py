@@ -21,6 +21,7 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
+from timm.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -285,8 +286,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             * config.training.optimization.lr
             / config.system.hardware.num_gpus_per_model
         )
-        self._lr_scheduler_interval = "epoch"
-
         self.model_comm_group = None
         self.reader_groups = None
 
@@ -1067,10 +1066,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
-        # timm schedulers have both step(epoch) and step_update(update)
-        # -> respect the normalized runtime interval chosen in configure_optimizers.
-        if hasattr(scheduler, "step_update"):
-            if self._lr_scheduler_interval == "step":
+        if isinstance(scheduler, TimmScheduler):
+            cfg = next(c for c in self.trainer.lr_scheduler_configs if c.scheduler is scheduler)
+            if cfg.interval == "step":
                 scheduler.step_update(self.trainer.global_step, metric)
             else:
                 scheduler.step(self.current_epoch + 1, metric)
@@ -1089,18 +1087,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
     ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-        optimization = self.config.training.optimization
+        optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization.optimizer, params=params, lr=self.effective_lr)
+        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
         self.log_optimizer(optimizer)
 
-        if not getattr(optimization, "lr_scheduler", None):
-            self._lr_scheduler_interval = "epoch"
+        if not getattr(optimization_config, "lr_scheduler", None):
             return optimizer
 
-        scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
-        scheduler_config = {"scheduler": scheduler, **(optimization.pl_lr_scheduler or {})}
-        return [optimizer], [scheduler_config]
+        scheduler = instantiate(optimization_config.lr_scheduler, optimizer=optimizer)
+        return [optimizer], [{"scheduler": scheduler, **optimization_config.pl_lr_scheduler}]  # type: ignore[return-value]
 
     @staticmethod
     def log_optimizer(optimizer: torch.optim.Optimizer) -> None:

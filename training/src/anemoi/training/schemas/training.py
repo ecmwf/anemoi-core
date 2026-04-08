@@ -46,6 +46,15 @@ class LRSchedulerSchema(GenericSchema):
     """Hydra instantiation config for a learning rate scheduler."""
 
 
+class PLSchedulerSchema(BaseModel):
+    """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    interval: str = "step"
+    """Interval at which Lightning calls lr_scheduler_step ('step' or 'epoch'). Defaults to 'step'."""
+
+
 class GradientClip(BaseModel):
     """Gradient clipping configuration."""
 
@@ -89,7 +98,7 @@ class OptimizationSchema(BaseModel):
     """Hydra instantiation config for the optimizer."""
     lr_scheduler: LRSchedulerSchema | None = None
     """Hydra instantiation config for the LR scheduler. If None, no scheduler is used."""
-    pl_lr_scheduler: dict[str, Any] | None = None
+    pl_lr_scheduler: PLSchedulerSchema = Field(default_factory=PLSchedulerSchema)
     """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
 
 
