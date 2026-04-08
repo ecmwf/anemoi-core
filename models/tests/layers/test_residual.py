@@ -33,13 +33,19 @@ def edge_index():
 
 def test_truncation_mapper_init(graph_data):
     _ = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", edge_weight_attribute="edge_length"
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
     )
 
 
 def test_forward(graph_data):
     mapper = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", edge_weight_attribute="edge_length"
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -47,7 +53,11 @@ def test_forward(graph_data):
 
 
 def test_forward_no_weight(graph_data):
-    mapper = TruncatedConnection(graph_data, data_nodes="data", truncation_nodes="hidden")
+    mapper = TruncatedConnection(
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+    )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
@@ -55,7 +65,10 @@ def test_forward_no_weight(graph_data):
 
 def test_forward_with_src_node_weight(graph_data):
     mapper = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", src_node_weight_attribute="weight"
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        src_node_weight_attribute="weight",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -85,11 +98,12 @@ def test_forward_with_fused_graph_projection_config():
     graph[("era5_truncation", "to", "era5")].edge_index = torch.tensor([[0, 0], [0, 1]])
     graph[("era5_truncation", "to", "era5")].edge_length = torch.tensor([1.0, 2.0])
 
+    # Edge names are pre-resolved by ProjectionCreator (fused graph: dataset-prefixed nodes)
     mapper = TruncatedConnection(
         graph=graph,
-        truncation_projection_config={"truncation": {"edge_weight_attribute": "edge_length"}},
-        dataset_name="era5",
-        dataset_names=["era5", "cerra"],
+        truncation_down_edges_name=("era5", "to", "era5_truncation"),
+        truncation_up_edges_name=("era5_truncation", "to", "era5"),
+        edge_weight_attribute="edge_length",
     )
     x = torch.randn(5, 2, 2, 2, 3)
     x_truncated = mapper.forward(x)

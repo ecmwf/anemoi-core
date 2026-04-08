@@ -16,7 +16,6 @@ from typing import Optional
 import torch
 from hydra.utils import instantiate
 from omegaconf import ListConfig
-from omegaconf import OmegaConf
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -64,9 +63,6 @@ class BaseGraphModel(nn.Module):
             runtime from the graph config.
         """
         super().__init__()
-        if type(model_config) is dict and not OmegaConf.is_config(model_config):
-            model_config = OmegaConf.create(model_config)
-
         self._graph_data = graph_data
         self._projection_data = projection_data or {}
         self.data_indices = data_indices

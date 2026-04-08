@@ -72,31 +72,33 @@ def _make_hierarchical_graph() -> HeteroData:
     return graph
 
 
-def test_base_graph_model_accepts_plain_dict_model_config() -> None:
-    model_config = {
-        "graph": {
-            "projections": {},
-        },
-        "training": {
-            "multistep_input": 1,
-            "multistep_output": 1,
-        },
-        "model": {
-            "num_channels": 8,
-            "trainable_parameters": {
-                "data": 0,
-                "hidden": 0,
+def test_base_graph_model_builds_with_omegaconf_config() -> None:
+    model_config = OmegaConf.create(
+        {
+            "graph": {
+                "projections": {},
+            },
+            "training": {
+                "multistep_input": 1,
+                "multistep_output": 1,
             },
             "model": {
-                "hidden_nodes_name": "hidden",
-                "latent_skip": False,
+                "num_channels": 8,
+                "trainable_parameters": {
+                    "data": 0,
+                    "hidden": 0,
+                },
+                "model": {
+                    "hidden_nodes_name": "hidden",
+                    "latent_skip": False,
+                },
+                "residual": {
+                    "_target_": "anemoi.models.layers.residual.SkipConnection",
+                },
+                "bounding": [],
             },
-            "residual": {
-                "_target_": "anemoi.models.layers.residual.SkipConnection",
-            },
-            "bounding": [],
         },
-    }
+    )
 
     model = DummyGraphModel(
         model_config=model_config,
