@@ -460,26 +460,26 @@ def global_config_with_checkpoint(
 
 
 @pytest.fixture
-def interpolator_config(
+def temporal_downscaler_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, str]:
-    """Compose a runnable configuration for the temporal-interpolation model with multiple output steps.
+    """Compose a runnable configuration for the temporal downscaling model with multiple output steps.
 
-    It is based on `temoral_downscaling.yaml` and only patches paths pointing to the
+    It is based on `temporal_downscaling.yaml` and only patches paths pointing to the
     sample dataset that the tests download locally.
     """
     # No model override here - the template already sets the dedicated
-    # interpolator model + GraphMultiOutInterpolator Lightning task.
+    # temporal downscaling model + task.
     with initialize(
         version_base=None,
         config_path="../../src/anemoi/training/config",
-        job_name="test_interpolator",
+        job_name="test_temporal_downscaler",
     ):
-        template = compose(config_name="temporal_downscaling.yaml")
+        template = compose(config_name="temporal_downscaler.yaml")
 
     use_case_modifications = OmegaConf.load(
-        Path.cwd() / "training/tests/integration/config/test_interpolator.yaml",
+        Path.cwd() / "training/tests/integration/config/test_temporal_downscaler.yaml",
     )
     assert isinstance(use_case_modifications, DictConfig)
 

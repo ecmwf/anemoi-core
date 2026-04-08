@@ -312,21 +312,21 @@ def test_restart_from_existing_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_interpolator(
-    interpolator_config: tuple[DictConfig, str],
+def test_training_cycle_temporal_downscaler(
+    temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    """Full training-cycle smoke-test for the temporal interpolation task."""
-    cfg, url = interpolator_config
+    """Full training-cycle smoke-test for the temporal downscaler task."""
+    cfg, url = temporal_downscaler_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
-    """Schema-level validation for the temporal interpolation config."""
-    cfg, _ = interpolator_config
+def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple[DictConfig, str]) -> None:
+    """Schema-level validation for the temporal downscaler config."""
+    cfg, _ = temporal_downscaler_config
     BaseSchema(**cfg)
 
 

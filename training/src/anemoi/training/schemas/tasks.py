@@ -53,11 +53,11 @@ class AutoencoderTaskSchema(BaseModel):
     "Task class path for the autoencoding task."
 
 
-class TimeInterpolationTaskSchema(BaseModel):
-    """Configuration for time interpolation tasks."""
+class TemporalDownscalerSchema(BaseModel):
+    """Configuration for temporal downscaling task."""
 
     target_: Literal["anemoi.training.tasks.TemporalDownscaler"] = Field(..., alias="_target_")
-    "Task class path for the time interpolation task."
+    "Task class path for the temporal downscaling task."
     input_timestep: str = Field(example="6H")
     "Input data timestep as a duration string (e.g. '6H')."
     output_timestep: str = Field(example="1H")
@@ -69,6 +69,6 @@ class TimeInterpolationTaskSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TimeInterpolationTaskSchema,
+    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
     Discriminator("target_"),
 ]

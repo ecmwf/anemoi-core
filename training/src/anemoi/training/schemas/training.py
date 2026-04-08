@@ -382,7 +382,7 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
+    "This flag picks a task to train for, examples: forecaster, autoencoder, temporal_downscaler.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)

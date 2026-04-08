@@ -48,14 +48,14 @@ def test_output_times_and_get_init_step_forecaster():
     assert adapter.get_init_step(2) == 0
 
 
-def test_output_times_and_get_init_step_interpolator():
-    """Interpolator plot_adapter: output_times == len(interp_times), get_init_step(rollout_step) == rollout_step."""
-    from anemoi.training.diagnostics.callbacks.plot_adapter import InterpolatorPlotAdapter
+def test_output_times_and_get_init_step_temporal_downscaler():
+    """TemporalDownscaler plot_adapter: output_times == len(interp_times), get_init_step(rollout_step) == rollout_step."""
+    from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalerPlotAdapter
 
     task = MagicMock()
     task.interp_times = [0, 1]
     task.n_step_input = 1
-    adapter = InterpolatorPlotAdapter(task)
+    adapter = TemporalDownscalerPlotAdapter(task)
     assert adapter.output_times == 2
     assert adapter.get_init_step(0) == 0
     assert adapter.get_init_step(1) == 1
@@ -298,10 +298,10 @@ def _make_pl_module_forecaster(
     return pl_module
 
 
-def _make_pl_module_interpolator(*, output_times=2, nlatlon=50) -> MagicMock:
-    """Mock pl_module for time-interpolator: get_init_step(rollout_step)==rollout_step."""
+def _make_pl_module_temporal_downscaler(*, output_times=2, nlatlon=50) -> MagicMock:
+    """Mock pl_module for temporal downscaler: get_init_step(rollout_step)==rollout_step."""
     pl_module = MagicMock()
-    pl_module.task_type = "time-interpolator"
+    pl_module.task_type = "temporal_downscaler"
     pl_module.local_rank = 0
     pl_module.n_step_input = 1
     pl_module.n_step_output = output_times
@@ -311,7 +311,7 @@ def _make_pl_module_interpolator(*, output_times=2, nlatlon=50) -> MagicMock:
     plot_adapter.get_total_plot_targets = lambda out_times=None: out_times if out_times is not None else output_times
     plot_adapter.prepare_plot_output_tensor = lambda x: x
     plot_adapter.loss_plot_times = 1
-    plot_adapter.get_loss_plot_batch_start = lambda _r: 1  # n_step_input for interpolator
+    plot_adapter.get_loss_plot_batch_start = lambda _r: 1  # n_step_input for temporal downscaler
     pl_module.plot_adapter = plot_adapter
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
@@ -331,7 +331,7 @@ def _make_pl_module_interpolator(*, output_times=2, nlatlon=50) -> MagicMock:
     ) -> Generator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, str], None, None]:
         del max_out_steps
         for r in range(out_times):
-            init_step = r  # interpolator: init step equals rollout step
+            init_step = r  # temporal downscaler: init step equals rollout step
             pred = output_tensor[r, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[r]
             pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
             yield (
@@ -400,8 +400,8 @@ def test_process_forecaster_output_shapes():
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
 
 
-def test_process_time_interpolator_output_shapes():
-    """BasePlotAdditionalMetrics.process: time-interpolator task yields expected shapes."""
+def test_process_temporal_downscaler_output_shapes():
+    """BasePlotAdditionalMetrics.process: temporal downscaler task yields expected shapes."""
     config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotSample(
         config=config,
@@ -412,8 +412,8 @@ def test_process_time_interpolator_output_shapes():
     )
     batch_size, sample_idx, n_ens, nlatlon, nvar = 2, 10, 1, 50, 3
     output_times = 2
-    total_targets = output_times  # no n_step_output factor for interpolator
-    pl_module = _make_pl_module_interpolator(
+    total_targets = output_times  # no n_step_output factor for temporal downscaler
+    pl_module = _make_pl_module_temporal_downscaler(
         output_times=output_times,
         nlatlon=nlatlon,
     )
@@ -434,8 +434,8 @@ def test_process_time_interpolator_output_shapes():
     assert output_tensor.shape == (output_times, 1, n_ens, nlatlon, nvar), output_tensor.shape
 
 
-def test_process_time_interpolator_multi_out_squeeze():
-    """BasePlotAdditionalMetrics.process: time-interpolator multi-out (ndim=5, shape[0]=1) squeezes to 4D."""
+def test_process_temporal_downscaler_multi_out_squeeze():
+    """BasePlotAdditionalMetrics.process: temporal downscaler multi-out (ndim=5, shape[0]=1) squeezes to 4D."""
     config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotSample(
         config=config,
@@ -446,7 +446,7 @@ def test_process_time_interpolator_multi_out_squeeze():
     )
     batch_size, nlatlon, nvar = 2, 50, 3
     output_times = 2
-    pl_module = _make_pl_module_interpolator(
+    pl_module = _make_pl_module_temporal_downscaler(
         output_times=output_times,
         nlatlon=nlatlon,
     )
@@ -522,7 +522,7 @@ def test_plot_loss_sort_and_color_by_parameter_group_with_groups():
     assert len(legend_patches) == 2  # pressure and wind
 
 
-def test_plot_loss_plot_time_interpolator():
+def test_plot_loss_plot_temporal_downscaler():
     """PlotLoss._plot uses output_times=1 when task_type != 'forecaster', so only one figure is produced."""
     from unittest.mock import patch
 
@@ -536,7 +536,7 @@ def test_plot_loss_plot_time_interpolator():
     trainer = MagicMock()
     trainer.logger = MagicMock()
     pl_module = MagicMock()
-    pl_module.task_type = "time-interpolator"
+    pl_module.task_type = "temporal_downscaler"
     pl_module.n_step_input = 2
     pl_module.n_step_output = 2
     pl_module.local_rank = 0
@@ -699,8 +699,8 @@ def test_plot_loss_plot_forecaster():
 # ---- PlotSpectrum ----
 
 
-def test_plot_spectrum_plot_time_interpolator():
-    """PlotSpectrum._plot produces one figure per output_times for time-interpolator."""
+def test_plot_spectrum_plot_temporal_downscaler():
+    """PlotSpectrum._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
     config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
@@ -713,7 +713,7 @@ def test_plot_spectrum_plot_time_interpolator():
     output_times = 2
     nvar = 2
     nlatlon = 20
-    pl_module = _make_pl_module_interpolator(
+    pl_module = _make_pl_module_temporal_downscaler(
         output_times=output_times,
         nlatlon=nlatlon,
     )
@@ -800,8 +800,8 @@ def test_plot_spectrum_plot_forecaster():
 # ---- PlotHistogram ----
 
 
-def test_plot_histogram_plot_time_interpolator():
-    """PlotHistogram._plot produces one figure per output_times for time-interpolator."""
+def test_plot_histogram_plot_temporal_downscaler():
+    """PlotHistogram._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
     config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
@@ -814,7 +814,7 @@ def test_plot_histogram_plot_time_interpolator():
     output_times = 2
     nvar = 2
     nlatlon = 20
-    pl_module = _make_pl_module_interpolator(
+    pl_module = _make_pl_module_temporal_downscaler(
         output_times=output_times,
         nlatlon=nlatlon,
     )
