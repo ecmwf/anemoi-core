@@ -38,7 +38,9 @@ class GraphExporter:
             elif graph_path.suffix in (".yaml", ".yml"):
                 self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
             else:
-                raise ValueError("The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml).")
+                raise ValueError(
+                    "The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml / .yml)."
+                )
         else:
             self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
 
