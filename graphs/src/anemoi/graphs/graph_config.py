@@ -345,8 +345,8 @@ def _projection_fragments_to_merge(
     return effective_projection_cfg.get("nodes", None), effective_projection_cfg.get("edges", None)
 
 
-def merge_projection_and_graph_config(graph_config: Any, dataset_names: list[str] | None = None) -> None:
-    """Add projection nodes and edges to the main graph config in place.
+def expand_projections_into_graph_config(graph_config: Any, dataset_names: list[str] | None = None) -> None:
+    """Expand the ``projections`` shorthand config into explicit nodes and edges in place.
 
     Shorthand ``truncation`` and ``multiscale`` configs are expanded first.
     In fused graphs, expansion happens separately for each dataset.
