@@ -15,6 +15,7 @@ from typing import Optional
 
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
@@ -38,7 +39,7 @@ class BaseGraphModel(nn.Module):
     def __init__(
         self,
         *,
-        model_config: Any,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -48,7 +49,7 @@ class BaseGraphModel(nn.Module):
 
         Parameters
         ----------
-        model_config : Any
+        model_config : DictConfig
             Model configuration
         data_indices : dict
             Data indices
