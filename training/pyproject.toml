@@ -57,7 +57,7 @@ dependencies = [
   "tqdm>=4.65",
   "zarr>=2.14.2",
 ]
-# Optional extras: pip install anemoi-training[mlflow,tests], etc.
+# Optional extras: pip install anemoi-training[azure,tests], etc.
 optional-dependencies.all = [ "anemoi-training[remote]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
@@ -91,7 +91,7 @@ optional-dependencies.remote = [
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",                         # required to load the gnn checkpoint as part of the tests
   "anemoi-models[spectral]",                    # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
+  "anemoi-training[azure,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
   "hypothesis>=6.11",
   "pytest>=8",
   "pytest-asyncio>=0.23",                       # required for async checkpoint tests
