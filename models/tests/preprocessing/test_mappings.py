@@ -65,6 +65,30 @@ def test_power_negative_input_raises() -> None:
         power_transform(torch.tensor([-0.1, 0.2], dtype=torch.float32), lambd=0.5)
 
 
+def test_inverse_power_transform_clip_negative_parameter() -> None:
+    """Test that inverse_power_transform accepts clip_negative parameter (for API symmetry).
+
+    Regression test for the bug where inverse_power_transform was missing the
+    clip_negative parameter, causing a TypeError when called with it.
+    """
+    x = torch.tensor([0.0, 0.01, 0.1, 1.0, 3.0], dtype=torch.float32)
+    # Should not raise TypeError for missing parameter
+    y = inverse_power_transform(x.clone(), lambd=0.5, clip_negative=True)
+    assert torch.isfinite(y).all()
+    # With clip_negative=False should also work
+    y2 = inverse_power_transform(x.clone(), lambd=0.5, clip_negative=False)
+    assert torch.isfinite(y2).all()
+    # Results should be the same (clip_negative is accepted for symmetry)
+    assert torch.allclose(y, y2)
+
+
+def test_inverse_power_transform_clip_negative_tangent_linear() -> None:
+    """Test inverse_power_transform with clip_negative and tangent_linear_above_one."""
+    x = torch.tensor([0.0, 0.01, 0.1, 1.0, 1.5, 3.0], dtype=torch.float32)
+    y = inverse_power_transform(x.clone(), lambd=0.5, clip_negative=True, tangent_linear_above_one=True)
+    assert torch.isfinite(y).all()
+
+
 @pytest.mark.parametrize("rho", [0.25, 1.0, 2.0, 4.0])
 def test_atanh_roundtrip(rho: float) -> None:
     x = torch.linspace(0.0, 1.0, steps=21, dtype=torch.float32)
