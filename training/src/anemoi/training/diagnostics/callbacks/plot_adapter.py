@@ -108,7 +108,7 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
         output_data = data[output_time_indices, ...]
 
         x = input_data[self.get_init_step(), ...].squeeze()
-        for output_step in range(self.task):
+        for output_step in range(self._task.num_output_timesteps):
             y_true = output_data[output_step].squeeze()
             pred = (
                 output_tensor[output_step, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[output_step]

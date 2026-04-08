@@ -6,7 +6,7 @@ defaults:
 - graph: multi_scale
 - model: graphtransformer_ens
 - task: temporal_downscaler
-- training: single
+- training: ensemble
 - _self_
 
 config_validation: False

@@ -95,28 +95,19 @@ class EnsemblePlotMixin:
         if self.latlons is None:
             self.latlons = {}
 
+        if dataset_name not in self.latlons:
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+
         # uniform handling of different ways to specify members
         if members is None:
             members = slice(members)
         elif not isinstance(members, list):
             members = [members]
 
-        if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
+        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
 
-        total_targets = pl_module.plot_adapter.output_times
-
-        input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
@@ -297,7 +288,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 data,
                 output_tensor,
                 pl_module.plot_adapter.output_times,
-                max_out_steps=pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     y_true, y_pred, tag_suffix = item[0], item[1], item[2]
