@@ -36,7 +36,8 @@ dependencies = [
   "anemoi-datasets>=0.5.34",
   "anemoi-graphs>=0.5.2",
   "anemoi-models[migrations]>=0.9.5",
-  "anemoi-training[mlflow]",
+  "anemoi-utils[mlflow]>=0.4.37",
+  "mlflow-skinny>=2.11.1",
   "anemoi-transform>=0.1.11",
   "anemoi-utils[provenance]>=0.5.1",
   "datashader>=0.17",
@@ -72,10 +73,7 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
-optional-dependencies.mlflow = [
-  "anemoi-utils[mlflow]>=0.4.37",
-  "mlflow-skinny>=2.11.1",
-]
+
 optional-dependencies.plotting = [
   "cartopy>=0.25",
   "distinctipy>=1",
