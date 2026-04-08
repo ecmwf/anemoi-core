@@ -29,6 +29,8 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -138,7 +140,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         graph_data: HeteroData,
-        projection_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -195,7 +196,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             metadata=metadata,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
-            projection_data=projection_data,
             config=config,
         )
         self.config = config
@@ -227,19 +227,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
-            # Resolve per-dataset projection metadata for loss construction.
-            # Use pre-resolved ProjectionData when available (preferred), otherwise
-            # fall back to passing the raw projection config for in-place resolution.
-            dataset_projection = (projection_data or {}).get(dataset_name)
-            loss_matrices_graph_resolved = (
-                dataset_projection.multiscale_loss_matrices_graph if dataset_projection is not None else None
-            )
-            graph_projections = getattr(self.config.graph, "projections", None)
-            multiscale_projection_config = (
-                None
-                if (dataset_projection is not None or graph_projections is None)
-                else graph_projections.get("multiscale")
-            )
+            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
+            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -273,11 +262,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 dataset_scalers,
                 data_indices[dataset_name],
                 graph_data=graph_data,
-                # Pass pre-resolved list when available, otherwise fall back to config-based derivation.
-                loss_matrices_graph=loss_matrices_graph_resolved,
-                multiscale_projection_config=multiscale_projection_config,
-                dataset_name=dataset_name,
-                dataset_names=self.dataset_names,
+                data_node_name=data_node_name,
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
@@ -285,9 +270,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
-                loss_matrices_graph=loss_matrices_graph_resolved,
-                multiscale_projection_config=multiscale_projection_config,
-                dataset_name=dataset_name,
+                data_node_name=data_node_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -420,9 +403,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scalers: dict,
         data_indices: IndexCollection,
         graph_data: object | None = None,
-        loss_matrices_graph: list | None = None,
-        multiscale_projection_config: Any = None,
-        dataset_name: str | None = None,
+        data_node_name: str = DEFAULT_DATASET_NAME,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
@@ -431,10 +412,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     scalers=scalers,
                     data_indices=data_indices,
                     graph_data=graph_data,
-                    loss_matrices_graph=loss_matrices_graph,
-                    multiscale_projection_config=multiscale_projection_config,
-                    dataset_name=dataset_name,
-                    dataset_names=self.dataset_names,
+                    data_node_name=data_node_name,
                 )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },

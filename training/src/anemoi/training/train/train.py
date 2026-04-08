@@ -29,8 +29,10 @@ from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.factory import GraphDataFactory
-from anemoi.graphs.factory import ProjectionData
+from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import load_graph_from_file
+from anemoi.graphs.create import validate_loaded_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -158,28 +160,34 @@ class AnemoiTrainer(ABC):
         return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
 
     @cached_property
-    def _graph_and_projection_data(self) -> tuple[HeteroData, dict[str, ProjectionData]]:
-        """Build the graph and per-dataset projection metadata once via GraphDataFactory."""
+    def graph_data(self) -> HeteroData:
+        """Graph data built or loaded for the current trainer config."""
         dataset_names = self._dataset_names
         graph_cfg = self.config.graph
         graph_path = self.config.system.input.graph
         save_path = Path(graph_path) if graph_path else None
 
-        # When pointing to a pre-built graph with no build config, fail early
-        # with a clear message rather than attempting to construct from scratch.
+        # Existing-graph mode: path given but no nodes/edges defined — load as-is.
         is_existing = (
             graph_path is not None
             and not graph_cfg.overwrite
             and not getattr(graph_cfg, "nodes", None)
             and not getattr(graph_cfg, "edges", None)
         )
-        if is_existing and not save_path.exists():
-            msg = f"Existing graph file not found: {save_path}"
-            raise FileNotFoundError(msg)
+        if is_existing:
+            if not save_path.exists():
+                msg = f"Existing graph file not found: {save_path}"
+                raise FileNotFoundError(msg)
+            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            graph = load_graph_from_file(save_path)
+            validate_loaded_graph(graph, required)
+            return graph
 
-        # Resolve dataset source path for single-dataset non-fused graphs.
-        dataset_path: str | None = None
-        if not is_existing and not uses_fused_dataset_graph(graph_cfg, dataset_names):
+        # Build mode: expand config and create graph via GraphCreator.
+        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
+
+        if not uses_fused_dataset_graph(graph_cfg, dataset_names):
             if len(dataset_names) == 1:
                 dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
                 dataset_name = dataset_names[0]
@@ -188,6 +196,13 @@ class AnemoiTrainer(ABC):
                 if dataset_path is None:
                     msg = f"Dataset source is None for dataset '{dataset_name}'."
                     raise ValueError(msg)
+                data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
+                if (
+                    data_node_cfg is not None
+                    and hasattr(data_node_cfg, "node_builder")
+                    and hasattr(data_node_cfg.node_builder, "dataset")
+                ):
+                    data_node_cfg.node_builder.dataset = dataset_path
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
@@ -196,21 +211,16 @@ class AnemoiTrainer(ABC):
                 )
                 raise ValueError(msg)
 
-        return GraphDataFactory(graph_cfg).build(
-            dataset_names=dataset_names,
-            dataset_path=dataset_path,
-            save_path=save_path,
-        )
+        # Try loading existing saved graph before rebuilding.
+        overwrite = graph_cfg.get("overwrite", False)
+        if save_path and save_path.exists() and not overwrite:
+            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            graph = load_graph_from_file(save_path)
+            validate_loaded_graph(graph, required)
+            return graph
 
-    @cached_property
-    def graph_data(self) -> HeteroData:
-        """Graph data built or loaded for the current trainer config."""
-        return self._graph_and_projection_data[0]
-
-    @cached_property
-    def projection_data(self) -> dict[str, ProjectionData]:
-        """Per-dataset projection metadata resolved from the graph."""
-        return self._graph_and_projection_data[1]
+        return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
 
     def _validate_transfer_learning_datasets(
         self,
@@ -301,7 +311,6 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
-            "projection_data": self.projection_data,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,

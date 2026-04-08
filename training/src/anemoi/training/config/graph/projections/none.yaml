@@ -1,5 +1,0 @@
----
-defaults:
-  - multiscale: none
-  - truncation: none
-  - _self_

@@ -302,7 +302,7 @@ class MultiScaleLossSchema(BaseModel):
     keep_batch_sharded: bool
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
-    loss_matrices_graph: bool | list[GraphLossMatrixSchema | None] = False
+    multiscale_config: dict | None = None
 
     @model_validator(mode="after")
     def validate_weights_length(self) -> Self:
@@ -310,8 +310,8 @@ class MultiScaleLossSchema(BaseModel):
         if self.loss_matrices is not None and len(self.weights) != len(self.loss_matrices):
             msg = "weights must have same length as loss_matrices"
             raise ValueError(msg)
-        if isinstance(self.loss_matrices_graph, list) and len(self.weights) != len(self.loss_matrices_graph):
-            msg = "weights must have same length as loss_matrices_graph"
+        if self.loss_matrices is not None and self.multiscale_config is not None:
+            msg = "Specify either loss_matrices or multiscale_config, not both."
             raise ValueError(msg)
         return self
 

@@ -27,12 +27,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs: dict | None = None) -> dict:
-    """Return runtime kwargs for classes that declare ``needs_graph_data``.
-
-    When ``needs_graph_data`` is True, includes ``graph_data`` and any extra
-    runtime kwargs (e.g. ``multiscale_projection_config``, ``dataset_name``)
-    that the class accepts but are not part of the YAML config.
-    """
+    """Return runtime kwargs for classes that declare ``needs_graph_data``."""
     if not getattr(target_cls, "needs_graph_data", False):
         return {}
     result: dict = {}
@@ -49,7 +44,6 @@ def get_loss_function(
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: dict | None = None,
     graph_data: object | None = None,
-    loss_matrices_graph: list | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -87,12 +81,6 @@ def get_loss_function(
     loss_config = OmegaConf.to_container(config, resolve=True)
     scalers_to_include = loss_config.pop("scalers", [])
     target_cls = get_class(loss_config["_target_"])
-
-    # When a pre-resolved loss_matrices_graph list is provided it overrides any
-    # loss_matrices_graph: true flag in the YAML config so that MultiscaleLossWrapper
-    # receives the concrete edge references directly rather than deriving them.
-    if loss_matrices_graph is not None:
-        kwargs = {**kwargs, "loss_matrices_graph": loss_matrices_graph}
 
     if "per_scale_loss" in loss_config:
         per_scale_loss_config = loss_config.pop("per_scale_loss")

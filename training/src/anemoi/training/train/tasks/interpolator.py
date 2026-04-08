@@ -45,7 +45,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         *,
         config: DictConfig,
         graph_data: HeteroData,
-        projection_data: dict | None = None,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -60,7 +59,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             Job configuration
         graph_data : HeteroData
             Graph definition
-        projection_data : dict, optional
             Per-dataset projection metadata resolved from the graph.
         statistics : dict
             Statistics of the training data
@@ -77,7 +75,6 @@ class GraphMultiOutInterpolator(BaseGraphModule):
         super().__init__(
             config=config,
             graph_data=graph_data,
-            projection_data=projection_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
