@@ -31,10 +31,10 @@ class GraphExporter:
         if isinstance(graph, Path) or isinstance(graph, str):
             if graph.endswith(".pt"):
                 self.graph = torch.load(graph, weights_only=False, map_location="cpu")
-            elif not graph.endswith(".yaml"):
+            elif graph.endswith(".yaml"):
+                self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
+            else:
                 raise ValueError("The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml).")
-
-        self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
 
         self.edges_name = self.graph.edge_types if edges_name is None else edges_name
         self.edge_attribute_name = edge_attribute_name
