@@ -84,11 +84,13 @@ class GraphAutoEncoder(BaseGraphModule):
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor]]:
-
         required_time_steps = max(self.n_step_input, self.n_step_output)
+        dataset_contexts = self._build_dataset_contexts()
         x = {}
 
-        for dataset_name, dataset_batch in batch.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            dataset_batch = batch[dataset_name]
             msg = (
                 f"Batch length not sufficient for requested n_step_input/n_step_output for {dataset_name}!"
                 f" {dataset_batch.shape[1]} !>= {required_time_steps}"
@@ -98,16 +100,18 @@ class GraphAutoEncoder(BaseGraphModule):
                 :,
                 0:required_time_steps,
                 ...,
-                self.data_indices[dataset_name].data.input.full,
+                dataset_ctx.static.data_indices.data.input.full,
             ]
 
         y_pred = self(x)
 
         y = {}
 
-        for dataset_name, dataset_batch in batch.items():
+        for dataset_ctx in dataset_contexts.values():
+            dataset_name = dataset_ctx.static.name
+            dataset_batch = batch[dataset_name]
             y_time = dataset_batch.narrow(1, 0, self.n_step_output)
-            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+            var_idx = dataset_ctx.static.data_indices.data.output.full.to(device=dataset_batch.device)
             y[dataset_name] = y_time.index_select(-1, var_idx)
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
