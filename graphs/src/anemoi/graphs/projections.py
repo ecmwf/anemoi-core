@@ -19,9 +19,11 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_RELATION_NAME
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.graphs.projection_helpers import multiscale_loss_matrices_graph
-from anemoi.graphs.projection_helpers import residual_projection_edge_names
+from anemoi.graphs.projection_helpers import projection_edge_name
+from anemoi.graphs.projection_helpers import residual_projection_truncation_node_name
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
@@ -99,12 +101,16 @@ class ProjectionCreator:
         if OmegaConf.is_config(truncation_cfg):
             truncation_cfg = OmegaConf.to_container(truncation_cfg, resolve=True)
 
-        down_edges, up_edges = residual_projection_edge_names(
+        truncation_node_name = residual_projection_truncation_node_name(truncation_cfg)
+        relation_name = truncation_cfg.get("relation_name", DEFAULT_EDGE_RELATION_NAME)
+        shared = dict(
             dataset_name=dataset_name,
             graph_or_config=graph_data,
             dataset_names=dataset_names,
-            truncation_projection_config=truncation_cfg,
+            relation_name=relation_name,
         )
+        down_edges = projection_edge_name("data", truncation_node_name, **shared)
+        up_edges = projection_edge_name(truncation_node_name, "data", **shared)
         edge_weight = truncation_cfg.get("edge_weight_attribute", DEFAULT_EDGE_WEIGHT_ATTRIBUTE)
 
         return {

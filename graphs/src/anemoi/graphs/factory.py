@@ -23,7 +23,7 @@ from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.graphs.projections import ProjectionCreator
-from anemoi.graphs.projections import ProjectionData
+from anemoi.graphs.projections import ProjectionData  # re-exported for callers
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
@@ -58,7 +58,7 @@ class GraphDataFactory:
         dataset_names: list[str],
         dataset_path: str | None = None,
         save_path: Path | None = None,
-    ) -> tuple[HeteroData, ProjectionData]:
+    ) -> tuple[HeteroData, dict[str, ProjectionData]]:
         """Load an existing graph or build a new one, then resolve projections.
 
         Parameters
@@ -76,7 +76,10 @@ class GraphDataFactory:
         graph_data:
             The built (or loaded) ``HeteroData`` graph.
         projection_data:
-            Resolved projection metadata derived from the graph.
+            Per-dataset resolved projection metadata derived from the graph.
+            For fused graphs every dataset resolves against the full
+            ``dataset_names`` list; for non-fused graphs each dataset is
+            resolved independently.
         """
         overwrite = self.config.get("overwrite", False)
 
@@ -88,9 +91,11 @@ class GraphDataFactory:
                 overwrite=overwrite,
             )
 
-        projection_data = ProjectionCreator(
-            config=self.config.get("projections") or {},
-        ).create(graph_data, dataset_names)
+        creator = ProjectionCreator(config=self.config.get("projections") or {})
+        fused = uses_fused_dataset_graph(self.config, dataset_names)
+        projection_data = {
+            name: creator.create(graph_data, dataset_names if fused else [name]) for name in dataset_names
+        }
 
         return graph_data, projection_data
 

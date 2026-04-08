@@ -15,9 +15,9 @@ from anemoi.graphs.projection_helpers import get_graph_node_names
 from anemoi.graphs.projection_helpers import multiscale_loss_matrices_graph
 from anemoi.graphs.projection_helpers import projection_edge_name
 from anemoi.graphs.projection_helpers import projection_node_name
-from anemoi.graphs.projection_helpers import residual_projection_edge_names
 from anemoi.graphs.projection_helpers import residual_projection_truncation_node_name
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.graphs.projections import ProjectionCreator
 
 
 @pytest.fixture
@@ -100,23 +100,19 @@ def test_projection_node_and_edge_names_expand_for_combined_multi_dataset_graphs
 def test_residual_projection_helpers_resolve_custom_and_default_truncation_names(
     fused_graph: HeteroData,
 ) -> None:
-    projection_config = {"truncation": {"node_name": "truncation", "relation_name": "projects_to"}}
-    truncation_config = projection_config["truncation"]
-
     assert residual_projection_truncation_node_name(None) == "truncation"
     assert residual_projection_truncation_node_name({"truncation_nodes": "legacy"}) == "legacy"
-    assert residual_projection_truncation_node_name(projection_config) == "truncation"
-    assert residual_projection_truncation_node_name(truncation_config) == "truncation"
+    assert residual_projection_truncation_node_name({"truncation": {"node_name": "truncation"}}) == "truncation"
+    assert residual_projection_truncation_node_name({"node_name": "truncation"}) == "truncation"
 
-    down_edges, up_edges = residual_projection_edge_names(
-        dataset_name="era5",
-        graph_or_config=fused_graph,
-        dataset_names=["era5", "cerra"],
-        truncation_projection_config=truncation_config,
-    )
 
-    assert down_edges == ("era5", "projects_to", "era5_truncation")
-    assert up_edges == ("era5_truncation", "projects_to", "era5")
+def test_projection_creator_resolves_truncation_edge_names(fused_graph: HeteroData) -> None:
+    config = {"truncation": {"node_name": "truncation", "relation_name": "projects_to"}}
+    creator = ProjectionCreator(config=config)
+    projection_data = creator.create(fused_graph, ["era5", "cerra"])
+
+    assert projection_data.truncation_down_edges_name == ("era5", "projects_to", "era5_truncation")
+    assert projection_data.truncation_up_edges_name == ("era5_truncation", "projects_to", "era5")
 
 
 def test_multiscale_loss_matrices_graph_builds_graph_entries_from_smoothers() -> None:

@@ -150,39 +150,6 @@ def residual_projection_truncation_node_name(
     return "truncation"
 
 
-def residual_projection_edge_names(
-    *,
-    dataset_name: str,
-    graph_or_config: HeteroData | DictConfig | Mapping,
-    dataset_names: list[str],
-    truncation_projection_config: Mapping | DictConfig | None = None,
-) -> tuple[tuple[str, str, str], tuple[str, str, str]]:
-    """Return the down/up edge tuples used by ``TruncatedConnection``."""
-    truncation_node_name = residual_projection_truncation_node_name(truncation_projection_config)
-    relation_name = (
-        truncation_projection_config.get("relation_name", DEFAULT_EDGE_RELATION_NAME)
-        if truncation_projection_config is not None
-        else DEFAULT_EDGE_RELATION_NAME
-    )
-    down_edges = projection_edge_name(
-        DEFAULT_DATASET_NAME,
-        truncation_node_name,
-        dataset_name=dataset_name,
-        graph_or_config=graph_or_config,
-        dataset_names=dataset_names,
-        relation_name=relation_name,
-    )
-    up_edges = projection_edge_name(
-        truncation_node_name,
-        DEFAULT_DATASET_NAME,
-        dataset_name=dataset_name,
-        graph_or_config=graph_or_config,
-        dataset_names=dataset_names,
-        relation_name=relation_name,
-    )
-    return down_edges, up_edges
-
-
 def expand_geometric_smoothers(projection_cfg: Mapping | dict) -> dict[str, Any] | None:
     """Build an explicit smoothers dict from a compact geometric progression spec.
 
