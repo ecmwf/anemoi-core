@@ -21,7 +21,7 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from timm.scheduler import Scheduler as TimmScheduler
+from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
