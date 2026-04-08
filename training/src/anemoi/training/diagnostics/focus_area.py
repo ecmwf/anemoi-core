@@ -8,7 +8,6 @@ import numpy as np
 class SpatialMask(ABC):
     def __init__(self, tag: str | None) -> None:
         self.focus_mask: np.ndarray | None = None
-        self.tag = "_" + tag
 
     @abstractmethod
     def verify_mask(self, graph_data: dict[str, Any]) -> None:
