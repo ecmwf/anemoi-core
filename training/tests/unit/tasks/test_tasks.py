@@ -14,8 +14,8 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.tasks import Autoencoder
-from anemoi.training.tasks import ForecastingTask
-from anemoi.training.tasks import TemporalDownscalingTask
+from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.diffusion import BaseDiffusionForecaster
 from anemoi.training.train.methods.diffusion import DiffusionTraining
@@ -220,11 +220,11 @@ def test_graphforecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forecaster output_times, get_init_step, and _step return shape (one instantiation)."""
     data_indices = _data_indices_single()
 
-    # Build a SingleTraining module with a ForecastingTask
+    # Build a SingleTraining module with a Forecaster
     training_module = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(training_module)
 
-    task = ForecastingTask(
+    task = Forecaster(
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
@@ -295,7 +295,7 @@ def test_graphdiffusionforecaster() -> None:
             self.model = model
 
     data_indices = _data_indices_single()
-    task = ForecastingTask(
+    task = Forecaster(
         multistep_input=_CFG_DIFFUSION.training.multistep_input,
         multistep_output=_CFG_DIFFUSION.training.multistep_output,
         timestep="6h",
@@ -598,7 +598,7 @@ def test_graphensforecaster_rollout_with_time_dim_output(monkeypatch: pytest.Mon
     """Rollout step works when model returns (B, T, E, G, V); _advance_input uses last time step."""
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
-    task = ForecastingTask(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1, "maximum": 1})
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1, "maximum": 1})
 
     forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)
@@ -662,7 +662,7 @@ def test_rollout_advance_input_keeps_latest_steps(
 ) -> None:
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
 
-    task = ForecastingTask(
+    task = Forecaster(
         multistep_input=n_step_input,
         multistep_output=n_step_output,
         timestep="6h",
@@ -766,7 +766,7 @@ def test_graphdiffusionforecaster_output_times_and_get_init_step() -> None:
 
 def test_graphforecaster_get_init_step() -> None:
     """Forecaster get_init_step(rollout_step) returns 0 for all steps."""
-    task = ForecastingTask(
+    task = Forecaster(
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
@@ -824,7 +824,7 @@ def test_graphautoencoder_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_temporal_downscaling_step_returns_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SingleTraining + TemporalDownscalingTask _step returns (loss, metrics, [y_pred]) for plot callback contract."""
+    """SingleTraining + TemporalDownscaler _step returns (loss, metrics, [y_pred]) for plot callback contract."""
 
     def dummy_forward(x_bound: dict) -> dict:
         b = next(iter(x_bound.values())).shape[0]
@@ -834,7 +834,7 @@ def test_temporal_downscaling_step_returns_list(monkeypatch: pytest.MonkeyPatch)
         return {"data": torch.randn(b, 2, e, g, v, dtype=torch.float32)}
 
     data_indices = _data_indices_single()
-    task = TemporalDownscalingTask(
+    task = TemporalDownscaler(
         input_timestep="18h",
         output_timestep="6H",
         output_left_boundary=False,

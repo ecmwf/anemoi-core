@@ -207,7 +207,7 @@ model:
       variables: []
 
 task:
-  _target_: anemoi.training.tasks.ForecastingTask
+  _target_: anemoi.training.tasks.Forecaster
   multistep_input: 2
   multistep_output: 1
   timestep: ${data.timestep}

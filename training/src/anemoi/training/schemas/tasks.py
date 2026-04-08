@@ -29,10 +29,10 @@ class RolloutSchema(BaseModel):
     "Maximum number of rollouts."
 
 
-class ForecastingTaskSchema(BaseModel):
+class ForecasterSchema(BaseModel):
     """Configuration for forecasting tasks."""
 
-    target_: Literal["anemoi.training.tasks.ForecastingTask"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.tasks.Forecaster"] = Field(..., alias="_target_")
     "Task class path for the forecasting task."
     multistep_input: PositiveInt = Field(example=2)
     "Number of input timesteps provided to the model."
@@ -53,17 +53,10 @@ class AutoencoderTaskSchema(BaseModel):
     "Task class path for the autoencoding task."
 
 
-class DownscalingTaskSchema(BaseModel):
-    """Configuration for downscaling tasks."""
-
-    target_: Literal["anemoi.training.tasks.SpatialDownscalingTask"] = Field(..., alias="_target_")
-    "Task class path for the downscaling task."
-
-
 class TimeInterpolationTaskSchema(BaseModel):
     """Configuration for time interpolation tasks."""
 
-    target_: Literal["anemoi.training.tasks.TemporalDownscalingTask"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.tasks.TemporalDownscaler"] = Field(..., alias="_target_")
     "Task class path for the time interpolation task."
     input_timestep: str = Field(example="6H")
     "Input data timestep as a duration string (e.g. '6H')."
@@ -76,6 +69,6 @@ class TimeInterpolationTaskSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecastingTaskSchema | AutoencoderTaskSchema | DownscalingTaskSchema | TimeInterpolationTaskSchema,
+    ForecasterSchema | AutoencoderTaskSchema | TimeInterpolationTaskSchema,
     Discriminator("target_"),
 ]
