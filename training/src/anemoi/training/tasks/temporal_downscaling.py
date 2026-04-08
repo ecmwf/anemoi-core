@@ -39,7 +39,7 @@ class TemporalDownscaler(BaseSingleStepTask):
             0,
         ), "Input timestep must be an integer multiple of output timestep for temporal downscaling."
         num_output_steps = input_timedelta // output_timedelta
-        output_offsets = [output_timedelta * (i + 1) for i in range(num_output_steps)]
+        output_offsets = [output_timedelta * (i + 1) for i in range(num_output_steps - 1)]
         if output_left_boundary:
             output_offsets = [datetime.timedelta(hours=0), *output_offsets]
 
