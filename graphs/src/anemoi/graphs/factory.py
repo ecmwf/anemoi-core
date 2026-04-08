@@ -151,10 +151,10 @@ class GraphDataFactory:
         dataset_path: str | None = None,
     ) -> DictConfig:
         """Clone the graph config, expand projections, inject dataset path."""
-        from anemoi.graphs.graph_config import merge_projection_and_graph_config
+        from anemoi.graphs.graph_config import expand_projections_into_graph_config
 
         graph_config = OmegaConf.create(OmegaConf.to_container(self.config, resolve=False))
-        merge_projection_and_graph_config(graph_config, dataset_names=dataset_names)
+        expand_projections_into_graph_config(graph_config, dataset_names=dataset_names)
 
         if dataset_path is not None and graph_config.get("nodes") is not None:
             data_node_cfg = graph_config.nodes.get(DEFAULT_DATASET_NAME)

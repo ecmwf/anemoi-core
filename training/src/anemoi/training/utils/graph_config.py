@@ -9,6 +9,6 @@
 
 """Re-export shim — graph config utilities have moved to anemoi.graphs."""
 
-from anemoi.graphs.graph_config import merge_projection_and_graph_config
+from anemoi.graphs.graph_config import expand_projections_into_graph_config
 
-__all__ = ["merge_projection_and_graph_config"]
+__all__ = ["expand_projections_into_graph_config"]

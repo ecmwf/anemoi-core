@@ -9,7 +9,7 @@
 
 from omegaconf import OmegaConf
 
-from anemoi.training.utils.graph_config import merge_projection_and_graph_config
+from anemoi.training.utils.graph_config import expand_projections_into_graph_config
 
 
 def test_merge_projection_rewrites_local_node_builder_references_for_fused_graphs() -> None:
@@ -44,7 +44,7 @@ def test_merge_projection_rewrites_local_node_builder_references_for_fused_graph
         },
     )
 
-    merge_projection_and_graph_config(graph_config, dataset_names=["era5", "cerra"])
+    expand_projections_into_graph_config(graph_config, dataset_names=["era5", "cerra"])
 
     assert graph_config.nodes.era5_smooth.node_builder.reference_node_name == "era5"
     assert graph_config.nodes.cerra_smooth.node_builder.reference_node_name == "cerra"
