@@ -56,27 +56,27 @@ class BaseTask(ABC):
 
     def __init__(
         self,
-        inputs_offsets: list[datetime.timedelta],
-        outputs_offsets: list[datetime.timedelta],
+        input_offsets: list[datetime.timedelta],
+        output_offsets: list[datetime.timedelta],
         steps: Iterable[dict] | None = None,
     ) -> None:
-        self._inputs_offsets = sorted(inputs_offsets)
-        self._outputs_offsets = sorted(outputs_offsets)
+        self._input_offsets = sorted(input_offsets)
+        self._output_offsets = sorted(output_offsets)
         self._steps = steps if steps is not None else ({},)
 
     @property
-    def inputs_offsets(self) -> list[datetime.timedelta]:
+    def input_offsets(self) -> list[datetime.timedelta]:
         """Sorted input time offsets."""
-        return self._inputs_offsets
+        return self._input_offsets
 
     @property
-    def outputs_offsets(self) -> list[datetime.timedelta]:
+    def output_offsets(self) -> list[datetime.timedelta]:
         """Sorted output time offsets for the current step.
 
         Subclasses may override this to support parametrised output
         selection (e.g. per rollout step).
         """
-        return self._outputs_offsets
+        return self._output_offsets
 
     @property
     def steps(self) -> Iterable[dict]:
@@ -90,17 +90,17 @@ class BaseTask(ABC):
         This is used by the datamodule to compute
         ``data_relative_time_indices``.
         """
-        return sorted(set(self._inputs_offsets + self._outputs_offsets))
+        return sorted(set(self._input_offsets + self._output_offsets))
 
     @property
     def num_input_timesteps(self) -> int:
         """Number of input time steps."""
-        return len(self._inputs_offsets)
+        return len(self._input_offsets)
 
     @property
     def num_output_timesteps(self) -> int:
         """Number of output time steps."""
-        return len(self._outputs_offsets)
+        return len(self._output_offsets)
 
     @property
     def num_steps(self) -> int:
@@ -113,15 +113,15 @@ class BaseTask(ABC):
 
     def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of input time offsets."""
-        return self._inputs_offsets
+        return self._input_offsets
 
     def get_output_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Return the output offsets for a given step.
 
-        The default implementation returns ``self._outputs_offsets``.
+        The default implementation returns ``self._output_offsets``.
         Subclasses may override this to shift outputs per rollout step.
         """
-        return self._outputs_offsets
+        return self._output_offsets
 
     def get_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of offsets for a given label (e.g. "training", "validation", "test").

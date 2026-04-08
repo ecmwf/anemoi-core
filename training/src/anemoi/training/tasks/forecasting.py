@@ -79,11 +79,11 @@ class Forecaster(BaseTask):
             )
 
         # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
-        inputs_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
+        input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
         # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
-        outputs_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
+        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
         steps = tuple({"rollout_step": i} for i in range(self.rollout.step))
-        super().__init__(inputs_offsets=inputs_offsets, outputs_offsets=outputs_offsets, steps=steps)
+        super().__init__(input_offsets=input_offsets, output_offsets=output_offsets, steps=steps)
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
@@ -97,10 +97,10 @@ class Forecaster(BaseTask):
 
     def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
         """Compute the full list of offsets needed for the current rollout configuration."""
-        all_offsets = set(self._inputs_offsets)
+        all_offsets = set(self._input_offsets)
         for step in range(rollout_step):
             shift = self._step_shift * step
-            for o in self._outputs_offsets:
+            for o in self._output_offsets:
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
@@ -112,7 +112,7 @@ class Forecaster(BaseTask):
         """Return output offsets shifted by ``rollout_step``."""
         rollout_step = rollout_step if label == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
-        return sorted(o + shift for o in self._outputs_offsets)
+        return sorted(o + shift for o in self._output_offsets)
 
     def _advance_dataset_input(
         self,

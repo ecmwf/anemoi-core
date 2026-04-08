@@ -199,8 +199,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             "relative_date_indices_training": relative_date_indices,  # backwards compatibility with inference
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
-            "input_offsets": [frequency_to_string(o) for o in self.task.inputs_offsets],
-            "output_offsets": [frequency_to_string(o) for o in self.task.outputs_offsets],
+            "input_offsets": [frequency_to_string(o) for o in self.task.input_offsets],
+            "output_offsets": [frequency_to_string(o) for o in self.task.output_offsets],
         }
 
         for dataset_name in self.dataset_names:
