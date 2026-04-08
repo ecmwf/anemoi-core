@@ -49,7 +49,6 @@ def test_output_times_and_get_init_step_forecaster():
 
 
 def test_output_times_and_get_init_step_temporal_downscaler():
-<<<<<<< HEAD
     """
     TemporalDownscaler plot_adapter:
 
