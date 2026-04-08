@@ -319,11 +319,9 @@ def ensemble_graph_multiscale_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     cfg.training.training_loss.datasets.data.loss_matrices = None
-    cfg.training.training_loss.datasets.data.loss_matrices_graph = True
     cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
 
     cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = None
-    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices_graph = True
     cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
     cfg.diagnostics.plot.callbacks = []
     OmegaConf.resolve(cfg)
@@ -359,13 +357,9 @@ def ensemble_truncated_connection_config(
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    cfg.training.training_loss.datasets.data.loss_matrices = None
-    cfg.training.training_loss.datasets.data.loss_matrices_graph = False
     cfg.training.training_loss.datasets.data.loss_matrices = [None]
     cfg.training.training_loss.datasets.data.weights = [1.0]
 
-    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = None
-    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices_graph = False
     cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = [None]
     cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0]
     cfg.diagnostics.plot.callbacks = []

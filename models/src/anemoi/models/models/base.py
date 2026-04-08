@@ -22,6 +22,8 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -43,7 +45,6 @@ class BaseGraphModel(nn.Module):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        projection_data: dict | None = None,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -57,21 +58,13 @@ class BaseGraphModel(nn.Module):
             Data statistics
         graph_data : HeteroData
             Graph definition
-        projection_data : dict, optional
-            Per-dataset projection metadata (truncation/multiscale edge names)
-            resolved by ``ProjectionCreator``. When provided, edge names are
-            passed directly to ``TruncatedConnection`` rather than derived at
-            runtime from the graph config.
         """
         super().__init__()
         self._graph_data = graph_data
-        self._projection_data = projection_data or {}
         self.data_indices = data_indices
         self.statistics = statistics
 
         self.dataset_names = list(data_indices.keys())
-
-        self._graph_projection_configs = getattr(model_config.graph, "projections", {})
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.n_step_input = model_config.training.multistep_input
@@ -242,19 +235,13 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: Any) -> None:
         self.residual = torch.nn.ModuleDict()
+        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
-            dataset_projection = self._projection_data.get(dataset_name)
-            extra_kwargs: dict = {}
-            if dataset_projection is not None:
-                extra_kwargs = {
-                    "truncation_down_edges_name": dataset_projection.truncation_down_edges_name,
-                    "truncation_up_edges_name": dataset_projection.truncation_up_edges_name,
-                    "edge_weight_attribute": dataset_projection.truncation_edge_weight_attribute,
-                }
+            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
-                **extra_kwargs,
+                data_node_name=data_node_name,
             )
 
     def _build_named_node_attributes_graph(self) -> HeteroData:

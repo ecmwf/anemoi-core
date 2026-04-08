@@ -65,7 +65,6 @@ class AnemoiModelInterface(torch.nn.Module):
         metadata: dict,
         statistics_tendencies: dict | None = None,
         supporting_arrays: dict | None = None,
-        projection_data: dict | None = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -77,7 +76,6 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
-        self.projection_data = projection_data
         self._build_model()
         self._update_metadata()
 
@@ -195,7 +193,6 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
-            projection_data=self.projection_data,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 

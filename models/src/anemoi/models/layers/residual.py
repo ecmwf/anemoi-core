@@ -132,10 +132,24 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_file_path: Optional[str] = None,
         truncation_up_edges_name: Optional[tuple[str, str, str]] = None,
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
+        truncation_config: Optional[dict] = None,
+        data_node_name: str = "data",
         autocast: bool = False,
         row_normalize: bool = False,
     ) -> None:
         super().__init__()
+        if truncation_config is not None:
+            from anemoi.graphs.builders import build_truncation_subgraph
+            from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+
+            graph = build_truncation_subgraph(graph, data_node_name, truncation_config)
+            truncation_down_edges_name = (data_node_name, "to", "truncation")
+            truncation_up_edges_name = ("truncation", "to", data_node_name)
+            if edge_weight_attribute is None:
+                from omegaconf import OmegaConf
+                cfg = OmegaConf.to_container(truncation_config, resolve=True) if OmegaConf.is_config(truncation_config) else truncation_config
+                edge_weight_attribute = cfg.get("edge_weight_attribute", DEFAULT_EDGE_WEIGHT_ATTRIBUTE)
+
         up_edges, down_edges = self._resolve_edges(
             graph=graph,
             truncation_up_file_path=truncation_up_file_path,

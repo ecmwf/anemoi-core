@@ -14,7 +14,6 @@ import pytest
 import torch
 from hydra.errors import InstantiationException
 from omegaconf import DictConfig
-from torch_geometric.data import HeteroData
 
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
@@ -120,18 +119,7 @@ def test_combined_loss_seperate_scalers() -> None:
     assert "test2" in loss.losses[1].scaler
 
 
-def test_combined_loss_multiscale_graph_data() -> None:
-    graph = HeteroData()
-    graph["data"].num_nodes = 4
-    graph["smooth_8x"].num_nodes = 4
-    graph["smooth_4x"].num_nodes = 4
-    graph["smooth_2x"].num_nodes = 4
-    graph["smooth_1x"].num_nodes = 4
-    identity_edges = torch.tensor([[0, 1, 2, 3], [0, 1, 2, 3]])
-    for name in ["smooth_8x", "smooth_4x", "smooth_2x", "smooth_1x"]:
-        graph[(name, "to", name)].edge_index = identity_edges
-        graph[(name, "to", name)].edge_weight = torch.ones(4)
-
+def test_combined_loss_multiscale() -> None:
     loss = get_loss_function(
         DictConfig(
             {
@@ -139,15 +127,8 @@ def test_combined_loss_multiscale_graph_data() -> None:
                 "losses": [
                     {
                         "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
-                        "weights": [1.0, 1.0, 1.0, 1.0, 1.0],
+                        "weights": [1.0],
                         "keep_batch_sharded": False,
-                        "loss_matrices_graph": [
-                            {"edges_name": ["smooth_8x", "to", "smooth_8x"], "edge_weight_attribute": "edge_weight"},
-                            {"edges_name": ["smooth_4x", "to", "smooth_4x"], "edge_weight_attribute": "edge_weight"},
-                            {"edges_name": ["smooth_2x", "to", "smooth_2x"], "edge_weight_attribute": "edge_weight"},
-                            {"edges_name": ["smooth_1x", "to", "smooth_1x"], "edge_weight_attribute": "edge_weight"},
-                            None,
-                        ],
                         "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss"},
                     },
                 ],
@@ -155,12 +136,10 @@ def test_combined_loss_multiscale_graph_data() -> None:
             },
         ),
         scalers={},
-        graph_data=graph,
     )
 
     assert isinstance(loss, CombinedLoss)
     assert isinstance(loss.losses[0], MultiscaleLossWrapper)
-    assert loss.losses[0].smoothing_matrices[-1] is None
 
 
 def test_combined_loss_propagates_needs_shard_layout_info() -> None:
