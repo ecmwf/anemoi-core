@@ -1,8 +1,8 @@
 import pytest
 import torch
 from omegaconf import OmegaConf
-from pytorch_lightning.utilities.types import LRSchedulerConfig
 from pytest_mock import MockerFixture
+from pytorch_lightning.utilities.types import LRSchedulerConfig
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
