@@ -93,9 +93,9 @@ def test_create_scheduler(mocked_module: BaseGraphModule) -> None:
     scheduler_dict = schedulers[0]
 
     assert isinstance(optimizer, torch.optim.Adam)
-    assert isinstance(scheduler_dict.scheduler, CosineLRScheduler)
-    assert scheduler_dict.scheduler.optimizer is optimizer
-    assert scheduler_dict.interval == "epoch"
+    assert isinstance(scheduler_dict["scheduler"], CosineLRScheduler)
+    assert scheduler_dict["scheduler"].optimizer is optimizer
+    assert scheduler_dict["interval"] == "epoch"
 
 
 def test_create_timm_scheduler_defaults_to_step_interval(

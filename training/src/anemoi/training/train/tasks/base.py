@@ -21,9 +21,6 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from pytorch_lightning.utilities.types import LRSchedulerConfig
-from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
-from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -47,6 +44,8 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
+    from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
@@ -1099,16 +1098,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
             self._lr_scheduler_interval = "epoch"
             return optimizer
 
-        pl_scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
-        pl_lr_scheduler_cfg = optimization.pl_lr_scheduler or {}
-        pl_lr_scheduler = LRSchedulerConfig(scheduler=pl_scheduler, **pl_lr_scheduler_cfg)
-        if "interval" in pl_lr_scheduler_cfg:
-            self._lr_scheduler_interval = pl_lr_scheduler.interval
-        elif hasattr(pl_scheduler, "step_update"):
-            self._lr_scheduler_interval = "step"
-        else:
-            self._lr_scheduler_interval = pl_lr_scheduler.interval
-        return [optimizer], [pl_lr_scheduler]
+        scheduler = instantiate(optimization.lr_scheduler, optimizer=optimizer)
+        scheduler_config = {"scheduler": scheduler, **(optimization.pl_lr_scheduler or {})}
+        return [optimizer], [scheduler_config]
 
     @staticmethod
     def log_optimizer(optimizer: torch.optim.Optimizer) -> None:

@@ -78,6 +78,10 @@ def prepare_mlflow_run_id(
     client.set_tag(run_id, "mlflow.user", owner)
     client.set_tag(run_id, "dry_run", True)
     client.set_tag(run_id, "mlflow.source.name", "anemoi-training mlflow prepare")
+
+    info = client.anemoi_auth.user_info()
+    client.set_tag(run_id, "prepare.user", info.name)
+    client.set_tag(run_id, "prepare.username", info.username)
     AnemoiMLflowLogger.log_hyperparams_in_mlflow(
         client,
         run_id,
@@ -251,12 +255,18 @@ class MlFlow(Command):
             from anemoi.training.utils.mlflow_sync import MlFlowSync
             from anemoi.utils.mlflow.utils import health_check
 
+            extra_tags = {}
+
             if args.authentication:
                 from anemoi.utils.mlflow.auth import TokenAuth
 
                 auth = TokenAuth(url=args.destination)
                 auth.login()
                 auth.authenticate()
+
+                info = auth.user_info()
+                extra_tags["sync.user"] = info.name
+                extra_tags["sync.username"] = info.username
 
             health_check(args.destination)
 
@@ -269,6 +279,7 @@ class MlFlow(Command):
                 args.experiment_name,
                 args.export_deleted_runs,
                 log_level,
+                extra_tags=extra_tags,
             ).sync()
             return
 
