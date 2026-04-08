@@ -50,7 +50,7 @@ def test_output_times_and_get_init_step_forecaster():
 
 def test_output_times_and_get_init_step_temporal_downscaler():
     """
-    TemporalDownscaler plot_adapter:
+    TemporalDownscaler plot_adapter.
 
     output_times == len(interp_times), get_init_step(rollout_step) == rollout_step.
     """
