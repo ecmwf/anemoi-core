@@ -58,4 +58,4 @@ training:
   ensemble_size_per_device: 2
   max_epochs: 1
 
-  rollout: null # override the default, it does not make sense for an interpolator
+  rollout: null # override the default, it does not make sense for temporal downscaling

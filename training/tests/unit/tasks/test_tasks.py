@@ -700,8 +700,8 @@ def test_rollout_advance_input_keeps_latest_steps(
         assert torch.all(updated[:, idx] == value)
 
 
-# Minimal index stub for interpolator output_times tests (no full IndexCollection).
-class _DummyIndexForInterpolator:
+# Minimal index stub for temporal downscaler output_times tests (no full IndexCollection).
+class _DummyIndexForTemporalDownscaler:
     model = type("_Dummy", (), {"output": [0]})()
 
 

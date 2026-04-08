@@ -4,7 +4,7 @@
 
 Anemoi provides a modular and extensible training framework for Graph
 Neural Networks (GNNs), designed for tasks such as forecasting,
-interpolation, and ensemble learning. The training setup is structured
+temporal downscaling, and ensemble learning. The training setup is structured
 around three key components:
 
 -  ``BaseTrainingModule``: The abstract base class for all task-specific
@@ -12,7 +12,7 @@ around three key components:
    distributed execution.
 
 -  **Tasks**: Task-specific subclasses that implement models for
-   deterministic forecasting, interpolation, ensemble learning, etc.
+   deterministic forecasting, temporal downscaling, ensemble learning, etc.
 
 -  ``AnemoiTrainer``: The training orchestrator responsible for running
    and managing the training and validation loops.
@@ -41,7 +41,7 @@ Key responsibilities include:
 
 ``BaseTrainingModule`` is not intended to be instantiated directly.
 Instead, model developers should subclass it to implement specific
-forecasting or interpolation tasks by overriding the :meth:`_step`
+forecasting or temporal downscaling tasks by overriding the :meth:`_step`
 method and optionally customizing the initialization logic in
 :meth:`__init__`.
 
@@ -86,8 +86,8 @@ Current supported graphmodules include:
    :class:`~anemoi.training.train.tasks.forecaster.GraphForecaster`
 #. **Ensemble Forecasting** —
    :class:`~anemoi.training.train.tasks.ensforecaster.GraphEnsForecaster`
-#. **Time Interpolation** —
-   :class:`~anemoi.training.train.tasks.interpolator.GraphMultiOutInterpolator`
+#. **Temporal Downscaling** —
+   :class:`~anemoi.training.train.tasks.temporal_downscaler.GraphTemporalDownscaler`
 #. **AutoEncoder** —
    :class:`~anemoi.training.train.tasks.autoencoder.GraphAutoEncoder`
 
@@ -130,7 +130,7 @@ logic.
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.train.tasks.interpolator
+.. automodule:: anemoi.training.train.tasks.temporal_downscaler
    :members:
    :no-undoc-members:
    :show-inheritance:

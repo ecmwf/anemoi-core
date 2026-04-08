@@ -745,8 +745,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             The name of the dataset to process
         outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
             The outputs from the model. The second element must be a list of dicts
-            (one per outer step). Tasks with a single step (e.g. diffusion, multi-out
-            interpolator) must return [y_pred] so that ``for x in outputs[1]``
+            (one per outer step). Tasks with a single step (e.g. diffusion,
+            temporal downscaling) must return [y_pred] so that ``for x in outputs[1]``
             iterates over steps; if they return the dict directly, iteration would
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
