@@ -23,6 +23,8 @@ from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.utils.masks import NoOutputMask
 
+from anemoi.utils.dates import as_timedelta
+
 
 class DummyLoss(torch.nn.Module):
 
@@ -705,25 +707,25 @@ class _DummyIndexForTemporalDownscaler:
     model = type("_Dummy", (), {"output": [0]})()
 
 
-_CFG_INTERP_TWO_TARGETS = DictConfig(
+
+# Config for temporal downscaler _step tests (numeric indices): 2 boundary, 2 target steps.
+_CFG_TEMP_DOWN_STEP = DictConfig(
     {
-        "training": {
-            "explicit_times": {
-                "input": ["2025-01-01T00"],
-                "target": ["2025-01-01T00", "2025-01-01T06"],
+        "task": {
+                "input_timestep": "6H",
+                "output_timestep": "2H",
+                "output_right_boundary": True,
+                "output_left_boundary": True,
+
             },
-        },
     },
 )
-
-# Config for interpolator _step tests (numeric indices): 2 boundary, 2 target steps.
-_CFG_INTERP_STEP = DictConfig({"training": {"explicit_times": {"input": [0, 3], "target": [1, 2]}}})
 
 # Autoencoder config
 _CFG_AE = DictConfig({"training": {"multistep_input": 1, "multistep_output": 1}})
 
 
-class _InterpolatorStub:
+class _TemporalDownscalerStub:
     """Minimal stub with attributes needed by TemporalDownscalerPlotAdapter."""
 
     def __init__(self, n_step_input: int, n_step_output: int, interp_times: list) -> None:
@@ -737,13 +739,20 @@ class _InterpolatorStub:
         return self._plot_adapter
 
 
-def test_interpolator_output_times_and_get_init_step() -> None:
-    """Interpolator task: output_times == len(target), get_init_step(i) == i."""
-    interp_times = _CFG_INTERP_TWO_TARGETS.training.explicit_times.target
-    stub = _InterpolatorStub(
+def test_temporal_downscaler_output_times_and_get_init_step() -> None:
+    """Temporal Downscaler task: output_times == len(target), get_init_step(i) == i."""
+    input_timedelta = as_timedelta(_CFG_TEMP_DOWN_STEP.input_timestep)
+    output_timedelta = as_timedelta(_CFG_TEMP_DOWN_STEP.output_timestep)
+
+    num_output_steps = (input_timedelta // output_timedelta) -1
+    if _CFG_TEMP_DOWN_STEP.output_left_boundary:
+        num_output_steps+=1
+    if _CFG_TEMP_DOWN_STEP.output_right_boundary:
+        num_output_steps+=1        
+
+    stub = _TemporalDownscalerStub(
         n_step_input=1,
-        n_step_output=len(interp_times),
-        interp_times=interp_times,
+        n_step_output=num_output_steps,
     )
 
     assert stub.plot_adapter.output_times == 2
@@ -845,7 +854,7 @@ def test_temporal_downscaling_step_returns_list(monkeypatch: pytest.MonkeyPatch)
     _set_base_task_attrs(
         training_module,
         data_indices=data_indices,
-        config=_CFG_INTERP_STEP,
+        config=_CFG_TEMP_DOWN_STEP,
         n_step_output=task.num_output_timesteps,
         n_step_input=task.num_input_timesteps,
         task=task,

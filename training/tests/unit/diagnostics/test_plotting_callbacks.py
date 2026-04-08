@@ -49,7 +49,8 @@ def test_output_times_and_get_init_step_forecaster():
 
 
 def test_output_times_and_get_init_step_temporal_downscaler():
-    """TemporalDownscaler plot_adapter: output_times == len(interp_times), get_init_step(rollout_step) == rollout_step."""
+    """TemporalDownscaler plot_adapter: 
+       output_times == len(interp_times), get_init_step(rollout_step) == rollout_step."""
     from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalerPlotAdapter
 
     task = MagicMock()
