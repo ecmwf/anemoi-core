@@ -71,24 +71,23 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     return config_system
 
 
+def _get(obj: Any, key: str) -> Any:
+    """Attribute-or-mapping access that works for both Pydantic models and plain dicts/DictConfigs."""
+    return getattr(obj, key, None) or (obj.get(key) if hasattr(obj, "get") else None)
+
+
 def _validate_multiscale_loss(training: Any) -> None:
     """Validate multiscale loss matrix source config.
 
     Runs for both validated (BaseSchema) and unvalidated (UnvalidatedBaseSchema)
     configs so the check is enforced regardless of the ``config_validation`` flag.
     """
-    training_loss = getattr(training, "training_loss", None) or (
-        training.get("training_loss") if hasattr(training, "get") else None
-    )
+    training_loss = _get(training, "training_loss")
     if training_loss is None:
         return
 
-    loss_matrices = getattr(training_loss, "loss_matrices", None) or (
-        training_loss.get("loss_matrices") if hasattr(training_loss, "get") else None
-    )
-    loss_matrices_graph = getattr(training_loss, "loss_matrices_graph", False)
-    if loss_matrices_graph is False and hasattr(training_loss, "get"):
-        loss_matrices_graph = training_loss.get("loss_matrices_graph", False)
+    loss_matrices = _get(training_loss, "loss_matrices")
+    loss_matrices_graph = _get(training_loss, "loss_matrices_graph") or False
 
     file_based = loss_matrices is not None
     graph_based = loss_matrices_graph is True or isinstance(loss_matrices_graph, list)
@@ -98,6 +97,24 @@ def _validate_multiscale_loss(training: Any) -> None:
         raise ValueError(msg)
     if not file_based and not graph_based:
         msg = "Specify loss_matrices, loss_matrices_graph=True, or an explicit loss_matrices_graph list."
+        raise ValueError(msg)
+
+
+def _validate_noise_projection(model: Any) -> None:
+    """Validate that noise_matrix and noise_edges_name are not both specified.
+
+    Runs for both validated (BaseSchema) and unvalidated (UnvalidatedBaseSchema)
+    configs so the check is enforced regardless of the ``config_validation`` flag.
+    Only applies to model configs that carry a ``noise_injector`` field
+    (e.g. ``EnsModelSchema``).
+    """
+    noise_injector = _get(model, "noise_injector")
+    if noise_injector is None:
+        return
+    noise_matrix = _get(noise_injector, "noise_matrix")
+    noise_edges_name = _get(noise_injector, "noise_edges_name")
+    if noise_matrix is not None and noise_edges_name is not None:
+        msg = "Specify either noise_matrix or noise_edges_name, not both."
         raise ValueError(msg)
 
 
@@ -111,6 +128,7 @@ class SchemaCommonMixin:
     def model_post_init(self, _: Any) -> None:
         expand_paths(self.system)
         _validate_multiscale_loss(self.training)
+        _validate_noise_projection(self.model)
         if self.diagnostics.log.mlflow.enabled and (
             self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
         ):

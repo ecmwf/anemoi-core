@@ -279,15 +279,6 @@ class NoiseConditioningSchema(BaseModel):
     autocast: bool = Field(default=False)
     "Whether to use autocast for the noise projection matrix operations."
 
-    @model_validator(mode="after")
-    def validate_noise_projection(self) -> "NoiseConditioningSchema":
-        file_based = self.noise_matrix is not None
-        graph_based = self.noise_edges_name is not None
-        if file_based and graph_based:
-            msg = "Specify either noise_matrix or noise_edges_name, not both."
-            raise ValueError(msg)
-        return self
-
 
 class NoiseInjectorSchema(BaseModel):
     """Schema for NoiseInjector - injects noise directly into input tensor."""
