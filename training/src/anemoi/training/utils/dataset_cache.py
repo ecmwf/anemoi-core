@@ -94,7 +94,7 @@ class CachedDataWrapper:
 
 #TODO change to overwriting the dataset insetad of data module?
 class DatasetCache(AnemoiDatasetsDataModule):
-    def __init__(self, ds, cache_root, dataset_path, proc_group=None):
+    def __init__(self, ds, cache_root, dataset_path, proc_group=None, hostname_suffix=None):
         self.ds=ds
         self.cache_root = Path(cache_root)
         self.dataset_path=dataset_path
@@ -106,6 +106,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.primary_dataset_name = None
         
         self.is_initalised = False
+
+        # optional suffix which will be appended to hostnames
+        self.hostname_suffix=hostname_suffix
         
         # Cache statistics - use shared memory for cross-process visibility
         self.cache_hits_local = Value('i', 0)  # 'i' = signed int
@@ -153,7 +156,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
             LOGGER.info(f"Rank {self.rank}: Set CUDA device to {self.rank}")
         
         self.world_size = dist.get_world_size(self.proc_group)
-        self.hostnames = self._get_all_hostnames()
+        self.hostnames = self._get_all_hostnames(suffix=self.hostname_suffix)
         self.proc_group = dist.new_group(ranks=None, backend="gloo")
 
         # Build a mapping from hostname -> node_id (integer) and figure out
@@ -314,13 +317,18 @@ class DatasetCache(AnemoiDatasetsDataModule):
     def _get_hostname(self, rank):
         return self.hostnames[rank]
     
-    def _get_all_hostnames(self):
-        """Gather the hostname of every rank into a list (length = world_size)."""
+    def _get_all_hostnames(self, suffix:str=None):
+        """Gather the hostname of every rank into a list (length = world_size).
+
+        prepends optional suffix to hostnames if given"""
         my_host = socket.gethostname()
 
         # Gather all hostnames as Python objects
         hostnames = [None for _ in range(self.world_size)]
         dist.all_gather_object(hostnames, my_host, self.proc_group)
+        if suffix is not None:
+            #prepend the ib interface to the end of the hostnames
+            hostnames = [hostname + suffix for hostname in hostnames]
         LOGGER.info(f"{self.rank=} {hostnames=}")
         return hostnames
     
@@ -341,8 +349,8 @@ class DatasetCache(AnemoiDatasetsDataModule):
         try:
             if hasattr(self, '_tcp_server') and self._tcp_server is not None:
                 LOGGER.info(f"Rank {self.rank}: Shutting down TCP server on port {self.port}")
-                self._tcp_server.shutdown()
-                self._tcp_server.server_close()
+                #self._tcp_server.shutdown()
+                #self._tcp_server.server_close()
                 LOGGER.info(f"Rank {self.rank}: TCP server shut down successfully")
         except Exception as e:
             LOGGER.warning(f"Rank {self.rank}: Error shutting down TCP server: {e}")
