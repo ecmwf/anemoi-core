@@ -22,7 +22,6 @@ from anemoi.training.train.methods.diffusion import DiffusionTraining
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.utils.masks import NoOutputMask
-
 from anemoi.utils.dates import as_timedelta
 
 
@@ -707,17 +706,15 @@ class _DummyIndexForTemporalDownscaler:
     model = type("_Dummy", (), {"output": [0]})()
 
 
-
 # Config for temporal downscaler _step tests (numeric indices): 2 boundary, 2 target steps.
 _CFG_TEMP_DOWN_STEP = DictConfig(
     {
         "task": {
-                "input_timestep": "6H",
-                "output_timestep": "2H",
-                "output_right_boundary": True,
-                "output_left_boundary": True,
-
-            },
+            "input_timestep": "6H",
+            "output_timestep": "2H",
+            "output_right_boundary": True,
+            "output_left_boundary": True,
+        },
     },
 )
 
@@ -744,11 +741,11 @@ def test_temporal_downscaler_output_times_and_get_init_step() -> None:
     input_timedelta = as_timedelta(_CFG_TEMP_DOWN_STEP.input_timestep)
     output_timedelta = as_timedelta(_CFG_TEMP_DOWN_STEP.output_timestep)
 
-    num_output_steps = (input_timedelta // output_timedelta) -1
+    num_output_steps = (input_timedelta // output_timedelta) - 1
     if _CFG_TEMP_DOWN_STEP.output_left_boundary:
-        num_output_steps+=1
+        num_output_steps += 1
     if _CFG_TEMP_DOWN_STEP.output_right_boundary:
-        num_output_steps+=1        
+        num_output_steps += 1
 
     stub = _TemporalDownscalerStub(
         n_step_input=1,
