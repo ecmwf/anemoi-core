@@ -152,7 +152,7 @@ class AnemoiModelInterface(torch.nn.Module):
             'rho': 7, 
             'num_steps': 100, 
             'num_steps_sdedit': 15, 
-            'SDEdit': False
+            'SDEdit': True
         }
         }
         # Add tendency processors if they exist

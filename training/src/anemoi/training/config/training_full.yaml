@@ -16,6 +16,7 @@ diagnostics:
     mlflow:
       enabled: True
       offline: False
+      on_resume_create_child: False
       experiment_name: 'uncond_diffusion_training_complet'
       project_name: 'uncond_diffusion_training_complet'
       run_name: 'train_mean'
@@ -95,7 +96,7 @@ model:
 hardware:
   paths:
     data: /project/home/p200177/DE_371/datasets/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6/arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6
-    output: /project/home/p200177/DE_371/avritj/experiments_anemoi/training/Training_complet_mean/
+    output: /project/home/p200177/DE_371/angeliquebonamy/anemoi/training/Training_complet_mean/
   files:
     dataset: arome-an-oper-titan-0p025-2020-2024-1h-v4-eurw-precip6.zarr
     graph: /project/home/p200177/DE_371/avritj/multi_scale_res9.pt

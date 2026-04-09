@@ -18,15 +18,19 @@ load_puv
 export HYDRA_FULL_ERROR=1
 export OMP_NUM_THREADS=4
 export NCCL_ASYNC_ERROR_HANDLING=1
-export PYTHONPATH=/home/users/u102751/code/anemoi-core/models/src:/home/users/u102751/code/anemoi-core/training/src:$PYTHONPATH
+
+export PYTHONPATH=/home/users/u101957/code/anemoi-core/models/src:/home/users/u101957/code/anemoi-core/training/src:$PYTHONPATH
 echo $CUDA_VISIBLE_DEVICES
-cd /home/users/u102751/anemoi/anemoi-core/
-git status
-cd /home/users/u102751/code/anemoi/anemoi-core/training/src/anemoi/training/config
+cd /home/users/u101957/code/anemoi-core/training/src/anemoi/training/config
 CUDA_VISIBLE_DEVICES=0,1,2,3
+# puv tree | grep anemoi-models
 srun puv run anemoi-training train --config-name=training_full
 
-#   puv run torchrun  \
-#   --nnodes=2 \
-#   --nproc_per_node=4 \
-#   -m anemoi.training train --config-name=diffusion_incond
+
+# export PYTHONPATH=/home/users/u102751/code/anemoi-core/models/src:/home/users/u102751/code/anemoi-core/training/src:$PYTHONPATH
+# echo $CUDA_VISIBLE_DEVICES
+# cd /home/users/u102751/anemoi/anemoi-core/
+# git status
+# cd /home/users/u102751/code/anemoi/anemoi-core/training/src/anemoi/training/config
+# CUDA_VISIBLE_DEVICES=0,1,2,3
+# srun puv run anemoi-training train --config-name=training_full
