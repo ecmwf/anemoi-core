@@ -1,6 +1,5 @@
 datasets:
   data:
-
     # Several scalers can be added here. In order to be applied their names must be included in the loss.
     # scaler name must be included in `scalers` in the losses for this to be applied.
     general_variable:
@@ -48,13 +47,11 @@ datasets:
     # Scalers from node attributes
     node_weights:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
       nodes_attribute_name: area_weight
       norm: "unit-sum"
 
     limited_area_mask:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
       nodes_attribute_name: cutout_mask
       norm: null
 

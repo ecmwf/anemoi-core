@@ -8,6 +8,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.11.0](https://github.com/ecmwf/anemoi-core/compare/training-0.10.0...training-0.11.0) (2026-03-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **diagnostics:** Rollout Evaluation ([#1011](https://github.com/ecmwf/anemoi-core/issues/1011))
+
+### Features
+
+* **mlflow:** Store username as a tag ([#1008](https://github.com/ecmwf/anemoi-core/issues/1008)) ([992a300](https://github.com/ecmwf/anemoi-core/commit/992a300e6add4894d2ab2b5d44a50c738cdbdc1b))
+
+
+### Bug Fixes
+
+* `member` argument of `EnsemblePlotMixin`'s  `process` method ([#843](https://github.com/ecmwf/anemoi-core/issues/843)) ([266f5a6](https://github.com/ecmwf/anemoi-core/commit/266f5a68e393aad1629ef9d2260a7fd347b9f182))
+* Add max version pining to Torch&lt;2.11 ([#1006](https://github.com/ecmwf/anemoi-core/issues/1006)) ([a23c97c](https://github.com/ecmwf/anemoi-core/commit/a23c97c272c02de18519deebc4e2149105a24be1))
+* **diagnostics:** Rollout Evaluation ([#1011](https://github.com/ecmwf/anemoi-core/issues/1011)) ([c23cdab](https://github.com/ecmwf/anemoi-core/commit/c23cdab59a55551951addaebb9728239629157df))
+* Log MLflow artifacts into per-callback subfolders ([#962](https://github.com/ecmwf/anemoi-core/issues/962)) ([6f650f2](https://github.com/ecmwf/anemoi-core/commit/6f650f226446e81fc710ac5a51d5a324f7cd5594))
+* Refactor `expand_iterables`: expand non-trivial lists (including ListConfig) ([#982](https://github.com/ecmwf/anemoi-core/issues/982)) ([fac741c](https://github.com/ecmwf/anemoi-core/commit/fac741c9aaa67491632039d256fcdaf2a3fea1b1))
+* **training:** Multiscale wrapper sharding is broken after multi dataset merge ([#958](https://github.com/ecmwf/anemoi-core/issues/958)) ([7603aa3](https://github.com/ecmwf/anemoi-core/commit/7603aa31e213de525eedbe1034460ae97a659031))
+
+## [0.10.0](https://github.com/ecmwf/anemoi-core/compare/training-0.9.1...training-0.10.0) (2026-03-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** expands graph config for multiple datasets ([#895](https://github.com/ecmwf/anemoi-core/issues/895))
+* **models:** move functionality to base model class ([#922](https://github.com/ecmwf/anemoi-core/issues/922))
+* Rewrite dataset Schema to fix issue 911 ([#916](https://github.com/ecmwf/anemoi-core/issues/916))
+* **training:** remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848))
+
+### Features
+
+* Checkpoint pipeline infrastructure (Phase 1) ([#501](https://github.com/ecmwf/anemoi-core/issues/501)) ([2e20ec6](https://github.com/ecmwf/anemoi-core/commit/2e20ec67cbf41ddbe192ba72ccdca02689816c00))
+* Consolidate and expand spectral losses ([#788](https://github.com/ecmwf/anemoi-core/issues/788)) ([9d70464](https://github.com/ecmwf/anemoi-core/commit/9d7046462e8b9b270296f34fdb10ea8e9cf08e06))
+* Diffusion bm test ([#921](https://github.com/ecmwf/anemoi-core/issues/921)) ([82e5fd1](https://github.com/ecmwf/anemoi-core/commit/82e5fd1e24b8ff50ab549b30ecaea3b65207f44c))
+* Enable plotting for Autoencoder ([#908](https://github.com/ecmwf/anemoi-core/issues/908)) ([18cd886](https://github.com/ecmwf/anemoi-core/commit/18cd886b64afa753e37b6095729445f3c58241b7))
+* **models,training:** Deprecate dynamic imputers ([#942](https://github.com/ecmwf/anemoi-core/issues/942)) ([fbdfa0c](https://github.com/ecmwf/anemoi-core/commit/fbdfa0c7c586697d9523380f3e539c4b35ab9f11))
+* **models:** Move functionality to base model class ([#922](https://github.com/ecmwf/anemoi-core/issues/922)) ([b735ec3](https://github.com/ecmwf/anemoi-core/commit/b735ec3c58d7f3e09b2ad8138855b37a05bee297))
+* Remove single out time interpolator ([#915](https://github.com/ecmwf/anemoi-core/issues/915)) ([80713fb](https://github.com/ecmwf/anemoi-core/commit/80713fb6d04b76ecfd44c6e5e450a546ac2a0d1c))
+* Rewrite dataset Schema to fix issue 911 ([#916](https://github.com/ecmwf/anemoi-core/issues/916)) ([b198783](https://github.com/ecmwf/anemoi-core/commit/b198783325bb0a8458be6525cc00e1319de48f4b))
+* **training:** Deprecate tensorboard and Harmonise loggers interface ([#850](https://github.com/ecmwf/anemoi-core/issues/850)) ([3da01b7](https://github.com/ecmwf/anemoi-core/commit/3da01b78c9a21f7b402eb7e0ebb4caa9f3b23f29))
+
+
+### Bug Fixes
+
+* Convert sanity rnd tensor ([#920](https://github.com/ecmwf/anemoi-core/issues/920)) ([f6f85e1](https://github.com/ecmwf/anemoi-core/commit/f6f85e1ab32a4781f3ed3d0236ffddc99a5d44a5))
+* Doc on number of ensemble members ([#972](https://github.com/ecmwf/anemoi-core/issues/972)) ([e9c1cc3](https://github.com/ecmwf/anemoi-core/commit/e9c1cc3ff1ddbf84b57c5e77809c8da7d8a1e10a))
+* Extend transfer learning to multidataset checkpoints ([#862](https://github.com/ecmwf/anemoi-core/issues/862)) ([#867](https://github.com/ecmwf/anemoi-core/issues/867)) ([4974428](https://github.com/ecmwf/anemoi-core/commit/497442888f96ff9cad214b552307a56c8ddfb316))
+* Forbid extras in nativedatasetschema ([#901](https://github.com/ecmwf/anemoi-core/issues/901)) ([dead80d](https://github.com/ecmwf/anemoi-core/commit/dead80d92075f2cda08287c131c3e06d1100a5db))
+* Integrate select variables in dataloader ([#900](https://github.com/ecmwf/anemoi-core/issues/900)) ([d34e80c](https://github.com/ecmwf/anemoi-core/commit/d34e80cacd2a82ca9d718b2914fe6e8cb306498a))
+* Interpolator_config ([#948](https://github.com/ecmwf/anemoi-core/issues/948)) ([d71d065](https://github.com/ecmwf/anemoi-core/commit/d71d06525614fa42b5dc6376b7c2d92b5180df85))
+* **mlflow:** Fix KeyError in error message for missing environment variables ([#894](https://github.com/ecmwf/anemoi-core/issues/894)) ([77ca1ae](https://github.com/ecmwf/anemoi-core/commit/77ca1ae5f5eb34c0790ec4ac24aee8814ee45cd7))
+* Optimiser schema was ignoring kwargs ([#885](https://github.com/ecmwf/anemoi-core/issues/885)) ([1f1a030](https://github.com/ecmwf/anemoi-core/commit/1f1a030421bebd2daf31c7cf285138b4baea340d))
+* Single interpolator ([#881](https://github.com/ecmwf/anemoi-core/issues/881)) ([4378de0](https://github.com/ecmwf/anemoi-core/commit/4378de0afd03010ef8b012b973d186961f67bbf0))
+* **training:** Add base seed fallback ([#957](https://github.com/ecmwf/anemoi-core/issues/957)) ([fd3883f](https://github.com/ecmwf/anemoi-core/commit/fd3883fb9b46a20b3453cf854563b9df8237cd41))
+* **training:** Expands graph config for multiple datasets ([#895](https://github.com/ecmwf/anemoi-core/issues/895)) ([33d7f4e](https://github.com/ecmwf/anemoi-core/commit/33d7f4e11fff8da22243fbb924036bab07f17c65))
+* **training:** Plot callbacks multi out and noopt graph provider ([#872](https://github.com/ecmwf/anemoi-core/issues/872)) ([872618f](https://github.com/ecmwf/anemoi-core/commit/872618fc6d2cc5060bd142fa634a7095b0645761))
+* **training:** Scaler index handling improvement, doc string clean-up ([#879](https://github.com/ecmwf/anemoi-core/issues/879)) ([7ffa124](https://github.com/ecmwf/anemoi-core/commit/7ffa12496e64ce46544d085dec58f47f4d6e234e))
+
+
+### Code Refactoring
+
+* **training:** Remove `grid_indices` inside Dataset ([#848](https://github.com/ecmwf/anemoi-core/issues/848)) ([dcd69ac](https://github.com/ecmwf/anemoi-core/commit/dcd69ac415894131876c2f19af643896f1605fe6))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/training-0.9.0...training-0.9.1) (2026-02-09)
 
 

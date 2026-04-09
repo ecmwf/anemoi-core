@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any
 from typing import Optional
 
 import einops
@@ -20,6 +19,7 @@ import torch
 from packaging import version
 from torch import Tensor
 from torch import nn
+from torch import where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
@@ -57,6 +57,7 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,
         is_causal: bool = False,
@@ -81,7 +82,10 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads : int
             number of heads
         embed_dim : int
-            embedding dimension
+            Input and output embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to embed_dim.
         qkv_bias : bool, optional
             bias for querys, keys and values, by default False
         qk_norm : bool, optional
@@ -102,16 +106,17 @@ class MultiHeadSelfAttention(nn.Module):
         """
         super().__init__()
 
-        assert (
-            embed_dim % num_heads == 0
-        ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
+        self.attn_channels = embed_dim if attn_channels is None else attn_channels
+        if self.attn_channels <= 0:
+            raise ValueError(f"attn_channels must be > 0, got {self.attn_channels}")
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})")
 
         self.attention_implementation = attention_implementation
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
-        self.embed_dim = embed_dim
-        self.head_dim = embed_dim // num_heads  # q k v
+        self.head_dim = self.attn_channels // num_heads  # q k v
         self.window_size = window_size
         self.dropout_p = dropout_p
         self.is_causal = is_causal
@@ -128,11 +133,11 @@ class MultiHeadSelfAttention(nn.Module):
             self.alibi_slopes = None
 
         linear = layer_kernels.Linear
-        self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_q = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_k = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_v = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
 
-        self.projection = linear(embed_dim, embed_dim, bias=True)
+        self.projection = linear(self.attn_channels, embed_dim, bias=True)
 
         if self.qk_norm:
             self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
@@ -228,18 +233,48 @@ class SDPAAttentionWrapper(nn.Module):
         from torch.nn.functional import scaled_dot_product_attention
 
         self.attention = scaled_dot_product_attention
-        self.mask = None
-        self.window_size = None
         LOGGER.info("Using scaled_dot_product_attention.")
 
-    def update_mask(self, seq_len, window_size: int, device: str):
+        self.attn_mask = None
+        from torch.nn.attention.flex_attention import create_mask
 
-        self.mask = (
-            torch.abs(
-                torch.arange(seq_len, device=device).unsqueeze(0) - torch.arange(seq_len, device=device).unsqueeze(1)
-            )
-            <= window_size
-        )
+        self.create_mask = create_mask
+
+    def create_sliding_window_mask(self, B, H, Q_LEN, KV_LEN, window_size, device="cpu") -> Tensor:
+        """Create a mask for sliding window attention compatible with SDPA.
+
+        Parameters
+        ----------
+        B : int
+            Batch size
+        H : int
+            Number of heads
+        Q_LEN : int
+            Query sequence length
+        KV_LEN : int
+            Key/value sequence length
+        window_size : tuple
+            Tuple of (left_window, right_window). Use -1 for unlimited.
+        device : str
+            Device for the mask tensor
+
+        Returns
+        -------
+        Tensor
+            2D attention mask
+        """
+        window_size_l = KV_LEN if window_size[0] == -1 else window_size[0]
+        window_size_r = KV_LEN if window_size[1] == -1 else window_size[1]
+
+        def sliding_window_mask(b, h, q_idx, kv_idx):
+            l_mask = where(kv_idx <= q_idx, abs(q_idx - kv_idx) <= window_size_l, False)
+            r_mask = where(q_idx <= kv_idx, abs(q_idx - kv_idx) <= window_size_r, False)
+            return l_mask | r_mask
+
+        # a mask for use with SDPA: tensor type, < 4D
+        mask = self.create_mask(sliding_window_mask, B, H, Q_LEN, KV_LEN, device=device)
+        mask = mask[0, 0, :, :]
+        return mask
 
     def forward(
         self,
@@ -253,26 +288,31 @@ class SDPAAttentionWrapper(nn.Module):
         softcap=None,
         alibi_slopes=None,
     ):
-        if softcap is not None:
-            NotImplementedError(
+        if softcap is not None and softcap > 0:
+            raise NotImplementedError(
                 "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
             )
         if alibi_slopes is not None:
-            NotImplementedError(
+            raise NotImplementedError(
                 "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
+        if window_size is not None and self.attn_mask is None:
+            # build the attention mask for sliding window attention. We build the mask once and reuse it,
+            # since it is the same for every forward pass (assuming the sequence length does not change).
 
-        sequence_len = query.shape[-2]
-
-        if window_size is not None and (self.mask is None or tuple(self.mask.shape) != (sequence_len, sequence_len)):
-            self.update_mask(sequence_len, window_size=window_size, device=query.device)
+            if isinstance(window_size, int):
+                window_size = (window_size, window_size)
+            self.attn_mask = self.create_sliding_window_mask(
+                1, query.shape[1], query.shape[2], key.shape[2], window_size, device=query.device
+            )
 
         out = self.attention(
             query,
             key,
             value,
-            attn_mask=self.mask,
-            is_causal=causal,
+            # self.attn_mask is None if global or causal attention is used, since SDPA will automatically apply a causal mask if causal=True. If window_size is used, we use the precomputed attn_mask.
+            attn_mask=self.attn_mask,
+            is_causal=False,
             dropout_p=dropout_p,
         )
 
@@ -292,20 +332,25 @@ class FlashAttentionWrapper(nn.Module):
     def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
         super().__init__()
 
-        flash_attn, self.use_flash_attn_v3 = self._import_flash_attn()
+        flash_attn_func = self._import_flash_attn()
 
-        flash_attn_version = version.parse(flash_attn.__version__)
-        self._init_rotary_embeddings(use_rotary_embeddings, head_dim, flash_attn_version)
+        self._init_rotary_embeddings(use_rotary_embeddings, head_dim)
 
-        self.attention = flash_attn.flash_attn_func
+        self.attention = flash_attn_func
 
-    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int, flash_attn_version) -> None:
+    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int) -> None:
         """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
         self.use_rotary_embeddings = False
         if use_rotary_embeddings:
-            if flash_attn_version >= version.parse("3"):
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v3")
-            elif flash_attn_version <= version.parse("2.6"):
+            if self.use_flash_attn_v4 or self.use_flash_attn_v3:
+                raise RuntimeError(
+                    "Rotary Embeddings not supported with flash attention v3 and v4. Please switch to flash attention v2 to use rotary embeddings."
+                )
+
+            # import flash attn v2 to check the version
+            import flash_attn
+
+            if flash_attn.__version__ <= version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
 
             from flash_attn.layers.rotary import RotaryEmbedding
@@ -313,38 +358,57 @@ class FlashAttentionWrapper(nn.Module):
             self.use_rotary_embeddings = True
             self.rotary_emb = RotaryEmbedding(dim=head_dim)
 
-    def _import_flash_attn(self) -> (Any, bool):
-        """imports either flash attention v2 or v3.
+    def _import_flash_attn(self) -> tuple:
+        """imports either flash attention v2, v3 or v4, based on what is installed. prioritising v4, then v3, then v2. if none are installed, raises an error.
 
         returns:
-            flash attention module
-            use_flash_attention_v3 (bool)
+            flash attention function
         """
-        use_flash_attn_v3 = False
+        # will be set to a valid version if either flash attention v2, v3 or v4 is successfully imported
+        flash_attn_func = None
 
-        # to detect which flash-attn interface we're using we try import them
-        # Since each import is semantically different we use this to
-        # distringuish flash attention versions
+        self.use_flash_attn_v3 = False
+        self.use_flash_attn_v4 = False
+
+        e_v4 = None
+        e_v3 = None
+        e_v2 = None
+
         try:
-            # first try import flash attn v2
-            import flash_attn
+            from flash_attn.cute import flash_attn_func
 
-        except ImportError as e_v2:
+            LOGGER.info("Using flash attention v4")
+            self.use_flash_attn_v4 = True
+            return flash_attn_func
+        except ImportError as e:
+            e_v4 = e
+            LOGGER.debug(f"Flash attention v4 not available: {e_v4}")
 
-            # failed importing flash attn v2,
-            # try import flash attn v3
-            try:
-                import flash_attn_interface as flash_attn
+        try:
+            from flash_attn_interface import flash_attn_func
 
-            except ImportError as e_v3:
-                # print both errors if both fail
-                raise ImportError(f"Error importing flash-attn v2: {e_v2}\nError importing flash-attn v2: {e_v3}")
-            else:
-                LOGGER.info("Using flash attention v3")
-                use_flash_attn_v3 = True
-        else:
+            LOGGER.info("Using flash attention v3")
+            self.use_flash_attn_v3 = True
+            return flash_attn_func
+        except ImportError as e:
+            e_v3 = e
+            LOGGER.debug(f"Flash attention v3 not available: {e_v3}")
+        try:
+            from flash_attn import flash_attn_func
+
             LOGGER.info("Using flash attention v2")
-        return flash_attn, use_flash_attn_v3
+            return flash_attn_func
+        except ImportError as e:
+            e_v2 = e
+            LOGGER.debug(f"Flash attention v2 not available: {e_v2}")
+
+        raise ImportError(
+            "Flash attention is not installed. Please install flash attention v4, v3 or v2 to use this attention implementation. "
+            f"Attempted imports resulted in the following errors: "
+            f"v4 import error: {e_v4} "
+            f"v3 import error: {e_v3} "
+            f"v2 import error: {e_v2} "
+        )
 
     def forward(
         self,
@@ -353,7 +417,7 @@ class FlashAttentionWrapper(nn.Module):
         value,
         batch_size: int,
         causal: bool = False,
-        window_size: int = None,
+        window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
@@ -363,7 +427,7 @@ class FlashAttentionWrapper(nn.Module):
         )
 
         if alibi_slopes is not None and self.use_flash_attn_v3:
-            NotImplementedError(
+            raise NotImplementedError(
                 "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
             )
 
@@ -379,7 +443,16 @@ class FlashAttentionWrapper(nn.Module):
             key = keyvalue[:, :, 0, ...]
             value = keyvalue[:, :, 1, ...]
 
-        if self.use_flash_attn_v3:
+        if self.use_flash_attn_v4:
+            out = self.attention(
+                query,
+                key,
+                value,
+                softmax_scale=1.0 / math.sqrt(query.shape[-1]),
+                causal=False,
+                window_size=(window_size, window_size) if window_size is not None else (-1, -1),
+            )[0]
+        elif self.use_flash_attn_v3:
             out = self.attention(
                 query,
                 key,
@@ -387,9 +460,11 @@ class FlashAttentionWrapper(nn.Module):
                 causal=False,
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
                 softcap=softcap,
-            )[
-                0
-            ]  # fav3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
+            )
+            if isinstance(out, tuple):
+                out = out[
+                    0
+                ]  # early versions of flash attention v3 returns a tuple with '(out, softmax_lse)'. here we drop to 'out'
         else:
             out = self.attention(
                 query,

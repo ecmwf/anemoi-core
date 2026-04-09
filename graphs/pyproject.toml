@@ -40,7 +40,7 @@ dependencies = [
   "numpy>=1.26",
   "plotly>=5.19",
   "scikit-learn>=1.5",
-  "torch>=2.2",
+  "torch>=2.2,<2.11",
   "torch-geometric>=2.3.1",
   "typeguard>=4",
 ]
@@ -81,3 +81,7 @@ git_describe_command = "git describe --dirty --tags --long --match 'graphs-*[0-9
 tag_regex = "^graphs-(?P<version>[vV]?[0-9]+[^-]*)"
 version_file = "src/anemoi/graphs/_version.py"
 fallback_version = "0.0.0"
+
+[tool.ruff]
+lint.extend-select = [ "TID251" ]  # banned API usage
+lint.flake8-tidy-imports.banned-api."anemoi.training".msg = "Do not import from anemoi-training in anemoi-graphs."
