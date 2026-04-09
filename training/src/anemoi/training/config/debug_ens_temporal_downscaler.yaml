@@ -48,6 +48,7 @@ system:
 
 data:
   resolution: o96  # Global resolution setting used in hardware file paths
+  frequency: 1h
 model:
   num_channels: 128
 dataloader:
