@@ -20,12 +20,18 @@ LOGGER = logging.getLogger(__name__)
 
 
 class TargetValueRangeScaler(BaseUpdatingScaler):
-    """Apply variable-specific loss weights based on target-value ranges.
+    """Apply multiplicative loss factors based on target-value ranges.
 
     This scaler is designed for cases such as radar reflectivity (`refc`) where
     large values are comparatively rare and should contribute more strongly to
     the loss. It updates per batch using the target portion of the current
-    batch, broadcasting weights across the ensemble dimension.
+    batch, broadcasting multiplicative factors across the ensemble dimension.
+
+    The produced tensor is intended to be combined with existing Anemoi loss
+    scalers (for example `general_variable`) in the standard ScaleTensor stack.
+    That means the effective weight is multiplicative:
+
+        final_weight = existing_weight * range_weight_factor
 
     Notes
     -----
@@ -40,7 +46,8 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         self,
         variable: str,
         thresholds: list[float],
-        weights: list[float],
+        range_weight_factors: list[float] | None = None,
+        apply_to: str | list[str] = "self",
         data_indices: IndexCollection,
         statistics: dict,
         normalization: str = "mean-std",
@@ -48,21 +55,51 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         **kwargs,
     ) -> None:
         super().__init__(norm=norm)
+        legacy_weights = kwargs.pop("weights", None)
         del kwargs
 
-        if len(weights) != len(thresholds) + 1:
-            msg = "weights must have exactly len(thresholds) + 1 entries."
+        if range_weight_factors is None:
+            range_weight_factors = legacy_weights
+
+        if range_weight_factors is None:
+            msg = "range_weight_factors must be provided."
+            raise ValueError(msg)
+
+        if len(range_weight_factors) != len(thresholds) + 1:
+            msg = "range_weight_factors must have exactly len(thresholds) + 1 entries."
             raise ValueError(msg)
 
         self.variable = variable
         self.thresholds = [float(x) for x in thresholds]
-        self.weights = [float(x) for x in weights]
+        self.range_weight_factors = [float(x) for x in range_weight_factors]
         self.data_indices = data_indices
         self.statistics = statistics
         self.normalization = normalization
+        self.apply_to = apply_to
 
         self.full_var_idx = int(self.data_indices.data.input.name_to_index[variable])
-        self.output_var_idx = int(self.data_indices.model.output.name_to_index[variable])
+        self.output_var_indices = self._resolve_output_indices(apply_to)
+
+    def _resolve_output_indices(self, apply_to: str | list[str]) -> list[int]:
+        """Resolve which model-output variables should receive the range-based factors."""
+        name_to_index = self.data_indices.model.output.name_to_index
+
+        if apply_to == "self":
+            return [int(name_to_index[self.variable])]
+
+        if apply_to == "all":
+            return [int(idx) for idx in name_to_index.values()]
+
+        if not isinstance(apply_to, list) or len(apply_to) == 0:
+            msg = "apply_to must be 'self', 'all', or a non-empty list of output variable names."
+            raise ValueError(msg)
+
+        missing = [name for name in apply_to if name not in name_to_index]
+        if missing:
+            msg = f"Variables in apply_to were not found in model outputs: {missing}"
+            raise ValueError(msg)
+
+        return [int(name_to_index[name]) for name in apply_to]
 
     def _to_raw_units(self, values: torch.Tensor) -> torch.Tensor:
         """Convert normalised batch values back to raw units for thresholding."""
@@ -81,9 +118,9 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         raise ValueError(msg)
 
     def _bucketize_weights(self, raw_target: torch.Tensor) -> torch.Tensor:
-        """Map raw target values to the configured piecewise-constant weights."""
-        out = torch.full_like(raw_target, self.weights[0], dtype=torch.float32)
-        for threshold, weight in zip(self.thresholds, self.weights[1:], strict=True):
+        """Map raw target values to the configured piecewise-constant multiplicative factors."""
+        out = torch.full_like(raw_target, self.range_weight_factors[0], dtype=torch.float32)
+        for threshold, weight in zip(self.thresholds, self.range_weight_factors[1:], strict=True):
             out = torch.where(raw_target >= threshold, torch.tensor(weight, device=out.device, dtype=out.dtype), out)
         return out
 
@@ -121,5 +158,5 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         bsz, tlen, grid = variable_weights.shape
         nvars = len(self.data_indices.model.output.full)
         weights = torch.ones((bsz, tlen, grid, nvars), device=variable_weights.device, dtype=torch.float32)
-        weights[..., self.output_var_idx] = variable_weights
+        weights[..., self.output_var_indices] = variable_weights.unsqueeze(-1)
         return weights
