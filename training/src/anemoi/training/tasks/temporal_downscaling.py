@@ -57,8 +57,7 @@ class TemporalDownscaler(BaseSingleStepTask):
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
 
-
     def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
         """Map a list of offsets to their positions in ``self.offsets``."""
         full = self.offsets
-        return [full.index(o)*self.timestep_factor for o in offsets]
+        return [full.index(o) * self.timestep_factor for o in offsets]
