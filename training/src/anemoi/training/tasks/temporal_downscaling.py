@@ -35,24 +35,29 @@ class TemporalDownscaler(BaseSingleStepTask):
         output_timedelta = as_timedelta(output_timestep)
         data_frequency = as_timedelta(data_frequency)
 
-        import ipdb; ipdb.set_trace()
         assert output_timedelta.total_seconds() % data_frequency.total_seconds() == 0, \
         "Output timestep must be an integer multiple of data frequency."
 
-        data_output_factor = output_timedelta // data_frequency
+        self.timestep_factor = output_timedelta // data_frequency
 
-        input_offsets = [datetime.timedelta(hours=0), input_timedelta*data_output_factor]
+        input_offsets = [datetime.timedelta(hours=0), input_timedelta]
 
         assert input_timedelta % output_timedelta == datetime.timedelta(
             0,
         ), "Input timestep must be an integer multiple of output timestep for temporal downscaling."
         num_output_steps = input_timedelta // output_timedelta
-        output_offsets = [output_timedelta * (i + 1) * data_output_factor for i in range(num_output_steps - 1)]
+        output_offsets = [output_timedelta * (i + 1) for i in range(num_output_steps - 1)]
         if output_left_boundary:
             output_offsets = [datetime.timedelta(hours=0), *output_offsets]
 
         if output_right_boundary:
-            output_offsets = [*output_offsets, input_timedelta*data_output_factor]
+            output_offsets = [*output_offsets, input_timedelta]
 
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
+
+
+    def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
+        """Map a list of offsets to their positions in ``self.offsets``."""
+        full = self.offsets
+        return [full.index(o)*self.timestep_factor for o in offsets]
