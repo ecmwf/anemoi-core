@@ -51,7 +51,6 @@ def test_expand_iterables_with_nested_dict() -> None:
     assert expanded == {"a": {"b": ["a", "b", "c"]}}
 
 
-
 def test_expand_iterables_with_nested_list() -> None:
     dictionary = {"a": [[0, 1, 2], "b", "c"]}
     expanded = expand_iterables(dictionary)
