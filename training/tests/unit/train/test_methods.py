@@ -615,7 +615,10 @@ def test_single_training_loss_is_averaged_over_num_steps(monkeypatch: pytest.Mon
     data_indices = _data_indices_single()
     # 2 steps at construction time so the loop runs twice
     task = Forecaster(
-        multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2, "maximum": 2},
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
     )
     module = _make_single_training(task, data_indices)
 
