@@ -76,7 +76,7 @@ def test_inverse_power_transform_clip_negative_parameter() -> None:
     y = inverse_power_transform(x.clone(), lambd=0.5, clip_negative=True)
     assert torch.isfinite(y).all()
     # With clip_negative=False should also work
-    y2 = inverse_power_transform(x.clone(), lambd=0.5) # clip_negative=False as default kwarg
+    y2 = inverse_power_transform(x.clone(), lambd=0.5)  # clip_negative=False as default kwarg
     assert torch.isfinite(y2).all()
     # Results should be the same (clip_negative is accepted for symmetry)
     assert torch.allclose(y, y2)
