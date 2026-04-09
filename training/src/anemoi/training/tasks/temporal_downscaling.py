@@ -35,6 +35,7 @@ class TemporalDownscaler(BaseSingleStepTask):
         output_timedelta = as_timedelta(output_timestep)
         data_frequency = as_timedelta(data_frequency)
 
+        import ipdb; ipdb.set_trace()
         assert output_timedelta.total_seconds() % data_frequency.total_seconds() == 0, \
         "Output timestep must be an integer multiple of data frequency."
 

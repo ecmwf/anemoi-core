@@ -140,6 +140,7 @@ class BaseAnemoiReader:
     @property
     def frequency(self) -> datetime.timedelta:
         """Return dataset frequency."""
+        import ipdb; ipdb.set_trace()
         return self.data.frequency
 
     @property
