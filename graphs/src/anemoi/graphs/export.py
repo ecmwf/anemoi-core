@@ -13,9 +13,11 @@ from pathlib import Path
 
 import scipy.sparse as sp
 import torch
+from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.utils.config import DotDict
 
 
 class GraphExporter:
@@ -23,7 +25,7 @@ class GraphExporter:
 
     def __init__(
         self,
-        graph: str | Path | HeteroData,
+        graph: str | Path | HeteroData | dict | DotDict | DictConfig,
         output_path: str | Path,
         edges_name: Iterable[tuple[str, str, str]] = None,
         edge_attribute_name: str = None,
