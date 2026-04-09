@@ -100,7 +100,6 @@ data:
   resolution: mrl${data.refinement}
   refinement: 3
   frequency: 6h
-  timestep: 6h
   datasets:
     data:
       forcing:
@@ -210,7 +209,7 @@ task:
   _target_: anemoi.training.tasks.Forecaster
   multistep_input: 2
   multistep_output: 1
-  timestep: ${data.timestep}
+  timestep: 6h
   rollout:
     start: 1
     epoch_increment: 1

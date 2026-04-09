@@ -639,7 +639,10 @@ def test_single_training_advance_input_called_once_per_step(monkeypatch: pytest.
     """advance_input is invoked exactly once per rollout step."""
     data_indices = _data_indices_single()
     task = Forecaster(
-        multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2, "maximum": 2},
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
     )
     module = _make_single_training(task, data_indices)
 
@@ -779,3 +782,236 @@ def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch)
     assert len(y_preds) == task.num_steps  # 1 rollout step
     # y_pred shape: (b, n_step_output, nens_per_device, g, v)
     assert y_preds[0]["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
+
+
+# ── Multi-step rollout correctness ────────────────────────────────────────────
+
+
+class _RecordingModel:
+    """Wraps DummyModel and records a clone of every dict input it receives."""
+
+    def __init__(self, inner: DummyModel) -> None:
+        self._inner = inner
+        self.recorded_x: list[dict[str, torch.Tensor]] = []
+
+    def __call__(self, x: dict[str, torch.Tensor] | torch.Tensor, **kw: Any) -> Any:
+        if isinstance(x, dict):
+            self.recorded_x.append({k: v.clone() for k, v in x.items()})
+        return self._inner(x, **kw)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def test_single_training_multi_rollout_accumulates_one_pred_per_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The y_preds list returned by _step has exactly one entry per rollout step."""
+    data_indices = _data_indices_single()
+    # offsets for rollout=3: [0h, 6h, 12h, 18h] → 4 time steps in batch
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 3, "maximum": 3},
+        data_frequency="6h",
+    )
+    module = _make_single_training(task, data_indices)
+
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+    monkeypatch.setattr(module, "compute_loss_metrics", lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred))
+
+    b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn(b, 4, e, g, v)}
+    _, _, y_preds = module._step(batch, validation_mode=False)
+
+    assert len(y_preds) == 3, f"Expected 3 y_pred entries for rollout=3, got {len(y_preds)}"
+    for pred in y_preds:
+        assert pred["data"].shape == (b, 1, e, g, v)
+
+
+def test_single_training_rollout_step_kwarg_propagated_to_get_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """task.get_targets is called with rollout_step=0 then rollout_step=1 in order.
+
+    This ensures each rollout step fetches the correct target time slice from the batch,
+    not the same slice repeated.
+    """
+    data_indices = _data_indices_single()
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        data_frequency="6h",
+    )
+    module = _make_single_training(task, data_indices)
+
+    captured_kwargs: list[dict] = []
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    def spy_get_targets(*_args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+        captured_kwargs.append(kwargs.copy())
+        return dummy_y
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", spy_get_targets)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+    monkeypatch.setattr(module, "compute_loss_metrics", lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred))
+
+    b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
+    # offsets for rollout=2: [0h, +6h, +12h] → 3 time steps
+    batch = {"data": torch.randn(b, 3, e, g, v)}
+    module._step(batch, validation_mode=False)
+
+    assert len(captured_kwargs) == 2, "get_targets must be called once per rollout step"
+    assert captured_kwargs[0].get("rollout_step") == 0
+    assert captured_kwargs[1].get("rollout_step") == 1
+
+
+def test_single_training_rollout_step_kwarg_propagated_to_compute_loss_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """compute_loss_metrics receives rollout_step=0 then rollout_step=1 in order.
+
+    rollout_step is used inside compute_loss_metrics for per-step metric naming
+    (e.g. _rstep0, _rstep1); wrong values would mis-name or collide metrics.
+    """
+    data_indices = _data_indices_single()
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        data_frequency="6h",
+    )
+    module = _make_single_training(task, data_indices)
+
+    captured_kwargs: list[dict] = []
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    def spy_compute_loss_metrics(
+        y_pred: dict[str, torch.Tensor],
+        _y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured_kwargs.append(kwargs.copy())
+        return torch.tensor(0.0), {}, y_pred
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+    monkeypatch.setattr(module, "compute_loss_metrics", spy_compute_loss_metrics)
+
+    b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn(b, 3, e, g, v)}
+    module._step(batch, validation_mode=False)
+
+    assert len(captured_kwargs) == 2, "compute_loss_metrics must be called once per rollout step"
+    assert captured_kwargs[0].get("rollout_step") == 0
+    assert captured_kwargs[1].get("rollout_step") == 1
+
+
+def test_single_training_model_receives_updated_input_at_each_rollout_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second rollout step's forward pass receives the x returned by advance_input.
+
+    This is the core plumbing test for the autoregressive loop: the output of
+    ``advance_input`` at step N must become the model input at step N+1.
+    We verify this by patching ``advance_input`` to add 1.0 to every element
+    (a deterministic marker) and checking that recorded_x[1] == recorded_x[0] + 1.
+    """
+    data_indices = _data_indices_single()
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        data_frequency="6h",
+    )
+    module = _make_single_training(task, data_indices)
+
+    recorder = _RecordingModel(module.model)
+    module.model = recorder
+
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    # advance_input adds 1.0 so we can detect its result in the next input.
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: {k: v + 1.0 for k, v in x.items()})
+    monkeypatch.setattr(module, "compute_loss_metrics", lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred))
+
+    b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn(b, 2, e, g, v)}
+    module._step(batch, validation_mode=False)
+
+    assert len(recorder.recorded_x) == 2, "Model should be called exactly once per rollout step"
+    # The second input must be exactly (first input + 1.0) — i.e., the value that
+    # advance_input returned — proving _step threads advance_input's output forward.
+    assert torch.allclose(
+        recorder.recorded_x[1]["data"],
+        recorder.recorded_x[0]["data"] + 1.0,
+    ), "Second forward pass must receive the x returned by advance_input, not the original"
+
+
+def test_ensemble_training_multi_rollout_accumulates_one_pred_per_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EnsembleTraining._step with rollout=2 appends one y_pred entry per rollout step."""
+    data_indices = _data_indices_single()
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        data_frequency="6h",
+    )
+
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.n_step_input = 1
+    forecaster.n_step_output = 1
+    forecaster.nens_per_device = 2
+    forecaster.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=1,
+    )
+    forecaster.output_mask = {"data": NoOutputMask()}
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    def _stub_compute_loss_metrics(
+        y_pred: dict[str, torch.Tensor],
+        _y: dict[str, torch.Tensor],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        ref = next(iter(y_pred.values()))
+        return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _stub_compute_loss_metrics)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+
+    b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(b, 1, 1, g, v)}
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    batch = {"data": torch.randn(b, 2, e, g, v)}
+    _, _, y_preds = forecaster._step(batch=batch, validation_mode=False)
+
+    assert len(y_preds) == 2, f"Expected 2 y_pred entries for rollout=2, got {len(y_preds)}"
+    for pred in y_preds:
+        assert pred["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
