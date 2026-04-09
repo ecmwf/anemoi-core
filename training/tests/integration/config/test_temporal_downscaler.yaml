@@ -5,7 +5,6 @@ system:
 
 data:
   frequency: 6h
-  timestep: 12h
 
 task:
   input_timestep: 12h
