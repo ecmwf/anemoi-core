@@ -1074,11 +1074,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 scheduler.step(self.current_epoch + 1, metric)
             return
 
-        # Fallback to standard Lightning semantics for other schedulers
-        if metric is not None:
-            scheduler.step(metric)
-        else:
-            scheduler.step()
+        super().lr_scheduler_step(scheduler, metric)
 
     def on_train_epoch_end(self) -> None:
         pass
