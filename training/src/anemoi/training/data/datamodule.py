@@ -34,7 +34,7 @@ def compute_relative_date_indices(
 ) -> dict[str, list[int]]:
     """Compute relative date indices for each dataset based on task offsets."""
     offsets = task.get_offsets(**kwargs)
-    
+
     relative_date_indices = {}
     for name, dr in data_readers.items():
         if any(o % dr.frequency for o in offsets):
