@@ -61,11 +61,15 @@ class Forecaster(BaseTask):
         multistep_input: int,
         multistep_output: int,
         timestep: str,
+        data_frequency: str,
         rollout: dict | None = None,
         validation_rollout: int = 1,
         **kwargs,
     ) -> None:
+
         self.timestep = frequency_to_timedelta(timestep)
+        self.data_frequency = frequency_to_timedelta(data_frequency)
+        self.timestep_factor = self.timestep // self.data_frequency
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
         self.rollout = RolloutConfig(**(rollout or {}))
@@ -79,9 +83,9 @@ class Forecaster(BaseTask):
             )
 
         # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
-        input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
+        input_offsets = [-1 * i * self.timestep * self.timestep_factor for i in range(multistep_input)]
         # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
-        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
+        output_offsets = [(i + 1) * self.timestep * self.timestep_factor for i in range(multistep_output)]
         steps = tuple({"rollout_step": i} for i in range(self.rollout.step))
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets, steps=steps)
         self._plot_adapter = ForecasterPlotAdapter(self)
@@ -93,7 +97,7 @@ class Forecaster(BaseTask):
     @property
     def _step_shift(self) -> datetime.timedelta:
         """Time shift between consecutive rollout steps."""
-        return self.timestep * self.num_output_steps
+        return self.timestep * self.num_output_steps * self.timestep_factor
 
     def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
         """Compute the full list of offsets needed for the current rollout configuration."""

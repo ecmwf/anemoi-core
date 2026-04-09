@@ -26,27 +26,32 @@ class TemporalDownscaler(BaseSingleStepTask):
         self,
         input_timestep: str,
         output_timestep: str,
+        data_frequency: str,        
         output_left_boundary: bool = False,
         output_right_boundary: bool = False,
         **_kwargs,
     ) -> None:
         input_timedelta = as_timedelta(input_timestep)
         output_timedelta = as_timedelta(output_timestep)
+        data_frequency = as_timedelta(data_frequency)
 
-        input_offsets = [datetime.timedelta(hours=0), input_timedelta]
+        assert output_timedelta.total_seconds() % data_frequency.total_seconds() == 0, \
+        "Output timestep must be an integer multiple of data frequency."
+
+        data_output_factor = output_timedelta // data_frequency
+
+        input_offsets = [datetime.timedelta(hours=0), input_timedelta*data_output_factor]
 
         assert input_timedelta % output_timedelta == datetime.timedelta(
             0,
         ), "Input timestep must be an integer multiple of output timestep for temporal downscaling."
         num_output_steps = input_timedelta // output_timedelta
-        output_offsets = [output_timedelta * (i + 1) for i in range(num_output_steps - 1)]
+        output_offsets = [output_timedelta * (i + 1) * data_output_factor for i in range(num_output_steps - 1)]
         if output_left_boundary:
             output_offsets = [datetime.timedelta(hours=0), *output_offsets]
 
         if output_right_boundary:
-            output_offsets = [*output_offsets, input_timedelta]
-
-        import ipdb; ipdb.set_trace()
+            output_offsets = [*output_offsets, input_timedelta*data_output_factor]
 
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
