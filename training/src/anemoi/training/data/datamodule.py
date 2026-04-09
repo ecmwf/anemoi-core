@@ -33,7 +33,19 @@ def compute_relative_date_indices(
     **kwargs,
 ) -> dict[str, list[int]]:
     """Compute relative date indices for each dataset based on task offsets."""
-    return {name: [o // dr.frequency for o in task.get_offsets(**kwargs)] for name, dr in data_readers.items()}
+    offsets = task.get_offsets(**kwargs)
+    
+    relative_date_indices = {}
+    for name, dr in data_readers.items():
+        if any(o % dr.frequency for o in offsets):
+            msg = (
+                f"The frequency of `{name}` ({dr.frequency}) is not compatible with the task defined offsets ({[frequency_to_string(o) for o in offsets]}). "
+                f"Check that the task offsets are compatible with the dataset frequency."
+            )
+            raise ValueError(msg)
+        relative_date_indices[name] = [o // dr.frequency for o in offsets]
+
+    return relative_date_indices
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
