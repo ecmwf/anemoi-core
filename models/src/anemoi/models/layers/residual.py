@@ -17,6 +17,7 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -126,7 +127,6 @@ class TruncatedConnection(BaseResidualConnection):
     def __init__(
         self,
         graph: Optional[HeteroData] = None,
-        edge_weight_attribute: Optional[str] = None,
         src_node_weight_attribute: Optional[str] = None,
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
@@ -140,15 +140,10 @@ class TruncatedConnection(BaseResidualConnection):
         super().__init__()
         if truncation_config is not None:
             from anemoi.graphs.builders import build_truncation_subgraph
-            from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 
             graph = build_truncation_subgraph(graph, data_node_name, truncation_config)
             truncation_down_edges_name = (data_node_name, "to", "truncation")
             truncation_up_edges_name = ("truncation", "to", data_node_name)
-            if edge_weight_attribute is None:
-                from omegaconf import OmegaConf
-                cfg = OmegaConf.to_container(truncation_config, resolve=True) if OmegaConf.is_config(truncation_config) else truncation_config
-                edge_weight_attribute = cfg.get("edge_weight_attribute", DEFAULT_EDGE_WEIGHT_ATTRIBUTE)
 
         up_edges, down_edges = self._resolve_edges(
             graph=graph,
@@ -161,7 +156,7 @@ class TruncatedConnection(BaseResidualConnection):
         self.provider_down = ProjectionGraphProvider(
             graph=graph,
             edges_name=down_edges,
-            edge_weight_attribute=edge_weight_attribute,
+            edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_down_file_path,
             row_normalize=row_normalize,
@@ -170,7 +165,7 @@ class TruncatedConnection(BaseResidualConnection):
         self.provider_up = ProjectionGraphProvider(
             graph=graph,
             edges_name=up_edges,
-            edge_weight_attribute=edge_weight_attribute,
+            edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_up_file_path,
             row_normalize=row_normalize,
@@ -203,47 +198,6 @@ class TruncatedConnection(BaseResidualConnection):
         down_edges = tuple(truncation_down_edges_name)
         assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
         assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
-        return up_edges, down_edges
-
-    def _get_edges_name(
-        self,
-        graph,
-        data_nodes,
-        truncation_nodes,
-        truncation_up_file_path,
-        truncation_down_file_path,
-        truncation_up_edges_name,
-        truncation_down_edges_name,
-        edge_weight_attribute,
-    ):
-        """Resolve and validate the edge tuples used for up/down sparse projections."""
-        files_specified = truncation_up_file_path is not None and truncation_down_file_path is not None
-        edge_names_specified = truncation_up_edges_name is not None or truncation_down_edges_name is not None
-        if not files_specified:
-            assert graph is not None, "graph must be provided if file paths are not specified."
-            if edge_names_specified:
-                assert (
-                    truncation_up_edges_name is not None and truncation_down_edges_name is not None
-                ), "Both truncation_up_edges_name and truncation_down_edges_name must be provided."
-                up_edges = tuple(truncation_up_edges_name)
-                down_edges = tuple(truncation_down_edges_name)
-            else:
-                assert data_nodes is not None, "data nodes name must be provided if file paths are not specified."
-                assert (
-                    truncation_nodes is not None
-                ), "truncation nodes name must be provided if file paths are not specified."
-                up_edges = (truncation_nodes, "to", data_nodes)
-                down_edges = (data_nodes, "to", truncation_nodes)
-            assert up_edges in graph.edge_types, f"Graph must contain edges {up_edges} for up-projection."
-            assert down_edges in graph.edge_types, f"Graph must contain edges {down_edges} for down-projection."
-        else:
-            assert (
-                data_nodes is None or truncation_nodes is None or edge_weight_attribute is None
-            ), "If file paths are specified, node and attribute names should not be provided."
-            assert (
-                truncation_up_edges_name is None and truncation_down_edges_name is None
-            ), "If file paths are specified, edge names should not be provided."
-            up_edges = down_edges = None  # Not used when loading from files
         return up_edges, down_edges
 
     def forward(

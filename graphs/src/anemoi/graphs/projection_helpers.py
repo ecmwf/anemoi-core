@@ -18,6 +18,7 @@ from torch_geometric.data import HeteroData
 DEFAULT_DATASET_NAME = "data"
 DEFAULT_EDGE_RELATION_NAME = "to"
 DEFAULT_EDGE_WEIGHT_ATTRIBUTE = "gauss_weight"
+DEFAULT_GAUSSIAN_NORM = "l1"
 
 
 def get_graph_node_names(

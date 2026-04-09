@@ -16,6 +16,7 @@ projection edges merged into the main graph.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -23,6 +24,34 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.graphs.projection_helpers import DEFAULT_GAUSSIAN_NORM
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _knn_edge_cfg(
+    source_name: str,
+    target_name: str,
+    num_nearest_neighbours: int,
+    sigma: float,
+) -> dict:
+    return {
+        "source_name": source_name,
+        "target_name": target_name,
+        "edge_builders": [
+            {
+                "_target_": "anemoi.graphs.edges.KNNEdges",
+                "num_nearest_neighbours": num_nearest_neighbours,
+            }
+        ],
+        "attributes": {
+            DEFAULT_EDGE_WEIGHT_ATTRIBUTE: {
+                "_target_": "anemoi.graphs.edges.attributes.GaussianDistanceWeights",
+                "norm": DEFAULT_GAUSSIAN_NORM,
+                "sigma": sigma,
+            }
+        },
+    }
 
 
 def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
@@ -46,46 +75,15 @@ def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
     base_neighbours = cfg["base_num_nearest_neighbours"]
     base_sigma = cfg["base_sigma"]
     scale_factor = cfg.get("scale_factor", 2)
-    edge_weight_attribute = cfg.get("edge_weight_attribute", DEFAULT_EDGE_WEIGHT_ATTRIBUTE)
-    gaussian_norm = cfg.get("gaussian_norm", "l1")
 
     smoothers = {}
     for i in range(num_scales):
         factor = scale_factor**i
         smoothers[f"smooth_{factor}x"] = {
-            "edge_weight_attribute": edge_weight_attribute,
-            "gaussian_norm": gaussian_norm,
             "num_nearest_neighbours": base_neighbours * factor,
             "sigma": round(base_sigma * factor, 5),
         }
     return smoothers
-
-
-def _knn_edge_cfg(
-    source_name: str,
-    target_name: str,
-    num_nearest_neighbours: int,
-    edge_weight_attribute: str,
-    gaussian_norm: str,
-    sigma: float,
-) -> dict:
-    return {
-        "source_name": source_name,
-        "target_name": target_name,
-        "edge_builders": [
-            {
-                "_target_": "anemoi.graphs.edges.KNNEdges",
-                "num_nearest_neighbours": num_nearest_neighbours,
-            }
-        ],
-        "attributes": {
-            edge_weight_attribute: {
-                "_target_": "anemoi.graphs.edges.attributes.GaussianDistanceWeights",
-                "norm": gaussian_norm,
-                "sigma": sigma,
-            }
-        },
-    }
 
 
 def build_truncation_subgraph(
@@ -93,25 +91,28 @@ def build_truncation_subgraph(
     data_node_name: str,
     truncation_config: Mapping | Any,
 ) -> HeteroData:
-    """Build a ``HeteroData`` with data→truncation and truncation→data edges.
+    """Add truncation nodes and edges to *graph_data* in-place.
 
-    The returned subgraph contains the data nodes (copied from *graph_data*)
-    and truncation nodes built from the grid/node_builder spec in
-    *truncation_config*.  Edge names are:
-
-    - ``(data_node_name, "to", "truncation")`` — down-projection
-    - ``("truncation", "to", data_node_name)`` — up-projection
+    Builds KNN edges between the data grid and a coarser truncation grid,
+    using hardcoded Gaussian edge weights (``gauss_weight``, ``l1`` norm).
 
     Parameters
     ----------
     graph_data:
-        Main graph; data-node coordinates are read from here.
+        Main graph; mutated in-place with truncation nodes/edges added.
     data_node_name:
         Node type in *graph_data* that corresponds to the data grid.
     truncation_config:
-        Mapping with keys: ``grid`` (or ``node_builder``),
-        ``num_nearest_neighbours``, ``edge_weight_attribute``, ``sigma``,
-        ``gaussian_norm``.
+        Compact mapping with keys:
+
+        - ``grid`` or ``node_builder``: truncation-grid specification
+        - ``num_nearest_neighbours``: int (default 3)
+        - ``sigma``: Gaussian width (default 1.0)
+
+    Returns
+    -------
+    HeteroData
+        The same *graph_data* object, updated in-place.
     """
     from anemoi.graphs.create import GraphCreator
 
@@ -127,25 +128,18 @@ def build_truncation_subgraph(
         node_builder_cfg = {"_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes", "grid": grid}
 
     num_nearest_neighbours = truncation_config.get("num_nearest_neighbours", 3)
-    edge_weight_attribute = truncation_config.get("edge_weight_attribute", DEFAULT_EDGE_WEIGHT_ATTRIBUTE)
-    gaussian_norm = truncation_config.get("gaussian_norm", "l1")
     sigma = truncation_config.get("sigma", 1.0)
-
-    subgraph = HeteroData()
-    subgraph[data_node_name].x = graph_data[data_node_name].x
-    subgraph[data_node_name].num_nodes = graph_data[data_node_name].num_nodes
 
     config = OmegaConf.create(
         {
             "nodes": {"truncation": {"node_builder": node_builder_cfg}},
             "edges": [
-                _knn_edge_cfg(data_node_name, "truncation", num_nearest_neighbours, edge_weight_attribute, gaussian_norm, sigma),
-                _knn_edge_cfg("truncation", data_node_name, num_nearest_neighbours, edge_weight_attribute, gaussian_norm, sigma),
+                _knn_edge_cfg(data_node_name, "truncation", num_nearest_neighbours, sigma),
+                _knn_edge_cfg("truncation", data_node_name, num_nearest_neighbours, sigma),
             ],
         }
     )
-
-    return GraphCreator(config).update_graph(subgraph)
+    return GraphCreator(config).update_graph(graph_data)
 
 
 def build_smoother_subgraph(
@@ -155,19 +149,20 @@ def build_smoother_subgraph(
 ) -> HeteroData:
     """Build a ``HeteroData`` with self-loop smoother edges over data nodes.
 
-    The subgraph contains only the data nodes (copied from *graph_data*) with
-    KNN self-loop edges.  Edge name is
-    ``(data_node_name, "to", data_node_name)``.
+    Creates a fresh subgraph that shares data-node coordinates by reference
+    (no copy/clone) with *graph_data* and adds KNN self-loop edges.
+    Edge name is ``(data_node_name, "to", data_node_name)``.
 
     Parameters
     ----------
     graph_data:
-        Main graph; data-node coordinates are read from here.
+        Main graph; data-node coordinates are read from here by reference.
     data_node_name:
-        Node type in *graph_data* that corresponds to the data grid.
+        Node type in *graph_data* that holds the data-grid coordinates.
     smoother_config:
-        Single-smoother mapping with keys: ``num_nearest_neighbours``,
-        ``sigma``, ``edge_weight_attribute``, ``gaussian_norm``.
+        Single-smoother mapping with keys: ``num_nearest_neighbours`` and
+        ``sigma``. Edge weights use ``gauss_weight`` with ``l1``-normalised
+        Gaussian distances.
     """
     from anemoi.graphs.create import GraphCreator
 
@@ -175,11 +170,10 @@ def build_smoother_subgraph(
         smoother_config = OmegaConf.to_container(smoother_config, resolve=True)
 
     num_nearest_neighbours = smoother_config["num_nearest_neighbours"]
-    edge_weight_attribute = smoother_config.get("edge_weight_attribute", DEFAULT_EDGE_WEIGHT_ATTRIBUTE)
-    gaussian_norm = smoother_config.get("gaussian_norm", "l1")
     sigma = smoother_config["sigma"]
 
     subgraph = HeteroData()
+    # Share tensors by reference — no copy of the underlying coordinate data.
     subgraph[data_node_name].x = graph_data[data_node_name].x
     subgraph[data_node_name].num_nodes = graph_data[data_node_name].num_nodes
 
@@ -187,7 +181,7 @@ def build_smoother_subgraph(
         {
             "nodes": {},
             "edges": [
-                _knn_edge_cfg(data_node_name, data_node_name, num_nearest_neighbours, edge_weight_attribute, gaussian_norm, sigma),
+                _knn_edge_cfg(data_node_name, data_node_name, num_nearest_neighbours, sigma),
             ],
         }
     )

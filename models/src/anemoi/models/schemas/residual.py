@@ -32,13 +32,9 @@ class TruncatedConnectionSchema(BaseModel):
     target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
     truncation_config: dict | None = Field(
         None,
-        description="Truncation projection config (grid, num_nearest_neighbours, "
-        "edge_weight_attribute, sigma, gaussian_norm). The truncation subgraph is "
-        "built internally from this spec and the data-node positions in graph_data.",
-    )
-    edge_weight_attribute: str | None = Field(
-        None,
-        description="Override edge weight attribute name (defaults to value in truncation_config or 'gauss_weight').",
+        description="Truncation projection config. Required keys: 'grid' (or 'node_builder'). "
+        "Optional: 'num_nearest_neighbours' (default 3), 'sigma' (default 1.0). "
+        "Edge weights use 'gauss_weight' with l1-normalised Gaussian distances.",
     )
     src_node_weight_attribute: str | None = Field(
         None,

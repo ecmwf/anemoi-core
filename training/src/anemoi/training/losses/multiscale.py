@@ -19,6 +19,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.builders import _expand_smoother_config
 from anemoi.graphs.builders import build_smoother_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -154,12 +155,14 @@ class MultiscaleLossWrapper(BaseLoss):
         # Reverse order: coarsest scale first (highest smoothing)
         for smoother_name, smoother_cfg in reversed(list(smoothers.items())):
             subgraph = build_smoother_subgraph(graph_data, data_node_name, smoother_cfg)
-            src_node_weight_attribute = smoother_cfg.get("src_node_weight_attribute") if isinstance(smoother_cfg, dict) else None
+            src_node_weight_attribute = (
+                smoother_cfg.get("src_node_weight_attribute") if isinstance(smoother_cfg, dict) else None
+            )
             row_normalize = bool(smoother_cfg.get("row_normalize", False)) if isinstance(smoother_cfg, dict) else False
             provider = ProjectionGraphProvider(
                 graph=subgraph,
                 edges_name=edge_name,
-                edge_weight_attribute=smoother_cfg.get("edge_weight_attribute") if isinstance(smoother_cfg, dict) else None,
+                edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
                 src_node_weight_attribute=src_node_weight_attribute,
                 row_normalize=row_normalize,
             )
