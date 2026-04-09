@@ -38,25 +38,25 @@ def _data_indices_single() -> dict[str, IndexCollection]:
 def test_forecaster_single_input_offset() -> None:
     """multistep_input=1 produces a single input offset at t=0."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
-    assert task.inputs_offsets == [datetime.timedelta(0)]
+    assert task.input_offsets == [datetime.timedelta(0)]
 
 
 def test_forecaster_multi_input_offsets_are_sorted() -> None:
     """multistep_input=2 produces sorted offsets [-6h, 0h]."""
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h", data_frequency="6h")
-    assert task.inputs_offsets == [datetime.timedelta(hours=-6), datetime.timedelta(0)]
+    assert task.input_offsets == [datetime.timedelta(hours=-6), datetime.timedelta(0)]
 
 
 def test_forecaster_single_output_offset() -> None:
     """multistep_output=1 produces one output offset at +1 timestep."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
-    assert task.outputs_offsets == [datetime.timedelta(hours=6)]
+    assert task.output_offsets == [datetime.timedelta(hours=6)]
 
 
 def test_forecaster_multi_output_offsets() -> None:
     """multistep_output=2 produces offsets [+6h, +12h]."""
     task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h", data_frequency="6h")
-    assert task.outputs_offsets == [datetime.timedelta(hours=6), datetime.timedelta(hours=12)]
+    assert task.output_offsets == [datetime.timedelta(hours=6), datetime.timedelta(hours=12)]
 
 
 def test_forecaster_steps_on_init_is_single_element() -> None:
@@ -234,8 +234,8 @@ def test_rollout_advance_input_keeps_latest_steps(
 def test_autoencoder_input_and_output_offsets_are_both_zero() -> None:
     """Autoencoder operates on a single snapshot at t=0."""
     task = Autoencoder()
-    assert task.inputs_offsets == [datetime.timedelta(0)]
-    assert task.outputs_offsets == [datetime.timedelta(0)]
+    assert task.input_offsets == [datetime.timedelta(0)]
+    assert task.output_offsets == [datetime.timedelta(0)]
     assert task.offsets == [datetime.timedelta(0)]
 
 
@@ -273,7 +273,7 @@ def test_temporal_downscaler_interior_offsets_only() -> None:
         data_frequency="2h",
     )
     expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
-    assert task.outputs_offsets == expected
+    assert task.output_offsets == expected
 
 
 def test_temporal_downscaler_left_boundary_included() -> None:
@@ -286,7 +286,7 @@ def test_temporal_downscaler_left_boundary_included() -> None:
         data_frequency="2h",
     )
     expected = [datetime.timedelta(hours=0), datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
-    assert task.outputs_offsets == expected
+    assert task.output_offsets == expected
 
 
 def test_temporal_downscaler_right_boundary_included() -> None:
@@ -299,7 +299,7 @@ def test_temporal_downscaler_right_boundary_included() -> None:
         data_frequency="2h",
     )
     expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4), datetime.timedelta(hours=6)]
-    assert task.outputs_offsets == expected
+    assert task.output_offsets == expected
 
 
 def test_temporal_downscaler_both_boundaries_included() -> None:
@@ -317,11 +317,11 @@ def test_temporal_downscaler_both_boundaries_included() -> None:
         datetime.timedelta(hours=4),
         datetime.timedelta(hours=6),
     ]
-    assert task.outputs_offsets == expected
+    assert task.output_offsets == expected
 
 
 def test_temporal_downscaler_num_output_timesteps_matches_offsets() -> None:
-    """num_output_timesteps equals the length of outputs_offsets."""
+    """num_output_timesteps equals the length of output_offsets."""
     task = TemporalDownscaler(
         input_timestep="6h",
         output_timestep="2h",
@@ -329,13 +329,13 @@ def test_temporal_downscaler_num_output_timesteps_matches_offsets() -> None:
         output_right_boundary=True,
         data_frequency="1h",
     )
-    assert task.num_output_timesteps == len(task.outputs_offsets) == 4
+    assert task.num_output_timesteps == len(task.output_offsets) == 4
 
 
 def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
     """Input offsets are always [0h, input_timestep] regardless of output settings."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h", data_frequency="2h")
-    assert task.inputs_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
+    assert task.input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
 
 
 def test_temporal_downscaler_plot_adapter_output_times() -> None:
