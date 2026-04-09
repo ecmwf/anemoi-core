@@ -9,7 +9,9 @@
 
 import pytest
 
-from anemoi.training.tasks import Forecaster, TemporalDownscaler, Autoencoder
+from anemoi.training.tasks import Autoencoder
+from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import TemporalDownscaler
 
 
 @pytest.mark.parametrize("rollout_steps", [1, 6, 12])

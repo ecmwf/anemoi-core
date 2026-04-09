@@ -32,7 +32,6 @@ from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
 # Tests to check plot_loss, plot_histogram, plot_spectrum, plot_predicted_multilevel_flat_sample return a figure
 
 
-
 def test_plot_histogram_instantiation():
     """PlotHistogram can be instantiated with config and parameters."""
     config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
