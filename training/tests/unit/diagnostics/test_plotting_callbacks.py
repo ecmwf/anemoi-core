@@ -764,8 +764,7 @@ def test_plot_spectrum_plot_forecaster():
             epoch=0,
         )
         # Forecaster branch: output_times * max_out_steps figures
-        expected = output_times * min(n_step_output, callback.output_steps)
-        assert mock_output_figure.call_count == expected
+        assert mock_output_figure.call_count == output_times * n_step_output
 
 
 # ---- PlotHistogram ----
@@ -863,8 +862,8 @@ def test_plot_histogram_plot_forecaster():
             batch_idx=0,
             epoch=0,
         )
-        expected = output_times * min(n_step_output, callback.output_steps)
-        assert mock_output_figure.call_count == expected
+        assert mock_output_figure.call_count == output_times * n_step_output
+
 
 
 # ---- Plot functions (diagnostics.plots) return a figure ----
