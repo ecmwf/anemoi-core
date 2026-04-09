@@ -8,7 +8,7 @@
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=0
-#SBATCH -t 24:00:00
+#SBATCH -t 4:00:00
 #SBATCH -o anemoi-gpu-1mon-3hrleadtime_123hr_loss-verify.%j.out
 #SBATCH -e anemoi-gpu-1mon-3hrleadtime-123hr_loss-verify.%j.err
 
@@ -18,7 +18,8 @@ source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/activate anemoi-trai
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
 
-run_id="8f3510f7-a380-46f0-a670-6d5a341c2882"
+#clt run_id="8f3510f7-a380-46f0-a670-6d5a341c2882"
+run_id="1fdd1f40-f4f7-4dca-9a69-c9a16f2459d5"
 training/docs/user-guide/examples/run_rrfs_verify_export_1to3h.sh \
   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/${run_id}/inference-last.ckpt \
   2024-05-05T00:00:00 2024-05-05T23:00:00 1h
