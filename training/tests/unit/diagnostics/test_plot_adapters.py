@@ -50,21 +50,23 @@ def test_temporal_downscaler_adapter():
     assert adapter.get_init_step() == 0
 
     # Example: [0H, 6H] input, [0H, 2H, 4H] output. 1 ens member ...
-    batch = torch.randn(4, 1, 1000, 12)  # (time, ens, grid, vars)
-    pred = torch.randn(adapter.output_times, 1, 1000, 12) # (time, ens, grid, vars)
+    grid_size = 1000
+    num_vars = 12
+    batch = torch.randn(4, 1, grid_size, num_vars)  # (time, ens, grid, vars)
+    pred = torch.randn(adapter.output_times, 1, grid_size, num_vars) # (time, ens, grid, vars)
 
     x, y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, None))
-    assert isinstance(x, torch.Tensor)
-    assert isinstance(y_true, torch.Tensor)
-    assert isinstance(y_pred, torch.Tensor)
-    assert isinstance(suffix, str)
+    assert isinstance(x, torch.Tensor) and x.shape == (grid_size, num_vars)
+    assert isinstance(y_true, torch.Tensor) and y_true.shape == (grid_size, num_vars)
+    assert isinstance(y_pred, torch.Tensor) and y_pred.shape == (grid_size, num_vars)
+    assert isinstance(suffix, str) and suffix.startswith("_istep")
 
 
 def test_autoencoder_adapter():
     """Autoencoder plot_adapter: output_times == 1, get_init_step() == 0."""
     task = Autoencoder()
 
-    adapter = task._plot_adapter
+    adapter = task._plot_adapter``
 
     assert adapter.output_times == 1
     assert adapter.get_init_step() == 0
