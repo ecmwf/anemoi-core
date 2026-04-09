@@ -117,11 +117,11 @@ class Forecaster(BaseTask):
         rollout_step = rollout_step if label == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
-    
+
     def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
         """Map a list of offsets to their positions in ``self.offsets``."""
         full = self.offsets
-        return [full.index(o)*self.timestep_factor for o in offsets]    
+        return [full.index(o) * self.timestep_factor for o in offsets]
 
     def _advance_dataset_input(
         self,

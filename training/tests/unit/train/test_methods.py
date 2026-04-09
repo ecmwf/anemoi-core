@@ -615,7 +615,9 @@ def test_single_training_loss_is_averaged_over_num_steps(monkeypatch: pytest.Mon
     """_step returns loss / num_steps (average over all rollout iterations)."""
     data_indices = _data_indices_single()
     # 2 steps at construction time so the loop runs twice
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2, "maximum": 2})
+    task = Forecaster(
+        multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2, "maximum": 2},
+    )
     module = _make_single_training(task, data_indices)
 
     per_step_losses = iter([torch.tensor(2.0), torch.tensor(4.0)])
@@ -637,7 +639,9 @@ def test_single_training_loss_is_averaged_over_num_steps(monkeypatch: pytest.Mon
 def test_single_training_advance_input_called_once_per_step(monkeypatch: pytest.MonkeyPatch) -> None:
     """advance_input is invoked exactly once per rollout step."""
     data_indices = _data_indices_single()
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2, "maximum": 2})
+    task = Forecaster(
+        multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2, "maximum": 2},
+    )
     module = _make_single_training(task, data_indices)
 
     advance_call_count: list[int] = []
