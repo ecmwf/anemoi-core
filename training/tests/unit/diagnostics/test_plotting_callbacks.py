@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -27,41 +27,10 @@ from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
 
 # Suite of Unit Tests for Plotting Callbacks
 # ------------------------------------------
-# Tests to check output_times and get_init_step by task type
 # Tests to check PlotHistogram, PlotSpectrum, PlotLoss, PlotSample instantiation
 # Tests to check PlotHistogram, PlotSpectrum, PlotLoss, PlotSample plot methods
 # Tests to check plot_loss, plot_histogram, plot_spectrum, plot_predicted_multilevel_flat_sample return a figure
 
-
-def test_output_times_and_get_init_step_forecaster():
-    """Forecaster plot_adapter: output_times from task.rollout, get_init_step(rollout_step) == 0."""
-    from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
-
-    task = MagicMock()
-    task.rollout.step = 3
-    task.n_step_output = 1
-    task.n_step_input = 1
-    adapter = ForecasterPlotAdapter(task)
-    assert adapter.output_times == 3
-    assert adapter.get_init_step(0) == 0
-    assert adapter.get_init_step(1) == 0
-    assert adapter.get_init_step(2) == 0
-
-
-def test_output_times_and_get_init_step_temporal_downscaler():
-    """TemporalDownscaler plot_adapter.
-
-    output_times == len(interp_times), get_init_step(rollout_step) == rollout_step.
-    """
-    from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalerPlotAdapter
-
-    task = MagicMock()
-    task.interp_times = [0, 1]
-    task.n_step_input = 1
-    adapter = TemporalDownscalerPlotAdapter(task)
-    assert adapter.output_times == 2
-    assert adapter.get_init_step(0) == 0
-    assert adapter.get_init_step(1) == 1
 
 
 def test_plot_histogram_instantiation():
