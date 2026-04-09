@@ -37,44 +37,44 @@ def _data_indices_single() -> dict[str, IndexCollection]:
 
 def test_forecaster_single_input_offset() -> None:
     """multistep_input=1 produces a single input offset at t=0."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     assert task.inputs_offsets == [datetime.timedelta(0)]
 
 
 def test_forecaster_multi_input_offsets_are_sorted() -> None:
     """multistep_input=2 produces sorted offsets [-6h, 0h]."""
-    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
     assert task.inputs_offsets == [datetime.timedelta(hours=-6), datetime.timedelta(0)]
 
 
 def test_forecaster_single_output_offset() -> None:
     """multistep_output=1 produces one output offset at +1 timestep."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     assert task.outputs_offsets == [datetime.timedelta(hours=6)]
 
 
 def test_forecaster_multi_output_offsets() -> None:
     """multistep_output=2 produces offsets [+6h, +12h]."""
-    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
     assert task.outputs_offsets == [datetime.timedelta(hours=6), datetime.timedelta(hours=12)]
 
 
 def test_forecaster_steps_on_init_is_single_element() -> None:
     """Default rollout start=1 produces steps=({"rollout_step": 0},)."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 1})
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1})
     assert list(task.steps) == [{"rollout_step": 0}]
 
 
 def test_forecaster_steps_on_init_reflect_rollout_start() -> None:
     """Rollout start=2 produces two steps at construction time."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2})
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2})
     assert list(task.steps) == [{"rollout_step": 0}, {"rollout_step": 1}]
     assert task.num_steps == 2
 
 
 def test_forecaster_metric_name_encodes_rollout_step() -> None:
     """get_metric_name returns a string containing the rollout step index."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     assert task.get_metric_name(rollout_step=0) == "_rstep0"
     assert task.get_metric_name(rollout_step=3) == "_rstep3"
 
@@ -103,7 +103,6 @@ def test_forecaster_rollout_does_not_exceed_maximum() -> None:
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
-        data_frequency="6h",
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
     for epoch in range(10):
@@ -117,7 +116,6 @@ def test_forecaster_rollout_no_increment_when_zero() -> None:
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
-        data_frequency="6h",
         rollout={"start": 1, "epoch_increment": 0, "maximum": 5},
     )
     for epoch in range(10):
@@ -130,7 +128,7 @@ def test_forecaster_rollout_no_increment_when_zero() -> None:
 
 def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     """get_inputs extracts multistep_input time steps from the batch."""
-    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [-6h, 0h, +6h] → 3 time steps in batch
@@ -141,7 +139,7 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
 
 def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     """get_targets extracts multistep_output time steps from the batch."""
-    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, 3, e, g, v)}
@@ -151,7 +149,7 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
 
 def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
     """Input and target time indices do not overlap for a single-step forecaster."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     input_indices = task.get_batch_input_indices()
     output_indices = task.get_batch_output_indices(rollout_step=0)
     assert set(input_indices).isdisjoint(set(output_indices))
@@ -162,19 +160,19 @@ def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
 
 def test_forecaster_plot_adapter_output_times_equals_num_output_timesteps() -> None:
     """ForecasterPlotAdapter.output_times reflects num_output_timesteps."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     assert task._plot_adapter.output_times == task.num_output_timesteps == 1
 
 
 def test_forecaster_plot_adapter_output_times_for_multi_output() -> None:
     """output_times is 2 when multistep_output=2."""
-    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
     assert task._plot_adapter.output_times == 2
 
 
 def test_forecaster_plot_adapter_get_init_step_returns_minus_one() -> None:
     """ForecasterPlotAdapter.get_init_step() returns -1 (last input time step)."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     assert task._plot_adapter.get_init_step() == -1
 
 
@@ -196,7 +194,7 @@ def test_rollout_advance_input_keeps_latest_steps(
 ) -> None:
     """_advance_dataset_input slides the window and fills with model predictions."""
     data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
-    task = Forecaster(multistep_input=n_step_input, multistep_output=n_step_output, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=n_step_input, multistep_output=n_step_output, timestep="6h")
 
     b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
     x = torch.zeros((b, n_step_input, e, g, v), dtype=torch.float32)
@@ -270,7 +268,6 @@ def test_temporal_downscaler_interior_offsets_only() -> None:
         output_timestep="2h",
         output_left_boundary=False,
         output_right_boundary=False,
-        data_frequency="2h",
     )
     expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
     assert task.outputs_offsets == expected
@@ -283,7 +280,6 @@ def test_temporal_downscaler_left_boundary_included() -> None:
         output_timestep="2h",
         output_left_boundary=True,
         output_right_boundary=False,
-        data_frequency="2h",
     )
     expected = [datetime.timedelta(hours=0), datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
     assert task.outputs_offsets == expected
@@ -296,7 +292,6 @@ def test_temporal_downscaler_right_boundary_included() -> None:
         output_timestep="2h",
         output_left_boundary=False,
         output_right_boundary=True,
-        data_frequency="2h",
     )
     expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4), datetime.timedelta(hours=6)]
     assert task.outputs_offsets == expected
@@ -309,7 +304,6 @@ def test_temporal_downscaler_both_boundaries_included() -> None:
         output_timestep="2h",
         output_left_boundary=True,
         output_right_boundary=True,
-        data_frequency="2h",
     )
     expected = [
         datetime.timedelta(hours=0),
@@ -327,14 +321,13 @@ def test_temporal_downscaler_num_output_timesteps_matches_offsets() -> None:
         output_timestep="2h",
         output_left_boundary=True,
         output_right_boundary=True,
-        data_frequency="1h",
     )
     assert task.num_output_timesteps == len(task.outputs_offsets) == 4
 
 
 def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
     """Input offsets are always [0h, input_timestep] regardless of output settings."""
-    task = TemporalDownscaler(input_timestep="6h", output_timestep="2h", data_frequency="2h")
+    task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
     assert task.inputs_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
 
 
@@ -345,7 +338,6 @@ def test_temporal_downscaler_plot_adapter_output_times() -> None:
         output_timestep="2h",
         output_left_boundary=True,
         output_right_boundary=True,
-        data_frequency="2h",
     )
     assert task._plot_adapter.output_times == 4
 
@@ -357,6 +349,5 @@ def test_temporal_downscaler_plot_adapter_get_init_step_is_zero() -> None:
         output_timestep="2h",
         output_left_boundary=True,
         output_right_boundary=True,
-        data_frequency="2h",
     )
     assert task._plot_adapter.get_init_step() == 0

@@ -61,15 +61,12 @@ class Forecaster(BaseTask):
         multistep_input: int,
         multistep_output: int,
         timestep: str,
-        data_frequency: str,
         rollout: dict | None = None,
         validation_rollout: int = 1,
         **kwargs,
     ) -> None:
 
         self.timestep = frequency_to_timedelta(timestep)
-        self.data_frequency = frequency_to_timedelta(data_frequency)
-        self.timestep_factor = self.timestep // self.data_frequency
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
         self.rollout = RolloutConfig(**(rollout or {}))
@@ -117,11 +114,6 @@ class Forecaster(BaseTask):
         rollout_step = rollout_step if label == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
-
-    def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
-        """Map a list of offsets to their positions in ``self.offsets``."""
-        full = self.offsets
-        return [full.index(o) * self.timestep_factor for o in offsets]
 
     def _advance_dataset_input(
         self,

@@ -44,8 +44,6 @@ class ForecasterSchema(BaseModel):
     "Rollout configuration for autoregressive training."
     validation_rollout: NonNegativeInt = Field(example=[0, 6, 12])
     "Number of rollouts to use for validation."
-    data_frequency: str | None = Field(default=None, example="1H")
-    "Frequency of the input data as a duration string (e.g. '1H'). Used to validate that the input timestep is an integer multiple of the data frequency."
 
 
 class AutoencoderTaskSchema(BaseModel):
@@ -68,8 +66,6 @@ class TemporalDownscalerSchema(BaseModel):
     "Whether to include the left boundary in the output."
     output_right_boundary: bool = Field(example=False)
     "Whether to include the right boundary in the output."
-    data_frequency: str | None = Field(default=None, example="1H")
-    "Frequency of the input data as a duration string (e.g. '1H'). Used to validate that the input timestep is an integer multiple of the data frequency."
 
 
 TaskSchema = Annotated[

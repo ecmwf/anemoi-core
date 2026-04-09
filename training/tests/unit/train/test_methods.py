@@ -500,7 +500,7 @@ def test_training_module_plot_adapter_delegates_to_task() -> None:
 
 def test_training_module_plot_adapter_reflects_forecaster_task() -> None:
     """When the task is a Forecaster, plot_adapter reports the correct output_times."""
-    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
     module = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(module)
     module.task = task
@@ -540,7 +540,7 @@ def test_single_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -
     """SingleTraining._step with Forecaster returns one y_pred per rollout step."""
     data_indices = _data_indices_single()
     # Rollout=1: steps = ({"rollout_step": 0},), offsets = [0h, +6h]
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module = _make_single_training(task, data_indices)
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
@@ -589,7 +589,6 @@ def test_single_training_step_with_temporal_downscaler(monkeypatch: pytest.Monke
         output_timestep="6h",
         output_left_boundary=False,
         output_right_boundary=False,
-        data_frequency="6h",
     )
     module = _make_single_training(task, data_indices)
 
@@ -616,7 +615,7 @@ def test_single_training_loss_is_averaged_over_num_steps(monkeypatch: pytest.Mon
     data_indices = _data_indices_single()
     # 2 steps at construction time so the loop runs twice
     task = Forecaster(
-        multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2, "maximum": 2},
+        multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2, "maximum": 2},
     )
     module = _make_single_training(task, data_indices)
 
@@ -640,7 +639,7 @@ def test_single_training_advance_input_called_once_per_step(monkeypatch: pytest.
     """advance_input is invoked exactly once per rollout step."""
     data_indices = _data_indices_single()
     task = Forecaster(
-        multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h", rollout={"start": 2, "maximum": 2},
+        multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2, "maximum": 2},
     )
     module = _make_single_training(task, data_indices)
 
@@ -676,7 +675,7 @@ def test_diffusion_training_step_with_forecaster() -> None:
             self.model = inner
 
     data_indices = _data_indices_single()
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
 
     forecaster = DiffusionTraining.__new__(DiffusionTraining)
     pl.LightningModule.__init__(forecaster)
@@ -738,7 +737,7 @@ def test_ensemble_collapse_ens_dim_takes_first_ensemble_member() -> None:
 def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """EnsembleTraining._step expands ensemble, runs forward, and collapses before loss."""
     data_indices = _data_indices_single()
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", data_frequency="6h")
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
 
     forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)

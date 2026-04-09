@@ -2,7 +2,6 @@ _target_: anemoi.training.tasks.Forecaster
 multistep_input: 2
 multistep_output: 1
 timestep: "6H"
-data_frequency: ${data.frequency}
 
 # Rollout configuration for autoregressive forecasting
 rollout:
