@@ -69,11 +69,11 @@ class BaseGraphModel(nn.Module):
 
         self.n_step_input = model_config.model.multistep_input
         self.n_step_output = model_config.model.multistep_output
-        self.num_channels = model_config.model.num_channels
+        self.num_channels = model_config.model.backbone.num_channels
         self.latent_skip = model_config.model.backbone.latent_skip
 
         trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
+            model_config.model.backbone.trainable_parameters,
             data=self.dataset_names,
             hidden=self.hidden_nodes_name,
         )
@@ -87,7 +87,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self._build_residual(model_config.model.backbone.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)

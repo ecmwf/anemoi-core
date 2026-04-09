@@ -37,7 +37,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         statistics: dict,
         graph_data: HeteroData,
     ) -> None:
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        self.condition_on_residual = DotDict(model_config).model.backbone.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -48,7 +48,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def _build_networks(self, model_config):
         super()._build_networks(model_config)
         self.noise_injector = instantiate(
-            model_config.model.noise_injector,
+            model_config.model.backbone.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
         )
