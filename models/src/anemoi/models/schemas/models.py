@@ -206,6 +206,9 @@ class DiffusionSchema(BaseModel):
 
 
 class BaseModelSchema(PydanticBaseModel):
+    class Config:
+        extra = "allow"  # Beware this allows extra fields in the config, typos are less likely to be spotted
+
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     keep_batch_sharded: bool = Field(default=True)
