@@ -26,7 +26,7 @@ class TemporalDownscaler(BaseSingleStepTask):
         self,
         input_timestep: str,
         output_timestep: str,
-        data_frequency: str,        
+        data_frequency: str,
         output_left_boundary: bool = False,
         output_right_boundary: bool = False,
         **_kwargs,
@@ -35,8 +35,9 @@ class TemporalDownscaler(BaseSingleStepTask):
         output_timedelta = as_timedelta(output_timestep)
         data_frequency = as_timedelta(data_frequency)
 
-        assert output_timedelta.total_seconds() % data_frequency.total_seconds() == 0, \
-        "Output timestep must be an integer multiple of data frequency."
+        assert (
+            output_timedelta.total_seconds() % data_frequency.total_seconds() == 0
+        ), "Output timestep must be an integer multiple of data frequency."
 
         self.timestep_factor = output_timedelta // data_frequency
 
