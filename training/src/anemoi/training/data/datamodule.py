@@ -39,7 +39,8 @@ def compute_relative_date_indices(
     for name, dr in data_readers.items():
         if any(o % dr.frequency for o in offsets):
             msg = (
-                f"The frequency of `{name}` ({dr.frequency}) is not compatible with the task defined offsets ({[frequency_to_string(o) for o in offsets]}). "
+                f"The frequency of `{name}` ({frequency_to_string(dr.frequency)}) is not compatible "
+                f"with the task defined offsets ({[frequency_to_string(o) for o in offsets]}). "
                 f"Check that the task offsets are compatible with the dataset frequency."
             )
             raise ValueError(msg)
