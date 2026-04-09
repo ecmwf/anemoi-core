@@ -130,6 +130,10 @@ def build_truncation_subgraph(
     num_nearest_neighbours = truncation_config.get("num_nearest_neighbours", 3)
     sigma = truncation_config.get("sigma", 1.0)
 
+    subgraph = HeteroData()
+    subgraph[data_node_name].x = graph_data[data_node_name].x
+    subgraph[data_node_name].num_nodes = graph_data[data_node_name].num_nodes
+
     config = OmegaConf.create(
         {
             "nodes": {"truncation": {"node_builder": node_builder_cfg}},
@@ -139,7 +143,7 @@ def build_truncation_subgraph(
             ],
         }
     )
-    return GraphCreator(config).update_graph(graph_data)
+    return GraphCreator(config).update_graph(subgraph)
 
 
 def build_smoother_subgraph(
