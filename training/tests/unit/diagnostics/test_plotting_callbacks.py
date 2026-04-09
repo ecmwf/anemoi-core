@@ -493,7 +493,7 @@ def test_plot_loss_sort_and_color_by_parameter_group_with_groups():
     assert len(legend_patches) == 2  # pressure and wind
 
 
-def test_plot_loss_plot_temporal_downscaler():
+def test_plot_loss_temporal_downscaler():
     """PlotLoss._plot uses output_times=1 when task_type != 'forecaster', so only one figure is produced."""
     from unittest.mock import patch
 
@@ -548,7 +548,7 @@ def test_plot_loss_plot_temporal_downscaler():
         assert mock_output_figure.call_count == 1
 
 
-def test_plot_loss_plot_diffusion():
+def test_plot_loss_diffusion():
     """PlotLoss._plot with diffusion (forecaster, output_times=1) produces one figure."""
     from unittest.mock import patch
 
@@ -606,7 +606,7 @@ def test_plot_loss_plot_diffusion():
         assert mock_output_figure.call_count == 1
 
 
-def test_plot_loss_plot_forecaster():
+def test_plot_loss_forecaster():
     """PlotLoss._plot uses full output_times when task_type == 'forecaster', so one figure per rollout step."""
     from unittest.mock import patch
 
@@ -670,7 +670,7 @@ def test_plot_loss_plot_forecaster():
 # ---- PlotSpectrum ----
 
 
-def test_plot_spectrum_plot_temporal_downscaler():
+def test_plot_spectrum_temporal_downscaler():
     """PlotSpectrum._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
@@ -717,7 +717,7 @@ def test_plot_spectrum_plot_temporal_downscaler():
         assert mock_output_figure.call_count == output_times
 
 
-def test_plot_spectrum_plot_forecaster():
+def test_plot_spectrum_forecaster():
     """PlotSpectrum._plot produces one figure per (rollout_step, out_step) for forecaster."""
     from unittest.mock import patch
 
@@ -770,7 +770,7 @@ def test_plot_spectrum_plot_forecaster():
 # ---- PlotHistogram ----
 
 
-def test_plot_histogram_plot_temporal_downscaler():
+def test_plot_histogram_temporal_downscaler():
     """PlotHistogram._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
@@ -817,7 +817,7 @@ def test_plot_histogram_plot_temporal_downscaler():
         assert mock_output_figure.call_count == output_times
 
 
-def test_plot_histogram_plot_forecaster():
+def test_plot_histogram_forecaster():
     """PlotHistogram._plot produces one figure per (rollout_step, out_step) for forecaster."""
     from unittest.mock import patch
 
