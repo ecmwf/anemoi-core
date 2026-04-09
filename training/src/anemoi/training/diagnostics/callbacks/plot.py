@@ -82,6 +82,79 @@ class PlottingSettings:
     dataset_names: list[str] | None = None
 
 
+class BasePlotExecutor(ABC):
+    """Abstract base class for plot executors.
+
+    Defines the interface for scheduling plot function calls and shutting down.
+    """
+
+    @abstractmethod
+    def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        """Schedule *fn(trainer, *args, **kwargs)* for execution."""
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        """Release any resources held by the executor."""
+
+
+class SyncPlotExecutor(BasePlotExecutor):
+    """Executes plot functions synchronously on the calling thread."""
+
+    def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        fn(trainer, args, kwargs)
+
+    def shutdown(self) -> None:
+        pass
+
+
+class AsyncPlotExecutor(BasePlotExecutor):
+    """Manages asynchronous plot execution in a background thread with an event loop.
+
+    Runs a single-threaded executor backed by a dedicated asyncio event loop,
+    allowing plot functions to be submitted from the main thread without blocking it.
+    """
+
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self._loop_ready = threading.Event()
+        self.loop_thread = threading.Thread(target=self._start_event_loop, daemon=True)
+        self.loop_thread.start()
+        self._loop_ready.wait()  # block until the loop is running before returning
+
+    def _start_event_loop(self) -> None:
+        """Start the event loop in the background thread."""
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.call_soon(self._loop_ready.set)  # signal after the loop is running
+        self.loop.run_forever()
+
+    async def _submit(self, fn: Any, trainer: pl.Trainer, args: Any, kwargs: Any) -> None:
+        """Coroutine that runs *fn* in the executor.
+
+        If *fn* raises, the executor shuts itself down so that resources are
+        released before the caller's error handler (e.g. os._exit) takes over.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(self._executor, fn, trainer, args, kwargs)
+        except BaseException:
+            LOGGER.exception("Unhandled exception in async plot executor; shutting down.")
+            self.shutdown()
+
+    def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        """Schedule *fn(trainer, *args, **kwargs)* to run asynchronously."""
+        asyncio.run_coroutine_threadsafe(self._submit(fn, trainer, args, kwargs), self.loop)
+
+    def shutdown(self) -> None:
+        """Shut down the executor and stop the event loop."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.loop_thread.join()
+        self.loop_thread._stop()
+        self.loop_thread._delete()
+
+
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
@@ -113,8 +186,6 @@ class BasePlotCallback(Callback, ABC):
 
         init_plot_settings()
 
-        self.plot = self._plot
-        self._executor = None
         self._error: BaseException = None
         self.datashader_plotting = plotting_settings.datashader
         self.projection_kind = plotting_settings.projection_kind
@@ -122,10 +193,9 @@ class BasePlotCallback(Callback, ABC):
 
         if self.asynchronous:
             LOGGER.info("Setting up asynchronous plotting ...")
-            self.plot = self._async_plot
-            self._executor = ThreadPoolExecutor(max_workers=1)
-            self.loop_thread = threading.Thread(target=self.start_event_loop, daemon=True)
-            self.loop_thread.start()
+            self._executor: BasePlotExecutor = AsyncPlotExecutor()
+        else:
+            self._executor = SyncPlotExecutor()
 
     def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check for NCCL timeout risk with asynchronous plotting."""
@@ -134,12 +204,6 @@ class BasePlotCallback(Callback, ABC):
             read_group_size = trainer.strategy.read_group_size
             if read_group_size > 1:
                 LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
-    def start_event_loop(self) -> None:
-        """Start the event loop in a separate thread."""
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
 
     @property
     def artifact_subfolder(self) -> str:
@@ -226,15 +290,8 @@ class BasePlotCallback(Callback, ABC):
         del trainer, pl_module, stage  # unused
         LOGGER.info("Teardown of the Plot Callback ...")
 
-        if self._executor is not None:
-            LOGGER.info("waiting and shutting down the executor ...")
-            self._executor.shutdown(wait=False, cancel_futures=True)
-
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            self.loop_thread.join()
-            # Step 3: Close the asyncio event loop
-            self.loop_thread._stop()
-            self.loop_thread._delete()
+        LOGGER.info("waiting and shutting down the executor ...")
+        self._executor.shutdown()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
@@ -254,34 +311,15 @@ class BasePlotCallback(Callback, ABC):
     ) -> None:
         """Plotting function to be implemented by subclasses."""
 
-    # Async function to run the plot function in the background thread
-    async def submit_plot(self, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
-        """Async function or coroutine to schedule the plot function."""
-        loop = asyncio.get_running_loop()
-        # run_in_executor doesn't support keyword arguments,
-        await loop.run_in_executor(
-            self._executor,
-            self._plot_with_error_catching,
-            trainer,
-            args,
-            kwargs,
-        )  # because loop.run_in_executor expects positional arguments, not keyword arguments
-
     @rank_zero_only
-    def _async_plot(
+    def plot(
         self,
         trainer: pl.Trainer,
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """Run the plot function asynchronously.
-
-        This is the function that is called by the callback. It schedules the plot
-        function to run in the background thread. Since we have an event loop running in
-        the background thread, we need to schedule the plot function to run in that
-        loop.
-        """
-        asyncio.run_coroutine_threadsafe(self.submit_plot(trainer, *args, **kwargs), self.loop)
+        """Schedule the plot function via the executor (sync or async)."""
+        self._executor.schedule(self._plot_with_error_catching, trainer, *args, **kwargs)
 
 
 class BasePerBatchPlotCallback(BasePlotCallback):
