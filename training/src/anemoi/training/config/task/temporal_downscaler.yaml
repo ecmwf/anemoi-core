@@ -3,3 +3,4 @@ input_timestep: 6H
 output_timestep: 1H
 output_left_boundary: False
 output_right_boundary: False
+data_frequency: ${data.frequency}

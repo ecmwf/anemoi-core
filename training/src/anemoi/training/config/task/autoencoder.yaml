@@ -1,1 +1,2 @@
 _target_: anemoi.training.tasks.Autoencoder
+data_frequency: ${data.frequency}
