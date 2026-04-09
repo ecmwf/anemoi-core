@@ -88,6 +88,22 @@ class BasePlotExecutor(ABC):
     Defines the interface for scheduling plot function calls and shutting down.
     """
 
+    def _run(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        """Call *fn* and force-exit the process on any unhandled exception.
+
+        Logging is done before the exit so the error is visible in the training
+        log. ``os._exit`` is used (rather than ``raise``) to guarantee the
+        process terminates even when sanity-validation steps are in progress.
+        """
+        try:
+            fn(trainer, *args, **kwargs)
+        except BaseException:
+            import os
+
+            LOGGER.exception(traceback.format_exc())
+            self.shutdown()
+            os._exit(1)
+
     @abstractmethod
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
         """Schedule *fn(trainer, *args, **kwargs)* for execution."""
@@ -101,7 +117,7 @@ class SyncPlotExecutor(BasePlotExecutor):
     """Executes plot functions synchronously on the calling thread."""
 
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
-        fn(trainer, args, kwargs)
+        self._run(fn, trainer, *args, **kwargs)
 
     def shutdown(self) -> None:
         pass
@@ -129,18 +145,10 @@ class AsyncPlotExecutor(BasePlotExecutor):
         self.loop.call_soon(self._loop_ready.set)  # signal after the loop is running
         self.loop.run_forever()
 
-    async def _submit(self, fn: Any, trainer: pl.Trainer, args: Any, kwargs: Any) -> None:
-        """Coroutine that runs *fn* in the executor.
-
-        If *fn* raises, the executor shuts itself down so that resources are
-        released before the caller's error handler (e.g. os._exit) takes over.
-        """
+    async def _submit(self, fn: Any, trainer: pl.Trainer, args: tuple, kwargs: dict) -> None:
+        """Coroutine that runs *fn* via _run in the thread-pool executor."""
         loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(self._executor, fn, trainer, args, kwargs)
-        except BaseException:
-            LOGGER.exception("Unhandled exception in async plot executor; shutting down.")
-            self.shutdown()
+        await loop.run_in_executor(self._executor, lambda: self._run(fn, trainer, *args, **kwargs))
 
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
         """Schedule *fn(trainer, *args, **kwargs)* to run asynchronously."""
@@ -274,17 +282,6 @@ class BasePlotCallback(Callback, ABC):
 
         plt.close(fig)  # cleanup
 
-    @rank_zero_only
-    def _plot_with_error_catching(self, trainer: pl.Trainer, args: Any, kwargs: Any) -> None:
-        """To execute the plot function but ensuring we catch any errors."""
-        try:
-            self._plot(trainer, *args, **kwargs)
-        except BaseException:
-            import os
-
-            LOGGER.exception(traceback.format_exc())
-            os._exit(1)  # to force exit when sanity val steps are used
-
     def teardown(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         """Teardown the callback."""
         del trainer, pl_module, stage  # unused
@@ -319,7 +316,7 @@ class BasePlotCallback(Callback, ABC):
         **kwargs: Any,
     ) -> None:
         """Schedule the plot function via the executor (sync or async)."""
-        self._executor.schedule(self._plot_with_error_catching, trainer, *args, **kwargs)
+        self._executor.schedule(self._plot, trainer, *args, **kwargs)
 
 
 class BasePerBatchPlotCallback(BasePlotCallback):

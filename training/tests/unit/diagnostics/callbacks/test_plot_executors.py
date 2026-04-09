@@ -9,8 +9,10 @@
 
 # ruff: noqa: ANN001, ANN201
 
+import threading
 import time
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -47,7 +49,7 @@ def test_sync_executor_calls_fn_immediately():
     """SyncPlotExecutor invokes fn synchronously before schedule() returns."""
     called_with = {}
 
-    def fn(trainer, args, kwargs) -> None:
+    def fn(trainer, *args, **kwargs) -> None:
         called_with["trainer"] = trainer
         called_with["args"] = args
         called_with["kwargs"] = kwargs
@@ -71,6 +73,19 @@ def test_sync_executor_is_concrete_base_plot_executor():
     assert isinstance(SyncPlotExecutor(), BasePlotExecutor)
 
 
+def test_sync_executor_calls_os_exit_on_fn_exception():
+    """SyncPlotExecutor calls os._exit(1) when fn raises."""
+    msg = "deliberate failure"
+
+    def failing_fn(_trainer, *_args, **_kwargs) -> None:
+        raise RuntimeError(msg)
+
+    executor = SyncPlotExecutor()
+    with patch("os._exit") as mock_exit:
+        executor.schedule(failing_fn, MagicMock())
+        mock_exit.assert_called_once_with(1)
+
+
 @pytest.fixture
 def async_executor():
     executor = AsyncPlotExecutor()
@@ -91,11 +106,9 @@ def test_async_executor_starts_event_loop(async_executor):
 
 def test_async_executor_runs_fn_in_background(async_executor):
     """schedule() runs fn asynchronously and completes within a reasonable time."""
-    import threading
-
     done = threading.Event()
 
-    def fn(_trainer, _args, _kwargs) -> None:
+    def fn(_trainer) -> None:
         done.set()
 
     async_executor.schedule(fn, MagicMock())
@@ -104,18 +117,15 @@ def test_async_executor_runs_fn_in_background(async_executor):
 
 def test_async_executor_passes_args_and_kwargs(async_executor):
     """schedule() forwards positional args and keyword args to fn correctly."""
-    import threading
-
     received = {}
     done = threading.Event()
 
-    def fn(_trainer, args, kwargs) -> None:
+    def fn(_trainer, *args, **kwargs) -> None:
         received["args"] = args
         received["kwargs"] = kwargs
         done.set()
 
-    trainer = MagicMock()
-    async_executor.schedule(fn, trainer, 1, 2, x=3)
+    async_executor.schedule(fn, MagicMock(), 1, 2, x=3)
     assert done.wait(timeout=5)
     assert received["args"] == (1, 2)
     assert received["kwargs"] == {"x": 3}
@@ -123,26 +133,23 @@ def test_async_executor_passes_args_and_kwargs(async_executor):
 
 def test_async_executor_shuts_down_on_fn_exception():
     """An exception raised inside fn triggers executor shutdown (loop stops, resources released)."""
-    import threading
-
     raised = threading.Event()
-
     msg = "deliberate failure"
 
-    def failing_fn(_trainer, _args, _kwargs) -> None:
+    def failing_fn(_trainer) -> None:
         raised.set()
         raise RuntimeError(msg)
 
-    executor = AsyncPlotExecutor()
-    executor.schedule(failing_fn, MagicMock())
-    assert raised.wait(timeout=5), "failing_fn was not called"
+    with patch("os._exit"):  # prevent process exit
+        executor = AsyncPlotExecutor()
+        executor.schedule(failing_fn, MagicMock())
+        assert raised.wait(timeout=5), "failing_fn was not called"
 
-    # Give the shutdown triggered inside _submit time to complete.
-    deadline = time.monotonic() + 5.0
-    while executor.loop.is_running() and time.monotonic() < deadline:
-        time.sleep(0.05)
+        deadline = time.monotonic() + 5.0
+        while executor.loop.is_running() and time.monotonic() < deadline:
+            time.sleep(0.05)
 
-    assert not executor.loop.is_running(), "executor loop should have stopped after fn raised"
+        assert not executor.loop.is_running(), "executor loop should have stopped after fn raised"
 
 
 def test_async_executor_shutdown_stops_loop():
