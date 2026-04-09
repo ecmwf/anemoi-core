@@ -865,7 +865,6 @@ def test_plot_histogram_forecaster():
         assert mock_output_figure.call_count == output_times * n_step_output
 
 
-
 # ---- Plot functions (diagnostics.plots) return a figure ----
 
 
