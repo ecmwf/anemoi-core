@@ -379,9 +379,10 @@ def test_training_cycle_imerg_target(
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
-
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_multidatasets_diffusion(
-    multidatasets_diffusion_config: tuple[DictConfig, list[str]],
+multidatasets_diffusion_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
 ) -> None:
     cfg, urls = multidatasets_diffusion_config
