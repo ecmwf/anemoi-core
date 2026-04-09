@@ -46,7 +46,9 @@ class TemporalDownscaler(BaseSingleStepTask):
         if output_right_boundary:
             output_offsets = [*output_offsets, input_timedelta]
 
-        import ipdb; ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()
 
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
