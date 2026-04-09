@@ -88,6 +88,7 @@ def test_forecaster_rollout_increases_on_epoch_end() -> None:
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
+        data_frequency="6h",
         rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
     )
     assert task.rollout.step == 1
