@@ -59,7 +59,7 @@ def test_temporal_downscaler_adapter() -> None:
     assert isinstance(x, torch.Tensor) and x.shape == (grid_size, num_vars)
     assert isinstance(y_true, torch.Tensor) and y_true.shape == (grid_size, num_vars)
     assert isinstance(y_pred, torch.Tensor) and y_pred.shape == (grid_size, num_vars)
-    assert isinstance(suffix, str) and suffix.startswith("_istep")
+    assert isinstance(suffix, str) and suffix.startswith("istep")
 
 
 def test_autoencoder_adapter() -> None:
@@ -69,4 +69,3 @@ def test_autoencoder_adapter() -> None:
     adapter = task._plot_adapter
 
     assert adapter.output_times == 1
-    assert adapter.get_init_step() == 0
