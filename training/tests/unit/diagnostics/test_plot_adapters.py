@@ -38,6 +38,18 @@ def test_forecaster_adapter(rollout_steps: int) -> None:
     assert isinstance(suffix, str) and suffix.startswith("rstep")
 
 
+def test_forecaster_plot_adapter_output_times_equals_num_output_timesteps() -> None:
+    """ForecasterPlotAdapter.output_times reflects num_output_timesteps."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    assert task._plot_adapter.output_times == task.num_output_timesteps == 1
+
+
+def test_forecaster_plot_adapter_output_times_for_multi_output() -> None:
+    """output_times is 2 when multistep_output=2."""
+    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
+    assert task._plot_adapter.output_times == 2
+
+
 def test_temporal_downscaler_adapter() -> None:
     """TemporalDownscaler plot_adapter."""
     task = TemporalDownscaler(input_timestep="6H", output_timestep="3H", output_left_boundary=True)
@@ -57,6 +69,17 @@ def test_temporal_downscaler_adapter() -> None:
     assert isinstance(y_true, torch.Tensor) and y_true.shape == (grid_size, num_vars)
     assert isinstance(y_pred, torch.Tensor) and y_pred.shape == (grid_size, num_vars)
     assert isinstance(suffix, str) and suffix.startswith("istep")
+
+
+def test_temporal_downscaler_output_times() -> None:
+    """TemporalDownscalerPlotAdapter.output_times reflects the number of output offsets."""
+    task = TemporalDownscaler(
+        input_timestep="6h",
+        output_timestep="2h",
+        output_left_boundary=True,
+        output_right_boundary=True,
+    )
+    assert task._plot_adapter.output_times == 4
 
 
 def test_autoencoder_adapter() -> None:

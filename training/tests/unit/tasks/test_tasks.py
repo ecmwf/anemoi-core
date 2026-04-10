@@ -156,21 +156,6 @@ def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
     assert set(input_indices).isdisjoint(set(output_indices))
 
 
-# ── Forecaster: plot adapter ───────────────────────────────────────────────────
-
-
-def test_forecaster_plot_adapter_output_times_equals_num_output_timesteps() -> None:
-    """ForecasterPlotAdapter.output_times reflects num_output_timesteps."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
-    assert task._plot_adapter.output_times == task.num_output_timesteps == 1
-
-
-def test_forecaster_plot_adapter_output_times_for_multi_output() -> None:
-    """output_times is 2 when multistep_output=2."""
-    task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
-    assert task._plot_adapter.output_times == 2
-
-
 # ── Forecaster: _advance_dataset_input ────────────────────────────────────────
 
 
@@ -247,12 +232,6 @@ def test_autoencoder_advance_input_returns_input_unchanged() -> None:
     assert result is x
 
 
-def test_autoencoder_plot_adapter_output_times_is_one() -> None:
-    """AutoencoderPlotAdapter reports output_times=1."""
-    task = Autoencoder()
-    assert task._plot_adapter.output_times == 1
-
-
 # ── TemporalDownscaler ────────────────────────────────────────────────
 
 
@@ -324,14 +303,3 @@ def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
     """Input offsets are always [0h, input_timestep] regardless of output settings."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
     assert task.input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
-
-
-def test_temporal_downscaler_plot_adapter_output_times() -> None:
-    """TemporalDownscalerPlotAdapter.output_times reflects the number of output offsets."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=True,
-        output_right_boundary=True,
-    )
-    assert task._plot_adapter.output_times == 4
