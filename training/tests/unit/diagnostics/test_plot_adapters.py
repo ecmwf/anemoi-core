@@ -66,7 +66,7 @@ def test_autoencoder_adapter():
     """Autoencoder plot_adapter: output_times == 1, get_init_step() == 0."""
     task = Autoencoder()
 
-    adapter = task._plot_adapter``
+    adapter = task._plot_adapter
 
     assert adapter.output_times == 1
     assert adapter.get_init_step() == 0
