@@ -84,7 +84,6 @@ def test_ensemble_plot_mixin_process():
 
     # Mock lightning module
     pl_module = MagicMock()
-    pl_module.task_type = "forecaster"
     pl_module.n_step_input = 2
     pl_module.n_step_output = 1
     pl_module.plot_adapter = MagicMock()

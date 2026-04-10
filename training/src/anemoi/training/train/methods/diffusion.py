@@ -31,10 +31,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseDiffusionForecaster(BaseTrainingModule):
-    """Base class for diffusion forecasters."""
-
-    task_type = "forecaster"
+class BaseDiffusionTraining(BaseTrainingModule):
+    """Base class for diffusion training."""
 
     def __init__(
         self,
@@ -164,15 +162,15 @@ class BaseDiffusionForecaster(BaseTrainingModule):
         return sigma, weight
 
 
-class DiffusionTraining(BaseDiffusionForecaster):
-    """Graph neural network forecaster for diffusion."""
+class DiffusionTraining(BaseDiffusionTraining):
+    """Graph neural network for diffusion."""
 
     def _step(
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
-        """Step for the forecaster.
+        """Step for the diffusion training.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
@@ -222,8 +220,8 @@ class DiffusionTraining(BaseDiffusionForecaster):
         return loss, metrics, [y_pred]
 
 
-class DiffusionTendTraining(BaseDiffusionForecaster):
-    """Graph neural network forecaster for diffusion tendency prediction."""
+class DiffusionTendTraining(BaseDiffusionTraining):
+    """Graph neural network for diffusion tendency prediction."""
 
     def __init__(
         self,
@@ -437,7 +435,7 @@ class DiffusionTendTraining(BaseDiffusionForecaster):
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
-        """Step for the tendency-based diffusion forecaster.
+        """Step for the tendency-based diffusion training.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 

@@ -10,7 +10,6 @@
 # ruff: noqa: ANN001, ANN201
 
 from collections.abc import Callable
-from collections.abc import Generator
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -24,6 +23,9 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
+from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.utils.masks import NoOutputMask
 
 # Suite of Unit Tests for Plotting Callbacks
 # ------------------------------------------
@@ -199,120 +201,72 @@ _PLOT_PROCESS_CONFIG = {
 
 def _make_pl_module_forecaster(
     *,
-    n_step_input=1,
-    n_step_output=1,
-    output_times=2,
-    nlatlon=50,
+    n_step_input: int = 1,
+    n_step_output: int = 1,
+    validation_rollout: int = 2,
+    nlatlon: int = 50,
 ) -> MagicMock:
     """Mock pl_module for forecaster task: output_times as given."""
     pl_module = MagicMock()
-    pl_module.task_type = "forecaster"
     pl_module.local_rank = 0
-    pl_module.n_step_input = n_step_input
-    pl_module.n_step_output = n_step_output
-    pl_module.grid_dim = 3  # latlon dim
-    plot_adapter = MagicMock()
-    plot_adapter.output_times = output_times
-    plot_adapter.get_total_plot_targets = lambda out_times=None: (out_times or output_times) * n_step_output
-    plot_adapter.prepare_plot_output_tensor = lambda x: x
-    plot_adapter.loss_plot_times = output_times
-    plot_adapter.get_loss_plot_batch_start = lambda r: n_step_input + r * n_step_output
-    pl_module.plot_adapter = plot_adapter
+    pl_module.grid_dim = 3  # latlon dim=2
+
+    # Use Forecaster task
+    pl_module.task = Forecaster(
+        multistep_input=n_step_input,
+        multistep_output=n_step_output,
+        timestep="6H",
+        validation_rollout=validation_rollout,
+        rollout={"start": 1, "epoch_increment": 1, "maximum": validation_rollout},
+    )
+    pl_module.n_step_input = pl_module.task.num_input_timesteps
+    pl_module.n_step_output = pl_module.task.num_output_timesteps
+    pl_module.plot_adapter = pl_module.task._plot_adapter
+
+    # Mock data_indices
     # data_indices[dataset_name].data.output.full, model.output.name_to_index for plot_parameters_dict
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
     data_indices.model.output.name_to_index = {"a": 0, "b": 1}
     pl_module.data_indices = {"data": data_indices}
-    # Latlons for graph (radians), converted to deg in process
-    pl_module.model.model._graph_data = {
-        "data": MagicMock(),
-    }
+
+    # Mock graph latlons (radians), converted to deg in process
+    pl_module.model.model._graph_data = {"data": MagicMock()}
     pl_module.model.model._graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
     graph_data = pl_module.model.model._graph_data["data"]
-    pl_module.model.model._graph_name_data = "x"
     graph_data.__getitem__ = lambda k: torch.zeros(nlatlon, 2) if k == pl_module.model.model._graph_name_data else None
-    # output_mask equal to identity
-    pl_module.output_mask = {"data": MagicMock()}
-    pl_module.output_mask["data"].apply.side_effect = lambda x, **_kwargs: x
 
-    def iter_plot_samples(
-        data: torch.Tensor,
-        output_tensor: torch.Tensor,
-        out_times: int,
-        max_out_steps: int | None = None,
-    ) -> Generator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, str], None, None]:
-        max_out = min(pl_module.n_step_output, max_out_steps or pl_module.n_step_output)
-        ndim = getattr(output_tensor, "ndim", 0)
-        shp = getattr(output_tensor, "shape", ())
-        if ndim == 5 and len(shp) > 0 and shp[0] == 1:
-            for r in range(out_times):
-                for o in range(max_out):
-                    truth_idx = r * pl_module.n_step_output + o + 1
-                    yield (
-                        data[0].squeeze(),
-                        data[truth_idx].squeeze(),
-                        output_tensor[0, r, o],
-                        f"rstep{r:02d}_out{o:02d}",
-                    )
-        else:
-            for r in range(out_times):
-                init_step = 0  # forecaster: same init step for all rollout steps
-                pred = output_tensor[r, 0] if ndim >= 4 and shp[1:2] else output_tensor[r]
-                yield (
-                    data[init_step].squeeze(),
-                    data[r + 1].squeeze(),
-                    pred.squeeze() if hasattr(pred, "squeeze") else pred,
-                    f"rstep{r:02d}_out00",
-                )
+    # Use no-op output_mask
+    pl_module.output_mask = {"data": NoOutputMask()}
 
-    plot_adapter.iter_plot_samples = iter_plot_samples
     return pl_module
 
 
-def _make_pl_module_temporal_downscaler(*, output_times=2, nlatlon=50) -> MagicMock:
+def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     """Mock pl_module for temporal downscaler."""
     pl_module = MagicMock()
-    pl_module.task_type = "temporal_downscaler"
     pl_module.local_rank = 0
-    pl_module.n_step_input = 1
-    pl_module.n_step_output = output_times
     pl_module.grid_dim = 3
-    plot_adapter = MagicMock()
-    plot_adapter.output_times = output_times
-    plot_adapter.get_total_plot_targets = lambda out_times=None: out_times if out_times is not None else output_times
-    plot_adapter.prepare_plot_output_tensor = lambda x: x
-    plot_adapter.loss_plot_times = 1
-    plot_adapter.get_loss_plot_batch_start = lambda _r: 1  # n_step_input for temporal downscaler
-    pl_module.plot_adapter = plot_adapter
+
+    # Use TemporalDownscaler task
+    pl_module.task = TemporalDownscaler(input_timestep="6H", output_timestep="3H", output_left_boundary=True)
+    pl_module.n_step_input = pl_module.task.num_input_timesteps
+    pl_module.n_step_output = pl_module.task.num_output_timesteps
+    pl_module.plot_adapter = pl_module.task._plot_adapter
+
+    # Mock data_indices
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
     data_indices.model.output.name_to_index = {"a": 0, "b": 1}
     pl_module.data_indices = {"data": data_indices}
+
+    # Mock graph data
     pl_module.model.model._graph_data = {"data": MagicMock()}
     pl_module.model.model._graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
-    pl_module.model.model._graph_name_data = "x"
-    pl_module.output_mask = {"data": MagicMock()}
-    pl_module.output_mask["data"].apply.side_effect = lambda x, **_kwargs: x
 
-    def iter_plot_samples(
-        data: torch.Tensor,
-        output_tensor: torch.Tensor,
-        out_times: int,
-        max_out_steps: int | None = None,
-    ) -> Generator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, str], None, None]:
-        del max_out_steps
-        for r in range(out_times):
-            init_step = r  # temporal downscaler: init step equals rollout step
-            pred = output_tensor[r, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[r]
-            pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
-            yield (
-                data[init_step].squeeze(),
-                data[r + 1].squeeze(),
-                pred,
-                f"istep{r + 1:02d}",
-            )
+    # Use no-op output_mask
+    pl_module.output_mask = {"data": NoOutputMask()}
 
-    plot_adapter.iter_plot_samples = iter_plot_samples
     return pl_module
 
 
@@ -348,7 +302,7 @@ def test_process_forecaster_output_shapes():
     pl_module = _make_pl_module_forecaster(
         n_step_input=n_step_input,
         n_step_output=n_step_output,
-        output_times=output_times,
+        validation_rollout=output_times,
         nlatlon=nlatlon,
     )
     batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
@@ -382,13 +336,12 @@ def test_process_temporal_downscaler_output_shapes():
         dataset_names=["data"],
     )
     batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
-    output_times = 2
-    total_targets = output_times  # no n_step_output factor for temporal downscaler
+
+    pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
+
+    total_targets = pl_module.task.num_output_timesteps  # no n_step_output factor for temporal downscaler
     n_time = 1 + total_targets + 1  # 4 time steps in the batch
-    pl_module = _make_pl_module_temporal_downscaler(
-        output_times=output_times,
-        nlatlon=nlatlon,
-    )
+
     batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
     outputs = (
         torch.tensor(0.0),
@@ -403,7 +356,7 @@ def test_process_temporal_downscaler_output_shapes():
     data, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
     assert data.shape == (1 + total_targets + 1, n_ens, nlatlon, nvar), data.shape
-    assert output_tensor.shape == (output_times, 1, n_ens, nlatlon, nvar), output_tensor.shape
+    assert output_tensor.shape == (pl_module.task.num_output_timesteps, 1, n_ens, nlatlon, nvar), output_tensor.shape
 
 
 def test_process_temporal_downscaler_multi_out_squeeze():
@@ -417,11 +370,9 @@ def test_process_temporal_downscaler_multi_out_squeeze():
         dataset_names=["data"],
     )
     batch_size, nlatlon, nvar = 2, 50, 3
-    output_times = 2
-    pl_module = _make_pl_module_temporal_downscaler(
-        output_times=output_times,
-        nlatlon=nlatlon,
-    )
+
+    pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
+
     sample_idx = 10
     batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
     # Simulate multi-out: each output (1, 1, 1, nlatlon, nvar) so cat gives (2, 1, 1, nlatlon, nvar);
@@ -438,9 +389,9 @@ def test_process_temporal_downscaler_multi_out_squeeze():
 
     _, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
-    # output_tensor: (output_times, 1, n_ens, nlatlon, nvar) - 5D, no squeeze when shape[0]==output_times
+    # output_tensor: (num_output_timesteps, 1, n_ens, nlatlon, nvar) - 5D
     assert output_tensor.ndim == 5, output_tensor.shape
-    assert output_tensor.shape == (output_times, 1, 1, nlatlon, nvar), output_tensor.shape
+    assert output_tensor.shape == (pl_module.task.num_output_timesteps, 1, 1, nlatlon, nvar), output_tensor.shape
 
 
 # ---- PlotLoss ----
@@ -495,7 +446,7 @@ def test_plot_loss_sort_and_color_by_parameter_group_with_groups():
 
 
 def test_plot_loss_temporal_downscaler():
-    """PlotLoss._plot uses output_times=1 when task_type != 'forecaster', so only one figure is produced."""
+    """PlotLoss._plot uses output_times=1 only one figure is produced."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
@@ -508,14 +459,11 @@ def test_plot_loss_temporal_downscaler():
     trainer = MagicMock()
     trainer.logger = MagicMock()
     pl_module = MagicMock()
-    pl_module.task_type = "temporal_downscaler"
-    pl_module.n_step_input = 2
-    pl_module.n_step_output = 2
+    pl_module.task = TemporalDownscaler(input_timestep="6H", output_timestep="3H", output_left_boundary=True)
+    pl_module.n_step_input = pl_module.task.num_input_timesteps
+    pl_module.n_step_output = pl_module.task.num_output_timesteps
+    pl_module.plot_adapter = pl_module.task._plot_adapter
     pl_module.local_rank = 0
-    pl_module.plot_adapter = MagicMock()
-    pl_module.plot_adapter.output_times = 2
-    pl_module.plot_adapter.loss_plot_times = 1
-    pl_module.plot_adapter.get_loss_plot_batch_start = lambda _r: 2
     pl_module.data_indices = {"data": MagicMock()}
     pl_module.data_indices["data"].model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
     pl_module.data_indices["data"].data.output.full = torch.arange(nvar)
@@ -528,9 +476,6 @@ def test_plot_loss_temporal_downscaler():
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
-    pl_module.task.steps = [{}]
-    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}
-    pl_module.task.get_metric_name.return_value = ""
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
@@ -569,7 +514,6 @@ def test_plot_loss_diffusion():
     trainer = MagicMock()
     trainer.logger = MagicMock()
     pl_module = MagicMock()
-    pl_module.task_type = "forecaster"  # Diffusion is a forecaster variant
     pl_module.n_step_input = n_step_input
     pl_module.n_step_output = n_step_output
     pl_module.local_rank = 0
@@ -615,7 +559,7 @@ def test_plot_loss_diffusion():
 
 
 def test_plot_loss_forecaster():
-    """PlotLoss._plot uses full output_times when task_type == 'forecaster', so one figure per rollout step."""
+    """PlotLoss._plot uses one figure per rollout step."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
@@ -631,12 +575,10 @@ def test_plot_loss_forecaster():
     trainer = MagicMock()
     trainer.logger = MagicMock()
     pl_module = MagicMock()
-    pl_module.task_type = "forecaster"
     pl_module.n_step_input = n_step_input
     pl_module.n_step_output = n_step_output
     pl_module.local_rank = 0
     pl_module.plot_adapter = MagicMock()
-    pl_module.plot_adapter.output_times = output_times
     pl_module.plot_adapter.loss_plot_times = output_times
     pl_module.plot_adapter.get_loss_plot_batch_start = lambda r: n_step_input + r * n_step_output
     pl_module.data_indices = {"data": MagicMock()}
@@ -692,13 +634,10 @@ def test_plot_spectrum_temporal_downscaler():
         parameters=["a", "b"],
         dataset_names=["data"],
     )
-    output_times = 2
     nvar = 2
     nlatlon = 20
-    pl_module = _make_pl_module_temporal_downscaler(
-        output_times=output_times,
-        nlatlon=nlatlon,
-    )
+    pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
+
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
@@ -725,7 +664,7 @@ def test_plot_spectrum_temporal_downscaler():
             batch_idx=0,
             epoch=0,
         )
-        assert mock_output_figure.call_count == output_times
+        assert mock_output_figure.call_count == pl_module.task.num_output_timesteps
 
 
 def test_plot_spectrum_forecaster():
@@ -739,23 +678,22 @@ def test_plot_spectrum_forecaster():
         parameters=["a", "b"],
         dataset_names=["data"],
     )
-    output_times = 2
+    rollout_steps = 2
     n_step_output = 1
     nvar = 2
     nlatlon = 20
     pl_module = _make_pl_module_forecaster(
-        output_times=output_times,
         n_step_output=n_step_output,
+        validation_rollout=rollout_steps,
         nlatlon=nlatlon,
     )
-    pl_module.task_type = "forecaster"  # PlotSpectrum checks "forecast" in code
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
     outputs = (
         torch.tensor(0.0),
-        [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
+        [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(rollout_steps)],
     )
     trainer = MagicMock()
     trainer.logger = MagicMock()
@@ -773,8 +711,8 @@ def test_plot_spectrum_forecaster():
             batch_idx=0,
             epoch=0,
         )
-        # Forecaster branch: output_times * max_out_steps figures
-        assert mock_output_figure.call_count == output_times * n_step_output
+        # Forecaster branch: rollout_steps * n_step_output figures
+        assert mock_output_figure.call_count == rollout_steps * n_step_output
 
 
 # ---- PlotHistogram ----
@@ -791,13 +729,10 @@ def test_plot_histogram_temporal_downscaler():
         parameters=["a", "b"],
         dataset_names=["data"],
     )
-    output_times = 2
     nvar = 2
     nlatlon = 20
-    pl_module = _make_pl_module_temporal_downscaler(
-        output_times=output_times,
-        nlatlon=nlatlon,
-    )
+    pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
+
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
@@ -824,7 +759,7 @@ def test_plot_histogram_temporal_downscaler():
             batch_idx=0,
             epoch=0,
         )
-        assert mock_output_figure.call_count == output_times
+        assert mock_output_figure.call_count == pl_module.task.num_output_timesteps
 
 
 def test_plot_histogram_forecaster():
@@ -838,12 +773,12 @@ def test_plot_histogram_forecaster():
         parameters=["a", "b"],
         dataset_names=["data"],
     )
-    output_times = 2
+    validation_rollout = 2
     n_step_output = 1
     nvar = 2
     nlatlon = 20
     pl_module = _make_pl_module_forecaster(
-        output_times=output_times,
+        validation_rollout=validation_rollout,
         n_step_output=n_step_output,
         nlatlon=nlatlon,
     )
@@ -853,7 +788,7 @@ def test_plot_histogram_forecaster():
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
     outputs = (
         torch.tensor(0.0),
-        [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
+        [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(validation_rollout)],
     )
     trainer = MagicMock()
     trainer.logger = MagicMock()
@@ -871,7 +806,7 @@ def test_plot_histogram_forecaster():
             batch_idx=0,
             epoch=0,
         )
-        assert mock_output_figure.call_count == output_times * n_step_output
+        assert mock_output_figure.call_count == validation_rollout * n_step_output
 
 
 # ---- Plot functions (diagnostics.plots) return a figure ----

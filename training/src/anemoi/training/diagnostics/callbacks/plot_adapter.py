@@ -39,12 +39,7 @@ class BasePlotAdapter(ABC):
         return output_tensor
 
     @abstractmethod
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-    ) -> Iterator[tuple[Any, Any, Any, str] | tuple[Any, Any, str]]:
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
         ...
 
@@ -58,19 +53,14 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
         return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
 
         input_data = data[input_time_indices, ...]
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
-        for rollout_step in range(output_times):
+        for rollout_step in range(self._task.validation_rollout):
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
             output_data = data[output_time_indices, ...]
@@ -88,13 +78,7 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
     def get_init_step(self) -> int:
         return 0
 
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
-        del output_times
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
         output_time_indices = self._task.get_batch_output_indices()
 
@@ -119,8 +103,7 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Autoencoder: single (sample, recon, tag) yield."""
 
-    def iter_plot_samples(self, data: Any, output_tensor: Any, output_times: int) -> Iterator[tuple[Any, Any, str]]:
-        del output_times
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
-        yield sample, recon, "recon"
+        yield sample, sample, recon, "recon"

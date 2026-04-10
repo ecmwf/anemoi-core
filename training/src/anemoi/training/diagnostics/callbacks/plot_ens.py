@@ -284,15 +284,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             local_rank = pl_module.local_rank
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.task.num_output_timesteps,
-            ):
-                if len(item) == 3:
-                    y_true, y_pred, tag_suffix = item[0], item[1], item[2]
-                else:
-                    _, y_true, y_pred, tag_suffix = item
+            for _, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 y_true = np.asarray(y_true).squeeze()
                 y_pred = np.asarray(y_pred).squeeze()
                 fig = plot_predicted_ensemble(

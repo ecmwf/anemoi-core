@@ -892,16 +892,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.task.num_output_timesteps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
                     self.per_sample,
@@ -1008,16 +999,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.task.num_output_timesteps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 fig = plot_power_spectrum(
                     plot_parameters_dict_spectrum,
                     latlons,
@@ -1126,16 +1108,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.task.num_output_timesteps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+
                 fig = plot_histogram(
                     plot_parameters_dict_histogram,
                     x,

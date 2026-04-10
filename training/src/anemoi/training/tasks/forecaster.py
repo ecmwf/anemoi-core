@@ -105,8 +105,19 @@ class Forecaster(BaseTask):
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
-    def get_offsets(self, label: str) -> list[datetime.timedelta]:
-        rollout_step = self.rollout.maximum if label == "training" else self.validation_rollout
+    def get_offsets(self, label: str = "training") -> list[datetime.timedelta]:
+        if label == "training":
+            rollout_step = self.rollout.maximum
+        elif label == "validation":
+            rollout_step = self.validation_rollout
+        else:
+            LOGGER.debug(
+                "Unknown label '%s' for %s.get_offsets(), defaulting to training rollout.",
+                label,
+                self.__class__.__name__,
+            )
+            rollout_step = max(self.rollout.maximum, self.validation_rollout)
+
         return self._compute_rollout_offsets(rollout_step)
 
     def get_output_offsets(self, rollout_step: int = 0, label: str = "training", **_kwargs) -> list[datetime.timedelta]:

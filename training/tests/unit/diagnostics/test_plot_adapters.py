@@ -67,7 +67,8 @@ def test_autoencoder_adapter() -> None:
     batch = torch.randn(1, 1, grid_size, num_vars)  # (time, ens, grid, vars)
     pred = torch.randn(1, 1, grid_size, num_vars)  # (time, ens, grid, vars)
 
-    y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, None))
+    x, y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, None))
+    assert isinstance(x, torch.Tensor) and x.shape == (grid_size, num_vars)
     assert isinstance(y_true, torch.Tensor) and y_true.shape == (grid_size, num_vars)
     assert isinstance(y_pred, torch.Tensor) and y_pred.shape == (grid_size, num_vars)
     assert isinstance(suffix, str) and suffix.startswith("recon")

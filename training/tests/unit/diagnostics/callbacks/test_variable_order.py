@@ -21,7 +21,6 @@ from anemoi.training.train.train import AnemoiTrainer
 
 
 class DummyTrainingModule(BaseTrainingModule):
-    task_type = "forecaster"
 
     def __init__(self) -> None:
         pass

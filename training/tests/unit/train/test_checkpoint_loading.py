@@ -61,7 +61,6 @@ class DummyModel(torch.nn.Module):
 
 
 class DummyTrainingModule(BaseTrainingModule):
-    task_type = "forecaster"
 
     def __init__(self) -> None:
         pass

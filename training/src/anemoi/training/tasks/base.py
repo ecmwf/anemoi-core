@@ -133,7 +133,7 @@ class BaseTask(ABC):
 
     def _offset_to_batch_indices(self, offsets: list[datetime.timedelta]) -> list[int]:
         """Map a list of offsets to their positions in ``self.offsets``."""
-        full = self.offsets
+        full = self.get_offsets()
         return [full.index(o) for o in offsets]
 
     def get_batch_input_indices(self, **kwargs) -> list[int]:
