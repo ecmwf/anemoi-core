@@ -22,6 +22,7 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram as _PlotHis
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss as _PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample as _PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum as _PlotSpectrum
+from anemoi.training.diagnostics.evaluation.plotting.plotter import EnsemblePlotter
 
 if TYPE_CHECKING:
     from typing import Any
@@ -228,7 +229,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         plotting_settings: Any | None = None,
         **kwargs: Any,
     ) -> None:
-        # Initialize PlotSample first
+        # Initialize PlotSample first (also builds self.plotter as SamplePlotter)
         _PlotSample.__init__(
             self,
             sample_idx,
@@ -245,6 +246,15 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             **kwargs,
         )
         self.plot_members = members
+        # Override plotter with the ensemble-specific one
+        self.plotter = EnsemblePlotter(
+            accumulation_levels_plot=accumulation_levels_plot,
+            precip_and_related_fields=precip_and_related_fields,
+            colormaps=colormaps,
+            datashader=self.datashader_plotting,
+            projection_kind=self.projection_kind,
+            focus_area=focus_area,
+        )
 
     @rank_zero_only
     def _plot(
@@ -257,10 +267,9 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         batch_idx: int,
         epoch: int,
     ) -> None:
-        from anemoi.training.diagnostics.plots import plot_predicted_ensemble
-
         logger = trainer.logger
 
+        local_rank = pl_module.local_rank
         for dataset_name in dataset_names:
 
             # Build dictionary of indices and parameters to be plotted
@@ -281,14 +290,13 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
+            latlons, data, output_tensor = self.plotter.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
                 data,
                 output_tensor,
             )
 
-            local_rank = pl_module.local_rank
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
@@ -301,28 +309,17 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                     _, y_true, y_pred, tag_suffix = item
                 y_true = np.asarray(y_true).squeeze()
                 y_pred = np.asarray(y_pred).squeeze()
-                fig = plot_predicted_ensemble(
-                    parameters=plot_parameters_dict,
-                    n_plots_per_sample=4,
-                    latlons=self.latlons[dataset_name],
-                    clevels=self.accumulation_levels_plot,
-                    y_true=y_true,
-                    y_pred=y_pred,
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                    projection_kind=self.projection_kind,
-                )
+                fig = self.plotter.plot(plot_parameters_dict, latlons, y_true, y_pred)
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
                     tag=(
                         f"pred_val_sample_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                     exp_log_tag=(
-                        f"pred_val_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"pred_val_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                 )
 

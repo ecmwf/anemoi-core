@@ -20,28 +20,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import matplotlib.animation as animation
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from matplotlib.colors import Colormap
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
-from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
-from anemoi.training.diagnostics.evaluation.plotting.plots import argsort_variablename_variablelevel
-from anemoi.training.diagnostics.evaluation.plotting.plots import init_plot_settings
-from anemoi.training.diagnostics.evaluation.plotting.plots import plot_graph_edge_features
-from anemoi.training.diagnostics.evaluation.plotting.plots import plot_graph_node_features
-from anemoi.training.diagnostics.evaluation.plotting.plots import plot_histogram
-from anemoi.training.diagnostics.evaluation.plotting.plots import plot_loss
-from anemoi.training.diagnostics.evaluation.plotting.plots import plot_power_spectrum
-from anemoi.training.diagnostics.evaluation.plotting.plots import plot_predicted_multilevel_flat_sample
+from anemoi.training.diagnostics.evaluation.plotting.plotter import GraphFeaturePlotter
+from anemoi.training.diagnostics.evaluation.plotting.plotter import HistogramPlotter
+from anemoi.training.diagnostics.evaluation.plotting.plotter import LossPlotter
+from anemoi.training.diagnostics.evaluation.plotting.plotter import SamplePlotter
+from anemoi.training.diagnostics.evaluation.plotting.plotter import SpectrumPlotter
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
+from anemoi.training.utils.custom_colormaps import CustomColormap
 
 LOGGER = logging.getLogger(__name__)
 
@@ -192,8 +185,6 @@ class BasePlotCallback(Callback, ABC):
         self.post_processors = None
         self.latlons = None
 
-        init_plot_settings()
-
         self._error: BaseException = None
         self.datashader_plotting = plotting_settings.datashader
         self.projection_kind = plotting_settings.projection_kind
@@ -248,35 +239,6 @@ class BasePlotCallback(Callback, ABC):
 
                 logger.experiment.log({exp_log_tag: wandb.Image(fig)})
             elif logger and logger.logger_name == "mlflow":
-                run_id = logger.run_id
-                logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
-
-        plt.close(fig)  # cleanup
-
-    @rank_zero_only
-    def _output_gif(
-        self,
-        logger: pl.loggers.logger.Logger,
-        fig: plt.Figure,
-        anim: animation.ArtistAnimation,
-        epoch: int,
-        tag: str = "gnn",
-    ) -> None:
-        """Animation output: save to file and/or display in notebook."""
-        if self.save_basedir is not None:
-            save_path = Path(
-                self.save_basedir,
-                "plots",
-                f"{tag}_epoch{epoch:03d}.gif",
-            )
-
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            anim.save(save_path, writer="pillow", fps=8)
-
-            if logger and logger.logger_name == "wandb":
-                LOGGER.warning("Saving gif animations not tested for wandb.")
-
-            if logger and logger.logger_name == "mlflow":
                 run_id = logger.run_id
                 logger.experiment.log_artifact(run_id, str(save_path), artifact_path=self.artifact_subfolder)
 
@@ -472,60 +434,10 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             plotting_settings=plotting_settings,
         )
         self.q_extreme_limit = q_extreme_limit
-
-    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
-        return {
-            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
-        }
-
-    @staticmethod
-    def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
-        if provider is None:
-            return None
-        if isinstance(provider, (dict, torch.nn.ModuleDict)):
-            if dataset_name in provider:
-                return provider[dataset_name]
-            return None
-        return provider
-
-    @staticmethod
-    def _has_trainable_edge_params(provider: Any) -> bool:
-        if provider is None:
-            return False
-        trainable_module = getattr(provider, "trainable", None)
-        if trainable_module is None:
-            return False
-        # Graph providers has TrainableTensor -> .trainable;
-        # parameter is nested as .trainable.trainable.
-        trainable_parameter = getattr(trainable_module, "trainable", None)
-        return trainable_parameter is not None
-
-    def get_edge_trainable_modules(
-        self,
-        model: torch.nn.Module,
-        dataset_name: str,
-    ) -> dict[tuple[str, str], torch.Tensor]:
-        # `_graph_name_data` and `_graph_name_hidden` above are the keys for different
-        # layers of nodes in the graphs obtained from the config (e.g., "data", "hidden").
-        # They are not themselves dictionaries; but the identifiers of the dictionaries
-        # of graphs. That is, the “dictionarification” happens one level down.
-        # Here, they are used as keys to track and label different parts of the model
-        # in the plots for one dataset.
-        # Therefore, we don't select `dataset_name` for the `_graph_name_xy`,
-        # but only for the modules (encoder/processor/decoder).
-        trainable_modules = {}
-
-        provider_specs = (
-            ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
-            ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
-            ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
+        self.plotter = GraphFeaturePlotter(
+            datashader=self.datashader_plotting,
+            q_extreme_limit=q_extreme_limit,
         )
-        for provider_name, edge_key in provider_specs:
-            provider = self._resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
-            if self._has_trainable_edge_params(provider):
-                trainable_modules[edge_key] = provider
-
-        return trainable_modules
 
     @rank_zero_only
     def _plot(
@@ -537,15 +449,11 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
-        node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
+        node_trainable_tensors = self.plotter.get_node_trainable_tensors(model.node_attributes)
 
         for dataset_name in dataset_names:
             if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
-                fig = plot_graph_node_features(
-                    model.node_attributes,
-                    node_trainable_tensors,
-                    datashader=self.datashader_plotting,
-                )
+                fig = self.plotter.plot_nodes(model.node_attributes, node_trainable_tensors)
 
                 self._output_figure(
                     trainer.logger,
@@ -563,12 +471,8 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 LOGGER.warning(
                     "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
                 )
-            elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
-                fig = plot_graph_edge_features(
-                    model.node_attributes,
-                    edge_trainable_modules,
-                    q_extreme_limit=self.q_extreme_limit,
-                )
+            elif len(edge_trainable_modules := self.plotter.get_edge_trainable_modules(model, dataset_name)):
+                fig = self.plotter.plot_edges(model.node_attributes, edge_trainable_modules)
 
                 self._output_figure(
                     trainer.logger,
@@ -609,108 +513,8 @@ class PlotLoss(BasePerBatchPlotCallback):
             dataset_names=dataset_names,
             plotting_settings=plotting_settings,
         )
-        self.parameter_groups = parameter_groups
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
-        if self.parameter_groups is None:
-            self.parameter_groups = {}
-
-    def sort_and_color_by_parameter_group(
-        self,
-        parameter_names: list[str],
-    ) -> tuple[np.ndarray, np.ndarray, dict, list]:
-        """Sort parameters by group and prepare colors."""
-
-        def automatically_determine_group(name: str) -> str:
-            # first prefix of parameter name is group name
-            parts = name.split("_")
-            if len(parts) == 1:
-                # if no underscore is present, return full name
-                return parts[0]
-            # else remove last part of name
-            return name[: -len(parts[-1]) - 1]
-
-        # group parameters by their determined group name for > 15 parameters
-        if len(parameter_names) <= 15:
-            # for <= 15 parameters, keep the full name of parameters
-            parameters_to_groups = np.array(parameter_names)
-            sort_by_parameter_group = np.arange(len(parameter_names), dtype=int)
-        else:
-            parameters_to_groups = np.array(
-                [
-                    next(
-                        (
-                            group_name
-                            for group_name, group_parameters in self.parameter_groups.items()
-                            if name in group_parameters
-                        ),
-                        automatically_determine_group(name),
-                    )
-                    for name in parameter_names
-                ],
-            )
-
-            unique_group_list, group_inverse, group_counts = np.unique(
-                parameters_to_groups,
-                return_inverse=True,
-                return_counts=True,
-            )
-
-            # join parameter groups that appear only once and are not given in config-file
-            unique_group_list = np.array(
-                [
-                    (unique_group_list[tn] if count > 1 or unique_group_list[tn] in self.parameter_groups else "other")
-                    for tn, count in enumerate(group_counts)
-                ],
-            )
-            parameters_to_groups = unique_group_list[group_inverse]
-            unique_group_list, group_inverse = np.unique(parameters_to_groups, return_inverse=True)
-
-            # sort parameters by groups
-            sort_by_parameter_group = np.argsort(group_inverse, kind="stable")
-
-        # apply new order to parameters
-        sorted_parameter_names = np.array(parameter_names)[sort_by_parameter_group]
-        parameters_to_groups = parameters_to_groups[sort_by_parameter_group]
-        unique_group_list, group_inverse, group_counts = np.unique(
-            parameters_to_groups,
-            return_inverse=True,
-            return_counts=True,
-        )
-
-        # get a color per group and project to parameter list
-        cmap = "tab10" if len(unique_group_list) <= 10 else "tab20"
-        if len(unique_group_list) > 20:
-            LOGGER.warning("More than 20 groups detected, but colormap has only 20 colors.")
-        # if all groups have count 1 use black color
-        bar_color_per_group = (
-            np.tile("k", len(group_counts))
-            if not np.any(group_counts - 1)
-            else plt.get_cmap(cmap)(np.linspace(0, 1, len(unique_group_list)))
-        )
-
-        # set x-ticks
-        x_tick_positions = np.cumsum(group_counts) - group_counts / 2 - 0.5
-        xticks = dict(zip(unique_group_list, x_tick_positions, strict=False))
-
-        legend_patches = []
-        for group_idx, group in enumerate(unique_group_list):
-            text_label = f"{group}: "
-            string_length = len(text_label)
-            for ii in np.where(group_inverse == group_idx)[0]:
-                text_label += sorted_parameter_names[ii] + ", "
-                string_length += len(sorted_parameter_names[ii]) + 2
-                if string_length > 50:
-                    # linebreak after 50 characters
-                    text_label += "\n"
-                    string_length = 0
-            legend_patches.append(mpatches.Patch(color=bar_color_per_group[group_idx], label=text_label[:-2]))
-
-        return (
-            sort_by_parameter_group,
-            bar_color_per_group[group_inverse],
-            xticks,
-            legend_patches,
-        )
+        self.plotter = LossPlotter(parameter_groups=parameter_groups)
 
     @rank_zero_only
     def _plot(
@@ -738,12 +542,6 @@ class PlotLoss(BasePerBatchPlotCallback):
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
             metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
 
-            # Sort the list using the custom key
-            argsort_indices = argsort_variablename_variablelevel(
-                parameter_names,
-                metadata_variables=metadata_variables,
-            )
-            parameter_names = [parameter_names[i] for i in argsort_indices]
             if not isinstance(self.loss[dataset_name], BaseLoss):
                 LOGGER.warning(
                     "Loss function must be a subclass of BaseLoss, or provide `squash`.",
@@ -759,11 +557,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 y_true = y_time.index_select(-1, var_idx)
                 loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
 
-                sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
-                    parameter_names,
-                )
-                loss = loss[argsort_indices]
-                fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
+                fig = self.plotter.plot(parameter_names, loss, metadata_variables=metadata_variables)
 
                 self._output_figure(
                     logger,
@@ -836,14 +630,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             dataset_names=dataset_names,
             plotting_settings=plotting_settings,
         )
+        self.focus_area = focus_area
 
-        # Build focus mask
-        self.focus_mask = build_spatial_mask(
-            node_attribute_name=focus_area.get("mask_attr_name", None) if focus_area is not None else None,
-            latlon_bbox=focus_area.get("latlon_bbox", None) if focus_area is not None else None,
-            name=focus_area.get("name", None) if focus_area is not None else None,
-        )
-
+    # !TODO - dicsuss with Vera where this should leave
     def process(
         self,
         pl_module: pl.LightningModule,
@@ -933,7 +722,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         accumulation_levels_plot: list[float],
         output_steps: int,
         precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str, Colormap] | None = None,
+        colormaps: dict[str, CustomColormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -954,7 +743,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
-        colormaps : dict[str, Colormap] | None, optional
+        colormaps : dict[str, CustomColormap] | None, optional
             Dictionary of colormaps, by default None
         per_sample : int, optional
             Number of plots per sample, by default 6
@@ -975,16 +764,20 @@ class PlotSample(BasePlotAdditionalMetrics):
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
-
-        self.precip_and_related_fields = precip_and_related_fields
-        self.accumulation_levels_plot = accumulation_levels_plot
         self.output_steps = output_steps
-        self.per_sample = per_sample
-        self.colormaps = colormaps
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
-            self.precip_and_related_fields,
+            precip_and_related_fields,
+        )
+        self.plotter = SamplePlotter(
+            per_sample=per_sample,
+            accumulation_levels_plot=accumulation_levels_plot,
+            precip_and_related_fields=precip_and_related_fields,
+            colormaps=colormaps,
+            datashader=self.datashader_plotting,
+            projection_kind=self.projection_kind,
+            focus_area=focus_area,
         )
 
     @rank_zero_only
@@ -1018,7 +811,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
+            latlons, data, output_tensor = self.plotter.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
                 data,
@@ -1036,19 +829,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                     y_true = None
                 else:
                     x, y_true, y_pred, tag_suffix = item
-                fig = plot_predicted_multilevel_flat_sample(
-                    plot_parameters_dict,
-                    self.per_sample,
-                    latlons,
-                    self.accumulation_levels_plot,
-                    x,
-                    y_true,
-                    y_pred,
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                    projection_kind=self.projection_kind,
-                )
+                fig = self.plotter.plot(plot_parameters_dict, latlons, x, y_true, y_pred)
 
                 self._output_figure(
                     logger,
@@ -1056,10 +837,10 @@ class PlotSample(BasePlotAdditionalMetrics):
                     epoch=epoch,
                     tag=(
                         f"pred_val_sample_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                     exp_log_tag=(
-                        f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                 )
 
@@ -1111,7 +892,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.output_steps = output_steps
-        self.min_delta = min_delta
+        self.plotter = SpectrumPlotter(min_delta=min_delta, focus_area=focus_area)
 
     @rank_zero_only
     def _plot(
@@ -1130,17 +911,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         for dataset_name in dataset_names:
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
-            # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
-
-        for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
-
             # Build dictionary of indices and parameters to be plotted
             input_data = pl_module.data_indices[dataset_name].data.input.todict()
             index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
@@ -1153,6 +923,14 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
+            # Apply spatial mask
+            latlons, data, output_tensor = self.plotter.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
+
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
@@ -1164,14 +942,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     y_true = None
                 else:
                     x, y_true, y_pred, tag_suffix = item
-                fig = plot_power_spectrum(
-                    plot_parameters_dict_spectrum,
-                    latlons,
-                    x,
-                    y_true,
-                    y_pred,
-                    min_delta=self.min_delta,
-                )
+                fig = self.plotter.plot(plot_parameters_dict_spectrum, latlons, x, y_true, y_pred)
 
                 self._output_figure(
                     logger,
@@ -1179,10 +950,10 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     epoch=epoch,
                     tag=(
                         f"pred_val_spec_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                     exp_log_tag=(
-                        f"pred_val_spec_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"pred_val_spec_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                 )
 
@@ -1238,12 +1009,15 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
         self.output_steps = output_steps
-        self.precip_and_related_fields = precip_and_related_fields
-        self.log_scale = log_scale
 
         LOGGER.info(
             "Using precip histogram plotting method for fields: %s.",
-            self.precip_and_related_fields,
+            precip_and_related_fields,
+        )
+        self.plotter = HistogramPlotter(
+            precip_and_related_fields=precip_and_related_fields,
+            log_scale=log_scale,
+            focus_area=focus_area,
         )
 
     @rank_zero_only
@@ -1270,7 +1044,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
             diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
+            _, data, output_tensor = self.plotter.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
                 data,
@@ -1296,14 +1070,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     y_true = None
                 else:
                     x, y_true, y_pred, tag_suffix = item
-                fig = plot_histogram(
-                    plot_parameters_dict_histogram,
-                    x,
-                    y_true,
-                    y_pred,
-                    self.precip_and_related_fields,
-                    self.log_scale,
-                )
+                fig = self.plotter.plot(plot_parameters_dict_histogram, x, y_true, y_pred)
 
                 self._output_figure(
                     logger,
@@ -1311,9 +1078,9 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     epoch=epoch,
                     tag=(
                         f"pred_val_histo_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                     exp_log_tag=(
-                        f"pred_val_histo_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"pred_val_histo_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.plotter.focus_mask.tag}"
                     ),
                 )

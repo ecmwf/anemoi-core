@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import datashader as dsh
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -70,12 +69,12 @@ def _compute_main_norm(
 
 def single_plot(
     fig: Figure,
-    ax: plt.axes,
-    lon: np.array,
-    lat: np.array,
-    data: np.array,
+    ax: plt.Axes,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    data: np.ndarray,
     cmap: Colormap | None = None,
-    norm: str | None = None,
+    norm: Normalize | None = None,
     title: str | None = None,
     datashader: bool = False,
     transform: object | None = None,
@@ -289,6 +288,8 @@ def plot_flat_sample(
         if truth is not None:
             norms[5] = norm_error
     else:
+        data[0] = None
+        data[4] = None
         ax[0].axis("off")
         ax[4].axis("off")
         ax[5].axis("off")
@@ -310,7 +311,7 @@ def plot_flat_sample(
 
 
 def plot_predicted_multilevel_flat_sample(
-    parameters: dict[str, int],
+    parameters: dict[int, tuple[str, bool]],
     n_plots_per_sample: int,
     latlons: np.ndarray,
     clevels: float,
@@ -329,7 +330,7 @@ def plot_predicted_multilevel_flat_sample(
 
     Parameters
     ----------
-    parameters : dict
+    parameters : dict[int, tuple[str, bool]]
         Variable index -> (variable_name, diagnostic_only).
     n_plots_per_sample : int
         Number of plots per sample
@@ -370,7 +371,7 @@ def plot_predicted_multilevel_flat_sample(
     if colormaps is None:
         colormaps = {}
 
-    for plot_idx, (variable_idx, (variable_name, diagnostic_only)) in enumerate[tuple[str, int]](parameters.items()):
+    for plot_idx, (variable_idx, (variable_name, diagnostic_only)) in enumerate(parameters.items()):
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * (0 if diagnostic_only else 1)
         yt = (
             (y_true.reshape(-1) if y_true.ndim == 1 else y_true[..., variable_idx].reshape(-1))
@@ -379,12 +380,11 @@ def plot_predicted_multilevel_flat_sample(
         )
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
-        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+        cmap = colormaps["default"].get_cmap() if colormaps.get("default") else plt.colormaps["viridis"]
+        error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else plt.colormaps["bwr"]
         for key in colormaps:
             if key not in ["default", "error"] and variable_name in colormaps[key].variables:
                 cmap = colormaps[key].get_cmap()
-                continue
 
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
         plot_flat_sample(

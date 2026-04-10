@@ -20,12 +20,12 @@ def plot_loss(
     xticks: dict[str, int] | None = None,
     legend_patches: list | None = None,
 ) -> Figure:
-    """Plots data for one multilevel sample.
+    """Plots per-variable loss as a grouped, coloured bar chart.
 
     Parameters
     ----------
     x : np.ndarray
-        Data for Plotting of shape (npred,)
+        Per-variable loss values of shape (npred,)
     colors : np.ndarray
         Colors for the bars.
     xticks : dict, optional

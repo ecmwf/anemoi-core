@@ -11,7 +11,7 @@
 from abc import ABC
 from abc import abstractmethod
 
-import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 from matplotlib.colors import Colormap
 from matplotlib.colors import ListedColormap
 
@@ -53,9 +53,9 @@ class MatplotlibColormap(CustomColormap):
         """
         super().__init__(variables)
         self.name = name
-        self.colormap = cm.get_cmap(self.name)
+        self.colormap = plt.colormaps[self.name]
 
-    def get_cmap(self) -> cm:
+    def get_cmap(self) -> Colormap:
         return self.colormap
 
 
@@ -102,5 +102,5 @@ class DistinctipyColormap(CustomColormap):
         self.n_colors = n_colors
         self.colormap = distinctipy.get_colormap(distinctipy.get_colors(n_colors, colorblind_type=colorblind_type))
 
-    def get_cmap(self) -> cm:
+    def get_cmap(self) -> Colormap:
         return self.colormap

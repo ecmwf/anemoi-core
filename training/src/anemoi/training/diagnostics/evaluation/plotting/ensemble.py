@@ -9,7 +9,6 @@
 
 import logging
 
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import BoundaryNorm
@@ -212,7 +211,8 @@ def plot_predicted_ensemble(
     parameters : Dict[int, str]
         Dictionary of target variables
     n_plots_per_sample : int
-        Number of plots per sample
+        Number of fixed panels per variable row (target, pred mean, mean error, ens sd = 4).
+        Ensemble member panels are added on top of this count.
     latlons : np.ndarray
         Latitudes and longitudes
     clevels : float
@@ -237,7 +237,6 @@ def plot_predicted_ensemble(
     """
     nens = y_pred.shape[0] if len(y_pred.shape) == 3 else 1
 
-    n_plots_per_sample = 4  # target, pred mean, mean error, ens sd
     n_plots_x, n_plots_y = len(parameters), nens + n_plots_per_sample
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
@@ -257,12 +256,11 @@ def plot_predicted_ensemble(
         yt = y_true[..., variable_idx].squeeze()
         _axs = axs[plot_idx, :] if n_plots_x > 1 else axs
 
-        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+        cmap = colormaps["default"].get_cmap() if colormaps.get("default") else plt.colormaps["viridis"]
+        error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else plt.colormaps["bwr"]
         for key in colormaps:
             if key not in ["default", "error"] and variable_name in colormaps[key].variables:
                 cmap = colormaps[key].get_cmap()
-                continue
 
         plot_ensemble_sample(
             fig=fig,

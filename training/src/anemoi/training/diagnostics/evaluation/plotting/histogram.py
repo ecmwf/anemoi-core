@@ -15,7 +15,7 @@ from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 
 
 def plot_histogram(
-    parameters: dict[str, int],
+    parameters: dict[int, tuple[str, bool]],
     x: np.ndarray,
     y_true: np.ndarray | None,
     y_pred: np.ndarray,
@@ -30,8 +30,8 @@ def plot_histogram(
 
     Parameters
     ----------
-    parameters : dict[str, int]
-        Dictionary of variable names and indices
+    parameters : dict[int, tuple[str, bool]]
+        Variable index -> (variable_name, diagnostic_only)
     x : np.ndarray
         Input data of shape (lat*lon, nvar*level)
     y_true : np.ndarray or None

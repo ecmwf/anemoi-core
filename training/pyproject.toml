@@ -109,6 +109,7 @@ urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
 urls.Issues = "https://github.com/ecmwf/anemoi-training/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-training/"
+scripts.".anemoi-training-evaluate" = "anemoi.training.commands.evaluate:main"
 # command for interactive DDP (not supposed to be used directly)
 # the dot is intentional, so it doesn't trigger autocomplete
 # Files need to be named profiler due to A005 Module `profile` is shadowing a Python builtin module
