@@ -66,7 +66,6 @@ Task-specific plot adapters normalize output handling so plotting
 callbacks can use the same interface across task types:
 
 - forecaster tasks use ``ForecasterPlotAdapter``;
-- diffusion tasks use ``DiffusionPlotAdapter``;
 - autoencoder tasks use ``AutoencoderPlotAdapter``;
 - temporal downscaler tasks use ``TemporalDownscalerPlotAdapter``.
 
