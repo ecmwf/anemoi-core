@@ -30,7 +30,7 @@ def test_forecaster_adapter(rollout_steps: int) -> None:
     batch = torch.randn(4, 1, 1000, 12)  # (time, ens, grid, vars)
     pred = torch.randn(2, 1, 1000, 12) # (time, ens, grid, vars)
 
-    x, y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, None))
+    x, y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, adapter.output_times))
     assert isinstance(x, torch.Tensor)
     assert isinstance(y_true, torch.Tensor)
     assert isinstance(y_pred, torch.Tensor)
