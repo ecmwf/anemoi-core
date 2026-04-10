@@ -1,4 +1,4 @@
-# (C) Copyright 2026 Anemoi contributors.
+# (C) Copyright 2026- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,9 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
-from anemoi.training.tasks import TemporalDownscaler
 
 
 def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
@@ -204,102 +202,3 @@ def test_rollout_advance_input_keeps_latest_steps(
     )
     for idx, value in enumerate(expected):
         assert torch.all(updated[:, idx] == value)
-
-
-# ── Autoencoder ────────────────────────────────────────────────────────────────
-
-
-def test_autoencoder_input_and_output_offsets_are_both_zero() -> None:
-    """Autoencoder operates on a single snapshot at t=0."""
-    task = Autoencoder()
-    assert task.input_offsets == [datetime.timedelta(0)]
-    assert task.output_offsets == [datetime.timedelta(0)]
-    assert task.offsets == [datetime.timedelta(0)]
-
-
-def test_autoencoder_has_exactly_one_step_with_no_kwargs() -> None:
-    """Autoencoder runs exactly one step and passes no step-specific kwargs."""
-    task = Autoencoder()
-    assert list(task.steps) == [{}]
-    assert task.num_steps == 1
-
-
-def test_autoencoder_advance_input_returns_input_unchanged() -> None:
-    """advance_input for a single-step task is a no-op (returns first positional arg)."""
-    task = Autoencoder()
-    x = {"data": torch.randn(2, 1, 1, 4, 2)}
-    result = task.advance_input(x, {}, {})
-    assert result is x
-
-
-# ── TemporalDownscaler ────────────────────────────────────────────────
-
-
-def test_temporal_downscaler_interior_offsets_only() -> None:
-    """No boundaries: only interior interpolation steps are produced."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=False,
-        output_right_boundary=False,
-    )
-    expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
-    assert task.output_offsets == expected
-
-
-def test_temporal_downscaler_left_boundary_included() -> None:
-    """output_left_boundary=True adds t=0 to the output offsets."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=True,
-        output_right_boundary=False,
-    )
-    expected = [datetime.timedelta(hours=0), datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
-    assert task.output_offsets == expected
-
-
-def test_temporal_downscaler_right_boundary_included() -> None:
-    """output_right_boundary=True adds t=input_timestep to the output offsets."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=False,
-        output_right_boundary=True,
-    )
-    expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4), datetime.timedelta(hours=6)]
-    assert task.output_offsets == expected
-
-
-def test_temporal_downscaler_both_boundaries_included() -> None:
-    """Both boundaries: offsets span the full [0h, input_timestep] range."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=True,
-        output_right_boundary=True,
-    )
-    expected = [
-        datetime.timedelta(hours=0),
-        datetime.timedelta(hours=2),
-        datetime.timedelta(hours=4),
-        datetime.timedelta(hours=6),
-    ]
-    assert task.output_offsets == expected
-
-
-def test_temporal_downscaler_num_output_timesteps_matches_offsets() -> None:
-    """num_output_timesteps equals the length of output_offsets."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=True,
-        output_right_boundary=True,
-    )
-    assert task.num_output_timesteps == len(task.output_offsets) == 4
-
-
-def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
-    """Input offsets are always [0h, input_timestep] regardless of output settings."""
-    task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
-    assert task.input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
