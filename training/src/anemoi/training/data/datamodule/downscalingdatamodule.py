@@ -33,6 +33,9 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             allow_pickle=True,
         ).item()
 
+        statistics = list(
+            self.ds_train.statistics
+        )  # to list as statistics is a tuple immutable
         reduced_name_to_index = self.ds_train.name_to_index[2].keys()
         reduced_residual_statistics = {
             "mean": np.array(
@@ -60,10 +63,6 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
                 ]
             ),
         }
-
-        statistics = list(
-            self.ds_train.statistics
-        )  # to list as statistics is a tuple immutable
         statistics[2] = reduced_residual_statistics
         return tuple(statistics)
         # return reduced_residual_statistics

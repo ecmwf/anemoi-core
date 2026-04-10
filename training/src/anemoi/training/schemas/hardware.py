@@ -78,8 +78,6 @@ class PathsSchema(BaseModel):
 class AccelerationsSchema(BaseModel):
     triton_gt: bool = False
     "Use custom Triton kernel for graph transformer attention (requires triton package)."
-    torch_compile: bool = False
-    "Wrap model and hot-path methods in torch.compile(mode='reduce-overhead')."
 
 
 class HardwareSchema(BaseModel):

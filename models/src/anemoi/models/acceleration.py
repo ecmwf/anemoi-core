@@ -14,19 +14,15 @@ Deep model layers (block.py, mapper.py, etc.) read these flags at init/forward t
 """
 
 TRITON_GT_ENABLED: bool = False
-TORCH_COMPILE_ENABLED: bool = False
 
 
-def configure(*, triton_gt: bool = False, torch_compile: bool = False) -> None:
+def configure(*, triton_gt: bool = False) -> None:
     """Set the global acceleration flags.
 
     Parameters
     ----------
     triton_gt : bool
         Enable the custom Triton graph-transformer attention kernel.
-    torch_compile : bool
-        Enable torch.compile wrapping for hot-path methods and the full model.
     """
-    global TRITON_GT_ENABLED, TORCH_COMPILE_ENABLED
+    global TRITON_GT_ENABLED
     TRITON_GT_ENABLED = triton_gt
-    TORCH_COMPILE_ENABLED = torch_compile

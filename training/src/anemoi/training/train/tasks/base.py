@@ -673,6 +673,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             logger=self.logger_enabled,
             batch_size=batch.shape[0],
             sync_dist=True,
+            sync_dist_group=self.model_comm_group,
         )
 
         return train_loss
@@ -721,6 +722,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             logger=self.logger_enabled,
             batch_size=batch.shape[0],
             sync_dist=True,
+            sync_dist_group=self.model_comm_group,
         )
 
         for mname, mvalue in metrics.items():
@@ -733,6 +735,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 logger=self.logger_enabled,
                 batch_size=batch.shape[0],
                 sync_dist=True,
+                sync_dist_group=self.model_comm_group,
             )
 
         return val_loss, y_preds

@@ -36,6 +36,13 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.utils.config import DotDict
 
+try:
+    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.utils import edge_index_to_csc
+except ImportError:
+    GraphTransformerFunction = None
+    edge_index_to_csc = None
+
 LOGGER = logging.getLogger(__name__)
 
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/66)
@@ -472,8 +479,14 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.k_norm = layer_kernels.KeyNorm(self.out_channels_conv)
 
         from anemoi.models import acceleration as _accel
-        if not _accel.TRITON_GT_ENABLED:
-            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+        self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
+        self.use_triton_gt = _accel.TRITON_GT_ENABLED and GraphTransformerFunction is not None
+
+        if _accel.TRITON_GT_ENABLED and GraphTransformerFunction is None:
+            LOGGER.warning(
+                "hardware.accelerations.triton_gt=True requested but Triton support is not "
+                "available; falling back to the default PyG graph transformer path."
+            )
 
         self.projection = Linear(out_channels, out_channels)
 
@@ -559,11 +572,20 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
 
-        from anemoi.models import acceleration as _accel
-        if _accel.TRITON_GT_ENABLED:
-            from anemoi.models.triton.gt import GraphTransformerFunction
-            from anemoi.models.triton.utils import edge_index_to_csc
-            csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
+        if (
+            self.use_triton_gt
+            and isinstance(edge_index, torch.Tensor)
+            and query.is_cuda
+            and key.is_cuda
+            and value.is_cuda
+            and edges.is_cuda
+            and edge_index.is_cuda
+        ):
+            csc, perm, reverse = edge_index_to_csc(
+                edge_index,
+                num_nodes=conv_size,
+                reverse=True,
+            )
             edges_csc = edges.index_select(0, perm)
             return GraphTransformerFunction.apply(query, key, value, edges_csc, csc, reverse)
 
