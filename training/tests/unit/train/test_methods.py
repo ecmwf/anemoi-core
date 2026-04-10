@@ -327,12 +327,12 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
 
 
-# ── BaseDiffusionForecaster: _compute_loss ─────────────────────────────────────
+# ── BaseDiffusionTraining: _compute_loss ─────────────────────────────────────
 
 
 def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     """DiffusionForecaster._compute_loss passes noise weights to the loss function."""
-    module = MagicMock(spec=BaseDiffusionForecaster)
+    module = MagicMock(spec=BaseDiffusionTraining)
     loss = CaptureLoss()
     group = object()
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
@@ -348,7 +348,7 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    result = BaseDiffusionForecaster._compute_loss(
+    result = BaseDiffusionTraining._compute_loss(
         module,
         y_pred=y_pred,
         y=y,
@@ -367,7 +367,7 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
 
 def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     """DiffusionForecaster._compute_loss adds shard layout when loss.needs_shard_layout_info."""
-    module = MagicMock(spec=BaseDiffusionForecaster)
+    module = MagicMock(spec=BaseDiffusionTraining)
     loss = ShardingAwareCaptureLoss()
     group = object()
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
@@ -383,7 +383,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    BaseDiffusionForecaster._compute_loss(
+    BaseDiffusionTraining._compute_loss(
         module,
         y_pred=y_pred,
         y=y,
