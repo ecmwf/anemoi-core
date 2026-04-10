@@ -97,6 +97,43 @@ the end of each epoch via ``on_train_epoch_end``.
    :no-undoc-members:
    :show-inheritance:
 
+
+Multistep Input and Output
+==========================
+
+The forecaster task uses ``multistep_input`` and ``multistep_output`` to control how many time
+steps the model injests as input and predicts in a single forward pass.
+
+-  ``multistep_input``: number of past timesteps provided as model input. When set to 1, only `t_{0}` is used.
+-  ``multistep_output``: number of future timesteps predicted per forward pass.
+
+Set ``multistep_output`` greater than 1 to enable multi-output prediction. This
+reduces the number of forward passes needed to cover a rollout horizon.
+
+Example:
+
+.. code:: yaml
+
+  task:
+    _target_: anemoi.training.tasks.Forecaster
+    multistep_input: 3
+    multistep_output: 2
+    timestep: "6H"
+    rollout:
+      start: 1
+      epoch_increment: 1
+      maximum: 6
+
+
+Rollout behavior:
+
+-  When time indices are inferred, the dataloader uses
+   ``multistep_input + rollout * multistep_output`` to determine how many timesteps
+   to load.
+-  If ``multistep_output`` is greater than ``multistep_input``, only the most recent
+   ``multistep_input`` outputs are fed into the next rollout step.
+
+
 *********************
  TemporalDownscaler
 *********************
