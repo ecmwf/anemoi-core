@@ -14,8 +14,8 @@ import logging
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-from anemoi.training import diagnostics
-from anemoi.training.diagnostics.projections import Projection
+import anemoi.training.diagnostics.evaluation.geospatial as _geospatial_pkg
+from anemoi.training.diagnostics.evaluation.geospatial.projections import Projection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class Coastlines:
                 msg = "Please install importlib_resources on Python <=3.8."
                 raise ModuleNotFoundError(msg) from e
 
-        self.continents_file = files(diagnostics) / "continents.json"
+        self.continents_file = files(_geospatial_pkg) / "continents.json"
         with self.continents_file.open("rt") as file:
             self.data = json.load(file)
 
@@ -92,7 +92,7 @@ class Borders:
                 raise ModuleNotFoundError(msg) from e
 
         # Assuming the file is placed in the same directory as 'continents.json'
-        self.borders_file = files(diagnostics) / "countries.geo.json"
+        self.borders_file = files(_geospatial_pkg) / "countries.geo.json"
         with self.borders_file.open("rt") as file:
             self.data = json.load(file)
 

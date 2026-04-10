@@ -31,15 +31,15 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.training.diagnostics.focus_area import build_spatial_mask
-from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
-from anemoi.training.diagnostics.plots import init_plot_settings
-from anemoi.training.diagnostics.plots import plot_graph_edge_features
-from anemoi.training.diagnostics.plots import plot_graph_node_features
-from anemoi.training.diagnostics.plots import plot_histogram
-from anemoi.training.diagnostics.plots import plot_loss
-from anemoi.training.diagnostics.plots import plot_power_spectrum
-from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
+from anemoi.training.diagnostics.evaluation.plotting.plots import argsort_variablename_variablelevel
+from anemoi.training.diagnostics.evaluation.plotting.plots import init_plot_settings
+from anemoi.training.diagnostics.evaluation.plotting.plots import plot_graph_edge_features
+from anemoi.training.diagnostics.evaluation.plotting.plots import plot_graph_node_features
+from anemoi.training.diagnostics.evaluation.plotting.plots import plot_histogram
+from anemoi.training.diagnostics.evaluation.plotting.plots import plot_loss
+from anemoi.training.diagnostics.evaluation.plotting.plots import plot_power_spectrum
+from anemoi.training.diagnostics.evaluation.plotting.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 
