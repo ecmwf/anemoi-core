@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .forecasting import Forecaster
-from .temporal_downscaling import TemporalDownscaler
+from .forecaster import Forecaster
+from .temporal_downscaler import TemporalDownscaler
 from .timeless import Autoencoder
 
 __all__ = [

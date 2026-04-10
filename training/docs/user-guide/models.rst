@@ -2,19 +2,9 @@
  Models
 ########
 
-The user can pick between different model tasks and types when using
+The user can pick between different model types when using
 anemoi-training:
 
-**Model Tasks:**
-
-#. Deterministic Forecasting (GraphForecaster)
-#. Ensemble Forecasting (GraphEnsForecaster)
-#. Time Interpolation (GraphMultiOutInterpolator)
-#. Diffusion-based Forecasting (GraphDiffusionForecaster)
-
-The model tasks specify the training objective and are specified in the
-configuration through ``training.training_method``. They are our
-`LightningModules <https://lightning.ai/docs/pytorch/lightning.html>`_.
 
 **Model Types:**
 
@@ -34,10 +24,6 @@ For a more detailed read on connections in Graph Neural Networks,
 For detailed instructions on creating models, see the
 :ref:`anemoi-models:usage-create-model`.
 
-.. note::
-
-   Currently, the GNN model type is not supported with the Ensemble
-   Forecasting model task and the Diffusion Forecasting model task.
 
 ************
  Processors

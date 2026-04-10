@@ -214,6 +214,11 @@ also possible for users to add callbacks using the same structure:
    :no-undoc-members:
    :show-inheritance:
 
+.. automodule:: anemoi.training.diagnostics.callbacks.plot_adapter
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
 .. automodule:: anemoi.training.diagnostics.callbacks.provenance
    :members:
    :no-undoc-members:
