@@ -233,9 +233,19 @@ training:
   swa:
     enabled: false
     lr: 0.0001
-  optimizer:
-    _target_: torch.optim.AdamW # or anemoi.training.optimizers.AdEMAMix.AdEMAMix
-    betas: [0.9, 0.95]
+  optimization:
+    lr: 6.25e-05
+    optimizer:
+      _target_: torch.optim.AdamW
+      betas: [0.9, 0.95]
+    lr_scheduler:
+      _target_: timm.scheduler.CosineLRScheduler
+      lr_min: 3.0e-7
+      t_initial: 300000
+      warmup_t: 1000
+      t_in_epochs: false
+    pl_lr_scheduler:
+      interval: step
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
@@ -243,11 +253,6 @@ training:
     read_group_size: ${dataloader.read_group_size}
   loss_gradient_scaling: False
   max_epochs: 1
-  lr:
-    rate: 6.25e-05
-    iterations: 300000
-    min: 3.0e-07
-    warmup: 1000
   scalers:
     datasets:
       data:

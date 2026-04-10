@@ -486,17 +486,18 @@ class AnemoiTrainer(ABC):
         )
         LOGGER.info(
             "Effective learning rate: %.3e",
-            int(total_number_of_model_instances) * self.config.training.lr.rate,
+            int(total_number_of_model_instances) * self.config.training.optimization.lr,
         )
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
+            lr_scheduler_cfg = getattr(self.config.training.optimization, "lr_scheduler", None)
             LOGGER.info(
                 "Training limits: max_epochs=%d, max_steps=%d. "
                 "Training will stop when either limit is reached first. "
-                "Learning rate scheduler will run for %d steps.",
+                "Learning rate scheduler: %s.",
                 self.config.training.max_epochs,
                 self.config.training.max_steps,
-                self.config.training.lr.iterations,
+                lr_scheduler_cfg or "none",
             )
 
     def _get_server2server_lineage(self) -> None:
