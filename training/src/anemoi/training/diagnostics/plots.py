@@ -63,6 +63,17 @@ def _plot_renderer_mode() -> str:
     return mode
 
 
+def _centered_norm_from_values(values: np.ndarray, quantile: float = 0.995, eps: float = 1.0e-5) -> TwoSlopeNorm:
+    """Build a zero-centered color normalization from a robust near-maximum magnitude."""
+    finite_values = np.asarray(values).reshape(-1)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        limit = eps
+    else:
+        limit = max(eps, float(np.nanquantile(np.abs(finite_values), quantile)))
+    return TwoSlopeNorm(vmin=-limit, vcenter=0.0, vmax=limit)
+
+
 @dataclass
 class LatLonData:
     latitudes: np.ndarray
@@ -644,16 +655,10 @@ def plot_flat_sample(
         data[0] = input_
         data[4] = pred - input_
         data[5] = truth - input_
-        combined_error = np.concatenate(((pred - input_), (truth - input_)))
-        # ensure vcenter is between minimum and maximum error
-        norm_error = TwoSlopeNorm(
-            vmin=min(-0.00001, np.nanmin(combined_error)),
-            vcenter=0.0,
-            vmax=max(0.00001, np.nanmax(combined_error)),
-        )
         norms[0] = norm
-        norms[4] = norm_error
-        norms[5] = norm_error
+        # Use separate robust scales so weak-but-real model increments are not hidden by larger persistence errors.
+        norms[4] = _centered_norm_from_values(data[4])
+        norms[5] = _centered_norm_from_values(data[5])
 
     else:
         # diagnostic fields: omit input and increment plots
