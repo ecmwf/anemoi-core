@@ -29,6 +29,7 @@ from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.diffusion import BaseDiffusionTraining
 from anemoi.training.train.methods.diffusion import DiffusionTraining
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
