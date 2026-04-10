@@ -28,7 +28,7 @@ def test_forecaster_adapter(rollout_steps: int) -> None:
 
     # Example: [-6H, 0H] input, [6H] output. 1 ens member ...
     batch = torch.randn(4, 1, 1000, 12)  # (time, ens, grid, vars)
-    pred = torch.randn(2, 1, 1000, 12) # (time, ens, grid, vars)
+    pred = torch.randn(2, 1, 1000, 12)  # (time, ens, grid, vars)
 
     x, y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, adapter.output_times))
     assert isinstance(x, torch.Tensor)
@@ -53,7 +53,7 @@ def test_temporal_downscaler_adapter() -> None:
     grid_size = 1000
     num_vars = 12
     batch = torch.randn(4, 1, grid_size, num_vars)  # (time, ens, grid, vars)
-    pred = torch.randn(adapter.output_times, 1, grid_size, num_vars) # (time, ens, grid, vars)
+    pred = torch.randn(adapter.output_times, 1, grid_size, num_vars)  # (time, ens, grid, vars)
 
     x, y_true, y_pred, suffix = next(adapter.iter_plot_samples(batch, pred, None))
     assert isinstance(x, torch.Tensor) and x.shape == (grid_size, num_vars)
