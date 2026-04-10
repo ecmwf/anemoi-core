@@ -5,6 +5,7 @@ defaults:
   - system: example
   - graph: encoder_decoder_only
   - model: transformer_ens
+  - task: forecaster
   - training: default
   - _self_
 
@@ -26,7 +27,7 @@ data:
 
 # Changes in training
 training:
-  training_method: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.methods.EnsembleTraining
   ensemble_size_per_device: 4
   max_epochs: 20
 

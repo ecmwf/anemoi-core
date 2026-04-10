@@ -138,8 +138,8 @@ different layer norm in the processor, here the
    :start-after: # Changes in training
    :end-before: # Changes in strategy
 
-The model task is set to
-:class:`anemoi.training.train.tasks.GraphEnsForecaster` for CRPS
+The training method is set to
+:class:`anemoi.training.train.methods.EnsembleTraining` for CRPS
 training to deal with the ensemble members. The number of ensemble
 members per device needs to be specified.
 

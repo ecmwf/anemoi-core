@@ -151,10 +151,10 @@ The training configuration for diffusion models requires changes:
 
    # Select diffusion model task
    # For standard diffusion:
-   training_method: anemoi.training.train.tasks.GraphDiffusionForecaster
+   training_method: anemoi.training.train.methods.DiffusionTraining
 
    # For tendency-based diffusion:
-   training_method: anemoi.training.train.tasks.GraphDiffusionTendForecaster
+   training_method: anemoi.training.train.methods.DiffusionTendTraining
 
    # Standard training configuration remains similar
    multistep_input: 2
@@ -162,7 +162,7 @@ The training configuration for diffusion models requires changes:
      start: 1
      max: 1
 
-The model task must be set to the appropriate diffusion forecaster class
+The training method must be set to the appropriate diffusion training class
 to handle the diffusion-specific forward pass with preconditioning and
 noise injection.
 
@@ -198,7 +198,7 @@ Uses `graphtransformer_diffusion.yaml` or `transformer_diffusion.yaml`:
 -  Predicts the denoised state directly
 -  Applies noise to the target state during training
 -  Model class: :class:`AnemoiDiffusionModelEncProcDec`
--  Forecaster: :class:`GraphDiffusionForecaster`
+-  Training method: :class:`DiffusionTraining`
 -  Use single-step rollout (`rollout.max: 1`)
 
 **Tendency-based Diffusion**
@@ -210,7 +210,7 @@ Uses `graphtransformer_diffusiontend.yaml` or
 -  Predicts the tendency (change) between timesteps
 -  Applies noise to the tendency rather than the state
 -  Model class: :class:`AnemoiDiffusionTendModelEncProcDec`
--  Forecaster: :class:`GraphDiffusionTendForecaster`
+-  Training method: :class:`DiffusionTendTraining`
 -  Requires `statistics_tendencies` for normalization
 -  Use single-step rollout (`rollout.max: 1`)
 
@@ -231,12 +231,13 @@ A minimal config file for standard diffusion training:
    - system: example
    - graph: multi_scale
    - model: graphtransformer_diffusion  # Use diffusion model
+   - task: forecaster
    - training: diffusion                 # Use diffusion training config
    - _self_
 
-   # Select model task for diffusion
+   # Select training methodfor diffusion
    training:
-     training_method: anemoi.training.train.tasks.GraphDiffusionForecaster
+     training_method: anemoi.training.train.methods.DiffusionTraining
 
    config_validation: True
 
@@ -251,12 +252,13 @@ For tendency-based diffusion, change the model config and model task:
    - system: example
    - graph: multi_scale
    - model: graphtransformer_diffusiontend  # Use tendency diffusion model
+   - task: forecaster
    - training: diffusion                     # Same training config
    - _self_
 
-   # Select model task for tendency-based diffusion
+   # Select training method for tendency-based diffusion
    training:
-     training_method: anemoi.training.train.tasks.GraphDiffusionTendForecaster
+     training_method: anemoi.training.train.methods.DiffusionTendTraining
 
    # Ensure statistics_tendencies are available
    config_validation: True
