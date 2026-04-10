@@ -339,19 +339,19 @@ def test_process_forecaster_output_shapes():
         accumulation_levels_plot=[0.5],
         dataset_names=["data"],
     )
-    batch_size, sample_idx, n_ens, nlatlon, nvar = 2, 10, 1, 50, 3
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
     n_step_input = 1
     n_step_output = 1
     output_times = 2
     total_targets = output_times * n_step_output  # 2
-    # Input slice: n_step_input - 1 : n_step_input + total_targets + 1 -> 0:4
+    n_time = 1 + total_targets + 1  # 4 time steps in the batch
     pl_module = _make_pl_module_forecaster(
         n_step_input=n_step_input,
         n_step_output=n_step_output,
         output_times=output_times,
         nlatlon=nlatlon,
     )
-    batch = {"data": torch.randn(batch_size, sample_idx, n_ens, nlatlon, nvar)}
+    batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
     # outputs: (loss, [pred_0, pred_1, ...]); each pred[dataset] (bs, n_step_output, ens, latlon, nvar)
     outputs = (
         torch.tensor(0.0),
@@ -381,14 +381,15 @@ def test_process_temporal_downscaler_output_shapes():
         accumulation_levels_plot=[0.5],
         dataset_names=["data"],
     )
-    batch_size, sample_idx, n_ens, nlatlon, nvar = 2, 10, 1, 50, 3
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
     output_times = 2
     total_targets = output_times  # no n_step_output factor for temporal downscaler
+    n_time = 1 + total_targets + 1  # 4 time steps in the batch
     pl_module = _make_pl_module_temporal_downscaler(
         output_times=output_times,
         nlatlon=nlatlon,
     )
-    batch = {"data": torch.randn(batch_size, sample_idx, n_ens, nlatlon, nvar)}
+    batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
     outputs = (
         torch.tensor(0.0),
         [
@@ -519,13 +520,17 @@ def test_plot_loss_temporal_downscaler():
     pl_module.data_indices["data"].model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
     pl_module.data_indices["data"].data.output.full = torch.arange(nvar)
     pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
-    batch_size, sample_idx, nlatlon = 2, 4, 10
-    batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
+    batch_size, nlatlon = 2, 10
+    n_time = 4
+    batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     outputs = (
         torch.tensor(0.0),
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
+    pl_module.task.steps = [{}]
+    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}
+    pl_module.task.get_metric_name.return_value = ""
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
@@ -576,14 +581,17 @@ def test_plot_loss_diffusion():
     pl_module.data_indices["data"].data.output.full = torch.arange(nvar)
     pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
     batch_size, nlatlon = 2, 10
-    sample_idx = n_step_input + n_step_output + 1
-    batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
+    n_time = n_step_input + n_step_output + 1
+    batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     # Single output (no rollout)
     outputs = (
         torch.tensor(0.0),
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
+    pl_module.task.steps = [{}]
+    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
+    pl_module.task.get_metric_name.return_value = ""
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
@@ -637,14 +645,17 @@ def test_plot_loss_forecaster():
     pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
     batch_size, nlatlon = 2, 10
     # Batch needs at least n_step_input + output_times * n_step_output time steps
-    sample_idx = n_step_input + output_times * n_step_output + 1
-    batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
+    n_time = n_step_input + output_times * n_step_output + 1
+    batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     # One prediction per rollout step
     outputs = (
         torch.tensor(0.0),
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
     )
     callback.loss = {"data": MSELoss()}
+    pl_module.task.steps = [{} for _ in range(output_times)]
+    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
+    pl_module.task.get_metric_name.return_value = ""
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
