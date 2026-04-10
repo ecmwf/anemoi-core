@@ -17,7 +17,7 @@ from anemoi.training.tasks import TemporalDownscaler
 
 @pytest.mark.parametrize("rollout_steps", [1, 6, 12])
 def test_forecaster_adapter(rollout_steps: int) -> None:
-    """Forecaster plot_adapter"""
+    """Forecaster plot_adapter."""
     rollout = {"start": 1, "epoch_increment": 1, "maximum": rollout_steps}
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6H", rollout=rollout)
 
@@ -39,7 +39,7 @@ def test_forecaster_adapter(rollout_steps: int) -> None:
 
 
 def test_temporal_downscaler_adapter() -> None:
-    """TemporalDownscaler plot_adapter"""
+    """TemporalDownscaler plot_adapter."""
     task = TemporalDownscaler(input_timestep="6H", output_timestep="3H", output_left_boundary=True)
 
     adapter = task._plot_adapter
@@ -60,7 +60,7 @@ def test_temporal_downscaler_adapter() -> None:
 
 
 def test_autoencoder_adapter() -> None:
-    """Autoencoder plot_adapter"""
+    """Autoencoder plot_adapter."""
     task = Autoencoder()
 
     adapter = task._plot_adapter

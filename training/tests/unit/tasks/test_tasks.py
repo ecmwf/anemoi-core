@@ -171,12 +171,6 @@ def test_forecaster_plot_adapter_output_times_for_multi_output() -> None:
     assert task._plot_adapter.output_times == 2
 
 
-def test_forecaster_plot_adapter_get_init_step_returns_minus_one() -> None:
-    """ForecasterPlotAdapter.get_init_step() returns -1 (last input time step)."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
-    assert task._plot_adapter.get_init_step() == -1
-
-
 # ── Forecaster: _advance_dataset_input ────────────────────────────────────────
 
 
@@ -341,14 +335,3 @@ def test_temporal_downscaler_plot_adapter_output_times() -> None:
         output_right_boundary=True,
     )
     assert task._plot_adapter.output_times == 4
-
-
-def test_temporal_downscaler_plot_adapter_get_init_step_is_zero() -> None:
-    """TemporalDownscalerPlotAdapter.get_init_step() returns 0 (first input step)."""
-    task = TemporalDownscaler(
-        input_timestep="6h",
-        output_timestep="2h",
-        output_left_boundary=True,
-        output_right_boundary=True,
-    )
-    assert task._plot_adapter.get_init_step() == 0

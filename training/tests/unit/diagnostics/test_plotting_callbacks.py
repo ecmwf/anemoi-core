@@ -204,7 +204,7 @@ def _make_pl_module_forecaster(
     output_times=2,
     nlatlon=50,
 ) -> MagicMock:
-    """Mock pl_module for forecaster task: get_init_step always 0, output_times as given."""
+    """Mock pl_module for forecaster task: output_times as given."""
     pl_module = MagicMock()
     pl_module.task_type = "forecaster"
     pl_module.local_rank = 0
@@ -270,7 +270,7 @@ def _make_pl_module_forecaster(
 
 
 def _make_pl_module_temporal_downscaler(*, output_times=2, nlatlon=50) -> MagicMock:
-    """Mock pl_module for temporal downscaler: get_init_step(rollout_step)==rollout_step."""
+    """Mock pl_module for temporal downscaler."""
     pl_module = MagicMock()
     pl_module.task_type = "temporal_downscaler"
     pl_module.local_rank = 0
@@ -749,7 +749,6 @@ def test_plot_spectrum_forecaster():
         nlatlon=nlatlon,
     )
     pl_module.task_type = "forecaster"  # PlotSpectrum checks "forecast" in code
-    pl_module.get_init_step = lambda _: 0
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
@@ -848,7 +847,6 @@ def test_plot_histogram_forecaster():
         n_step_output=n_step_output,
         nlatlon=nlatlon,
     )
-    pl_module.get_init_step = lambda _: 0
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
