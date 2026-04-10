@@ -495,7 +495,6 @@ def test_training_module_plot_adapter_delegates_to_task() -> None:
     pl.LightningModule.__init__(module)
     module.task = task
     assert module.plot_adapter is task._plot_adapter
-    assert module.plot_adapter.output_times == 1
 
 
 def test_training_module_plot_adapter_reflects_forecaster_task() -> None:
@@ -505,7 +504,6 @@ def test_training_module_plot_adapter_reflects_forecaster_task() -> None:
     pl.LightningModule.__init__(module)
     module.task = task
     assert module.plot_adapter is task._plot_adapter
-    assert module.plot_adapter.output_times == 2
 
 
 # ── SingleTraining._step integration ──────────────────────────────────────────

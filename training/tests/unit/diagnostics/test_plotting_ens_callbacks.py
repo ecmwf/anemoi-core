@@ -88,7 +88,6 @@ def test_ensemble_plot_mixin_process():
     pl_module.n_step_input = 2
     pl_module.n_step_output = 1
     pl_module.plot_adapter = MagicMock()
-    pl_module.plot_adapter.output_times = 3
     pl_module.plot_adapter.get_total_plot_targets.return_value = 3
     pl_module.plot_adapter.prepare_plot_output_tensor.side_effect = lambda x: x
     pl_module.model.model._graph_name_data = "x"

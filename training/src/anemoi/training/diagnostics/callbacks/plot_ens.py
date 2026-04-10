@@ -287,7 +287,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl_module.plot_adapter.output_times,
+                pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     y_true, y_pred, tag_suffix = item[0], item[1], item[2]

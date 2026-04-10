@@ -32,13 +32,7 @@ class BasePlotAdapter(ABC):
     def __init__(self, task: BaseTask) -> None:
         self._task = task
 
-    @property
-    def output_times(self) -> int:
-        """Number of rollout/outer steps for plotting."""
-        return self._task.num_output_timesteps
-
-    def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        del rollout_step
+    def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:

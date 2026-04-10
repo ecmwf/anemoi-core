@@ -895,7 +895,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl_module.plot_adapter.output_times,
+                pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
@@ -1011,7 +1011,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl_module.plot_adapter.output_times,
+                pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
@@ -1129,7 +1129,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             for item in pl_module.plot_adapter.iter_plot_samples(
                 data,
                 output_tensor,
-                pl_module.plot_adapter.output_times,
+                pl_module.task.num_output_timesteps,
             ):
                 if len(item) == 3:
                     x, y_pred, tag_suffix = item
