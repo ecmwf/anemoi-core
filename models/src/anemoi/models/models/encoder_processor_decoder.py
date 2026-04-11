@@ -35,7 +35,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
+        for dataset_name in self.encoded_dataset_names:
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
@@ -241,6 +241,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
+
+            if dataset_name not in self.encoded_dataset_names:
+                continue
 
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
                 dataset_name
