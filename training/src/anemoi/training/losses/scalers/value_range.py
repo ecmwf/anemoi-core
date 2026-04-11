@@ -177,14 +177,21 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
 
         if not self._logged_first_batch:
             unique_weights = torch.unique(variable_weights.detach().cpu()).tolist()
+            bucket_counts = {
+                str(float(weight)): int((variable_weights == weight).sum().detach().cpu())
+                for weight in self.range_weight_factors
+            }
+            total_count = int(variable_weights.numel())
             LOGGER.info(
-                "%s applied for variable=%s dataset=%s raw_target_range=[%.3f, %.3f] unique_range_weights=%s",
+                "%s applied for variable=%s dataset=%s raw_target_range=[%.3f, %.3f] unique_range_weights=%s bucket_counts=%s total_count=%d",
                 self.__class__.__name__,
                 self.variable,
                 dataset_name,
                 float(raw_target.min().detach().cpu()),
                 float(raw_target.max().detach().cpu()),
                 unique_weights,
+                bucket_counts,
+                total_count,
             )
             self._logged_first_batch = True
 
