@@ -26,7 +26,8 @@ data:
           config:
             default: "mean-std"
             std: []
-            min-max: []
+            min-max:
+              - refc
             max: []
             none:
               - landcover
@@ -131,7 +132,7 @@ training:
         refc_range_weight_factors:
           _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
           variable: refc
-          normalization: mean-std
+          normalization: min-max
           thresholds: [5.0, 20.0, 40.0]
           range_weight_factors: [5, 20, 40, 80]
   metrics:
