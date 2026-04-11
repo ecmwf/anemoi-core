@@ -134,7 +134,7 @@ training:
           variable: refc
           normalization: min-max
           thresholds: [5.0, 20.0, 40.0]
-          range_weight_factors: [5, 20, 40, 80]
+          range_weight_factors: [0.1, 20, 40, 80]
   metrics:
     datasets:
       data:
