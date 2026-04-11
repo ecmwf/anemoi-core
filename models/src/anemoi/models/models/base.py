@@ -62,10 +62,10 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self.encoded_dataset_names = self.dataset_names
-        if hasattr(model_config.model, "encoded_dataset_names") and model_config.model.encoded_dataset_names is not None:
-            self.encoded_dataset_names = model_config.model.encoded_dataset_names
 
         model_config = DotDict(model_config)
+        if hasattr(model_config.model, "encoded_dataset_names") and model_config.model.encoded_dataset_names is not None:
+            self.encoded_dataset_names = model_config.model.encoded_dataset_names
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.n_step_input = model_config.training.multistep_input
