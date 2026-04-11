@@ -11,8 +11,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from torch.utils.checkpoint import checkpoint
-
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
 
 if TYPE_CHECKING:
@@ -80,13 +78,11 @@ class GraphForecaster(BaseRolloutGraphModule):
                 y[dataset_name] = y_time.index_select(-1, var_idx)
             # y includes the auxiliary variables, so we must leave those out when computing the loss
             # Compute loss for each dataset and sum them up
-            loss, metrics_next, y_pred = checkpoint(
-                self.compute_loss_metrics,
+            loss, metrics_next, y_pred = self.compute_loss_metrics(
                 y_pred,
                 y,
                 step=rollout_step,
                 validation_mode=validation_mode,
-                use_reentrant=False,
             )
 
             # Advance input state for each dataset
