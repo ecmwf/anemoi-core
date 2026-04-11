@@ -139,7 +139,7 @@ class TargetValueRangeScalerSchema(BaseModel):
     "Multiplicative factors for the threshold bins; must have len(thresholds) + 1 entries."
     apply_to: Literal["self", "all"] | list[str] = Field(default="self", example="all")
     "Which output variables receive the multiplicative factors: the reference variable only, all outputs, or a named list."
-    normalization: Literal["mean-std", "std", "none"] = Field(default="mean-std", example="mean-std")
+    normalization: Literal["mean-std", "std", "min-max", "none"] = Field(default="mean-std", example="mean-std")
     "Normalization mode used by the variable so thresholds can be applied in raw units."
     norm: Literal["unit-max", "unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
     "Optional normalization method for the resulting scaler tensor."
