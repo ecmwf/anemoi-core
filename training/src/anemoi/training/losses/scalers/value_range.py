@@ -37,7 +37,7 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
     -----
     - The thresholds are interpreted in the *raw* variable units.
     - The current implementation assumes the selected variable is normalised
-      with either `mean-std`, `std` or `none`.
+      with either `mean-std`, `std`, `min-max` or `none`.
     """
 
     scale_dims = (TensorDim.BATCH_SIZE, TensorDim.TIME, TensorDim.GRID, TensorDim.VARIABLE)
@@ -79,6 +79,17 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
 
         self.full_var_idx = int(self.data_indices.data.input.name_to_index[variable])
         self.output_var_indices = self._resolve_output_indices(apply_to)
+        self._logged_first_batch = False
+
+        LOGGER.info(
+            "%s configured for variable=%s normalization=%s thresholds=%s range_weight_factors=%s apply_to=%s",
+            self.__class__.__name__,
+            self.variable,
+            self.normalization,
+            self.thresholds,
+            self.range_weight_factors,
+            self.apply_to,
+        )
 
     def _resolve_output_indices(self, apply_to: str | list[str]) -> list[int]:
         """Resolve which model-output variables should receive the range-based factors."""
@@ -108,11 +119,15 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
 
         mean = float(self.statistics["mean"][self.full_var_idx])
         stdev = float(self.statistics["stdev"][self.full_var_idx])
+        minimum = float(self.statistics["minimum"][self.full_var_idx])
+        maximum = float(self.statistics["maximum"][self.full_var_idx])
 
         if self.normalization == "mean-std":
             return values * stdev + mean
         if self.normalization == "std":
             return values * stdev
+        if self.normalization == "min-max":
+            return values * (maximum - minimum) + minimum
 
         msg = f"Unsupported normalization mode for {self.__class__.__name__}: {self.normalization}"
         raise ValueError(msg)
@@ -159,4 +174,18 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         nvars = len(self.data_indices.model.output.full)
         weights = torch.ones((bsz, tlen, grid, nvars), device=variable_weights.device, dtype=torch.float32)
         weights[..., self.output_var_indices] = variable_weights.unsqueeze(-1)
+
+        if not self._logged_first_batch:
+            unique_weights = torch.unique(variable_weights.detach().cpu()).tolist()
+            LOGGER.info(
+                "%s applied for variable=%s dataset=%s raw_target_range=[%.3f, %.3f] unique_range_weights=%s",
+                self.__class__.__name__,
+                self.variable,
+                dataset_name,
+                float(raw_target.min().detach().cpu()),
+                float(raw_target.max().detach().cpu()),
+                unique_weights,
+            )
+            self._logged_first_batch = True
+
         return weights
