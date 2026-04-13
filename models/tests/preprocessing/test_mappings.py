@@ -153,3 +153,32 @@ def test_displace_boundary_atoms_validates_targets() -> None:
         displace_boundary_atoms(x.clone(), lower_atom=0.0, lower_target=0.1)
     with pytest.raises(AssertionError):
         displace_boundary_atoms(x.clone(), upper_atom=1.0, upper_target=0.9)
+
+
+def test_inverse_power_transform_via_kwargs() -> None:
+    """Test inverse_power_transform called with **kwargs, matching real usage from config.
+
+    In practice, these functions are called like:
+        config = {"lambd": 0.5, "clip_negative": True}
+        y = power_transform(x, **config)
+        x_back = inverse_power_transform(y, **config)
+
+    This test would have caught the original bug where inverse_power_transform
+    was missing the clip_negative parameter.
+    """
+    x = torch.tensor([0.0, 0.01, 0.1, 1.0, 3.0], dtype=torch.float32)
+    config = {"lambd": 0.5, "clip_negative": True}
+    y = power_transform(x.clone(), **config)
+    x_back = inverse_power_transform(y.clone(), **config)
+    assert torch.isfinite(x_back).all()
+    assert torch.allclose(x_back, x, atol=1e-6, rtol=1e-5)
+
+
+def test_power_roundtrip_with_clip_negative_via_kwargs() -> None:
+    """Full roundtrip test with clip_negative passed via **kwargs."""
+    x = torch.tensor([0.5, 1.0, 2.0], dtype=torch.float32)
+    config = {"lambd": 0.33, "clip_negative": True, "tangent_linear_above_one": True}
+    y = power_transform(x.clone(), **config)
+    x_back = inverse_power_transform(y.clone(), **config)
+    assert torch.isfinite(x_back).all()
+    assert torch.allclose(x_back, x, atol=1e-5, rtol=1e-4)
