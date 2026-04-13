@@ -25,7 +25,6 @@ from pytorch_lightning.callbacks import TQDMProgressBar
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.optimiser import StochasticWeightAveraging
-from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.utils.checkpoint import RegisterMigrations
@@ -220,6 +219,63 @@ def _get_progress_bar_callback(diagnostics_cfg: DictConfig) -> list[Callback]:
     return [progress_bar]
 
 
+def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
+    """Check that all plotting dependencies required by the current config are installed.
+
+    Raises
+    ------
+    ImportError
+        With a specific message and ``pip install anemoi-training[plotting]`` hint
+        for each missing dependency.
+    """
+    # matplotlib is required for all plotting
+    try:
+        import matplotlib as mpl  # noqa: F401
+    except ImportError as err:
+        msg = (
+            "Plotting callbacks are configured but matplotlib is not installed. "
+            "Install it with: pip install anemoi-training[plotting]"
+        )
+        raise ImportError(msg) from err
+
+    # datashader is only required when datashader rendering is enabled
+    if diagnostics_cfg.plot.datashader:
+        try:
+            import datashader  # noqa: F401
+        except ImportError as err:
+            msg = (
+                "datashader=True is set but datashader is not installed. "
+                "Install it with: pip install anemoi-training[plotting]"
+            )
+            raise ImportError(msg) from err
+
+    # pyshtools is only required when a spectrum callback is configured
+    spectrum_targets = {"PlotSpectrum"}
+    has_spectrum = any(
+        any(t in str(getattr(cb, "_target_", "")) for t in spectrum_targets) for cb in diagnostics_cfg.plot.callbacks
+    )
+    if has_spectrum:
+        try:
+            import pyshtools  # noqa: F401
+        except ImportError as err:
+            msg = (
+                "PlotSpectrum is configured but pyshtools is not installed. "
+                "Install it with: pip install anemoi-training[plotting]"
+            )
+            raise ImportError(msg) from err
+
+    # cartopy is only required for lambert_conformal projection
+    if diagnostics_cfg.plot.projection_kind == "lambert_conformal":
+        try:
+            import cartopy  # noqa: F401
+        except ImportError as err:
+            msg = (
+                "projection_kind='lambert_conformal' requires cartopy, which is not installed. "
+                "Install it with: pip install anemoi-training[plotting]"
+            )
+            raise ImportError(msg) from err
+
+
 def get_callbacks(context: CallbacksContext) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
@@ -268,22 +324,27 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     # Base callbacks — instantiated directly from their own YAML-specified parameters
     trainer_callbacks.extend(instantiate(callback) for callback in diagnostics_cfg.callbacks)
 
-    # Plotting callbacks — instantiated with global plotting settings from diagnostics.plot
-    plotting_settings = PlottingSettings(
-        datashader=diagnostics_cfg.plot.datashader,
-        projection_kind=diagnostics_cfg.plot.projection_kind,
-        asynchronous=diagnostics_cfg.plot.asynchronous,
-        save_basedir=context.plots_output,
-        colormaps=getattr(diagnostics_cfg.plot, "colormaps", None),
-        precip_and_related_fields=getattr(diagnostics_cfg.plot, "precip_and_related_fields", None),
-        focus_areas=getattr(diagnostics_cfg.plot, "focus_areas", None),
-        dataset_names=getattr(diagnostics_cfg.plot, "datasets_to_plot", None),
-    )
-    for callback_cfg in diagnostics_cfg.plot.callbacks:
-        # Merge global plotting settings into callback config
-        callback_cfg_dict = dict(callback_cfg)
-        callback_cfg_dict["plotting_settings"] = plotting_settings
-        trainer_callbacks.append(instantiate(callback_cfg_dict))
+    # Plotting callbacks — only instantiated when there are callbacks configured
+    if diagnostics_cfg.plot.callbacks:
+        _check_plotting_dependencies(diagnostics_cfg)
+
+        from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
+
+        plotting_settings = PlottingSettings(
+            datashader=diagnostics_cfg.plot.datashader,
+            projection_kind=diagnostics_cfg.plot.projection_kind,
+            asynchronous=diagnostics_cfg.plot.asynchronous,
+            save_basedir=context.plots_output,
+            colormaps=getattr(diagnostics_cfg.plot, "colormaps", None),
+            precip_and_related_fields=getattr(diagnostics_cfg.plot, "precip_and_related_fields", None),
+            focus_areas=getattr(diagnostics_cfg.plot, "focus_areas", None),
+            dataset_names=getattr(diagnostics_cfg.plot, "datasets_to_plot", None),
+        )
+        for callback_cfg in diagnostics_cfg.plot.callbacks:
+            # Merge global plotting settings into callback config
+            callback_cfg_dict = dict(callback_cfg)
+            callback_cfg_dict["plotting_settings"] = plotting_settings
+            trainer_callbacks.append(instantiate(callback_cfg_dict))
 
     # Extend with config enabled callbacks
     trainer_callbacks.extend(_get_config_enabled_callbacks(context.full_config))

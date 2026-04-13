@@ -10,13 +10,11 @@
 
 import logging
 
-import datashader as dsh
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
-from datashader.mpl_ext import dsshow
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
@@ -824,6 +822,9 @@ def single_plot(
         )
 
     else:
+        import datashader as dsh
+        from datashader.mpl_ext import dsshow
+
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         # Adjust binning to match the resolution of the data
         lower_limit = 25
