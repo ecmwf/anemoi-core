@@ -78,17 +78,6 @@ class SWA(BaseModel):
     "Learning rate for SWA."
 
 
-class Rollout(BaseModel):
-    """Rollout configuration."""
-
-    start: NonNegativeInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(example=1)
-    "Maximum number of rollouts."
-
-
 class OptimizationSchema(BaseModel):
     """Optimizer and LR scheduler configuration."""
 
@@ -460,22 +449,22 @@ class BaseTrainingSchema(BaseModel):
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
-class ForecasterSchema(BaseTrainingSchema):
+class SingleTrainingSchema(BaseTrainingSchema):
     training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
-class ForecasterEnsSchema(ForecasterSchema):
+class EnsembleTrainingSchema(BaseTrainingSchema):
     training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
-class DiffusionForecasterSchema(ForecasterSchema):
+class DiffusionTrainingSchema(BaseTrainingSchema):
     training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
     "Training objective."
 
 
-class DiffusionTendForecasterSchema(ForecasterSchema):
+class DiffusionTendTrainingSchema(BaseTrainingSchema):
     training_method: Literal["anemoi.training.train.methods.DiffusionTendTraining"] = Field(
         ...,
         alias="training_method",
@@ -484,6 +473,6 @@ class DiffusionTendForecasterSchema(ForecasterSchema):
 
 
 TrainingSchema = Annotated[
-    ForecasterSchema | ForecasterEnsSchema | DiffusionForecasterSchema | DiffusionTendForecasterSchema,
+    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendTrainingSchema,
     Discriminator("training_method"),
 ]
