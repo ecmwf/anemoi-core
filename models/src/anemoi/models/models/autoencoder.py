@@ -13,7 +13,6 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -22,80 +21,18 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.models import BaseGraphModel
-from anemoi.utils.config import DotDict
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelAutoEncoder(BaseGraphModel):
-
-    def _build_networks(self, model_config: DotDict) -> None:
-        """Builds the model components."""
-
-        self.encoder_graph_provider = torch.nn.ModuleDict()
-        self.encoder = torch.nn.ModuleDict()
-
-        for dataset_name in self._graph_data.keys():
-            # Create graph providers
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_data, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
-            )
-
-            self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden],
-                hidden_dim=self.num_channels,
-                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
-            )
-
-        # Decoder hidden -> data
-        self.decoder_graph_provider = torch.nn.ModuleDict()
-        self.decoder = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[dataset_name][(self._graph_name_hidden, "to", self._graph_name_data)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes[dataset_name].num_nodes[self._graph_name_data],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
-            )
-
-            self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.num_channels,
-                in_channels_dst=self.target_dim[dataset_name],
-                hidden_dim=self.num_channels,
-                out_channels_dst=self.output_dim[dataset_name],
-                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
-            )
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        super()._calculate_shapes_and_indices(data_indices)
-
-        self._forcing_input_idx = {}
-        self.num_input_channels_forcings = {}
-        self.target_dim = {}
-
-        for dataset_name, dataset_indices in data_indices.items():
-            forcing_names = dataset_indices.model._forcing
-            self._forcing_input_idx[dataset_name] = [dataset_indices.name_to_index[name] for name in forcing_names]
-            self.num_input_channels_forcings[dataset_name] = len(self._forcing_input_idx[dataset_name])
-
-            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
+class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
+    """AutoEncoder"""
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
-            self.n_step_output * self.num_input_channels_forcings[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+            self.n_step_output * self.num_input_channels_decoding_forcings[dataset_name]
+            + self.node_attributes.attr_ndims[dataset_name]
         )
 
     def _assemble_input(
@@ -107,7 +44,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         dataset_name: str | None = None,
     ) -> tuple[Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
@@ -159,7 +96,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         dataset_name: str | None = None,
     ) -> tuple[Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_target = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_size)
+        node_attributes_target = self.node_attributes(dataset_name, batch_size=batch_size)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
         if grid_shard_sizes is not None:
             node_attributes_target = shard_tensor(node_attributes_target, 0, grid_shard_sizes, model_comm_group)
@@ -169,7 +106,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         x_target_latent = torch.cat(
             (
                 einops.rearrange(
-                    x_forcing[..., self._forcing_input_idx[dataset_name]],
+                    x_forcing[..., self._decoding_forcing_input_idx[dataset_name]],
                     "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
                 ),
                 node_attributes_target,
@@ -221,16 +158,15 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
         shard_sizes_data_dict = {}
-        shard_sizes_hidden_dict = {}
 
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in dataset_names:
             x_data_latent, shard_sizes_data = self._assemble_input(
                 x[dataset_name], batch_size, grid_shard_sizes, model_comm_group, dataset_name
             )
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
-            x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
-            shard_sizes_hidden_dict[dataset_name] = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-            x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden_dict[dataset_name], model_comm_group)
 
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
                 dataset_name
@@ -240,7 +176,7 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
             )
             enc_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data,  # None if not sharded
-                dst_nodes=shard_sizes_hidden_dict[dataset_name],
+                dst_nodes=shard_sizes_hidden,
                 edges=enc_edge_shard_sizes,
             )
 
@@ -259,7 +195,6 @@ class AnemoiModelAutoEncoder(BaseGraphModel):
 
         # Combine all dataset latents
         x_latent = sum(dataset_latents.values())
-        shard_sizes_hidden = shard_sizes_hidden_dict[dataset_names[0]]
 
         # Decoder
         x_out_dict = {}
