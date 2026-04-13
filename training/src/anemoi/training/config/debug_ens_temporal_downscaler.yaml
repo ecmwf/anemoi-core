@@ -9,7 +9,7 @@ defaults:
 - training: ensemble
 - _self_
 
-config_validation: False
+config_validation: True
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords
@@ -24,9 +24,6 @@ diagnostics:
     mlflow:
       enabled: False
       tracking_uri: None
-    wandb:
-      enabled: False
-      entity: example
   callbacks: []
 
 system:
@@ -58,5 +55,3 @@ dataloader:
 training:
   ensemble_size_per_device: 2
   max_epochs: 1
-
-  rollout: null # override the default, it does not make sense for temporal downscaling
