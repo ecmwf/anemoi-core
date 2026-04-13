@@ -335,6 +335,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name], y_noised[dataset_name], bse, grid_shard_sizes, model_comm_group, dataset_name
