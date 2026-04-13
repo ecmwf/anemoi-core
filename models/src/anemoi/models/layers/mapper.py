@@ -1058,42 +1058,25 @@ class PointWiseMapper(BaseMapper, ABC):
             layer_kernels=layer_kernels,
         )
 
-    @staticmethod
-    def _node_partition(shapes: list[list[int]] | list[int]) -> list[int]:
-        if shapes and isinstance(shapes[0], int):
-            return [shapes[0]]
-        return [shape[0] for shape in shapes]
-
     def mapper_forward(
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        shard_info: BipartiteGraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
     ) -> PairTensor:
-        shapes_src, shapes_dst = shard_shapes
-        assert self._node_partition(shapes_src) == self._node_partition(shapes_dst), (
-            f"Source and destination must have the same node partition for {self.__class__.__name__}, "
-            f"but got src={self._node_partition(shapes_src)} and dst={self._node_partition(shapes_dst)}."
-        )
+        x_src, x_dst = x
 
-        x_dst, shapes_dst = self.pre_process(
-            x=x,
-            shard_shapes=shard_shapes,
-            model_comm_group=model_comm_group,
-            x_src_is_sharded=x_src_is_sharded,
-            x_dst_is_sharded=x_dst_is_sharded,
-        )
+        # Ensure src is sharded
+        x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_info.src_nodes, model_comm_group)
 
-        x_dst = self.post_process(
-            x_dst=x_dst,
-            shapes_dst=shapes_dst,
-            model_comm_group=model_comm_group,
-            keep_x_dst_sharded=keep_x_dst_sharded,
-        )
+        x_dst = self.pre_process((x_src, x_dst))
+
+        x_dst = self.post_process(x_dst)
+
+        if not keep_x_dst_sharded:
+            x_dst = gather_tensor(x_dst, 0, shard_sizes_src, model_comm_group)
 
         return x_dst
 
@@ -1101,14 +1084,11 @@ class PointWiseMapper(BaseMapper, ABC):
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        shard_info: BipartiteGraphShardInfo,
         edge_attr: Optional[Tensor] = None,
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
-        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1116,12 +1096,9 @@ class PointWiseMapper(BaseMapper, ABC):
             self.gradient_checkpointing,
             x=x,
             batch_size=batch_size,
-            shard_shapes=shard_shapes,
+            shard_info=shard_info,
             model_comm_group=model_comm_group,
-            x_src_is_sharded=x_src_is_sharded,
-            x_dst_is_sharded=x_dst_is_sharded,
             keep_x_dst_sharded=keep_x_dst_sharded,
-            **kwargs,
         )
 
 
@@ -1149,51 +1126,32 @@ class PointWiseForwardMapper(PointWiseMapper):
         )
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
 
-    def pre_process(
-        self,
-        x: tuple[torch.Tensor, torch.Tensor],
-        shard_shapes: tuple[list[list[int]], list[list[int]]],
-        model_comm_group=None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
-    ):
-        shapes_src, shapes_dst = shard_shapes
-        x_src = x[0]
-        if not x_src_is_sharded:
-            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
-        x_src = self.emb_nodes_src(x_src)
-        return x_src, change_channels_in_shape(shapes_dst, self.hidden_dim)
+    def pre_process(self, x):
+        x_src, x_dst = x
+        return self.emb_nodes_src(x_src)
 
-    def post_process(
-        self, x_dst: torch.Tensor, shapes_dst=None, model_comm_group=None, keep_x_dst_sharded: bool = False
-    ):
+    def post_process(self, x_dst):
         return x_dst
 
     def forward(
         self,
         x: PairTensor,
         batch_size: int,
-        shard_shapes: tuple[list[list[int]], list[list[int]]],
+        shard_info: BipartiteGraphShardInfo,
         edge_attr: Optional[Tensor] = None,
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
         keep_x_dst_sharded: bool = False,
-        edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
             x,
             batch_size,
-            shard_shapes,
+            shard_info,
             edge_attr,
             edge_index,
             model_comm_group,
-            x_src_is_sharded,
-            x_dst_is_sharded,
             keep_x_dst_sharded,
-            edge_shard_shapes,
             **kwargs,
         )
         return x[0], x_dst
@@ -1238,26 +1196,12 @@ class PointWiseBackwardMapper(PointWiseMapper):
                     if module.bias is not None:
                         nn.init.constant_(module.bias, 0.0)
 
-    def pre_process(
-        self,
-        x: tuple[torch.Tensor, torch.Tensor],
-        shard_shapes: tuple[list[list[int]], list[list[int]]],
-        model_comm_group=None,
-        x_src_is_sharded: bool = False,
-        x_dst_is_sharded: bool = False,
-    ):
-        shapes_src, shapes_dst = shard_shapes
-        shapes_src = change_channels_in_shape(shapes_src, self.hidden_dim)
-        x_src = x[0]
-        if not x_src_is_sharded:
-            x_src = shard_tensor(x_src, 0, shapes_src, model_comm_group)
-        return x_src, change_channels_in_shape(shapes_dst, self.out_channels_dst)
+    def pre_process(self, x):
+        x_src, x_dst = x
+        return x_src
 
-    def post_process(self, x_dst: torch.Tensor, shapes_dst, model_comm_group=None, keep_x_dst_sharded: bool = False):
-        x_dst = self.node_data_extractor(x_dst)
-        if not keep_x_dst_sharded:
-            x_dst = gather_tensor(x_dst, 0, shapes_dst, model_comm_group)
-        return x_dst
+    def post_process(self, x_dst):
+        return self.node_data_extractor(x_dst)
 
 
 class TransformerBaseMapper(BaseMapper, ABC):
