@@ -31,6 +31,7 @@ class GraphTransformerProcessorConfig:
     num_chunks: int = 2
     num_heads: int = 16
     mlp_hidden_ratio: int = 4
+    attn_channels: int | None = None
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
@@ -91,6 +92,18 @@ class TestGraphTransformerProcessor:
 
     def test_all_blocks(self, graphtransformer_processor):
         assert all(isinstance(block, GraphTransformerProcessorBlock) for block in graphtransformer_processor.proc)
+
+    def test_custom_attn_channels(self, graphtransformer_init, graph_provider, device):
+        config = asdict(graphtransformer_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        config["attn_channels"] = 96
+
+        processor = GraphTransformerProcessor(**config).to(device)
+
+        assert processor.proc[0].attn_channels == 96
+        assert processor.proc[0].out_channels_conv == 96 // graphtransformer_init.num_heads
+        assert processor.proc[0].projection.in_features == 96
+        assert processor.proc[0].projection.out_features == graphtransformer_init.num_channels
 
     def test_forward(self, graphtransformer_processor, graphtransformer_init, graph_provider):
         batch_size = 1

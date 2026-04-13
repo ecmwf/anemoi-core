@@ -22,6 +22,17 @@ from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
 
 
+def _conditional_layer_kernels(condition_shape: int):
+    return load_layer_kernels(
+        {
+            "LayerNorm": {
+                "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                "condition_shape": condition_shape,
+            }
+        }
+    )
+
+
 @pytest.fixture
 def init():
     num_channels: int = 8
@@ -113,3 +124,44 @@ def test_forward_output(
     assert isinstance(output[0], torch.Tensor)
     assert isinstance(output[1], torch.Tensor)
     assert output[1].shape == (batch_size, num_channels)
+
+
+def test_forward_output_with_conditioning():
+    condition_shape = 6
+    num_channels = 8
+    hidden_dim = 16
+    num_src_nodes = 3
+    num_dst_nodes = 5
+
+    block = TransformerMapperBlock(
+        num_channels=num_channels,
+        hidden_dim=hidden_dim,
+        num_heads=2,
+        window_size=None,
+        dropout_p=0.0,
+        layer_kernels=_conditional_layer_kernels(condition_shape),
+        attention_implementation="scaled_dot_product_attention",
+        softcap=None,
+        qk_norm=False,
+    )
+
+    x = (
+        torch.randn((num_src_nodes, num_channels)),
+        torch.randn((num_dst_nodes, num_channels)),
+    )
+    cond = (
+        torch.randn((num_src_nodes, condition_shape)),
+        torch.randn((num_dst_nodes, condition_shape)),
+    )
+
+    output, _ = block.forward(
+        x,
+        ([[num_src_nodes, num_channels]], [[num_dst_nodes, num_channels]]),
+        batch_size=1,
+        cond=cond,
+    )
+
+    assert isinstance(output[0], torch.Tensor)
+    assert isinstance(output[1], torch.Tensor)
+    assert output[0].shape == (num_src_nodes, num_channels)
+    assert output[1].shape == (num_dst_nodes, num_channels)

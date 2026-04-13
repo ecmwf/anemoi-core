@@ -86,13 +86,13 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
     assert out["ds_b"].dtype == torch.bfloat16
 
 
-def test_sample_initialization_uses_per_dataset_schedule_tensor(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummyScheduler:
+def test_sample_passes_zero_terminated_schedule_to_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyScheduler(diffusion_samplers.NoiseScheduler):
         def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
-            del sigma_max, sigma_min, kwargs
-            self.num_steps = num_steps
+            super().__init__(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
+            del kwargs
 
-        def get_schedule(self, device=None, dtype_compute: torch.dtype = torch.float64, **kwargs):
+        def _build_schedule(self, device=None, dtype_compute: torch.dtype = torch.float64, **kwargs):
             del kwargs
             return torch.linspace(1.0, 0.1, self.num_steps, device=device, dtype=dtype_compute)
 
@@ -113,6 +113,8 @@ def test_sample_initialization_uses_per_dataset_schedule_tensor(monkeypatch: pyt
         ):
             del denoising_fn, model_comm_group, grid_shard_sizes, kwargs
             assert isinstance(sigmas, torch.Tensor)
+            assert sigmas.shape == (5,)
+            assert sigmas[-1] == 0.0
             for dataset_name, y_data in y.items():
                 assert y_data.dtype == sigmas.dtype
                 assert y_data.shape[:4] == (
@@ -157,7 +159,7 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
 ) -> None:
     model = AnemoiDiffusionModelEncProcDec.__new__(AnemoiDiffusionModelEncProcDec)
     model.inference_defaults = SimpleNamespace(
-        noise_scheduler={"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.0, "num_steps": 6},
+        noise_scheduler={"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.02, "num_steps": 6},
         diffusion_sampler={"sampler": sampler_name, **sampler_config},
     )
     model.n_step_output = 2

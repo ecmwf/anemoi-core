@@ -203,8 +203,12 @@ requirements.
  Dataloader
 ************
 
-The dataloader file contains information on how many workers are used,
-and the batch size. ``num_workers`` relates to model parallelisation.
+Anemoi uses the Dataloader class from `PyTorch`_ to load the input batches for the upcoming training steps. The data is asynchronously prefetched from a filesystem and stored in CPU memory until a batch is required by the GPU.
+
+.. _PyTorch: https://docs.pytorch.org/docs/stable/data.html#single-and-multi-process-data-loading
+
+The dataloader config exposes configuration options of the underlying pytorch dataloaders. By default, ``num_workers`` dataloading processes are created for every GPU. Each worker will prefetch a maximum of ``prefetch_factor`` batches.
+
 
 .. code:: yaml
 
@@ -221,6 +225,28 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       training: null
       validation: null
       test: 20
+
+   prefetch_factor:
+      training: 2
+      validation: 2
+      test: 2
+
+   multiprocessing_context: None
+
+
+Determining the optimal number of workers depends on your system and training setup. More dataloader processes can increase your filesystem bandwidth, at the cost of higher CPU memory usage. Higher source resolutions and larger batch sizes increase the memory required per worker. When the available CPU memory is not sufficient for the requested number of workers, your training run will crash. One can use the `anemoi dataloader benchmark`_ to quickly test different setups and determine the optimal configuration for your training setup.
+
+.. _anemoi dataloader benchmark: https://github.com/ecmwf/anemoi-core/pull/818
+
+The config entry ``limit_batches`` is an option to limit the number of batches loaded by the dataloader. This can be useful for testing and debugging purposes, allowing you to run a shorter training loop without processing the entire dataset.
+
+The config entry ``multiprocessing_context`` allows you to specify the multiprocessing context for the dataloader workers.
+The default is ``None``, which uses the default context for your system. Typically, there is no need to change this, but in some cases, such as when using certain libraries or running on specific platforms, you may need to set it to ``fork`` or ``spawn`` to avoid issues with multiprocessing.
+
+.. note::
+
+   When training directly from S3, it is required to use the ``spawn`` multiprocessing context to avoid issues with the underlying library used to access S3.
+
 
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
@@ -253,6 +279,10 @@ variables, the items listed in drop/select may vary.
 
 .. literalinclude:: yaml/dataloader.yaml
    :language: yaml
+
+
+
+
 
 ***************
  Normalisation
@@ -324,8 +354,6 @@ performed. The user can specify the imputer for each dataset by setting
 ensuring that the variable value over NaNs becomes zero after mean-std
 normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 

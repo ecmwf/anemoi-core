@@ -55,8 +55,9 @@ def test_pointwisemlp_processor_init(pointwisemlp_processor, pointwisemlp_proces
         == pointwisemlp_processor_init.num_layers // pointwisemlp_processor_init.num_chunks
     )
 
-    def test_all_blocks(self, pointwisemlp_processor):
-        assert all(isinstance(block, PointWiseMLPProcessorBlock) for block in pointwisemlp_processor.proc)
+
+def test_pointwisemlp_processor_uses_only_pointwise_blocks(pointwisemlp_processor):
+    assert all(isinstance(block, PointWiseMLPProcessorBlock) for block in pointwisemlp_processor.proc)
 
 
 @pytest.fixture(params=[0.1, None])

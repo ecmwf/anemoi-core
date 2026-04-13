@@ -254,7 +254,7 @@ class MultiDataset(IterableDataset):
         reader_group_size : int
             Reader group size
         shard_sizes : dict[str, ShardSizes]
-            Shard shapes for all datasets
+            Shard sizes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -372,8 +372,15 @@ class MultiDataset(IterableDataset):
 
         x = {}
         for name, dataset in self.datasets.items():
-            start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-            x[name] = dataset.get_sample(time_indices, slice(start, end))
+            # self.shard_sizes is lazily initalised to None
+            # This if statement guards against the case where shard_sizes is not set
+            # (e.g. if set_comm_group_info hasn't been called yet)
+            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
+                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
+                grid_indices = slice(start, end)
+            else:
+                grid_indices = slice(None)
+            x[name] = dataset.get_sample(time_indices, grid_indices)
 
         return x
 

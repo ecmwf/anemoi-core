@@ -11,6 +11,7 @@ from typing import Any
 from typing import Literal
 from typing import Union
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -19,6 +20,11 @@ from pydantic import model_validator
 from .common_components import GNNModelComponent
 from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
+
+
+class NoOpProcessorSchema(PydanticBaseModel):
+    target_: Literal["anemoi.models.layers.processor.NoOpProcessor"] = Field(..., alias="_target_")
+    "No-op processor, used for ablations."
 
 
 class GNNProcessorSchema(GNNModelComponent):
@@ -102,7 +108,7 @@ class PointWiseMLPProcessorSchema(PointWiseModelComponent):
     "Transformer processor object from anemoi.models.layers.processor."
     num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Transformer processor."
-    num_channels: NonNegativeInt = Field(example=128)
-    "Number of channels."
-    dropout_p: NonNegativeFloat = Field(example=0.1)
+    mlp_hidden_ratio: NonNegativeInt = Field(example=4)
+    "Ratio of the hidden dimension to the processor channel dimension."
+    dropout_p: NonNegativeFloat = Field(default=0.0, example=0.0)
     "Dropout probability, default 0.0"

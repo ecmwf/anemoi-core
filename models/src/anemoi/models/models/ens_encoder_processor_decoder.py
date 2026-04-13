@@ -74,7 +74,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=batch_ens_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
         x_skip = self.residual[dataset_name](
@@ -194,8 +194,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_skip_dict = {}
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
-        shard_sizes_hidden_dict = {}
 
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
@@ -208,10 +209,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
-            x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_ens_size)
-            shard_sizes_hidden_dict[dataset_name] = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-            x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden_dict[dataset_name], model_comm_group)
-
             encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
                 dataset_name
             ].get_edges(
@@ -221,7 +218,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
             enc_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
-                dst_nodes=shard_sizes_hidden_dict[dataset_name],
+                dst_nodes=shard_sizes_hidden,
                 edges=enc_edge_shard_sizes,
             )
 
@@ -241,16 +238,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         # Combine all dataset latents
         x_latent = sum(dataset_latents.values())
 
-        shard_sizes_hidden = shard_sizes_hidden_dict[dataset_names[0]]
-        assert all(
-            shard_size == shard_sizes_hidden for shard_size in shard_sizes_hidden_dict.values()
-        ), "All datasets must have the same shard sizes for the hidden graph."
-
         x_latent_proc, latent_noise = self.noise_injector(
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self.node_attributes[dataset_names[0]].num_nodes[self._graph_name_hidden],
+            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             grid_shard_sizes=shard_sizes_hidden,
             model_comm_group=model_comm_group,
         )
@@ -272,7 +264,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             **processor_kwargs,
         )
 
-        x_latent_proc = x_latent_proc + x_latent
+        if self.latent_skip:
+            x_latent = x_latent_proc + x_latent
 
         x_out_dict = {}
         for dataset_name in dataset_names:
@@ -291,7 +284,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_ens_size,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,

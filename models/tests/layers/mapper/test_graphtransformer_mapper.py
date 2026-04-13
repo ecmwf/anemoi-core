@@ -44,6 +44,7 @@ class MapperConfig:
     num_chunks: int = 2
     num_heads: int = 16
     mlp_hidden_ratio: int = 7
+    attn_channels: int | None = None
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None
@@ -233,6 +234,23 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
         ), f"out_heads ({out_heads}) != out_edges ({out_edges}) when using different strategies"
+
+    def test_custom_attn_channels(self, mapper_init, graph_provider, pair_tensor, device):
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        config["attn_channels"] = 112
+
+        mapper = GraphTransformerForwardMapper(**config).to(device)
+
+        assert mapper.proc.attn_channels == 112
+        assert mapper.proc.projection.in_features == 112
+        assert mapper.proc.projection.out_features == mapper_init.hidden_dim
+
+        batch_size = 1
+        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        _, x_dst = mapper.forward(pair_tensor, batch_size, shard_shapes, edge_attr, edge_index)
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
 
 class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):

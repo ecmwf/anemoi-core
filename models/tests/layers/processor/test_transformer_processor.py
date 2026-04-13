@@ -29,6 +29,7 @@ class TransformerProcessorConfig:
     num_chunks: int = 2
     num_heads: int = 16
     mlp_hidden_ratio: int = 4
+    attn_channels: Optional[int] = None
     dropout_p: float = 0.1
     attention_implementation: str = "scaled_dot_product_attention"
     softcap: Optional[float] = None
@@ -66,6 +67,16 @@ def test_transformer_processor_init(transformer_processor, transformer_processor
 
 def test_all_blocks(transformer_processor):
     assert all(isinstance(block, TransformerProcessorBlock) for block in transformer_processor.proc)
+
+
+def test_transformer_processor_custom_attn_channels(transformer_processor_init):
+    config = asdict(transformer_processor_init)
+    config["attn_channels"] = 96
+    processor = TransformerProcessor(**config)
+
+    assert processor.proc[0].attention.attn_channels == 96
+    assert processor.proc[0].attention.projection.in_features == 96
+    assert processor.proc[0].attention.projection.out_features == transformer_processor_init.num_channels
 
 
 def test_transformer_processor_forward(transformer_processor, transformer_processor_init):
