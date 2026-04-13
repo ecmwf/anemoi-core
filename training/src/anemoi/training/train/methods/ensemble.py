@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -161,6 +162,9 @@ class EnsembleTraining(BaseTrainingModule):
         dataset_name: str,
         rollout_step: int | None = None,
         validation_mode: bool = False,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
@@ -176,6 +180,8 @@ class EnsembleTraining(BaseTrainingModule):
             grid_dim=self.grid_dim,
             grid_shard_shape=self.grid_shard_shapes,
             dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
         # Compute metrics if in validation mode
@@ -187,9 +193,39 @@ class EnsembleTraining(BaseTrainingModule):
                 rollout_step=rollout_step,
                 dataset_name=dataset_name,
                 grid_shard_slice=self.grid_shard_slice[dataset_name],
+                pred_layout=pred_layout,
+                target_layout=target_layout,
             )
 
         return loss, metrics_next, y_pred_ens
+
+    def _make_targets(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int,
+    ) -> dict[str, torch.Tensor]:
+        """Build loss targets for ensemble rollout.
+
+        Ground-truth targets are provided with a singleton ensemble axis and
+        are reduced to `(batch, time, grid, vars)` for loss computation.
+        """
+        y_full = self.get_target(
+            batch,
+            start=start,
+        )
+
+        y: dict[str, torch.Tensor] = {}
+        for dataset_name, target in y_full.items():
+            msg = (
+                "Expected singleton ensemble dimension in target for "
+                f"{dataset_name}, got shape {tuple(target.shape)}."
+            )
+            assert target.ndim == 5 and target.shape[2] == 1, msg
+            y[dataset_name] = target[:, :, 0, :, :]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+
+        return y
 
     def forward(self, x: dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
@@ -224,8 +260,9 @@ class EnsembleTraining(BaseTrainingModule):
 
         for task_kwargs in self.task.steps:
             y_pred = self(x, **task_kwargs)
-            y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-            y = self._collapse_ens_dim(y)
+            y = self._make_targets(batch)
+            # Move this into _make_targets() y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+            # Move this into _make_targets() y = self._collapse_ens_dim(y)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -233,6 +270,8 @@ class EnsembleTraining(BaseTrainingModule):
                 y,
                 **task_kwargs,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 

@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.utils.index_space import IndexSpace
 
 from .base import BaseTrainingModule
 
@@ -60,6 +61,63 @@ class BaseDiffusionTraining(BaseTrainingModule):
 
         self.rho = config.model.model.diffusion.rho
 
+        from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
+
+        self._plot_adapter = DiffusionPlotAdapter(self)
+
+    def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Get input tensor shape for diffusion model."""
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            msg = (
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {self.n_step_input + self.n_step_output}"
+            )
+            assert dataset_batch.shape[1] >= self.n_step_input + self.n_step_output, msg
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.n_step_input,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, n_step_input, latlon, nvar)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+        return x
+
+    def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Project full targets into data-output variable space."""
+        y = {}
+        for dataset_name, target_dataset in target_full.items():
+            var_idx = self.data_indices[dataset_name].data.output.full.to(device=target_dataset.device)
+            y[dataset_name] = target_dataset.index_select(-1, var_idx)
+            LOGGER.debug("SHAPE: y_data_output[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+        return y
+
+    def reduce_data_output_target_to_model_output(
+        self,
+        y_data_output: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Reduce a data-output tensor to model-output variable space."""
+        y_reduced = {}
+        for dataset_name, y_dataset in y_data_output.items():
+            dataset_indices = self.data_indices[dataset_name]
+            if dataset_indices.model_output_in_data_output_is_identity:
+                y_reduced[dataset_name] = y_dataset
+            elif dataset_indices.model_output_in_data_output_is_contiguous:
+                y_reduced[dataset_name] = y_dataset.narrow(
+                    -1,
+                    dataset_indices.model_output_in_data_output_contiguous_start,
+                    dataset_indices.model_output_in_data_output_contiguous_length,
+                )
+            else:
+                var_idx = torch.as_tensor(
+                    dataset_indices.model_output_positions_in_data_output,
+                    device=y_dataset.device,
+                    dtype=torch.long,
+                )
+                y_reduced[dataset_name] = y_dataset.index_select(-1, var_idx)
+            LOGGER.debug("SHAPE: y_model_output[%s].shape = %s", dataset_name, list(y_reduced[dataset_name].shape))
+        return y_reduced
+
     def forward(
         self,
         x: dict[str, torch.Tensor],
@@ -81,6 +139,8 @@ class BaseDiffusionTraining(BaseTrainingModule):
         dataset_name: str,
         weights: torch.Tensor | None = None,
         grid_shard_slice: slice | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the diffusion loss with noise weighting.
@@ -111,6 +171,10 @@ class BaseDiffusionTraining(BaseTrainingModule):
             "grid_shard_slice": grid_shard_slice,
             "group": self.model_comm_group,
         }
+        if pred_layout is not None:
+            loss_kwargs["pred_layout"] = pred_layout
+        if target_layout is not None:
+            loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
@@ -190,7 +254,8 @@ class DiffusionTraining(BaseDiffusionTraining):
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
+        y, target = self._get_diffusion_targets(batch)
+        # move this to _get_diffusion_targets, y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -211,9 +276,11 @@ class DiffusionTraining(BaseDiffusionTraining):
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
-            y,
-            validation_mode=validation_mode,
+            target,
             weights=noise_weights,
+            validation_mode=validation_mode,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
         )
 
@@ -420,12 +487,15 @@ class DiffusionTendTraining(BaseDiffusionTraining):
                 dataset_name=dataset_name,
             )
 
+            metric_kwargs = {k: v for k, v in kwargs.items() if k not in {"pred_layout", "target_layout"}}
             metrics_next = self._compute_metrics(
                 y_pred_state_full,
                 y_state_full,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
-                **kwargs,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
+                **metric_kwargs,
             )
 
         return loss, metrics_next, y_pred_state_full if validation_mode else None
@@ -453,9 +523,11 @@ class DiffusionTendTraining(BaseDiffusionTraining):
             Loss value, metrics, and predictions (per step)
         """
         # batch is already normalized in BaseTrainingModule._normalize_batch
-        # x: data.input.full (normalized), y: data.output.full (normalized)
+        # x: data.input.full (normalized), state_target: data.full (normalized slice view)
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
-        y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
+        state_target = self.task.get_targets(batch, data_indices=self.data_indices)
+        y_data_output = self.get_data_output_target(state_target)
+        # Move this to get_target()?, y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
@@ -473,7 +545,8 @@ class DiffusionTendTraining(BaseDiffusionTraining):
         # x_ref is normalized model.input.prognostic (subset), aligned to output steps
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
-        tendency_target = self._compute_tendency_target(y, x_ref)
+        tendency_target_data_output = self._compute_tendency_target(y_data_output, x_ref)
+        tendency_target = self.reduce_data_output_target_to_model_output(tendency_target_data_output)
 
         # get noise level and associated loss weights
         shapes = {k: target.shape for k, target in tendency_target.items()}
@@ -494,15 +567,16 @@ class DiffusionTendTraining(BaseDiffusionTraining):
         y_pred = None
         if validation_mode:
             y_pred = self._reconstruct_state(x_ref, tendency_pred)
-
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,
-            tendency_target,
+            tendency_target_data_output,
             y_pred_state=y_pred,
-            y_state=y,
+            y_state=state_target,
             validation_mode=validation_mode,
             weights=noise_weights,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_OUTPUT,
             use_reentrant=False,
         )
 

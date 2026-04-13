@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
+    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -427,6 +428,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 del state_dict[key]
 
         model_state_dict = self.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
         for key, value in model_state_dict.items():
             full_key = f"model.{key}"
             if full_key.startswith(processor_prefixes):
@@ -570,6 +572,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -597,6 +601,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             "grid_shard_slice": grid_shard_slice,
             "group": self.model_comm_group,
         }
+        if pred_layout is not None:
+            loss_kwargs["pred_layout"] = pred_layout
+        if target_layout is not None:
+            loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
@@ -611,6 +619,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -629,7 +639,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name)
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
+        )
 
     def compute_dataset_loss_metrics(
         self,
@@ -894,6 +911,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -924,22 +943,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
-            if not isinstance(metric, BaseLoss):
-                # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                    grid_shard_slice=grid_shard_slice,
-                    model_comm_group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes[dataset_name],
-                )
-                continue
+            # Validation now compares the model output tensor with the full target tensor.
+            # Those can contain different variables, so the metric needs to know how to
+            # line them up before computing the score. Other metrics do not have this information.
+            assert isinstance(
+                metric,
+                BaseLoss,
+            ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
+                if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
                         " in the post processed space."
@@ -947,21 +961,21 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     raise ValueError(exception_msg)
 
                 metric_kwargs = {
+                    "scaler_indices": (..., indices),
                     "grid_shard_slice": grid_shard_slice,
                     "group": self.model_comm_group,
                 }
+                if pred_layout is not None:
+                    metric_kwargs["pred_layout"] = pred_layout
+                if target_layout is not None:
+                    metric_kwargs["target_layout"] = target_layout
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
                         grid_shard_shapes=self.grid_shard_shapes[dataset_name],
                     )
 
-                metrics[metric_step_name] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                    scaler_indices=(..., indices),
-                    **metric_kwargs,
-                )
+                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
 
         return metrics
 

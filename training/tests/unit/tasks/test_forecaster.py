@@ -17,8 +17,20 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
 
 
-def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollection:
-    cfg = DictConfig({"forcing": [], "diagnostic": [], "target": []})
+def _make_minimal_index_collection(
+    name_to_index: dict[str, int],
+    *,
+    forcing: list[str] | None = None,
+    diagnostic: list[str] | None = None,
+    target: list[str] | None = None,
+) -> IndexCollection:
+    cfg = DictConfig(
+        {
+            "forcing": forcing or [],
+            "diagnostic": diagnostic or [],
+            "target": target or [],
+        },
+    )
     return IndexCollection(cfg, name_to_index)
 
 

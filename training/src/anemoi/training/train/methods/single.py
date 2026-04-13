@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,8 @@ class SingleTraining(BaseTrainingModule):
         dataset_name: str,
         step: int | None = None,
         grid_shard_slice: slice | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -42,6 +45,10 @@ class SingleTraining(BaseTrainingModule):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        pred_layout : IndexSpace | str | None
+            Layout of the predicted values
+        target_layout : IndexSpace | str | None
+            Layout of the target values
 
         Returns
         -------
@@ -54,6 +61,8 @@ class SingleTraining(BaseTrainingModule):
             step=step,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
         )
 
     def _step(
@@ -78,6 +87,8 @@ class SingleTraining(BaseTrainingModule):
                 y,
                 **task_kwargs,
                 validation_mode=validation_mode,
+                pred_layout=IndexSpace.MODEL_OUTPUT,
+                target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 

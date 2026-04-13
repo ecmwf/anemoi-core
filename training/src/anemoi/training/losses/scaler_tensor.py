@@ -167,6 +167,10 @@ class ScaleTensor(nn.Module):
 
         return Shape(get_dim_shape)
 
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        """Check if there is a scaler for the given dimension."""
+        return len(self.subset_by_dim(dim.value).tensors) > 0
+
     def validate_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor) -> None:
         """Check if the scaler is compatible with the given dimension.
 
@@ -225,6 +229,9 @@ class ScaleTensor(nn.Module):
         """
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler]) if isinstance(scaler, int | float) else torch.tensor(scaler)
+        assert (
+            not scaler.requires_grad
+        ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
         if isinstance(dimension, int):
             if len(scaler.shape) == 1:
