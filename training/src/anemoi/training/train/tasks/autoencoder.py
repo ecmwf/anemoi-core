@@ -15,6 +15,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.diagnostics.callbacks.plot_adapter import AutoencoderPlotAdapter
 from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -103,12 +104,10 @@ class GraphAutoEncoder(BaseGraphModule):
 
         y_pred = self(x)
 
-        y = {}
-
-        for dataset_name, dataset_batch in batch.items():
-            y_time = dataset_batch.narrow(1, 0, self.n_step_output)
-            var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = y_time.index_select(-1, var_idx)
+        y = self.get_target(
+            batch,
+            start=0,
+        )
 
         # y includes the auxiliary variables, so we must leave those out when computing the loss
         loss, metrics, y_pred = checkpoint(
@@ -118,6 +117,8 @@ class GraphAutoEncoder(BaseGraphModule):
             rollout_step=0,
             training_mode=True,
             validation_mode=validation_mode,
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
         )
 
