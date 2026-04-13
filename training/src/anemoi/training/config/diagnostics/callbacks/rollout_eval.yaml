@@ -1,4 +1,5 @@
 # Add callbacks here
 - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-  rollout: ${dataloader.validation_rollout}
+  rollout:
+  - ${dataloader.validation_rollout}
   every_n_batches: 20

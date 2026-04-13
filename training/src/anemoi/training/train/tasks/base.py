@@ -21,7 +21,7 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from timm.scheduler import CosineLRScheduler
+from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -45,6 +45,8 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
+    from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
@@ -278,17 +280,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
-        self.lr = (
+        self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
-            * config.training.lr.rate
+            * config.training.optimization.lr
             / config.system.hardware.num_gpus_per_model
         )
-        self.lr_iterations = config.training.lr.iterations
-        self.lr_warmup = config.training.lr.warmup
-        self.lr_min = config.training.lr.min
-        self.optimizer_settings = config.training.optimizer
-
         self.model_comm_group = None
         self.reader_groups = None
 
@@ -1058,62 +1055,55 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, *args
 
-    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
+    def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
 
         Parameters
         ----------
-        scheduler : CosineLRScheduler
+        scheduler : LRSchedulerTypeUnion
             Learning rate scheduler object.
         metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
-        del metric
-        scheduler.step(epoch=self.trainer.global_step)
+        if isinstance(scheduler, TimmScheduler):
+            cfg = next(c for c in self.trainer.lr_scheduler_configs if c.scheduler is scheduler)
+            if cfg.interval == "step":
+                scheduler.step_update(self.trainer.global_step, metric)
+            else:
+                scheduler.step(self.current_epoch + 1, metric)
+            return
+
+        super().lr_scheduler_step(scheduler, metric)
 
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-        optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
-        scheduler = self._create_scheduler(optimizer)
-        return [optimizer], [scheduler]
-
-    def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
-        """Instantiate optimizer directly via Hydra config (_target_ style)."""
+        optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
+        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
+        self.log_optimizer(optimizer)
 
-        # Convert schema to dict if needed
-        if hasattr(opt_cfg, "model_dump"):
-            opt_cfg = opt_cfg.model_dump(by_alias=True)
+        if not getattr(optimization_config, "lr_scheduler", None):
+            return optimizer
 
-        optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
+        scheduler = instantiate(optimization_config.lr_scheduler, optimizer=optimizer)
+        return [optimizer], [{"scheduler": scheduler, **optimization_config.pl_lr_scheduler}]  # type: ignore[return-value]
 
-        # Log the actual optimizer settings to help users verify configuration
+    @staticmethod
+    def log_optimizer(optimizer: torch.optim.Optimizer) -> None:
+        """Log optimizer type and settings."""
         defaults_to_log = {k: v for k, v in optimizer.defaults.items() if k != "params"}
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
-        return optimizer
-
-    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
-        """Helper to create the cosine LR scheduler."""
-        scheduler = CosineLRScheduler(
-            optimizer,
-            lr_min=self.lr_min,
-            t_initial=self.lr_iterations,
-            warmup_t=self.lr_warmup,
-        )
-        return {"scheduler": scheduler, "interval": "step"}
-
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
-        # The conditions should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
-            # Log hyperparameters on rank 0
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
-            # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)

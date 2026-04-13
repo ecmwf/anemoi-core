@@ -79,13 +79,17 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             If you would like to run in deterministic mode, please use aifs-train"
         )
 
-        self.lr = (
+        self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
-            * config.training.lr.rate
+            * config.training.optimization.lr
             / num_gpus_per_ensemble
         )
-        LOGGER.info("Base (config) learning rate: %e -- Effective learning rate: %e", config.training.lr.rate, self.lr)
+        LOGGER.info(
+            "Base (config) learning rate: %e -- Effective learning rate: %e",
+            config.training.optimization.lr,
+            self.effective_lr,
+        )
 
         self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
