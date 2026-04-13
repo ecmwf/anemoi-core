@@ -13,6 +13,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from hydra import compose
+from hydra import initialize_config_module
 from omegaconf import OmegaConf
 
 from anemoi.training.commands.config import ConfigGenerator
@@ -89,3 +91,10 @@ def test_validate_config_with_mask_env_vars(config_generator: ConfigGenerator) -
 
         # Verify that _mask_slurm_env_variables was called
         mock_mask.assert_called_once()
+
+
+def test_optimizer_config_group_can_be_overridden() -> None:
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
+        cfg = compose(config_name="config", overrides=["training/optimization/optimizer=zero"])
+
+    assert cfg.training.optimization.optimizer._target_ == "torch.distributed.optim.ZeroRedundancyOptimizer"
