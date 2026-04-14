@@ -421,6 +421,7 @@ class GraphTransformerProcessor(BaseProcessor):
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
         **kwargs,
@@ -453,6 +454,8 @@ class GraphTransformerProcessor(BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy: str, by default "edges"
+            Strategy to shard tensors, options are "edges" and "heads"
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         edge_pre_mlp: bool, by default False
@@ -469,6 +472,20 @@ class GraphTransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
+        self.shard_strategy = shard_strategy
+
+        assert shard_strategy in ["edges", "heads"], (
+            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
+            f"Supported strategies are 'edges' and 'heads'."
+        )
+
+        self.shard_strategy = shard_strategy
+
+        assert shard_strategy in ["edges", "heads"], (
+            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
+            f"Supported strategies are 'edges' and 'heads'."
+        )
+
         self.build_layers(
             GraphTransformerProcessorBlock,
             in_channels=num_channels,
@@ -478,6 +495,7 @@ class GraphTransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
+            shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
             edge_pre_mlp=edge_pre_mlp,
@@ -501,11 +519,14 @@ class GraphTransformerProcessor(BaseProcessor):
         if shard_info.edges_are_sharded():
             # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
             # but edge_attr can stay sharded
-            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
+            if self.shard_strategy == "heads":
+                edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
         else:
-            # Edges not pre-sharded, shard edge_attr here (edge_index stays full)
+            # Edges not pre-sharded, shard edges according to strategy
             edge_shard_sizes = get_shard_sizes(edge_attr, 0, model_comm_group)
             edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
+            if self.shard_strategy != "heads":
+                edge_index = shard_tensor(edge_index, 1, edge_shard_sizes, model_comm_group)
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
         x, edge_attr = self.run_layers(
@@ -519,3 +540,15 @@ class GraphTransformerProcessor(BaseProcessor):
         )
 
         return x
+
+    def _forward_edges_sharding(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_info: GraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **kwargs,
+    ) -> Tensor:
+        raise NotImplementedError("Halo sharding strategy is not yet implemented for GraphTransformerProcessor.")
