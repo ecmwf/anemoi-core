@@ -78,7 +78,7 @@ class AnemoiTrainer(ABC):
 
         self.config = convert_to_omegaconf(self.config)
 
-        # Optionally override the torch default BLAS backend. 
+        # Optionally override the torch default BLAS backend.
         _blas_backend = self.config.training.get("preferred_blas_backend", None)
         if _blas_backend:
             if hasattr(torch.backends.cuda, "preferred_blas_library"):
