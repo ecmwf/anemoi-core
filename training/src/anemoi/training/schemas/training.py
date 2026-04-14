@@ -425,6 +425,8 @@ class BaseTrainingSchema(BaseModel):
     " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
+    preferred_blas_backend: str | None = Field(default=None)
+    "Optionally override PyTorch's default BLAS backend."
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model.
     E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
