@@ -124,22 +124,40 @@ to ``null``:
 
 ``BaseGraphModule.configure_optimizers`` handles both cases: if
 ``lr_scheduler`` is absent or null, only the optimizer is returned;
-otherwise the scheduler is returned alongside the optimizer wrapped in
-the Lightning format specified by ``pl_lr_scheduler``.
+otherwise the scheduler is returned alongside the optimizer in the
+format Lightning expects.
 
-The ``pl_lr_scheduler`` key controls Lightning's scheduler integration
-(stepping interval, metric to monitor for ``ReduceLROnPlateau``, etc.)
-independently of the scheduler's own parameters:
+************************************
+ Lightning Scheduler Integration
+************************************
+
+PyTorch Lightning wraps the scheduler in its own configuration layer
+that controls *how* Lightning calls the scheduler during training —
+independently of the scheduler's own parameters. This is configured
+via ``pl_lr_scheduler``:
 
 .. code:: yaml
 
    pl_lr_scheduler:
      interval: step  # "step" or "epoch"
-     # monitor: val/loss  # uncomment for ReduceLROnPlateau
 
-For ``timm`` schedulers, ``interval: step`` is handled by a custom
-``lr_scheduler_step`` override in ``BaseGraphModule`` that calls
-``scheduler.step_update`` instead of the standard Lightning path.
+The most important field is ``interval``, which tells Lightning whether
+to step the scheduler after every batch (``step``) or after every epoch
+(``epoch``). The default is ``step``, which is appropriate for the
+default cosine scheduler where ``t_initial`` and ``warmup_t`` are given
+in steps.
+
+Any additional key accepted by Lightning's ``LRSchedulerConfig`` can
+be added here — for example, ``monitor: val/loss`` when using
+``ReduceLROnPlateau``. See the `Lightning docs
+<https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers>`_
+for the full list of options.
+
+For ``timm`` schedulers, the stepping is handled by a custom
+``lr_scheduler_step`` in ``BaseGraphModule`` that calls
+``scheduler.step_update`` instead of the standard Lightning path, so
+``interval: step`` works correctly with ``timm`` schedulers out of the
+box.
 
 ********************
  Available Presets
