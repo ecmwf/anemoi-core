@@ -534,7 +534,7 @@ class DiffusionTendTraining(BaseDiffusionTraining):
         # x: data.input.full (normalized), state_target: data.full (normalized slice view)
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
         state_target = self.task.get_targets(batch, data_indices=self.data_indices)
-        y_data_output = self.get_data_output_target(state_target) # (bs, n_step_output, ens, latlon, nvar)
+        y_data_output = self.get_data_output_target(state_target)  # (bs, n_step_output, ens, latlon, nvar)
         # Move to get_target()?, y = self.task.get_targets(batch, data_indices=self.data_indices)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
