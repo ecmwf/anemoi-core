@@ -25,7 +25,7 @@ def normalize_time_indices(time_indices: TimeIndices) -> TimeIndices:
     PyTorch, while slices use the cheaper basic-indexing path. We preserve
     sparse selections as explicit indices.
     """
-    if isinstance(time_indices, slice | int):
+    if isinstance(time_indices, (slice, int)):
         return time_indices
 
     if isinstance(time_indices, np.ndarray):
