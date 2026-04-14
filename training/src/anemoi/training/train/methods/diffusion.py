@@ -254,9 +254,8 @@ class DiffusionTraining(BaseDiffusionTraining):
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
-        y, target = self._get_diffusion_targets(batch)
-        # move this to _get_diffusion_targets,
-        # y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
+        y, target = self._get_diffusion_targets(batch) # (bs, n_step_output, ens, latlon, nvar)
+        # move to _get_diffusion_targets? y = self.task.get_targets(batch, data_indices=self.data_indices)  
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -527,9 +526,8 @@ class DiffusionTendTraining(BaseDiffusionTraining):
         # x: data.input.full (normalized), state_target: data.full (normalized slice view)
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
         state_target = self.task.get_targets(batch, data_indices=self.data_indices)
-        y_data_output = self.get_data_output_target(state_target)
-        # Move this to get_target()?,
-        # y = self.task.get_targets(batch, data_indices=self.data_indices)  # (bs, n_step_output, ens, latlon, nvar)
+        y_data_output = self.get_data_output_target(state_target) # (bs, n_step_output, ens, latlon, nvar)
+        # Move to get_target()?, y = self.task.get_targets(batch, data_indices=self.data_indices)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
