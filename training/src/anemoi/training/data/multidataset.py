@@ -23,6 +23,8 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.data_reader import offset_time_indices
+from anemoi.training.data.data_reader import normalize_time_indices
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -55,6 +57,9 @@ class MultiDataset(IterableDataset):
         """
         self.data_readers = data_readers
         self.relative_date_indices = relative_date_indices
+        self.relative_time_indexers = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
@@ -324,7 +329,7 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         x = {}
         for name, dataset in self.data_readers.items():
-            time_steps = [index + i for i in self.relative_date_indices[name]]
+            time_steps = offset_time_indices(index, self.relative_time_indexers[name])
             # self.shard_shapes is lazily initalised to None
             # This if statement guards against the case where shard_shapes is not set
             # (e.g. if set_comm_group_info hasn't been called yet)

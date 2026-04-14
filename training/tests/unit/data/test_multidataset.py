@@ -99,6 +99,41 @@ class TestMultiDataset:
         with pytest.raises(ValueError, match="No valid date indices found after intersection across all datasets"):
             _ = multi_dataset.valid_date_indices
 
+    def test_get_sample_uses_slice_for_contiguous_time_offsets(self, mocker: MockFixture) -> None:
+        dataset = mocker.MagicMock()
+        dataset.get_sample.return_value = "sample"
+
+        multi_dataset = MultiDataset(
+            data_readers={"dataset": dataset},
+            relative_date_indices={"dataset": [-1, 0, 1]},
+            shuffle=False,
+        )
+
+        sample = multi_dataset.get_sample(10)
+
+        assert sample == {"dataset": "sample"}
+        time_index = dataset.get_sample.call_args.args[0]
+        grid_index = dataset.get_sample.call_args.args[1]
+        assert isinstance(time_index, slice)
+        assert (time_index.start, time_index.stop, time_index.step) == (9, 12, 1)
+        assert isinstance(grid_index, slice)
+        assert (grid_index.start, grid_index.stop, grid_index.step) == (None, None, None)
+
+    def test_get_sample_preserves_sparse_time_offsets(self, mocker: MockFixture) -> None:
+        dataset = mocker.MagicMock()
+        dataset.get_sample.return_value = "sample"
+
+        multi_dataset = MultiDataset(
+            data_readers={"dataset": dataset},
+            relative_date_indices={"dataset": [0, 2, 6]},
+            shuffle=False,
+        )
+
+        multi_dataset.get_sample(10)
+
+        assert dataset.get_sample.call_args.args[0] == [10, 12, 16]
+
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
