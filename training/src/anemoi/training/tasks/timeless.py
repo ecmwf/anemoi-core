@@ -24,6 +24,10 @@ class BaseTimelessTask(BaseSingleStepTask):
 
         self._plot_adapter = AutoencoderPlotAdapter(self)
 
+    def _get_timestep_for_metadata(self) -> str:
+        """Get the timestep string for metadata."""
+        return "0H"
+
 
 class Autoencoder(BaseTimelessTask):
     """Autoencoding task implementation."""

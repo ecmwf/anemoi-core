@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -221,6 +222,23 @@ class BaseTask(ABC):
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
         md_dict["task"] = self.name
+
+        input_relative_date_indices = self.get_batch_input_indices()
+        output_relative_date_indices = self.get_batch_output_indices()
+        timestep = self._get_timestep_for_metadata()
+        relative_date_indices = sorted(input_relative_date_indices + output_relative_date_indices)
+        timesteps = {
+            "relative_date_indices_training": relative_date_indices,  # backwards compatibility with inference
+            "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
+            "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
+            "timestep": timestep,  # backwards compatibility with inference
+            "input_offsets": [frequency_to_string(o) for o in self.input_offsets],
+            "output_offsets": [frequency_to_string(o) for o in self.output_offsets],
+        }
+
+        dataset_names = md_dict["metadata_inference"]["dataset_names"]
+        for dataset_name in dataset_names:
+            md_dict["metadata_inference"][dataset_name]["timesteps"] = timesteps
 
 
 class BaseSingleStepTask(BaseTask):

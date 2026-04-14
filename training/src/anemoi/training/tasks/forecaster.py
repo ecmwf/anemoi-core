@@ -16,6 +16,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
+from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
@@ -198,3 +199,8 @@ class Forecaster(BaseTask):
     def on_train_epoch_end(self, current_epoch: int) -> None:
         if self.rollout.should_increase(current_epoch):
             self.rollout.increase()
+
+    def _get_timestep_for_metadata(self) -> str:
+        """Get the timestep string for metadata."""
+        timestep = self.output_offsets[-1]
+        return frequency_to_string(timestep)

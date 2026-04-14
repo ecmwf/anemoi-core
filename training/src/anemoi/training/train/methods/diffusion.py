@@ -61,10 +61,6 @@ class BaseDiffusionTraining(BaseTrainingModule):
 
         self.rho = config.model.model.diffusion.rho
 
-        from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
-
-        self._plot_adapter = DiffusionPlotAdapter(self)
-
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
         x = {}
