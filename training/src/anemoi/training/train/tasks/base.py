@@ -21,7 +21,7 @@ import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from timm.scheduler import CosineLRScheduler
+from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -44,11 +44,14 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
+    from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -265,17 +268,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.n_step_input = config.training.multistep_input
         self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
-        self.lr = (
+        self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
-            * config.training.lr.rate
+            * config.training.optimization.lr
             / config.system.hardware.num_gpus_per_model
         )
-        self.lr_iterations = config.training.lr.iterations
-        self.lr_warmup = config.training.lr.warmup
-        self.lr_min = config.training.lr.min
-        self.optimizer_settings = config.training.optimizer
-
         self.model_comm_group = None
         self.reader_groups = None
 
@@ -383,6 +381,40 @@ class BaseGraphModule(pl.LightningModule, ABC):
             },
         )
 
+    def get_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        *,
+        start: int | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Get full targets for a time slice.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Input batch keyed by dataset.
+        start : int | None, optional
+            Time index where targets start. Defaults to ``self.n_step_input``.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Full target tensor view for each dataset.
+        """
+        if start is None:
+            start = self.n_step_input
+
+        target_full: dict[str, torch.Tensor] = {}
+        for dataset_name, dataset_batch in batch.items():
+            msg = (
+                f"Batch length not sufficient for requested target slice for {dataset_name}! "
+                f"{dataset_batch.shape[1]} !>= {start + self.n_step_output}"
+            )
+            assert dataset_batch.shape[1] >= start + self.n_step_output, msg
+            target_full[dataset_name] = dataset_batch.narrow(1, start, self.n_step_output)
+
+        return target_full
+
     def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
@@ -417,6 +449,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 del state_dict[key]
 
         model_state_dict = self.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
         for key, value in model_state_dict.items():
             full_key = f"model.{key}"
             if full_key.startswith(processor_prefixes):
@@ -560,6 +593,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -587,6 +622,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             "grid_shard_slice": grid_shard_slice,
             "group": self.model_comm_group,
         }
+        if pred_layout is not None:
+            loss_kwargs["pred_layout"] = pred_layout
+        if target_layout is not None:
+            loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
@@ -601,6 +640,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -619,7 +660,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name)
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
+        )
 
     def compute_dataset_loss_metrics(
         self,
@@ -866,6 +914,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -891,22 +941,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
-            if not isinstance(metric, BaseLoss):
-                # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
-                    y_pred,
-                    y,
-                    grid_shard_slice=grid_shard_slice,
-                    model_comm_group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes[dataset_name],
-                )
-                continue
+            # Validation now compares the model output tensor with the full target tensor.
+            # Those can contain different variables, so the metric needs to know how to
+            # line them up before computing the score. Other metrics do not have this information.
+            assert isinstance(
+                metric,
+                BaseLoss,
+            ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
+                if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
                         " in the post processed space."
@@ -914,21 +959,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     raise ValueError(exception_msg)
 
                 metric_kwargs = {
+                    "scaler_indices": (..., indices),
                     "grid_shard_slice": grid_shard_slice,
                     "group": self.model_comm_group,
                 }
+                if pred_layout is not None:
+                    metric_kwargs["pred_layout"] = pred_layout
+                if target_layout is not None:
+                    metric_kwargs["target_layout"] = target_layout
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
                         grid_shard_shapes=self.grid_shard_shapes[dataset_name],
                     )
 
-                metrics[metric_step_name] = metric(
-                    y_pred,
-                    y,
-                    scaler_indices=(..., indices),
-                    **metric_kwargs,
-                )
+                metrics[metric_step_name] = metric(y_pred, y, **metric_kwargs)
 
         return metrics
 
@@ -1020,62 +1065,55 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         return val_loss, *args
 
-    def lr_scheduler_step(self, scheduler: CosineLRScheduler, metric: None = None) -> None:
+    def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
 
         Parameters
         ----------
-        scheduler : CosineLRScheduler
+        scheduler : LRSchedulerTypeUnion
             Learning rate scheduler object.
         metric : Any
             Metric object for e.g. ReduceLRonPlateau. Default is None.
 
         """
-        del metric
-        scheduler.step(epoch=self.trainer.global_step)
+        if isinstance(scheduler, TimmScheduler):
+            cfg = next(c for c in self.trainer.lr_scheduler_configs if c.scheduler is scheduler)
+            if cfg.interval == "step":
+                scheduler.step_update(self.trainer.global_step, metric)
+            else:
+                scheduler.step(self.current_epoch + 1, metric)
+            return
+
+        super().lr_scheduler_step(scheduler, metric)
 
     def on_train_epoch_end(self) -> None:
         pass
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
+    def configure_optimizers(
+        self,
+    ) -> OptimizerLRScheduler:
         """Create optimizer and LR scheduler based on Hydra config."""
-        optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
-        scheduler = self._create_scheduler(optimizer)
-        return [optimizer], [scheduler]
-
-    def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
-        """Instantiate optimizer directly via Hydra config (_target_ style)."""
+        optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
+        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
+        self.log_optimizer(optimizer)
 
-        # Convert schema to dict if needed
-        if hasattr(opt_cfg, "model_dump"):
-            opt_cfg = opt_cfg.model_dump(by_alias=True)
+        if not getattr(optimization_config, "lr_scheduler", None):
+            return optimizer
 
-        optimizer = instantiate(opt_cfg, params=params, lr=self.lr)
+        scheduler = instantiate(optimization_config.lr_scheduler, optimizer=optimizer)
+        return [optimizer], [{"scheduler": scheduler, **optimization_config.pl_lr_scheduler}]  # type: ignore[return-value]
 
-        # Log the actual optimizer settings to help users verify configuration
+    @staticmethod
+    def log_optimizer(optimizer: torch.optim.Optimizer) -> None:
+        """Log optimizer type and settings."""
         defaults_to_log = {k: v for k, v in optimizer.defaults.items() if k != "params"}
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
-        return optimizer
-
-    def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
-        """Helper to create the cosine LR scheduler."""
-        scheduler = CosineLRScheduler(
-            optimizer,
-            lr_min=self.lr_min,
-            t_initial=self.lr_iterations,
-            warmup_t=self.lr_warmup,
-        )
-        return {"scheduler": scheduler, "interval": "step"}
-
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
-        # The conditions should be separate, but are combined due to pre-commit hook
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
-            # Log hyperparameters on rank 0
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
-            # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
