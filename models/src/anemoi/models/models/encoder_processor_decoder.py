@@ -13,6 +13,7 @@ from typing import Optional
 
 import einops
 import torch
+from torch import nn
 from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
