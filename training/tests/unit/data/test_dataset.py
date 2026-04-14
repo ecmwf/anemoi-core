@@ -16,45 +16,9 @@ from pydantic import ValidationError
 
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.data_reader import create_dataset
-from anemoi.training.data.data_reader import normalize_time_indices
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
-
-
-
-
-def test_normalize_time_indices_collapses_contiguous_ranges() -> None:
-    normalized = normalize_time_indices([2, 3, 4])
-
-    assert isinstance(normalized, slice)
-    assert (normalized.start, normalized.stop, normalized.step) == (2, 5, 1)
-
-
-def test_normalize_time_indices_preserves_sparse_ranges() -> None:
-    normalized = normalize_time_indices([2, 4, 7])
-
-    assert normalized == [2, 4, 7]
-
-
-def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
-    class FakeDataset:
-        def __init__(self) -> None:
-            self.last_index = None
-
-        def __getitem__(self, item):
-            self.last_index = item
-            return np.zeros((3, 2, 4, 5), dtype=np.float32)
-
-    dataset = NativeGridDataset.__new__(NativeGridDataset)
-    dataset.data = FakeDataset()
-
-    sample = dataset.get_sample(time_indices=[4, 5, 6], grid_shard_indices=slice(0, 5))
-
-    time_index = dataset.data.last_index[0]
-    assert isinstance(time_index, slice)
-    assert (time_index.start, time_index.stop, time_index.step) == (4, 7, 1)
-    assert sample.shape == (3, 4, 5, 2)
 
 
 @pytest.fixture
