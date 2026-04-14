@@ -66,6 +66,9 @@ class DummyGraphModule(BaseGraphModule):
     def __init__(self) -> None:
         pass
 
+    def fill_metadata(self, metadata: dict) -> None:
+        pass
+
     def _step(self, batch, validation_mode: bool = False) -> Never:  # noqa: ANN001
         raise NotImplementedError
 
@@ -286,7 +289,7 @@ def test_validate_transfer_learning_add_dataset() -> None:
     model = SimpleNamespace(_ckpt_model_name_to_index={"era5": {"t2m": 0, "u10": 1}})
 
     # Call validation method
-    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model, trainer.data_indices)
 
     # Assert: compare_variables was called for ERA5 (found in checkpoint)
     assert len(era5_index.compare_called_with) == 1
@@ -310,7 +313,7 @@ def test_validate_transfer_learning_swap_datasets() -> None:
         },
     )
 
-    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model, trainer.data_indices)
 
     assert len(era5_index.compare_called_with) == 1
     assert len(icon_index.compare_called_with) == 0
@@ -325,7 +328,7 @@ def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -
     trainer = SimpleNamespace(data_indices={"era5": era5_index})
     model = SimpleNamespace(_ckpt_model_name_to_index={"t2m": 0, "u10": 1})
 
-    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model, trainer.data_indices)
 
     assert len(era5_index.compare_called_with) == 0
 
@@ -345,7 +348,7 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     )
 
     # Call validation method
-    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model, trainer.data_indices)
 
     # Assert: compare_variables was called for ERA5
     assert len(era5_index.compare_called_with) == 1

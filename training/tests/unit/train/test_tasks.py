@@ -350,6 +350,12 @@ def test_graphdiffusionforecaster() -> None:
         def __init__(self, model: DummyDiffusionModel) -> None:
             self.model = model
 
+        def get_diffusion_parameters(self) -> tuple[float, float, float]:
+            return self.model.sigma_max, self.model.sigma_min, self.model.sigma_data
+
+        def forward_with_preconditioning(self, x, y_noised, sigma, **kwargs):
+            return self.model.fwd_with_preconditioning(x, y_noised, sigma, **kwargs)
+
     data_indices = _data_indices_single()
     forecaster = GraphDiffusionForecaster.__new__(GraphDiffusionForecaster)
     pl.LightningModule.__init__(forecaster)
@@ -383,6 +389,12 @@ def test_graphdiffusionforecaster_uses_reduced_model_target_and_full_loss_target
     class DummyDiffusion:
         def __init__(self, model: DummyDiffusionModel) -> None:
             self.model = model
+
+        def get_diffusion_parameters(self) -> tuple[float, float, float]:
+            return self.model.sigma_max, self.model.sigma_min, self.model.sigma_data
+
+        def forward_with_preconditioning(self, x, y_noised, sigma, **kwargs):
+            return self.model.fwd_with_preconditioning(x, y_noised, sigma, **kwargs)
 
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
@@ -540,6 +552,37 @@ def test_graphdiffusiontendforecaster_validation_uses_full_state_targets(
             self.pre_processors = {"data": object()}
             self.post_processors = {"data": object()}
 
+        def get_diffusion_parameters(self) -> tuple[float, float, float]:
+            return self.model.sigma_max, self.model.sigma_min, self.model.sigma_data
+
+        def apply_reference_state_truncation(self, x, grid_shard_shapes, model_comm_group=None):
+            return self.model.apply_reference_state_truncation(x, grid_shard_shapes, model_comm_group)
+
+        def forward_with_preconditioning(self, x, y_noised, sigma, **kwargs):
+            return self.model.fwd_with_preconditioning(x, y_noised, sigma, **kwargs)
+
+        def get_tendency_processors(self, dataset_name):
+            return self.pre_processors_tendencies[dataset_name], self.post_processors_tendencies.get(dataset_name)
+
+        def compute_tendency_step(self, dataset_name, y_step, x_ref_step, tendency_pre_processor):
+            return self.model.compute_tendency(
+                {dataset_name: y_step},
+                {dataset_name: x_ref_step},
+                {dataset_name: self.pre_processors[dataset_name]},
+                {dataset_name: tendency_pre_processor},
+            )[dataset_name]
+
+        def add_tendency_to_state_step(self, dataset_name, x_ref_step, tendency_step, tendency_post_processor):
+            return self.model.add_tendency_to_state(
+                {dataset_name: x_ref_step},
+                {dataset_name: tendency_step},
+                {dataset_name: self.post_processors[dataset_name]},
+                {dataset_name: tendency_post_processor},
+            )[dataset_name]
+
+        def apply_imputer_inverse(self, dataset_name, x):
+            return self.model._apply_imputer_inverse(self.post_processors, dataset_name, x)
+
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
 
@@ -621,6 +664,9 @@ def test_graphdiffusiontendforecaster_validation_metrics_use_data_full_state_tar
         def __init__(self) -> None:
             self.model = DummyInner()
             self.post_processors = {"data": object()}
+
+        def apply_imputer_inverse(self, dataset_name: str, x):
+            return self.model._apply_imputer_inverse(self.post_processors, dataset_name, x)
 
     forecaster.model = DummyOuter()
 
