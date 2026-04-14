@@ -123,7 +123,7 @@ training:
             height: 12      # z
             pres_0g: 10     # sp
             # RRFS-specific fields not present in Anemoi defaults; keep at default unless tuned:
-            refc: 1
+            refc: 40 
             clmr: 1
             icmr: 1
             rwmr: 1
