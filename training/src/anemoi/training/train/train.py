@@ -24,6 +24,7 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from omegaconf import open_dict
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -262,6 +263,13 @@ class AnemoiTrainer(ABC):
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
         model_task = get_class(self.config.training.model_task)
+
+        # Sync multistep values from training to model config. Interpolations like
+        # model.multistep_input = ${training.multistep_input} may have been frozen by an
+        # earlier OmegaConf.resolve() call before the training values were modified.
+        with open_dict(self.config.model):
+            self.config.model.multistep_input = self.config.training.multistep_input
+            self.config.model.multistep_output = self.config.training.multistep_output
 
         model = _instantiate_model(self.config.model, self.runtime_artifacts)
 
