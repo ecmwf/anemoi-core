@@ -261,7 +261,8 @@ class EnsembleTraining(BaseTrainingModule):
         for task_kwargs in self.task.steps:
             y_pred = self(x, **task_kwargs)
             y = self._make_targets(batch)
-            # Move this into _make_targets() y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+            # Move this into _make_targets()
+            # y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
             # Move this into _make_targets() y = self._collapse_ens_dim(y)
 
             loss_next, metrics_next, y_preds_next = checkpoint(

@@ -10,12 +10,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from typing import Any
 from unittest.mock import MagicMock
 
 import einops
 import pytest
 import pytorch_lightning as pl
+
+if TYPE_CHECKING:
+    import pytest
 import torch
 from omegaconf import DictConfig
 
@@ -33,7 +37,6 @@ from anemoi.training.train.methods.diffusion import BaseDiffusionTraining
 from anemoi.training.train.methods.diffusion import DiffusionTraining
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
-from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 
 
