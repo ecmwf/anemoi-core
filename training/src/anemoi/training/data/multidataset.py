@@ -23,8 +23,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.data_reader import offset_time_indices
-from anemoi.training.data.data_reader import normalize_time_indices
+from anemoi.training.data.relative_time_indices import offset_time_indices
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -57,9 +56,6 @@ class MultiDataset(IterableDataset):
         """
         self.data_readers = data_readers
         self.relative_date_indices = relative_date_indices
-        self.relative_time_indexers = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())

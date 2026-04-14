@@ -10,7 +10,6 @@
 import datetime
 import logging
 from abc import abstractmethod
-from collections.abc import Sequence
 from functools import cached_property
 
 import numpy as np
@@ -22,70 +21,14 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.utils.dates import frequency_to_seconds
+from anemoi.training.data.relative_time_indices import TimeIndices
 
 LOGGER = logging.getLogger(__name__)
-
-
-TimeIndices = slice | int | list[int] | np.ndarray
 
 
 def _as_dict(value: str | dict | DictConfig) -> str | dict:
     """Convert DictConfig payloads to plain dicts."""
     return dict(value) if isinstance(value, DictConfig) else value
-
-
-def normalize_time_indices(time_indices: TimeIndices) -> TimeIndices:
-    """Collapse contiguous integer sequences into slices when possible.
-
-    Using a list/array of integers triggers advanced indexing in NumPy and
-    PyTorch, while slices use the cheaper basic-indexing path. We preserve
-    sparse selections as explicit indices.
-    """
-    if isinstance(time_indices, slice | int):
-        return time_indices
-
-    if isinstance(time_indices, np.ndarray):
-        if time_indices.ndim != 1:
-            return time_indices
-        indices = time_indices.tolist()
-    elif isinstance(time_indices, Sequence):
-        indices = list(time_indices)
-    else:
-        return time_indices
-
-    if not indices:
-        return indices
-
-    if len(indices) == 1:
-        start = indices[0]
-        return slice(start, start + 1, 1)
-
-    step = indices[1] - indices[0]
-    if step <= 0:
-        return indices
-
-    if any(curr - prev != step for prev, curr in zip(indices, indices[1:], strict=False)):
-        return indices
-
-    return slice(indices[0], indices[-1] + step, step)
-
-
-def offset_time_indices(reference_index: int, relative_indices: TimeIndices) -> TimeIndices:
-    """Shift relative time indices by a sample reference index."""
-    relative_indices = normalize_time_indices(relative_indices)
-
-    if isinstance(relative_indices, slice):
-        start = None if relative_indices.start is None else reference_index + relative_indices.start
-        stop = None if relative_indices.stop is None else reference_index + relative_indices.stop
-        return slice(start, stop, relative_indices.step)
-
-    if isinstance(relative_indices, int):
-        return reference_index + relative_indices
-
-    if isinstance(relative_indices, np.ndarray):
-        return reference_index + relative_indices
-
-    return [reference_index + offset for offset in relative_indices]
 
 
 def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | dict:
@@ -241,7 +184,6 @@ class BaseAnemoiReader:
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
-        time_indices = normalize_time_indices(time_indices)
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
             x = self.data[time_indices, :, :, grid_shard_indices]
