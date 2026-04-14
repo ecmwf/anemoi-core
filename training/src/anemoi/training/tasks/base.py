@@ -182,7 +182,7 @@ class BaseTask(ABC):
     def get_targets(
         self,
         batch: dict[str, torch.Tensor],
-        data_indices: dict[str, IndexCollection],
+        data_indices: dict[str, IndexCollection],  # noqa: ARG002
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Extract model targets from a batch.
@@ -201,15 +201,14 @@ class BaseTask(ABC):
         -------
         dict[str, torch.Tensor]
             Target tensors per dataset with shape
-            ``(bs, num_outputs, grid, nvar)``.
+            ``(bs, num_outputs, ensemble, grid, full_nvar)`` in DATA_FULL
+            variable space (all variables including forcings).
         """
         time_indices = self.get_batch_output_indices(**kwargs)
 
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            dataset_batch = dataset_batch[:, time_indices]
-            var_indices = data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
-            y[dataset_name] = dataset_batch[..., var_indices]
+            y[dataset_name] = dataset_batch[:, time_indices]
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 

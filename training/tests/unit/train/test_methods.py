@@ -10,16 +10,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from typing import Any
 from unittest.mock import MagicMock
 
 import einops
 import pytest
 import pytorch_lightning as pl
-
-if TYPE_CHECKING:
-    import pytest
 import torch
 from omegaconf import DictConfig
 
@@ -34,9 +30,11 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.diffusion import BaseDiffusionTraining
+from anemoi.training.train.methods.diffusion import DiffusionTendTraining
 from anemoi.training.train.methods.diffusion import DiffusionTraining
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -1032,3 +1030,399 @@ def test_ensemble_training_multi_rollout_accumulates_one_pred_per_step(
     assert len(y_preds) == 2, f"Expected 2 y_pred entries for rollout=2, got {len(y_preds)}"
     for pred in y_preds:
         assert pred["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
+
+
+# ── DATA_FULL target layout correctness ───────────────────────────────────────
+
+
+def test_single_training_uses_data_full_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SingleTraining._step must pass target_layout=DATA_FULL and the full (unfiltered) batch slice as y.
+
+    When forcing variables are present the DATA_FULL variable count is larger than the
+    DATA_OUTPUT count. Passing the already-filtered batch with DATA_FULL layout indices
+    would cause an out-of-bounds CUDA assert.  This test verifies that get_targets()
+    returns the full batch slice and that target_layout=DATA_FULL is declared.
+    """
+    # Include a forcing variable so DATA_FULL (3) > DATA_OUTPUT (2).
+    name_to_index = {"prog_0": 0, "forcing_0": 1, "prog_1": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["forcing_0"])}
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+
+    forecaster = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=1,
+    )
+    forecaster.output_mask = {"data": NoOutputMask()}
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        ref = next(iter(y_pred.values()))
+        return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    b, e, g = 2, 1, 4
+    full_v = len(name_to_index)
+    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    forecaster._step(batch=batch, validation_mode=False)
+
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_FULL
+    # Target must contain ALL variables (DATA_FULL), not just output vars (DATA_OUTPUT).
+    assert captured["target_vars"] == full_v, (
+        f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}. "
+        "get_targets() must not pre-filter to data.output.full."
+    )
+
+
+def test_ensemble_training_uses_data_full_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EnsembleTraining._step must pass target_layout=DATA_FULL with the full batch slice as y."""
+    name_to_index = {"prog_0": 0, "forcing_0": 1, "prog_1": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["forcing_0"])}
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.n_step_input = 1
+    forecaster.n_step_output = 1
+    forecaster.nens_per_device = 2
+    forecaster.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=1,
+    )
+    forecaster.output_mask = {"data": NoOutputMask()}
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["target_layout"] = kwargs["target_layout"]
+        ref = next(iter(y_pred.values()))
+        return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    b, e, g = 2, 1, 4
+    full_v = len(name_to_index)
+    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    forecaster._step(batch=batch, validation_mode=False)
+
+    assert captured["target_layout"] == IndexSpace.DATA_FULL
+    assert (
+        captured["target_vars"] == full_v
+    ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+
+
+def test_diffusion_training_uses_data_full_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DiffusionTraining._step must pass target_layout=DATA_FULL with the full batch slice as y."""
+
+    class _DummyDiffusionWrapper:
+        def __init__(self, inner: DummyDiffusionModel) -> None:
+            self.model = inner
+
+    # Include an extra target (observation) variable to exercise the target-variable path.
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+
+    forecaster = DiffusionTraining.__new__(DiffusionTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION, task=task)
+    forecaster.model = _DummyDiffusionWrapper(
+        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    )
+    forecaster.rho = _CFG_DIFFUSION.model.model.diffusion.rho
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["pred_vars"] = y_pred["data"].shape[-1]
+        captured["target_vars"] = y["data"].shape[-1]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        pred = y_pred["data"]
+        return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
+
+    monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+
+    b, e, g = 2, 1, 4
+    full_v = len(name_to_index)
+    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    forecaster._step(batch=batch, validation_mode=False)
+
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_FULL
+    assert captured["pred_vars"] == len(data_indices["data"].model.output.full)
+    assert (
+        captured["target_vars"] == full_v
+    ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
+
+
+def test_diffusion_training_target_reduction_fast_paths() -> None:
+    """BaseDiffusionTraining.reduce_data_output_target_to_model_output uses fast paths when possible."""
+    module = DiffusionTraining.__new__(DiffusionTraining)
+    pl.LightningModule.__init__(module)
+
+    # Identity: model.output == data.output (no target/forcing/diagnostic), so no selection needed.
+    data_indices_identity = {"data": _make_minimal_index_collection({"A": 0, "B": 1})}
+    _wire_training_module(module, data_indices=data_indices_identity, config=_CFG_DIFFUSION)
+    y_identity = {"data": torch.randn((2, 1, 1, 4, 2), dtype=torch.float32)}
+    y_model_identity = module.reduce_data_output_target_to_model_output(y_identity)
+    assert y_model_identity["data"] is y_identity["data"]
+
+    # Non-contiguous: obs_A sits between A and B in the original variable ordering
+    # (name_to_index = {A:0, obs_A:1, B:2}) so data.output is [A, obs_A, B] (sorted by index).
+    # model.output = [A, B] → positions [0, 2] in data.output, which is non-contiguous.
+    data_indices_non_contiguous = {
+        "data": _make_minimal_index_collection(
+            {"A": 0, "obs_A": 1, "B": 2},
+            target=["obs_A"],
+        ),
+    }
+    _wire_training_module(module, data_indices=data_indices_non_contiguous, config=_CFG_DIFFUSION)
+    y_non_contiguous = {"data": torch.randn((2, 1, 1, 4, 3), dtype=torch.float32)}
+    y_model_non_contiguous = module.reduce_data_output_target_to_model_output(y_non_contiguous)
+    expected_non_contiguous = y_non_contiguous["data"].index_select(
+        -1,
+        torch.tensor([0, 2], dtype=torch.long),
+    )
+    torch.testing.assert_close(y_model_non_contiguous["data"], expected_non_contiguous)
+    assert (
+        y_model_non_contiguous["data"].untyped_storage().data_ptr()
+        != y_non_contiguous["data"].untyped_storage().data_ptr()
+    )
+
+
+def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DiffusionTendTraining.compute_dataset_loss_metrics must use DATA_FULL for validation metrics.
+
+    The state-space targets (y_state) originate from get_targets() which returns DATA_FULL.
+    After applying the imputer inverse they are compared against the predicted state using
+    target_layout=DATA_FULL so that LossVariableMapper can resolve variables correctly.
+    """
+    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
+
+    forecaster = DiffusionTendTraining.__new__(DiffusionTendTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+
+    captured: dict[str, Any] = {}
+
+    class _DummyInner:
+        def _apply_imputer_inverse(
+            self,
+            post_processors: dict[str, Any],
+            dataset_name: str,
+            x: torch.Tensor,
+        ) -> torch.Tensor:
+            del post_processors
+            captured["inverse_dataset_name"] = dataset_name
+            return x + 7.0
+
+    class _DummyOuter:
+        def __init__(self) -> None:
+            self.model = _DummyInner()
+            self.post_processors = {"data": object()}
+
+    forecaster.model = _DummyOuter()
+
+    def _prepare_tensors_stub(
+        self: DiffusionTendTraining,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        dataset_name: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, slice]:
+        del self, validation_mode, dataset_name
+        return y_pred, y, slice(0, 1)
+
+    def _compute_loss_stub(
+        self: DiffusionTendTraining,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del self, y_pred, y
+        captured["loss_kwargs"] = kwargs
+        return torch.tensor(0.0)
+
+    def _compute_metrics_stub(
+        self: DiffusionTendTraining,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> dict[str, torch.Tensor]:
+        del self, y_pred
+        captured["metric_target"] = y
+        captured["metric_kwargs"] = kwargs
+        return {"dummy": torch.tensor(1.0)}
+
+    monkeypatch.setattr(DiffusionTendTraining, "_prepare_tensors_for_loss", _prepare_tensors_stub, raising=True)
+    monkeypatch.setattr(DiffusionTendTraining, "_compute_loss", _compute_loss_stub, raising=True)
+    monkeypatch.setattr(DiffusionTendTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
+
+    b, e, g = 2, 1, 4
+    n_model = len(data_indices["data"].model.output.full)
+    n_full = len(name_to_index)
+    y_pred = torch.randn(b, 1, e, g, n_model, dtype=torch.float32)
+    y = torch.randn(b, 1, e, g, len(data_indices["data"].data.output.full), dtype=torch.float32)
+    y_pred_state = {"data": torch.randn(b, 1, e, g, n_model, dtype=torch.float32)}
+    y_state = {"data": torch.randn(b, 1, e, g, n_full, dtype=torch.float32)}
+    weights = {"data": torch.ones(b, 1, 1, 1, 1, dtype=torch.float32)}
+
+    loss, metrics, _ = forecaster.compute_dataset_loss_metrics(
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        validation_mode=True,
+        y_pred_state=y_pred_state,
+        y_state=y_state,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_OUTPUT,
+        weights=weights,
+    )
+
+    assert isinstance(loss, torch.Tensor)
+    assert isinstance(metrics["dummy"], torch.Tensor)
+    assert captured["inverse_dataset_name"] == "data"
+    # Loss kwargs keep the originally-passed layouts (DATA_OUTPUT for tendency targets)
+    assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["loss_kwargs"]["target_layout"] == IndexSpace.DATA_OUTPUT
+    # Metrics use DATA_FULL because state targets come from get_targets() in DATA_FULL space
+    assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
+    # The metric target has been shifted by _apply_imputer_inverse (+7)
+    torch.testing.assert_close(captured["metric_target"], y_state["data"] + 7.0)
+
+
+def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EnsembleTraining.compute_dataset_loss_metrics must forward target_layout=DATA_FULL."""
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
+    pl.LightningModule.__init__(forecaster)
+
+    forecaster.ens_comm_subgroup_size = 1
+    forecaster.ens_comm_subgroup = None
+    forecaster.grid_shard_slice = {"data": None}
+    forecaster.grid_dim = -2
+    forecaster.grid_shard_shapes = {"data": None}
+
+    monkeypatch.setattr(
+        "anemoi.training.train.methods.ensemble.gather_tensor",
+        lambda input_, *_args, **_kwargs: input_,
+        raising=True,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_stub(
+        self: EnsembleTraining,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        del self, y_pred, y
+        captured["loss_kwargs"] = kwargs
+        return torch.tensor(0.0)
+
+    def _compute_metrics_stub(
+        self: EnsembleTraining,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        **kwargs: Any,
+    ) -> dict[str, torch.Tensor]:
+        del self, y_pred, y
+        captured["metric_kwargs"] = kwargs
+        return {"dummy": torch.tensor(1.0)}
+
+    monkeypatch.setattr(EnsembleTraining, "_compute_loss", _compute_loss_stub, raising=True)
+    monkeypatch.setattr(EnsembleTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
+
+    y_pred = torch.randn(2, 1, 2, 4, 3)
+    y = torch.randn(2, 1, 4, 3)
+    loss, metrics, y_pred_ens = forecaster.compute_dataset_loss_metrics(
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        rollout_step=3,
+        validation_mode=True,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
+
+    assert isinstance(loss, torch.Tensor)
+    assert isinstance(metrics["dummy"], torch.Tensor)
+    assert y_pred_ens.shape == y_pred.shape
+    assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["loss_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
+    assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
+    assert captured["metric_kwargs"]["rollout_step"] == 3
+
+
+def test_ensemble_make_targets_requires_singleton_ensemble_dim() -> None:
+    """EnsembleTraining._make_targets must assert the ensemble dim is a singleton."""
+    data_indices = _data_indices_single()
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.n_step_input = 1
+    forecaster.n_step_output = 1
+
+    # Ensemble dim=2 (shape[2]=2) should trigger the singleton-ensemble assertion.
+    # Use rollout_step=0 (start=0), requiring a batch with at least input+output=2 time steps.
+    b, t, e, g, v = 2, 2, 2, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
+
+    with pytest.raises(AssertionError, match="Expected singleton ensemble dimension"):
+        forecaster._make_targets(batch, start=0)
