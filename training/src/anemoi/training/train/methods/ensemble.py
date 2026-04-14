@@ -210,9 +210,10 @@ class EnsembleTraining(BaseTrainingModule):
         Ground-truth targets are provided with a singleton ensemble axis and
         are reduced to `(batch, time, grid, vars)` for loss computation.
         """
-        y_full = self.get_target(
+        y_full = self.task.get_targets(
             batch,
-            start=start,
+            data_indices=self.data_indices,
+            rollout_step=start,
         )
 
         y: dict[str, torch.Tensor] = {}
@@ -260,9 +261,8 @@ class EnsembleTraining(BaseTrainingModule):
 
         for task_kwargs in self.task.steps:
             y_pred = self(x, **task_kwargs)
-            y = self._make_targets(batch)
-            # Move into _make_targets() y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-            # Move this into _make_targets() y = self._collapse_ens_dim(y)
+            y = self._make_targets(batch, start=task_kwargs.get("rollout_step", 0))
+            # Move into _make_targets() y = self._collapse_ens_dim(y)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
