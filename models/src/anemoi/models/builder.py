@@ -18,42 +18,13 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.models.models import AnemoiDiffusionModel
-from anemoi.models.models import AnemoiDiffusionTendencyModel
 from anemoi.models.models import AnemoiModel
-from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
-from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.runtime_artifacts import RuntimeArtifacts
 from anemoi.models.utils.supporting_arrays import build_combined_supporting_arrays
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _build_backbone(backbone_cfg: DictConfig, model_config, data_indices: dict, statistics: dict, graph_data) -> object:
-    """Instantiate the backbone NN from its Hydra config."""
-    cfg = {
-        "_target_": backbone_cfg._target_,
-        "_convert_": getattr(backbone_cfg, "_convert_", "none"),
-    }
-    return instantiate(
-        cfg,
-        model_config=model_config,
-        data_indices=data_indices,
-        statistics=statistics,
-        graph_data=graph_data,
-        _recursive_=False,
-    )
-
-
-def _dispatch_model_class(backbone: object) -> type:
-    """Return the AnemoiModel wrapper class appropriate for *backbone*."""
-    if isinstance(backbone, AnemoiDiffusionTendModelEncProcDec):
-        return AnemoiDiffusionTendencyModel
-    if isinstance(backbone, AnemoiDiffusionModelEncProcDec):
-        return AnemoiDiffusionModel
-    return AnemoiModel
 
 
 # ---------------------------------------------------------------------------
@@ -202,18 +173,8 @@ def build_anemoi_model(
         dataset_names=list(runtime_artifacts.statistics.keys()),
     )
 
-    backbone_instance = _build_backbone(
-        backbone,
-        model_config,
-        runtime_artifacts.data_indices,
-        runtime_artifacts.statistics,
-        runtime_artifacts.graph_data,
-    )
-    model_cls = _dispatch_model_class(backbone_instance)
-
-    return model_cls(
-        backbone=backbone_instance,
-        n_step_input=multistep_input,
+    return AnemoiModel(
+        model_config=model_config,
         graph_data=runtime_artifacts.graph_data,
         statistics=runtime_artifacts.statistics,
         statistics_tendencies=runtime_artifacts.statistics_tendencies,

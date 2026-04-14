@@ -39,14 +39,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.backbone.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.backbone.encoder.get("trainable_size", 0),
+                trainable_size=model_config.model.encoder.get("trainable_size", 0),
             )
 
             self.encoder[dataset_name] = instantiate(
-                model_config.model.backbone.encoder,
+                model_config.model.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
@@ -57,14 +57,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
             graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.backbone.processor.get("sub_graph_edge_attributes"),
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.backbone.processor.get("trainable_size", 0),
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
         )
 
         self.processor = instantiate(
-            model_config.model.backbone.processor,
+            model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
@@ -76,14 +76,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.backbone.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.backbone.decoder.get("trainable_size", 0),
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
             self.decoder[dataset_name] = instantiate(
-                model_config.model.backbone.decoder,
+                model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],

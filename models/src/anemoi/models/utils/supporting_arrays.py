@@ -25,11 +25,8 @@ def build_combined_supporting_arrays(
         from anemoi.models.utils.config import get_multiple_datasets_config
 
         dataset_names = list(get_multiple_datasets_config(config.data).keys())
-    backbone_cfg = getattr(getattr(config, "model", None), "backbone", None)
-    output_mask_cfg = getattr(backbone_cfg, "output_mask", None) if backbone_cfg is not None else None
     for name in dataset_names:
         combined.setdefault(name, {})
-        if output_mask_cfg is not None:
-            mask = instantiate(output_mask_cfg, nodes=graph_data[name])
-            combined[name].update(mask.supporting_arrays)
+        mask = instantiate(config.model.output_mask, nodes=graph_data[name])
+        combined[name].update(mask.supporting_arrays)
     return combined
