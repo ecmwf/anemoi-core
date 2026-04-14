@@ -7,13 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from collections.abc import Sequence
+
 import numpy as np
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.tasks.base import BaseTask
-
 from anemoi.utils.dates import frequency_to_string
-from collections.abc import Sequence
 
 TimeIndices = slice | int | list[int] | np.ndarray
 
