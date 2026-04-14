@@ -1,5 +1,5 @@
 ############
- Optimizers
+ Optimization
 ############
 
 Optimizers are responsible for updating the model parameters during
