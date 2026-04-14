@@ -564,7 +564,9 @@ def test_graphdiffusiontendforecaster_validation_uses_full_state_targets(
         def get_tendency_processors(self, dataset_name: str) -> Any:
             return self.pre_processors_tendencies[dataset_name], self.post_processors_tendencies.get(dataset_name)
 
-        def compute_tendency_step(self, dataset_name: str, y_step: Any, x_ref_step: Any, tendency_pre_processor: Any) -> Any:
+        def compute_tendency_step(
+            self, dataset_name: str, y_step: Any, x_ref_step: Any, tendency_pre_processor: Any,
+        ) -> Any:
             return self.model.compute_tendency(
                 {dataset_name: y_step},
                 {dataset_name: x_ref_step},
@@ -572,7 +574,9 @@ def test_graphdiffusiontendforecaster_validation_uses_full_state_targets(
                 {dataset_name: tendency_pre_processor},
             )[dataset_name]
 
-        def add_tendency_to_state_step(self, dataset_name: str, x_ref_step: Any, tendency_step: Any, tendency_post_processor: Any) -> Any:
+        def add_tendency_to_state_step(
+            self, dataset_name: str, x_ref_step: Any, tendency_step: Any, tendency_post_processor: Any,
+        ) -> Any:
             return self.model.add_tendency_to_state(
                 {dataset_name: x_ref_step},
                 {dataset_name: tendency_step},
