@@ -82,14 +82,42 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
+            out_channels = self.output_dim[dataset_name] if dataset_name in model_config.model.refiner else num_channels
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
                 hidden_dim=self.num_channels,
-                out_channels_dst=self.output_dim[dataset_name],
+                out_channels_dst=out_channels,
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+            )
+
+        self.refiner_graph_provider = torch.nn.ModuleDict()
+        self.refiner = torch.nn.ModuleDict()
+        self.node_data_extractor = nn.ModuleDict()
+        for dataset_name in self.dataset_names:
+            if dataset_name not in model_config.model.refiner:
+                continue
+
+            self.refiner_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[(dataset_name, "to", dataset_name)],
+                edge_attributes=model_config.model.refiner.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes.num_nodes[dataset_name],
+                dst_size=self.node_attributes.num_nodes[dataset_name],
+                trainable_size=model_config.model.refiner.get("trainable_size", 0),
+            )
+
+            self.refiner[dataset_name] = instantiate(
+                model_config.model.refiner[dataset_name],
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                num_channels=self.num_channels,
+                edge_dim=self.refiner_graph_provider[dataset_name].edge_dim,
+            )
+
+            self.node_data_extractor[dataset_name] = nn.Sequential(
+                nn.LayerNorm(self.hidden_dim), 
+                nn.Linear(self.hidden_dim, self.output_dim[dataset_name])
             )
 
     def _assemble_input(
@@ -311,6 +339,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
                 edge_shard_shapes=dec_edge_shard_shapes,
             )
+
+            if dataset_name in self.refiner:
+                refiner_edge_attr, refiner_edge_index, refiner_edge_shard_shapes = self.refiner_graph_provider.get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+
+                x_ref = self.refiner[dataset_name](
+                    x=x_latent,
+                    batch_size=batch_size,
+                    shard_shapes=shard_shapes_data_dict[dataset_name],
+                    edge_attr=refiner_edge_attr,
+                    edge_index=refiner_edge_index,
+                    model_comm_group=model_comm_group,
+                    edge_shard_shapes=refiner_edge_shard_shapes,
+                )
+                x_ref = self.node_data_extractor[dataset_name](x_ref)
+
+                x_out = x_out + x_ref
+
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
