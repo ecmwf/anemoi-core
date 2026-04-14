@@ -122,10 +122,11 @@ to ``null``:
      optimization:
        lr_scheduler: null
 
-``BaseGraphModule.configure_optimizers`` handles both cases: if
-``lr_scheduler`` is absent or null, only the optimizer is returned;
-otherwise the scheduler is returned alongside the optimizer in the
-format Lightning expects.
+``BaseGraphModule.configure_optimizers`` returns just the optimizer when
+``lr_scheduler`` is absent or null. When a scheduler is configured, it
+returns a tuple of ``([optimizer], [{"scheduler": scheduler,
+**pl_lr_scheduler}])``, which is the format Lightning expects when both
+an optimizer and a scheduler are used.
 
 ************************************
  Lightning Scheduler Integration
