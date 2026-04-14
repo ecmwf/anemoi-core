@@ -66,11 +66,11 @@ config group. The default is AdamW:
    _target_: torch.optim.AdamW
    betas: [0.9, 0.95]
 
-The learning rate is **not** set in the optimizer config — it is
-injected automatically from ``config.training.optimization.lr`` at
-runtime (scaled to the effective per-replica LR by
-``BaseGraphModule``). Optimizer configs should therefore only contain
-algorithm-specific parameters.
+The learning rate is set separately via ``config.training.optimization.lr``
+and is not part of the optimizer config. At runtime, ``BaseGraphModule``
+computes an effective LR by scaling ``optimization.lr`` by the total
+number of GPUs divided by the number of GPUs per model, and passes
+that as the ``lr`` argument when instantiating the optimizer.
 
 To override the optimizer at the command line:
 
