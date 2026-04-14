@@ -540,15 +540,3 @@ class GraphTransformerProcessor(BaseProcessor):
         )
 
         return x
-
-    def _forward_edges_sharding(
-        self,
-        x: Tensor,
-        batch_size: int,
-        shard_info: GraphShardInfo,
-        edge_attr: Tensor,
-        edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
-    ) -> Tensor:
-        raise NotImplementedError("Halo sharding strategy is not yet implemented for GraphTransformerProcessor.")
