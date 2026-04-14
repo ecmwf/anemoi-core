@@ -82,7 +82,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
             )
 
-            out_channels = self.output_dim[dataset_name] if dataset_name in model_config.model.refiner else num_channels
+            out_channels = self.output_dim[dataset_name] if dataset_name in model_config.model.refiner else self.num_channels
             self.decoder[dataset_name] = instantiate(
                 model_config.model.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here

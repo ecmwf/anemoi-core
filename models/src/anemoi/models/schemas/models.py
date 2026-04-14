@@ -247,7 +247,18 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN decoder schema.",
+    "GNN decoder schema."
+    refiner: Optional[dict[
+        str, 
+        Union[
+            NoOpProcessorSchema,
+            GNNProcessorSchema,
+            GraphTransformerProcessorSchema,
+            TransformerProcessorSchema,
+            PointWiseMLPProcessorSchema,
+        ]
+    ]] = Field(...)
+    "Refiner"
     residual: ResidualConnectionSchema = Field(
         ...,
         discriminator="target_",
