@@ -134,6 +134,5 @@ class TestMultiDataset:
         assert dataset.get_sample.call_args.args[0] == [10, 12, 16]
 
 
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

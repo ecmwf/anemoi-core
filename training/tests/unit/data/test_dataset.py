@@ -22,8 +22,6 @@ from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
 
 
-
-
 def test_normalize_time_indices_collapses_contiguous_ranges() -> None:
     normalized = normalize_time_indices([2, 3, 4])
 
