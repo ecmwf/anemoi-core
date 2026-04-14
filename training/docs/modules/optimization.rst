@@ -4,8 +4,7 @@
 
 Optimization in ``anemoi-training`` covers the optimizer, learning rate,
 and LR scheduler. All three are configured together under the
-``config.training.optimization`` config group, using Hydra's ``_target_``
-mechanism to select any PyTorch optimizer or compatible scheduler.
+``config.training.optimization`` config group.
 
 **************************
  Configuration Structure
