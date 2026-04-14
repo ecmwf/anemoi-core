@@ -9,9 +9,9 @@
 
 import numpy as np
 
+from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.relative_time_indices import normalize_time_indices
 from anemoi.training.data.relative_time_indices import offset_time_indices
-from anemoi.training.data.data_reader import NativeGridDataset
 
 
 def test_normalize_time_indices_collapses_contiguous_ranges() -> None:
@@ -48,6 +48,7 @@ def test_offset_time_indices_shifts_indices() -> None:
 
 def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
     """Test that NativeGridDataset.get_sample normalizes time indices to slices before accessing the dataset."""
+
     class FakeDataset:
         def __init__(self) -> None:
             self.last_index = None
