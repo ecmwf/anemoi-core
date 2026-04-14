@@ -322,3 +322,105 @@ def _alltoall_transpose(
     _alltoallwrapper(output_list, input_list, group=group)
 
     return torch.cat(output_list, dim=dim_concat).contiguous(memory_format=input_format)
+
+
+def _halo_exchange(
+    x: Tensor,
+    send_indices: tuple[Tensor, ...],
+    recv_counts: tuple[int, ...],
+    group: ProcessGroup,
+) -> Tensor:
+    """Forward halo exchange: gather inner node features and send to peers.
+
+    For each peer rank *r*, gathers ``x[send_indices[r]]`` and sends it
+    to rank *r*.  Receives ``recv_counts[r]`` rows from rank *r*.
+    Returns *x* concatenated with the received halo rows, preserving the
+    ordering expected by the relabeled local edge index.
+
+    Parameters
+    ----------
+    x : Tensor
+        Local node features, shape ``(num_local, ...)``.
+    send_indices : tuple[Tensor, ...]
+        Per-rank local indices of inner nodes to send.  Length = world size.
+    recv_counts : tuple[int, ...]
+        Per-rank number of halo rows to receive.  Length = world size.
+    group : ProcessGroup
+        Communication group.
+
+    Returns
+    -------
+    Tensor
+        ``(num_local + sum(recv_counts), ...)`` — local followed by halo rows.
+    """
+    comm_size = dist.get_world_size(group=group)
+    if comm_size == 1:
+        return x
+
+    send_list = [x[idx].contiguous() for idx in send_indices]
+    recv_list = [torch.empty((count, *x.shape[1:]), dtype=x.dtype, device=x.device) for count in recv_counts]
+
+    _alltoallwrapper(recv_list, send_list, group=group)
+
+    return torch.cat([x] + recv_list, dim=0)
+
+
+def _halo_exchange_bwd(
+    grad_output: Tensor,
+    send_indices: tuple[Tensor, ...],
+    recv_counts: tuple[int, ...],
+    num_local_nodes: int,
+    group: ProcessGroup,
+) -> Tensor:
+    """Backward of halo exchange.
+
+    Splits *grad_output* into local and per-rank halo gradient portions.
+    Sends halo gradients back to the ranks that originally owned those
+    nodes and accumulates the received gradients at the ``send_indices``
+    positions via scatter-add.
+
+    Parameters
+    ----------
+    grad_output : Tensor
+        Gradient w.r.t. the halo-exchange output, shape ``(total_nodes, ...)``.
+    send_indices : tuple[Tensor, ...]
+        Per-rank local indices (same as in the forward pass).
+    recv_counts : tuple[int, ...]
+        Per-rank halo counts (same as in the forward pass).
+    num_local_nodes : int
+        Number of local (inner) nodes.
+    group : ProcessGroup
+        Communication group.
+
+    Returns
+    -------
+    Tensor
+        Gradient w.r.t. the halo-exchange input, shape ``(num_local_nodes, ...)``.
+    """
+    comm_size = dist.get_world_size(group=group)
+    if comm_size == 1:
+        return grad_output
+
+    grad_local = grad_output[:num_local_nodes].clone()
+
+    # split halo portion into per-rank chunks (same ordering as forward recv)
+    halo_grads = list(torch.split(grad_output[num_local_nodes:], list(recv_counts), dim=0))
+
+    # reverse exchange: send halo grads to originating ranks,
+    # receive grads for inner nodes we sent in the forward pass
+    send_counts = [idx.size(0) for idx in send_indices]
+    recv_list = [
+        torch.empty((count, *grad_output.shape[1:]), dtype=grad_output.dtype, device=grad_output.device)
+        for count in send_counts
+    ]
+    send_list = [g.contiguous() for g in halo_grads]
+
+    _alltoallwrapper(recv_list, send_list, group=group)
+
+    # scatter-add: accumulate received gradients into local grad
+    all_recv = torch.cat(recv_list, dim=0)
+    all_indices = torch.cat(list(send_indices), dim=0)
+    if all_recv.numel() > 0:
+        grad_local.index_add_(0, all_indices, all_recv)
+
+    return grad_local
