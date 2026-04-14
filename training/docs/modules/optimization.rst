@@ -2,14 +2,10 @@
  Optimization
 ############
 
-Optimizers are responsible for updating the model parameters during
-training based on the computed gradients from the loss function. In
-``anemoi-training``, the optimizer, learning rate, and LR scheduler are
-configured under the ``config.training.optimization`` config group.
-
-Both the optimizer and the scheduler are instantiated via Hydra's
-``_target_`` mechanism, allowing any PyTorch optimizer or compatible
-scheduler to be used without changing Python code.
+Optimization in ``anemoi-training`` covers the optimizer, learning rate,
+and LR scheduler. All three are configured together under the
+``config.training.optimization`` config group, using Hydra's ``_target_``
+mechanism to select any PyTorch optimizer or compatible scheduler.
 
 **************************
  Configuration Structure
