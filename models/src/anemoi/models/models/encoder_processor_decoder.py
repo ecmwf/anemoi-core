@@ -117,8 +117,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             self.node_data_extractor[dataset_name] = nn.Sequential(
-                nn.LayerNorm(self.hidden_dim), 
-                nn.Linear(self.hidden_dim, self.output_dim[dataset_name])
+                nn.LayerNorm(self.num_channels), 
+                nn.Linear(self.num_channels, self.output_dim[dataset_name])
             )
 
     def _assemble_input(
@@ -342,7 +342,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             if dataset_name in self.refiner:
-                refiner_edge_attr, refiner_edge_index, refiner_edge_shard_shapes = self.refiner_graph_provider.get_edges(
+                refiner_edge_attr, refiner_edge_index, refiner_edge_shard_shapes = self.refiner_graph_provider[dataset_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
                 )
