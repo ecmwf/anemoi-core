@@ -24,7 +24,6 @@ from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from omegaconf import open_dict
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -180,7 +179,6 @@ class AnemoiTrainer(ABC):
     def _validate_transfer_learning_datasets(
         self,
         model: pl.LightningModule,
-        data_indices: dict,
     ) -> None:
         """Validate dataset compatibility between checkpoint and config for transfer learning.
 
@@ -212,7 +210,7 @@ class AnemoiTrainer(ABC):
             return
 
         # Validate each dataset in current config against checkpoint
-        for dataset_name, dataset_indices in data_indices.items():
+        for dataset_name, dataset_indices in self.data_indices.items():
             if dataset_name in model._ckpt_model_name_to_index:
                 # Dataset found in checkpoint - validate variables match
                 ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
@@ -293,7 +291,7 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
-            self._validate_transfer_learning_datasets(model, self.data_indices)
+            self._validate_transfer_learning_datasets(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
