@@ -16,6 +16,7 @@ from abc import abstractmethod
 from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Union
 
 import pytorch_lightning as pl
 import torch
@@ -859,18 +860,28 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     def transfer_batch_to_device(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: dict[str, Union[torch.Tensor, tuple[list[torch.Tensor], dict[str, Any]]]],
         device: torch.device,
         _dataloader_idx: int = 0,
-    ) -> dict[str, torch.Tensor]:
-        """Transfer batch to device, handling dictionary batches."""
+    ) -> dict[str, Union[torch.Tensor, tuple[list[torch.Tensor], dict[str, Any]]]]:
+        """Transfer batch to device, handling gridded tensors and sparse (tensor, metadata) tuples."""
         transferred_batch = {}
         for dataset_name, dataset_batch in batch.items():
-            transferred_batch[dataset_name] = (
-                dataset_batch.to(device, non_blocking=True)
-                if isinstance(dataset_batch, torch.Tensor)
-                else dataset_batch
-            )
+            if isinstance(dataset_batch, torch.Tensor):
+                # Gridded field or observations: single tensor
+                transferred_batch[dataset_name] = dataset_batch.to(device, non_blocking=True)
+            else:
+                # Sparse observations
+                tensors, meta = dataset_batch
+                transferred_batch[dataset_name] = (
+                    [t.to(device, non_blocking=True) for t in tensors],
+                    {
+                        "latitudes": [t.to(device, non_blocking=True) for t in meta["latitudes"]],
+                        "longitudes": [t.to(device, non_blocking=True) for t in meta["longitudes"]],
+                        "timedeltas": [t.to(device, non_blocking=True) for t in meta["timedeltas"]],
+                        "boundaries": meta["boundaries"],  # list[list[slice]], not transferable; used only for indexing
+                    },
+                )
         return transferred_batch
 
     def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

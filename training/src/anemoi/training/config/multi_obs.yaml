@@ -1,0 +1,40 @@
+defaults:
+- data: multi_obs
+- dataloader: multi_obs
+- diagnostics: evaluation_multi_obs
+- system: example
+- graph: multi_scale
+- model: graphtransformer
+- training: multi_obs
+- _self_
+
+config_validation: True
+
+data:
+  # the resolution label applies to gridded or superobed sparse obs datasets
+  resolution: o96
+
+system:
+  input:
+    graph: graph_anemoi_new_${data.resolution}.pt
+
+    # Primary dataset for ERA5
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8
+
+    # Secondary dataset for CERRA (using same file for debugging)
+    dataset_b: observations-file-1994-2025-combined-mw-humidity-${data.resolution}-v2-from-dop-try-2
+
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
+
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+
+diagnostics:
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None

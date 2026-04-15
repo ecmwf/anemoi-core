@@ -147,3 +147,4 @@ trace.txt
 *.prof
 prof/
 *.gz
+outputs/
