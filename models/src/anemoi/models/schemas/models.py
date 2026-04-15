@@ -40,6 +40,7 @@ from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
+from .data_processor import PreprocessorSchema
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -259,6 +260,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "Residual connection schema."
+    processors: dict[str, dict[str, PreprocessorSchema]] = Field(default_factory=dict)
+    "Pre/post processors per dataset, keyed by dataset name then processor name."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
 
