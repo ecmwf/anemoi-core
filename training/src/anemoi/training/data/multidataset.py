@@ -377,8 +377,15 @@ class MultiDataset(IterableDataset):
 
         x = {}
         for name, dataset in self.datasets.items():
-            start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
-            x[name] = dataset.get_sample(time_indices, slice(start, end))
+            # self.shard_shapes is lazily initalised to None
+            # This if statement guards against the case where shard_shapes is not set
+            # (e.g. if set_comm_group_info hasn't been called yet)
+            if self.shard_shapes is not None and self.shard_shapes[name] is not None:
+                start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+                grid_indices = slice(start, end)
+            else:
+                grid_indices = slice(None)
+            x[name] = dataset.get_sample(time_indices, grid_indices)
 
         return x
 

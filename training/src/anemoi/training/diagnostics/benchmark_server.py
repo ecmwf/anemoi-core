@@ -686,6 +686,40 @@ def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
     return artifacts
 
 
+@rank_zero_only
+def track_dataloader_benchmark_results(
+    test_case: str,
+    batches_per_second: float,
+) -> None:
+    """Track dataloader metrics by updating the remote benchmark server on main."""
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping dataloader benchmark tracking: not on main branch")
+        return
+
+    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+    user, hostname, path = parse_benchmark_config(config_path)
+    store = f"ssh://{user}@{hostname}:{path}"
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
+
+    commit = get_git_revision_hash()
+    today = datetime.now(tz=UTC).date()
+    dataloader_benchmark_results = [
+        BenchmarkValue(
+            name="dataloaderThroughputIterPerS",
+            value=batches_per_second,
+            unit="iter/s",
+            date=today,
+            commit=commit,
+            op=operator.ge,
+            tolerance=10,
+        ),
+    ]
+
+    LOGGER.info("Updating dataloader benchmark metrics on server")
+    for dataloader_benchmark_value in dataloader_benchmark_results:
+        benchmark_server.set_value(dataloader_benchmark_value)
+
+
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:
     local_results_str = "Local benchmark results:\n"
     local_results_str += "-" * 20 + "\n"

@@ -16,14 +16,23 @@ from typing import Any
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.utils.enums import TensorDim
 
 
 class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
+    # CombinedLoss builds child losses itself, so it needs the filtered scaler
+    # set and data indices during construction.
+    factory_context_keys = frozenset(
+        {LossFactoryContextKey.AVAILABLE_SCALERS, LossFactoryContextKey.DATA_INDICES},
+    )
     _initial_set_scaler: bool = False
 
     def __init__(
@@ -31,6 +40,8 @@ class CombinedLoss(BaseLoss):
         *extra_losses: dict[str, Any] | Callable | BaseLoss,
         loss_weights: tuple[int, ...] | None = None,
         losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
+        available_scalers: dict[str, TENSOR_SPEC] | None = None,
+        data_indices: IndexCollection | None = None,
         **kwargs,
     ):
         """Combined loss function.
@@ -70,6 +81,11 @@ class CombinedLoss(BaseLoss):
             Must be the same length as the number of losses.
             If None, all losses are weighted equally.
             by default None.
+        available_scalers : dict[str, TENSOR_SPEC] | None, optional
+            Scaler tensors already filtered by the top-level CombinedLoss configuration.
+            These are passed down to child losses when present.
+        data_indices : IndexCollection | None, optional
+            Training data indices needed by child losses that perform variable mapping.
         kwargs: Any
             Additional arguments to pass to the loss functions, if not Loss.
 
@@ -125,8 +141,20 @@ class CombinedLoss(BaseLoss):
 
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
-                self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
-                self.losses.append(get_loss_function(loss, scalers={}, **dict(kwargs)))
+                loss_config = dict(loss)
+                scaler_spec = loss_config.pop("scalers", ["*"])
+                self._loss_scaler_specification[i] = scaler_spec
+                # Only propagate scaler declarations when explicitly provided.
+                if available_scalers:
+                    loss_config["scalers"] = scaler_spec
+                self.losses.append(
+                    get_loss_function(
+                        DictConfig(loss_config),
+                        scalers=available_scalers,
+                        data_indices=data_indices,
+                        **dict(kwargs),
+                    ),
+                )
             elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
@@ -138,6 +166,22 @@ class CombinedLoss(BaseLoss):
             self.add_module(str(i), self.losses[-1])  # (self.losses[-1].name + str(i), self.losses[-1])
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
+
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether any wrapped loss requires explicit shard-layout metadata."""
+        return any(getattr(loss, "needs_shard_layout_info", False) for loss in self.losses)
+
+    @staticmethod
+    def _forward_kwargs_for_loss(loss_fn: BaseLoss, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Filter shard-layout kwargs for child losses that do not require them."""
+        if getattr(loss_fn, "needs_shard_layout_info", False):
+            return kwargs
+
+        filtered_kwargs = dict(kwargs)
+        filtered_kwargs.pop("grid_dim", None)
+        filtered_kwargs.pop("grid_shard_shapes", None)
+        return filtered_kwargs
 
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
         """Recursively yield leaf losses from all sub-losses."""
@@ -169,20 +213,24 @@ class CombinedLoss(BaseLoss):
         """
         loss = None
         for i, loss_fn in enumerate(self.losses):
+            loss_kwargs = self._forward_kwargs_for_loss(loss_fn, kwargs)
             if loss is not None:
-                loss += self.loss_weights[i] * loss_fn(pred, target, **kwargs)
+                loss += self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
             else:
-                loss = self.loss_weights[i] * loss_fn(pred, target, **kwargs)
+                loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
         return loss
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         for i, spec in self._loss_scaler_specification.items():
             if "*" in spec or name in spec:
-                self.losses[i].scaler.add_scaler(dimension, scaler, name=name)
+                self.losses[i].add_scaler(dimension=dimension, scaler=scaler, name=name)
 
     @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         for i, spec in self._loss_scaler_specification.items():
             if "*" in spec or name in spec:
-                self.losses[i].scaler.update_scaler(name, scaler=scaler, override=override)
+                self.losses[i].update_scaler(name=name, scaler=scaler, override=override)
+
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return any(loss.has_scaler_for_dim(dim=dim) for loss in self.losses)

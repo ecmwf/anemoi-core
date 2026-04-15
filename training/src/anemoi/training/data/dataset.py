@@ -302,6 +302,16 @@ class SparseObservationDataset(BaseAnemoiReader):
         """Return dataset missing values mask."""
         return set()
 
+    @property
+    def metadata(self) -> dict:
+        """Return dataset metadata."""
+        return {}
+    
+    @property
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting arrays."""
+        return {}
+
     def tree(self, prefix: str = "") -> Tree:
         tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
         tree.add(f"Dataset: {self.data}")
@@ -309,6 +319,13 @@ class SparseObservationDataset(BaseAnemoiReader):
         tree.add(f"Window: {self.data.window}")
         tree.add(f"Num variables: {len(self.name_to_index)}")
         return tree
+
+    def statistics_tendencies(
+        self,
+        timestep: int | str | datetime.timedelta | None = None,
+    ) -> dict | None:
+        """Observation datasets do not have tendency statistics."""
+        return None
 
     def _unpack_sample(self, x) -> tuple[np.ndarray, dict]:
         """Unpack a sample from the dataset into data and metadata components."""

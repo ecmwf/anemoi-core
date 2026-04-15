@@ -18,7 +18,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import mlflow.entities
-from mlflow_export_import.common import utils
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
@@ -64,6 +63,7 @@ from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
 try:
     import mlflow_export_import.common.utils as mlflow_utils
     from mlflow_export_import.client.client_utils import create_http_client
+    from mlflow_export_import.common import utils
     from mlflow_export_import.run.export_run import _get_metrics_with_steps
     from mlflow_export_import.run.export_run import _inputs_to_dict
     from mlflow_export_import.run.import_run import _import_inputs
@@ -87,10 +87,21 @@ def _log_tags(
     run_id: str,
     batch_size: int,
     src_user_id: str,
+    extra_tags: dict,
 ) -> None:
     def get_data(run_dct: dict, *args) -> list:
         del args  # unused
         tags = run_dct["tags"]
+        for tag in extra_tags:
+            if tag in tags:
+                LOGGER.warning(
+                    "Tag %s already exists in the run tags with value %s. "
+                    "It will be overwritten with the new value %s.",
+                    tag,
+                    tags[tag],
+                    extra_tags[tag],
+                )
+        tags.update(extra_tags)
         tags = list(starmap(RunTag, tags.items()))
         user_id = _get_user()
         tags.append(RunTag(MLFLOW_USER, user_id))
@@ -126,7 +137,13 @@ def _log_params(client: mlflow.MlflowClient, run_dct: dict[str, Any], run_id: st
     _log_data(run_dct, run_id, batch_size, get_data, log_data)
 
 
-def import_run_data(mlflow_client: mlflow.MlflowClient, run_dct: dict, run_id: str, src_user_id: str) -> None:
+def import_run_data(
+    mlflow_client: mlflow.MlflowClient,
+    run_dct: dict,
+    run_id: str,
+    src_user_id: str,
+    extra_tags: dict,
+) -> None:
 
     _log_params(mlflow_client, run_dct, run_id, MAX_PARAMS_TAGS_PER_BATCH)
     _log_metrics(mlflow_client, run_dct, run_id, MAX_METRICS_PER_BATCH)
@@ -136,6 +153,7 @@ def import_run_data(mlflow_client: mlflow.MlflowClient, run_dct: dict, run_id: s
         run_id,
         MAX_PARAMS_TAGS_PER_BATCH,
         src_user_id,
+        extra_tags,
     )
 
 
@@ -151,6 +169,7 @@ class MlFlowSync:
         export_deleted_runs: bool = False,
         log_level: str = "INFO",
         log_model: bool = False,
+        extra_tags: dict | None = None,
     ) -> None:
         self.source_tracking_uri = source_tracking_uri
         self.dest_tracking_uri = dest_tracking_uri
@@ -159,6 +178,7 @@ class MlFlowSync:
         self.export_deleted_runs = export_deleted_runs
         self.log_level = log_level
         self.log_model = log_model
+        self.extra_tags = extra_tags if extra_tags is not None else {}
 
         LOGGER.setLevel(self.log_level)
 
@@ -429,6 +449,7 @@ class MlFlowSync:
                 src_run_dct,
                 dst_run_id,
                 src_user_id,
+                self.extra_tags,
             )
             _import_inputs(http_client, src_run_dct, dst_run_id)
 
