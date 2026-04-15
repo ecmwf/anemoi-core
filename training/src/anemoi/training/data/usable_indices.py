@@ -8,8 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from anemoi.training.data.data_reader import BaseAnemoiReader
 
 LOGGER = logging.getLogger(__name__)
 
