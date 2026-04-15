@@ -414,6 +414,8 @@ class BaseTrainingSchema(BaseModel):
     " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
+    preferred_blas_backend: str | None = Field(default=None)
+    "Optionally override PyTorch's default BLAS backend."
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
