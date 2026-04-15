@@ -7,8 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
 import logging
+
+import numpy as np
 
 LOGGER = logging.getLogger(__name__)
 

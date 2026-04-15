@@ -9,6 +9,7 @@
 
 from collections.abc import Sequence
 from itertools import pairwise
+
 import numpy as np
 
 from anemoi.training.tasks.base import BaseTask
