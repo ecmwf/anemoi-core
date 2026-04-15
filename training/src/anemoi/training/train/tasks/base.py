@@ -191,7 +191,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.data_indices = data_indices
 
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters()
 
         self.statistics_tendencies = statistics_tendencies
 
