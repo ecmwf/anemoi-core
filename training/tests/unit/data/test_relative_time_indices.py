@@ -53,7 +53,7 @@ def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
         def __init__(self) -> None:
             self.last_index = None
 
-        def __getitem__(self, item):
+        def __getitem__(self, item: int) -> np.ndarray:
             self.last_index = item
             return np.zeros((3, 2, 4, 5), dtype=np.float32)
 

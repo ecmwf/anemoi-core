@@ -8,10 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 from collections.abc import Sequence
-
+from itertools import pairwise
 import numpy as np
 
-from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.tasks.base import BaseTask
 from anemoi.utils.dates import frequency_to_string
 
@@ -48,7 +47,7 @@ def normalize_time_indices(time_indices: TimeIndices) -> TimeIndices:
     if step <= 0:
         return indices
 
-    if any(curr - prev != step for prev, curr in zip(indices, indices[1:], strict=False)):
+    if any(curr - prev != step for prev, curr in pairwise(indices)):
         return indices
 
     return slice(indices[0], indices[-1] + step, step)
@@ -74,7 +73,7 @@ def offset_time_indices(reference_index: int, relative_indices: TimeIndices) -> 
 
 def compute_relative_date_indices(
     task: BaseTask,
-    data_readers: dict[str, BaseAnemoiReader],
+    data_readers: dict,
     **kwargs,
 ) -> dict[str, list[int]]:
     """Compute relative date indices for each dataset based on task offsets."""
