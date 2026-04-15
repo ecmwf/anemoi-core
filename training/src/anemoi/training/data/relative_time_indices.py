@@ -88,9 +88,6 @@ def compute_relative_date_indices(
                 f"Check that the task offsets are compatible with the dataset frequency."
             )
             raise ValueError(msg)
-        dr_indices = [o // dr.frequency for o in offsets]
-
-        # Normalize the time indices to use slices where possible, which can improve downstream indexing performance.
-        relative_date_indices[name] = normalize_time_indices(dr_indices)
+        relative_date_indices[name] = [o // dr.frequency for o in offsets]
 
     return relative_date_indices
