@@ -78,6 +78,18 @@ class AnemoiTrainer(ABC):
 
         self.config = convert_to_omegaconf(self.config)
 
+        # Optionally override the torch default BLAS backend.
+        _blas_backend = self.config.training.get("preferred_blas_backend", None)
+        if _blas_backend:
+            if hasattr(torch.backends.cuda, "preferred_blas_library"):
+                torch.backends.cuda.preferred_blas_library(_blas_backend)
+                LOGGER.info("BLAS backend forced to %r (config.training.preferred_blas_backend)", _blas_backend)
+            else:
+                LOGGER.warning(
+                    "config.training.preferred_blas_backend=%r ignored: API unavailable in this PyTorch version",
+                    _blas_backend,
+                )
+
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
