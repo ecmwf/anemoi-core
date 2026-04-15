@@ -325,7 +325,7 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         x = {}
         for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(index, self.relative_time_indexers[name])
+            time_steps = offset_time_indices(index, self.relative_date_indices[name])
             # self.shard_shapes is lazily initalised to None
             # This if statement guards against the case where shard_shapes is not set
             # (e.g. if set_comm_group_info hasn't been called yet)
