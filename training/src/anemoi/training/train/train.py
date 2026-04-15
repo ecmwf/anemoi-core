@@ -49,7 +49,6 @@ LOGGER = logging.getLogger(__name__)
 PL_VERSION = version.parse(pl.__version__)
 
 
-
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 

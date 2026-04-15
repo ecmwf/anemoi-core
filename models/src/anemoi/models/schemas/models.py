@@ -27,6 +27,7 @@ from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
+from .data_processor import PreprocessorSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -40,7 +41,6 @@ from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
-from .data_processor import PreprocessorSchema
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
