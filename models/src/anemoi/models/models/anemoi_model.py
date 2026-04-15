@@ -39,7 +39,7 @@ class AnemoiModel(torch.nn.Module):
     ) -> None:
         super().__init__()
         self.id = str(uuid.uuid4())
-        self.n_step_input = model_config.model.multistep_input
+        self.n_step_input = model_config.multistep_input
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
@@ -51,8 +51,8 @@ class AnemoiModel(torch.nn.Module):
 
         # Instantiate the backbone from model_config.model.backbone
         nn_cfg = {
-            "_target_": model_config.model.backbone._target_,
-            "_convert_": getattr(model_config.model.backbone, "_convert_", "none"),
+            "_target_": model_config.backbone._target_,
+            "_convert_": getattr(model_config.backbone, "_convert_", "none"),
         }
         self.backbone = instantiate(
             nn_cfg,

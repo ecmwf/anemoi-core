@@ -63,17 +63,17 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.backbone.hidden_nodes_name
+        self._graph_name_hidden = model_config.backbone.hidden_nodes_name
         self.hidden_nodes_name = self._graph_name_hidden
-        self.data_nodes_name = model_config.model.backbone.data_nodes_name
+        self.data_nodes_name = model_config.backbone.data_nodes_name
 
-        self.n_step_input = model_config.model.multistep_input
-        self.n_step_output = model_config.model.multistep_output
-        self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.backbone.latent_skip
+        self.n_step_input = model_config.multistep_input
+        self.n_step_output = model_config.multistep_output
+        self.num_channels = model_config.num_channels
+        self.latent_skip = model_config.backbone.latent_skip
 
         trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
+            model_config.trainable_parameters,
             data=self.dataset_names,
             hidden=self.hidden_nodes_name,
         )
@@ -87,7 +87,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self._build_residual(model_config.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)

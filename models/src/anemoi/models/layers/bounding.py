@@ -342,7 +342,7 @@ def _build_dataset_boundings(
         ``model_config.model.bounding``. May be empty.
     """
 
-    bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
+    bounding_cfgs: Iterable[Any] = getattr(model_config, "bounding", []) or []
 
     return nn.ModuleList(
         [

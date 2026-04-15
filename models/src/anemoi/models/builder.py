@@ -148,12 +148,10 @@ def build_anemoi_model(
 
     model_config = OmegaConf.create(
         {
-            "model": {
-                "backbone": _to_container(backbone),
-                "multistep_input": multistep_input,
-                "multistep_output": multistep_output if multistep_output is not None else 1,
-                **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
-            },
+            "backbone": _to_container(backbone),
+            "multistep_input": multistep_input,
+            "multistep_output": multistep_output if multistep_output is not None else 1,
+            **{k: _to_container(v) for k, v in model_arch_kwargs.items()},
         }
     )
 
