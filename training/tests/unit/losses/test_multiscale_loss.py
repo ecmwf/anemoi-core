@@ -9,16 +9,20 @@
 
 import pytest
 import torch
+from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 
 
 class TrackingLoss(BaseLoss):
@@ -73,7 +77,6 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     loss_result = torch.tensor([1.0])
     return pred, target, loss_result
-
 
 
 def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
@@ -169,6 +172,40 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_kcrps), "Loss for single/original scale should be equal to the kcrps"
+
+
+def test_multiscale_forwards_layout_kwargs_to_filtered_per_scale_loss() -> None:
+    """Nested per-scale filtered losses must receive layout kwargs."""
+    data_indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": []}), {"a": 0, "b": 1})
+    multiscale_loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                "weights": [1.0],
+                "keep_batch_sharded": False,
+                "loss_matrices": [None],
+                "per_scale_loss": {
+                    "_target_": "anemoi.training.losses.MSELoss",
+                    "scalers": [],
+                },
+            },
+        ),
+        scalers={},
+        data_indices=data_indices,
+    )
+
+    pred = torch.ones((1, 1, 1, 4, 2))
+    target = torch.zeros((1, 1, 1, 4, 2))
+    loss = multiscale_loss(
+        pred,
+        target,
+        group=None,
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
+
+    assert isinstance(loss, torch.Tensor)
+    assert loss.shape == (1,)
 
 
 def test_multiscale_loss_forwards_scaler_indices() -> None:

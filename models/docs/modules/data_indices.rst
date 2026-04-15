@@ -138,31 +138,25 @@ And the following training loss config:
    training_loss:
      _target_: anemoi.training.losses.combined.CombinedLoss
      losses:
-       - _target_: anemoi.training.losses.filtering.FilteringLossWrapper
+       - _target_: anemoi.training.losses.spatial.LogFFT2Distance
          predicted_variables: ["TOT_PREC"]
          target_variables: ["TOT_PREC_RADAR"]
-         loss:
-           _target_: anemoi.training.losses.spatial.LogFFT2Distance
-           x_dim: 710
-           y_dim: 640
+         x_dim: 710
+         y_dim: 640
          < other loss parameters >
 
-       - _target_: anemoi.training.losses.filtering.FilteringLossWrapper
+       - _target_: anemoi.training.losses.huber.HuberLoss
          predicted_variables: ["U_10M", "V_10M", "T_2M", "TD_2M"]
          target_variables: ["U_10M_SYNOP", "V_10M_SYNOP", "T_2M_SYNOP", "TD_2M_SYNOP"]
-         loss:
-           _target_: anemoi.training.losses.huber.HuberLoss
          < other loss parameters >
 
 
-       - _target_: anemoi.training.losses.filtering.FilteringLossWrapper
+       - _target_: anemoi.training.losses.spatial.LogFFT2Distance
          predicted_variables: ["U_10M", "V_10M", "T_2M", "TD_2M"]
          target_variables: ["U_10M", "V_10M", "T_2M", "TD_2M"]
-         loss:
-           _target_: anemoi.training.losses.spatial.LogFFT2Distance
-           x_dim: 710
-           y_dim: 640
-           < other loss parameters >
+         x_dim: 710
+         y_dim: 640
+         < other loss parameters >
 
      loss_weights: [0.4, 0.4, 0.2]
 

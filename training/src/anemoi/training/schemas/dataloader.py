@@ -133,6 +133,7 @@ class DataLoaderSchema(PydanticBaseModel):
     "Test DatasetSchema."
     validation_rollout: NonNegativeInt = Field(example=1)
     "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
-    # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
+    multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
+    "Multiprocessing context to use for workers. If None, the default context will be used"

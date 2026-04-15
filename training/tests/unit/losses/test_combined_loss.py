@@ -23,6 +23,8 @@ from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.variable_mapper import LossVariableMapper
+from anemoi.training.utils.index_space import IndexSpace
 
 
 class FakeGroup:
@@ -119,27 +121,100 @@ def test_combined_loss_seperate_scalers() -> None:
     assert "test2" in loss.losses[1].scaler
 
 
-def test_combined_loss_multiscale() -> None:
+def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapping() -> None:
+    """CombinedLoss correctly isolates per-subloss variable filtering and scaler remapping.
+
+    The scenario mirrors a realistic training setup:
+    - A forcing variable (f0) creates a non-contiguous gap in the DATA_FULL index space:
+      indices [tp=0, f0=1(forcing), t2m=2, msl=3, imerg=4] → model only outputs [0, 2, 3].
+    - A target-only variable (imerg) can appear as a prediction target but never as a
+      model output, exercising the cross-variable subloss path.
+    - A per-variable dynamic scaler is defined over all DATA_FULL variables (including f0),
+      so each child LossVariableMapper must independently slice it to its own predicted
+      variable subset, correctly skipping the forcing-variable slot.
+
+    What this guards against:
+    - Scaler values leaking across sublosses (wrong indexing into the shared scaler tensor).
+    - The forcing gap corrupting non-contiguous target index resolution.
+    - Numerical error in the weighted forward pass when pred/target layouts differ.
+    """
+    from anemoi.models.data_indices.collection import IndexCollection
+
+    data_config = {"forcing": ["f0"], "diagnostic": [], "target": ["imerg"]}
+    name_to_index = {"tp": 0, "f0": 1, "t2m": 2, "msl": 3, "imerg": 4}
+    data_indices = IndexCollection(DictConfig(data_config), name_to_index)
+
     loss = get_loss_function(
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
                     {
-                        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
-                        "weights": [1.0],
-                        "keep_batch_sharded": False,
-                        "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss"},
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "predicted_variables": ["tp", "t2m", "msl"],
+                        "target_variables": ["tp", "t2m", "msl"],
+                        "scalers": ["grid_uniform", "dynamic"],
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "predicted_variables": ["tp"],
+                        "target_variables": ["imerg"],
+                        "scalers": ["grid_uniform", "dynamic"],
                     },
                 ],
-                "loss_weights": [1.0],
+                "loss_weights": [1.0, 0.5],
+                "scalers": ["*"],
             },
         ),
-        scalers={},
+        scalers={
+            "grid_uniform": (3, torch.ones(4)),
+            # dynamic has one value per DATA_FULL variable: tp=2, f0=99(ignored), t2m=3, msl=5, imerg=7
+            "dynamic": (4, torch.tensor([2.0, 99.0, 3.0, 5.0, 7.0])),
+        },
+        data_indices=data_indices,
     )
 
     assert isinstance(loss, CombinedLoss)
-    assert isinstance(loss.losses[0], MultiscaleLossWrapper)
+    assert isinstance(loss.losses[0], LossVariableMapper)
+    assert isinstance(loss.losses[1], LossVariableMapper)
+
+    # First subloss predicts [tp, t2m, msl] → dynamic scaler filtered to [2.0, 3.0, 5.0]
+    torch.testing.assert_close(
+        loss.losses[0].loss.scaler.tensors["dynamic"][1],
+        torch.tensor([2.0, 3.0, 5.0]),
+    )
+    # Second subloss predicts [tp] → dynamic scaler filtered to [2.0]
+    torch.testing.assert_close(
+        loss.losses[1].loss.scaler.tensors["dynamic"][1],
+        torch.tensor([2.0]),
+    )
+
+    # Verify non-contiguous target indices through the forcing gap
+    assert loss.losses[0].target_indices_by_layout[IndexSpace.DATA_FULL] == [0, 2, 3]
+    assert loss.losses[1].target_indices_by_layout[IndexSpace.DATA_FULL] == [4]
+
+    # Numerical forward check using DATA_OUTPUT layout (pred tensor covers model output only)
+    # pred shape: (batch=1, ens=1, step=1, grid=4, model_output_vars=3)
+    # target shape: (batch=1, ens=1, step=1, grid=4, data_full_vars=5)
+    pred = torch.full((1, 1, 1, 4, 3), 2.0)
+    target = torch.zeros((1, 1, 1, 4, 5))
+    target[..., 0] = 1.0  # tp: (2-1)²=1
+    target[..., 2] = 2.0  # t2m: (2-2)²=0
+    target[..., 3] = 4.0  # msl: (2-4)²=4
+    target[..., 4] = 5.0  # imerg: (2-5)²=9 for second subloss
+
+    out = loss(
+        pred,
+        target,
+        squash_mode="sum",
+        pred_layout=IndexSpace.MODEL_OUTPUT,
+        target_layout=IndexSpace.DATA_FULL,
+    )
+
+    # First subloss (weight=1): grid=4, per-var MSE*dynamic=[1*2, 0*3, 4*5]=[2,0,20] -> sum=22*4=88
+    # Second subloss (weight=0.5): 9*dynamic[tp]=9*2=18 per point, *4=72 -> 72*0.5=36
+    # Expected total: 124
+    torch.testing.assert_close(out, torch.tensor(124.0))
 
 
 def test_combined_loss_propagates_needs_shard_layout_info() -> None:
