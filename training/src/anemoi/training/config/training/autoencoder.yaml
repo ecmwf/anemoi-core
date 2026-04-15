@@ -70,10 +70,10 @@ loss_gradient_scaling: False
 # loss function for the model
 training_loss:
   datasets:
-    data: # user-defined key in data
+    data: # user-defined key in data
       # loss class to initialise
       _target_: anemoi.training.losses.MSELoss
-      # Scalers to include in loss calculation
+      # Scalers to include in loss calculation
       # A selection of available scalers are listed in training/scalers.
       # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
       # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
@@ -81,17 +81,17 @@ training_loss:
       ignore_nans: False
 
 # Validation metrics calculation,
-# This may be a list, in which case all metrics will be calculated
+# This may be a list, in which case all metrics will be calculated
 # and logged according to their name.
 # These metrics are calculated in the output model space, and thus
 # have undergone postprocessing.
 validation_metrics:
   datasets:
-    data: # user-defined key in data
+    data: # user-defined key in data
       # loss class to initialise
       mse:
         _target_: anemoi.training.losses.MSELoss
-        # Scalers to include in loss calculation
+        # Scalers to include in loss calculation
         # Cannot scale over the variable dimension due to possible remappings.
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
@@ -100,10 +100,10 @@ validation_metrics:
         # other kwargs
         ignore_nans: True
 
-# Variable groups definition for scaling
+# Variable groups definition for scaling
 # The variable level scaling methods are defined under training/scalers
 # A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
-# Variables are assigned to a group by their param if contained in the metadata, else by their name.
+# Variables are assigned to a group by their param if contained in the metadata, else by their name.
 
 # If more complex grouping is required, groups can be defined as a dictionary, such that all
 # keys must be evaluate to True.
@@ -125,14 +125,14 @@ validation_metrics:
 
 variable_groups:
   datasets:
-    data: # user-defined key in data
+    data: # user-defined key in data
       default: sfc
       pl:
         param: [q, t, u, v, w, z]
 
 metrics:
   datasets:
-    data: # user-defined key in data
+    data: # user-defined key in data
       - z_500
       - t_850
       - u_850

@@ -8,6 +8,7 @@ anemoi-training:
 **Model Tasks:**
 
 #. Deterministic Forecasting (GraphForecaster)
+#. Latent Rollout Forecasting (LatentGraphForecaster)
 #. Ensemble Forecasting (GraphEnsForecaster)
 #. Time Interpolation (GraphMultiOutInterpolator)
 #. Diffusion-based Forecasting (GraphDiffusionForecaster)

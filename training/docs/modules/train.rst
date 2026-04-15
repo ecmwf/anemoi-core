@@ -84,6 +84,8 @@ Current supported graphmodules include:
 
 #. **Deterministic Forecasting** —
    :class:`~anemoi.training.train.tasks.forecaster.GraphForecaster`
+#. **Latent Rollout Forecasting** —
+   :class:`~anemoi.training.train.tasks.forecaster.LatentGraphForecaster`
 #. **Ensemble Forecasting** —
    :class:`~anemoi.training.train.tasks.ensforecaster.GraphEnsForecaster`
 #. **Time Interpolation** —
