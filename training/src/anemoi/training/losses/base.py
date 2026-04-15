@@ -49,8 +49,8 @@ class BaseLoss(nn.Module, ABC):
         """Node- and feature_weighted Loss.
 
         Exposes:
-        - self.avg_function: torch.nanmean or torch.mean
-        - self.sum_function: torch.nansum or torch.sum
+        - self.avg_function: torch.mean
+        - self.sum_function: torch.sum
         depending on the value of `ignore_nans`
 
         Registers:
