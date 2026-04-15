@@ -34,7 +34,7 @@ def test_normalize_time_indices_preserves_evenly_spaced_ranges() -> None:
     normalized = normalize_time_indices([2, 4, 6, 8])
 
     assert isinstance(normalized, slice)
-    assert (normalized.start, normalized.stop, normalized.step) == (2, 9, 2)
+    assert (normalized.start, normalized.stop, normalized.step) == (2, 10, 2)
 
 
 def test_offset_time_indices_shifts_indices() -> None:
@@ -42,8 +42,10 @@ def test_offset_time_indices_shifts_indices() -> None:
     offset1 = offset_time_indices(10, [0, 2, 4])
     offset2 = offset_time_indices(10, [-2, 0, 2, 4])
 
-    assert offset1 == [10, 12, 14]
-    assert offset2 == [8, 10, 12, 14]
+    assert isinstance(offset1, slice)
+    assert (offset1.start, offset1.stop, offset1.step) == (10, 16, 2)
+    assert isinstance(offset2, slice)
+    assert (offset2.start, offset2.stop, offset2.step) == (8, 16, 2)
 
 
 def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:

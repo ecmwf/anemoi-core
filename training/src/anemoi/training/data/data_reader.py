@@ -21,6 +21,7 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.training.data.relative_time_indices import TimeIndices
+from anemoi.training.data.relative_time_indices import normalize_time_indices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -184,6 +185,7 @@ class BaseAnemoiReader:
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
+        time_indices = normalize_time_indices(time_indices)
         if isinstance(grid_shard_indices, slice):
             # Load only shards into CPU memory
             x = self.data[time_indices, :, :, grid_shard_indices]
