@@ -246,13 +246,6 @@ class AnemoiTrainer(ABC):
         """Provide the model instance."""
         model_task = get_class(self.config.training.model_task)
 
-        # Sync multistep values from training to model config. Interpolations like
-        # model.multistep_input = ${training.multistep_input} may have been frozen by an
-        # earlier OmegaConf.resolve() call before the training values were modified.
-        with open_dict(self.config.model):
-            self.config.model.multistep_input = self.config.training.multistep_input
-            self.config.model.multistep_output = self.config.training.multistep_output
-
         model_partial = instantiate(self.config.model, _partial_=True)
         model = model_partial(runtime_artifacts=self.runtime_artifacts)
 

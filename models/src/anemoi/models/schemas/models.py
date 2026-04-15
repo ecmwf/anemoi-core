@@ -213,6 +213,10 @@ class DiffusionSchema(BaseModel):
 class BaseModelSchema(PydanticBaseModel):
     model_config = ConfigDict(extra="allow")
 
+    multistep_input: PositiveInt = Field(example=2)
+    "Number of input timesteps."
+    multistep_output: PositiveInt = Field(default=1)
+    "Number of output timesteps."
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     keep_batch_sharded: bool = Field(default=True)
