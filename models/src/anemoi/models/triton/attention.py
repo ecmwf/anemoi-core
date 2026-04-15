@@ -167,7 +167,8 @@ def _attn_fwd_inner(
                 (curr_iter + offs_iter)[None, :] < N_CTX, k, 0.0
             )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
 
-        qk = tl.dot(q, k) * qk_scale
+        #qk = tl.dot(q, k) * qk_scale
+        qk = tl.dot(q, k) 
 
         if UNEVEN_CTX and tail_iter_block:
             qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
@@ -187,8 +188,10 @@ def _attn_fwd_inner(
             qk = tl.where(mask, qk, MINUS_INF)
 
         # compute max and exponent after masking (more numerically stable)
-        m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        p = tl.math.exp2(qk - m_ij[:, None])
+        #m_ij = tl.maximum(m_i, tl.max(qk, 1))
+        #p = tl.math.exp2(qk - m_ij[:, None])
+        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+        p = tl.math.exp2(qk * qk_scale - m_ij[:, None])
 
         # -- compute correction factor --
         alpha = tl.math.exp2(m_i - m_ij)

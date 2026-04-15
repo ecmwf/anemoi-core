@@ -178,6 +178,14 @@ class MultiHeadSelfAttention(nn.Module):
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
+        self.debug=False
+        if os.getenv("DEBUG_ATTN", "0") == "1":
+            self.debug = True
+            self.ref_attention = attn_funcs["flash_attention"](
+                use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
+            )
+            LOGGER.info(f"Loading flash attention as reference attention for debugging purposes")
+
     def attention_computation(
         self,
         query: Tensor,
@@ -223,12 +231,92 @@ class MultiHeadSelfAttention(nn.Module):
             alibi_slopes=self.alibi_slopes,
         )
 
+        if self.debug:
+            with torch.no_grad():
+                ref_out = self.ref_attention(
+                    query,
+                    key,
+                    value,
+                    batch_size,
+                    causal=False,
+                    window_size=self.window_size,
+                    dropout_p=dropout_p,
+                    softcap=self.softcap,
+                    alibi_slopes=self.alibi_slopes,
+                )
+            if not torch.allclose(out, ref_out, atol=2e-3):
+                max_diff = torch.max(torch.abs(out - ref_out))
+                LOGGER.warning(f"Attention outputs differ! Max difference: {max_diff.item()}")
+                self._save_debug_checkpoint(
+                    query=query,
+                    key=key,
+                    value=value,
+                    out=out,
+                    ref_out=ref_out,
+                    batch_size=batch_size,
+                    dropout_p=dropout_p,
+                )
+                exit()
+            else:
+                LOGGER.info("Attention outputs match reference attention within tolerance.")
+
         out = shard_sequence(out, shapes=shapes, num_heads=self.num_heads, mgroup=model_comm_group)
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         out = self.projection(out)
 
         return out
+
+    def _save_debug_checkpoint(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        out: Tensor,
+        ref_out: Tensor,
+        batch_size: int,
+        dropout_p: float,
+    ) -> None:
+        """Save a checkpoint with all state needed to reproduce an attention mismatch.
+
+        The checkpoint is saved to a file named 'attn_debug_checkpoint_<N>.pt' in the
+        current working directory (or the path set via DEBUG_ATTN_CHECKPOINT_DIR env var).
+        """
+        import datetime
+
+        checkpoint_dir = os.environ.get("DEBUG_ATTN_CHECKPOINT_DIR", os.getcwd())
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        path = os.path.join(checkpoint_dir, f"attn_debug_checkpoint_{timestamp}.pt")
+
+        checkpoint = {
+            # Input tensors (already in [batch, heads, grid, vars] layout)
+            "query": query.detach().cpu(),
+            "key": key.detach().cpu(),
+            "value": value.detach().cpu(),
+            # Outputs
+            "out": out.detach().cpu(),
+            "ref_out": ref_out.detach().cpu(),
+            # Attention parameters
+            "batch_size": batch_size,
+            "num_heads": self.num_heads,
+            "head_dim": self.head_dim,
+            "window_size": self.window_size,
+            "dropout_p": dropout_p,
+            "softcap": self.softcap,
+            "alibi_slopes": self.alibi_slopes.detach().cpu() if self.alibi_slopes is not None else None,
+            "is_causal": self.is_causal,
+            "qk_norm": self.qk_norm,
+            "use_rotary_embeddings": self.use_rotary_embeddings,
+            # Module states so we can reconstruct both attention wrappers
+            "attention_implementation": self.attention_implementation,
+            "attention_state_dict": self.attention.state_dict(),
+            "ref_attention_state_dict": self.ref_attention.state_dict(),
+        }
+
+        torch.save(checkpoint, path)
+        LOGGER.warning(f"Saved attention debug checkpoint to: {path}")
 
     def forward(
         self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
@@ -498,6 +586,7 @@ class FlashAttentionWrapper(nn.Module):
                 dropout_p=dropout_p,
                 softcap=softcap,
                 alibi_slopes=alibi_slopes,
+                #softmax_scale=1.0 / math.sqrt(query.shape[-1]),
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
