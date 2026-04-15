@@ -103,10 +103,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             self.refiner_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", dataset_name)],
-                edge_attributes=model_config.model.refiner.get("sub_graph_edge_attributes"),
+                edge_attributes=model_config.model.refiner[dataset_name].get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.refiner.get("trainable_size", 0),
+                trainable_size=model_config.model.refiner[dataset_name].get("trainable_size", 0),
             )
 
             self.refiner[dataset_name] = instantiate(
