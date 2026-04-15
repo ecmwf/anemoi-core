@@ -56,8 +56,6 @@ def normalize_time_indices(time_indices: TimeIndices) -> TimeIndices:
 
 def offset_time_indices(reference_index: int, relative_indices: TimeIndices) -> TimeIndices:
     """Shift relative time indices by a sample reference index."""
-    relative_indices = normalize_time_indices(relative_indices)
-
     if isinstance(relative_indices, slice):
         start = None if relative_indices.start is None else reference_index + relative_indices.start
         stop = None if relative_indices.stop is None else reference_index + relative_indices.stop

@@ -41,9 +41,12 @@ def test_offset_time_indices_shifts_indices() -> None:
     """Test that offset_time_indices correctly shifts relative time indices by a reference index."""
     offset1 = offset_time_indices(10, [0, 2, 4])
     offset2 = offset_time_indices(10, [-2, 0, 2, 4])
+    offset3 = offset_time_indices(10, slice(-2, 5, 2))
 
     assert offset1 == [10, 12, 14]
     assert offset2 == [8, 10, 12, 14]
+    assert isinstance(offset3, slice)
+    assert (offset3.start, offset3.stop, offset3.step) == (8, 15, 2)
 
 
 def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
