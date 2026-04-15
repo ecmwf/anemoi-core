@@ -33,6 +33,50 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             + self.node_attributes.attr_ndims[dataset_name]
         )
 
+    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+        if grid_shard_shapes is not None:
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+            )
+            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+
+        x_input = x[:, : self.n_step_input, ...]
+        # normalize and add data positional info (lat/lon)
+        x_data_latent = torch.cat(
+            (
+                einops.rearrange(x_input, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                node_attributes_data,
+            ),
+            dim=-1,  # feature dimension
+        )
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+        )
+
+        return x_data_latent, shard_shapes_data
+
+    def _assemble_output(self, x_out, batch_size, ensemble_size, dtype, dataset_name=None):
+        x_out = (
+            einops.rearrange(
+                x_out,
+                "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
+                batch=batch_size,
+                ensemble=ensemble_size,
+                time=self.n_step_output,
+            )
+            .to(dtype=dtype)
+            .clone()
+        )
+        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
+
+        for bounding in self.boundings[dataset_name]:
+            # bounding performed in the order specified in the config file
+            x_out = bounding(x_out)
+        return x_out
+
     def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_target = self.node_attributes(dataset_name, batch_size=batch_size)
