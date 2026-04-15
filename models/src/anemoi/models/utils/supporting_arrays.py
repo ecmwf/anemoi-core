@@ -22,11 +22,9 @@ def build_combined_supporting_arrays(
     """Merge output-mask supporting arrays into supporting_arrays."""
     combined = {name: arrays.copy() for name, arrays in supporting_arrays.items()}
     if dataset_names is None:
-        from anemoi.models.utils.config import get_multiple_datasets_config
-
-        dataset_names = list(get_multiple_datasets_config(config.data).keys())
+        dataset_names = list(supporting_arrays.keys())
     for name in dataset_names:
         combined.setdefault(name, {})
-        mask = instantiate(config.model.output_mask, nodes=graph_data[name])
+        mask = instantiate(config.output_mask, nodes=graph_data[name])
         combined[name].update(mask.supporting_arrays)
     return combined

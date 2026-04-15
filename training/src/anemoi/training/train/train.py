@@ -401,7 +401,7 @@ class AnemoiTrainer(ABC):
     def supporting_arrays(self) -> dict:
         from anemoi.models.utils.supporting_arrays import build_combined_supporting_arrays
 
-        return build_combined_supporting_arrays(self.config, self.graph_data, self.datamodule.supporting_arrays)
+        return build_combined_supporting_arrays(self.config.model, self.graph_data, self.datamodule.supporting_arrays)
 
     @cached_property
     def _logger_kwargs(self) -> dict:
