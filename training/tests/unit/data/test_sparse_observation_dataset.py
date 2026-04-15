@@ -155,9 +155,7 @@ class TestSparseObservationGetSample:
             assert key in meta, f"Missing metadata key: {key}"
 
     @pytest.mark.data_dependent
-    def test_metadata_latitudes_longitudes_are_tensors(
-        self, sparse_obs_sample: tuple[torch.Tensor, dict]
-    ) -> None:
+    def test_metadata_latitudes_longitudes_are_tensors(self, sparse_obs_sample: tuple[torch.Tensor, dict]) -> None:
         _, meta = sparse_obs_sample
         assert isinstance(meta["latitudes"], torch.Tensor)
         assert isinstance(meta["longitudes"], torch.Tensor)

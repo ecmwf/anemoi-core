@@ -876,7 +876,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 transferred_batch[dataset_name] = (
                     [t.to(device, non_blocking=True) for t in tensors],
                     {
-                        "latitudes":  [t.to(device, non_blocking=True) for t in meta["latitudes"]],
+                        "latitudes": [t.to(device, non_blocking=True) for t in meta["latitudes"]],
                         "longitudes": [t.to(device, non_blocking=True) for t in meta["longitudes"]],
                         "timedeltas": [t.to(device, non_blocking=True) for t in meta["timedeltas"]],
                         "boundaries": meta["boundaries"],  # list[list[slice]], not transferable; used only for indexing

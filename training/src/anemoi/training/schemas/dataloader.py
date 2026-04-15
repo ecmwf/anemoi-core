@@ -90,7 +90,7 @@ class NativeDatasetSchema(BaseModel):
 
 class ObservationDatasetSchema(NativeDatasetSchema):
     """Observation dataset configuration schema."""
-    pass
+
 
 
 class TrajectorySchema(PydanticBaseModel):

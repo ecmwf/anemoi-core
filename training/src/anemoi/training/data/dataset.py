@@ -142,6 +142,7 @@ class BaseAnemoiReader:
 
 class AnemoiGriddedReader(BaseAnemoiReader):
     """Anemoi data reader for gridded datasets. This can be either fields or observations."""
+
     @property
     def grid_size(self) -> int:
         """Return dataset grid size."""
@@ -271,7 +272,7 @@ def create_dataset(dataset_config: dict) -> AnemoiGriddedReader:
     if is_tabular:
         LOGGER.info("Creating a SparseObservationDataset from config %s...", dataset_config)
         return SparseObservationDataset(**dataset_config)
-    
+
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating a TrajectoryDataset from config %s...", dataset_config)
         return TrajectoryDataset(
@@ -287,6 +288,7 @@ def create_dataset(dataset_config: dict) -> AnemoiGriddedReader:
 
 class SparseObservationDataset(BaseAnemoiReader):
     """Reader for sparse observation data (from tabular-zarrs)."""
+
     @property
     def has_trajectories(self) -> bool:
         """Return whether the dataset has trajectories."""
@@ -306,7 +308,7 @@ class SparseObservationDataset(BaseAnemoiReader):
     def metadata(self) -> dict:
         """Return dataset metadata."""
         return {}
-    
+
     @property
     def supporting_arrays(self) -> dict:
         """Return dataset supporting arrays."""
@@ -329,7 +331,7 @@ class SparseObservationDataset(BaseAnemoiReader):
 
     def _unpack_sample(self, x) -> tuple[np.ndarray, dict]:
         """Unpack a sample from the dataset into data and metadata components."""
-        x_data = torch.from_numpy(x[None, ...])  # introduce a dummy ensemble dimension 
+        x_data = torch.from_numpy(x[None, ...])  # introduce a dummy ensemble dimension
         x_metadata = {
             "latitudes": torch.from_numpy(x.latitudes),
             "longitudes": torch.from_numpy(x.longitudes),

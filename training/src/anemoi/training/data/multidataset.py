@@ -12,8 +12,9 @@ import logging
 import os
 import random
 from functools import cached_property
+from typing import Any
+from typing import Union
 
-from typing import Any, Union
 import numpy as np
 import torch
 from rich.console import Console
@@ -440,7 +441,7 @@ def collate_sparse(samples: list[tuple[Tensor, dict[str, Any]]]) -> tuple[list[T
     tensors, metas = zip(*samples)
 
     return list(tensors), {
-        "latitudes":  [m["latitudes"]  for m in metas],
+        "latitudes": [m["latitudes"] for m in metas],
         "longitudes": [m["longitudes"] for m in metas],
         "timedeltas": [m["timedeltas"] for m in metas],
         "boundaries": [m["boundaries"] for m in metas],
@@ -448,8 +449,7 @@ def collate_sparse(samples: list[tuple[Tensor, dict[str, Any]]]) -> tuple[list[T
 
 
 def multidataset_collator_func(batch: list[Sample]) -> dict[str, Any]:
-    """
-    Collator for MultiDataset samples, where each sample is a dict:
+    """Collator for MultiDataset samples, where each sample is a dict:
       key   : dataset name (str)
       value : Tensor of shape (1, N_i, v)           — gridded field
             | Tuple[Tensor, Dict]                   — sparse observations
