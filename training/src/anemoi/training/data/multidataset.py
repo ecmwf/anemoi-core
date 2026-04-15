@@ -108,7 +108,10 @@ class MultiDataset(IterableDataset):
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all datasets."""
-        return {name: getattr(dataset, attr_name) for name, dataset in self.datasets.items()}
+        _result = {}
+        for name, dataset in self.datasets.items():
+            _result[name] = getattr(dataset, attr_name) if hasattr(dataset, attr_name) else None
+        return _result
 
     def _apply_to_all_datasets(self, method_name: str, *args, **kwargs) -> None:
         """Call a method by name with given arguments on all datasets."""
