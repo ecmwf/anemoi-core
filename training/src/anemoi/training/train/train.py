@@ -222,7 +222,7 @@ class AnemoiTrainer(ABC):
                 initialized_datasets.append(dataset_name)
 
         # Check for datasets in checkpoint but not in config
-        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in data_indices]
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
         if ignored_datasets:
             for ignored_dataset in ignored_datasets:
                 LOGGER.warning(
