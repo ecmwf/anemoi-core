@@ -68,7 +68,7 @@ def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
     time_index = dataset.data.last_index[0]
     assert isinstance(time_index, list)
 
-    dataset.get_sample(time_indices=slice(4, 7), grid_shard_indices=slice(0, 5))
+    dataset.get_sample(time_indices=slice(4, 7, 1), grid_shard_indices=slice(0, 5))
 
     time_index = dataset.data.last_index[0]
     assert isinstance(time_index, slice)
