@@ -16,37 +16,15 @@ from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
-
-
-def compute_relative_date_indices(
-    task: BaseTask,
-    data_readers: dict[str, BaseAnemoiReader],
-    **kwargs,
-) -> dict[str, list[int]]:
-    """Compute relative date indices for each dataset based on task offsets."""
-    offsets = task.get_offsets(**kwargs)
-
-    relative_date_indices = {}
-    for name, dr in data_readers.items():
-        if any(o % dr.frequency for o in offsets):
-            msg = (
-                f"The frequency of `{name}` ({frequency_to_string(dr.frequency)}) is not compatible "
-                f"with the task defined offsets ({[frequency_to_string(o) for o in offsets]}). "
-                f"Check that the task offsets are compatible with the dataset frequency."
-            )
-            raise ValueError(msg)
-        relative_date_indices[name] = [o // dr.frequency for o in offsets]
-
-    return relative_date_indices
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):

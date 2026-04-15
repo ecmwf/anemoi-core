@@ -23,7 +23,8 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.training.data.relative_time_indices import offset_time_indices
+from anemoi.training.data.usable_indices import compute_valid_data_indices
 from anemoi.training.utils.seeding import get_base_seed
 
 LOGGER = logging.getLogger(__name__)
@@ -54,10 +55,16 @@ class MultiDataset(IterableDataset):
             label for the dataset, by default "multi"
         """
         self.data_readers = data_readers
-        self.relative_date_indices = relative_date_indices
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
+
+        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
+
+        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
+        self.relative_date_indices = {
+            name: offset_time_indices(0, indices) for name, indices in relative_date_indices.items()
+        }
 
         self._lazy_init_model_and_reader_group_info()
 
@@ -134,42 +141,6 @@ class MultiDataset(IterableDataset):
                 freq_ref = freq
             assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
-
-    @cached_property
-    def valid_date_indices(self) -> np.ndarray:
-        """Return valid date indices.
-
-        A date t is valid if we can sample the elements t + i
-        for every relative_date_index i across all data readers.
-
-        Returns the intersection of valid indices from all data readers.
-        """
-        valid_date_indices_intersection = None
-        for dataset_name, ds in self.data_readers.items():
-            valid_date_indices = get_usable_indices(
-                ds.missing,
-                len(ds.dates),
-                self.relative_date_indices[dataset_name],
-                ds.trajectory_ids if ds.has_trajectories else None,
-            )
-            if valid_date_indices_intersection is None:
-                valid_date_indices_intersection = valid_date_indices
-            else:
-                valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
-
-            if len(valid_date_indices) == 0:
-                msg = f"No valid date indices found for data reader '{dataset_name}': {ds}"
-                raise ValueError(msg)
-
-            LOGGER.info("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
-
-        if len(valid_date_indices_intersection) == 0:
-            msg = "No valid date indices found after intersection across all datasets."
-            raise ValueError(msg)
-
-        LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
-
-        return valid_date_indices_intersection
 
     def set_comm_group_info(
         self,
@@ -324,7 +295,7 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         x = {}
         for name, dataset in self.data_readers.items():
-            time_steps = [index + i for i in self.relative_date_indices[name]]
+            time_steps = offset_time_indices(index, self.relative_date_indices[name])
             # self.shard_shapes is lazily initalised to None
             # This if statement guards against the case where shard_shapes is not set
             # (e.g. if set_comm_group_info hasn't been called yet)

@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.training.data.relative_time_indices import TimeIndices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ class BaseAnemoiReader:
 
     def get_sample(
         self,
-        time_indices: slice | int | list[int],
+        time_indices: TimeIndices,
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""

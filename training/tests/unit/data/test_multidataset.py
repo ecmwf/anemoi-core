@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import re
+
 import numpy as np
 import pytest
 from pytest_mock import MockFixture
@@ -58,47 +60,43 @@ class TestMultiDataset:
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """Test that MultiDataset raises ValueError when a dataset has no valid indices."""
-        # Clear the cached property if it was already computed
-        if "valid_date_indices" in multi_dataset.__dict__:
-            del multi_dataset.__dict__["valid_date_indices"]
+        data_readers = multi_dataset.data_readers
+        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
-        # Mock get_usable_indices: dataset_a has valid indices, dataset_b has none
+        # Mock get_usable_indices: dataset_a has valid indices, dataset_b has none.
+        # Patch before constructing MultiDataset so it takes effect during __init__.
         mocker.patch(
-            "anemoi.training.data.multidataset.get_usable_indices",
+            "anemoi.training.data.usable_indices.get_usable_indices",
             side_effect=[
                 np.array([0, 1, 2, 3, 4, 5]),  # dataset_a
                 np.array([]),  # dataset_b - empty!
             ],
         )
 
-        # Accessing valid_date_indices should raise ValueError
-        empty_dataset = multi_dataset.data_readers["dataset_b"]
+        # Constructing MultiDataset should raise ValueError
+        empty_dataset = data_readers["dataset_b"]
         err_msg = f"No valid date indices found for data reader 'dataset_b': {empty_dataset}"
-        with pytest.raises(ValueError, match=err_msg):
-            _ = multi_dataset.valid_date_indices
+        with pytest.raises(ValueError, match=re.escape(err_msg)):
+            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """Test that MultiDataset raises ValueError when intersection of valid indices is empty."""
-        # Clear the cached property if it was already computed
-        if "valid_date_indices" in multi_dataset.__dict__:
-            del multi_dataset.__dict__["valid_date_indices"]
+        data_readers = multi_dataset.data_readers
+        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
         # Mock get_usable_indices: both datasets have valid indices but no overlap
         # dataset_a has indices: [0, 1, 2]
         # dataset_b has indices: [5, 6, 7]
-        # intersection should be empty ([])
+        # intersection should be empty ([]).
+        # Patch before constructing MultiDataset so it takes effect during __init__.
         mocker.patch(
-            "anemoi.training.data.multidataset.get_usable_indices",
+            "anemoi.training.data.usable_indices.get_usable_indices",
             side_effect=[
                 np.array([0, 1, 2]),  # dataset_a
                 np.array([5, 6, 7]),  # dataset_b
             ],
         )
 
-        # Accessing valid_date_indices should raise ValueError
+        # Constructing MultiDataset should raise ValueError
         with pytest.raises(ValueError, match="No valid date indices found after intersection across all datasets"):
-            _ = multi_dataset.valid_date_indices
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)

@@ -7,7 +7,54 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from anemoi.training.data.data_reader import BaseAnemoiReader
+
+LOGGER = logging.getLogger(__name__)
+
+
+def compute_valid_data_indices(
+    data_readers: dict[str, "BaseAnemoiReader"],
+    relative_date_indices: dict[str, np.ndarray | list[int]],
+) -> np.ndarray:
+    """Return valid date indices.
+
+    A date t is valid if we can sample the elements t + i
+    for every relative_date_index i across all data readers.
+
+    Returns the intersection of valid indices from all data readers.
+    """
+    valid_date_indices_intersection = None
+    for dataset_name, ds in data_readers.items():
+        valid_date_indices = get_usable_indices(
+            ds.missing,
+            len(ds.dates),
+            relative_date_indices[dataset_name],
+            ds.trajectory_ids if ds.has_trajectories else None,
+        )
+        if valid_date_indices_intersection is None:
+            valid_date_indices_intersection = valid_date_indices
+        else:
+            valid_date_indices_intersection = np.intersect1d(valid_date_indices_intersection, valid_date_indices)
+
+        if len(valid_date_indices) == 0:
+            msg = f"No valid date indices found for data reader '{dataset_name}': {ds}"
+            raise ValueError(msg)
+
+        LOGGER.info("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
+
+    if len(valid_date_indices_intersection) == 0:
+        msg = "No valid date indices found after intersection across all datasets."
+        raise ValueError(msg)
+
+    LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
+
+    return valid_date_indices_intersection
 
 
 def get_usable_indices(
