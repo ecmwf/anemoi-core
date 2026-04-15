@@ -7,7 +7,6 @@
 # nor does it submit to any jurisdiction.
 
 
-from enum import StrEnum
 from functools import partial
 from typing import Annotated
 from typing import Any
@@ -155,13 +154,11 @@ class NaNMaskScalerSchema(BaseModel):
     "Flag to include processors for tendencies when building the loss mask."
 
 
-class TendencyScalerTargets(StrEnum):
-    stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
-    var = "anemoi.training.losses.scalers.VarTendencyScaler"
-
-
 class TendencyScalerSchema(BaseModel):
-    target_: TendencyScalerTargets = Field(
+    target_: Literal[
+        "anemoi.training.losses.scalers.StdevTendencyScaler",
+        "anemoi.training.losses.scalers.VarTendencyScaler",
+    ] = Field(
         example="anemoi.training.losses.scalers.StdevTendencyScaler",
         alias="_target_",
     )
@@ -169,15 +166,13 @@ class TendencyScalerSchema(BaseModel):
     "Timestep key used to select tendency statistics for scalers."
 
 
-class VariableLevelScalerTargets(StrEnum):
-    relu_scaler = "anemoi.training.losses.scalers.ReluVariableLevelScaler"
-    linear_scaler = "anemoi.training.losses.scalers.LinearVariableLevelScaler"
-    polynomial_sclaer = "anemoi.training.losses.scalers.PolynomialVariableLevelScaler"
-    no_scaler = "anemoi.training.losses.scalers.NoVariableLevelScaler"
-
-
 class VariableLevelScalerSchema(BaseModel):
-    target_: VariableLevelScalerTargets = Field(
+    target_: Literal[
+        "anemoi.training.losses.scalers.ReluVariableLevelScaler",
+        "anemoi.training.losses.scalers.LinearVariableLevelScaler",
+        "anemoi.training.losses.scalers.PolynomialVariableLevelScaler",
+        "anemoi.training.losses.scalers.NoVariableLevelScaler",
+    ] = Field(
         example="anemoi.training.losses.scalers.ReluVariableLevelScaler",
         alias="_target_",
     )
@@ -243,7 +238,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     "Normalisation method applied to the node attribute."
 
 
-ScalerSchema = (
+ScalerSchema = Annotated[
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
@@ -253,29 +248,19 @@ ScalerSchema = (
     | TimeStepScalerSchema
     | UniformTimeStepScalerSchema
     | LeadTimeDecayScalerSchema
-    | ReweightedGraphNodeAttributeScalerSchema
-)
-
-
-class ImplementedLossesUsingBaseLossSchema(StrEnum):
-    kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
-    afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
-    rmse = "anemoi.training.losses.RMSELoss"
-    mse = "anemoi.training.losses.MSELoss"
-    weighted_mse = "anemoi.training.losses.WeightedMSELoss"
-    mae = "anemoi.training.losses.MAELoss"
-    logcosh = "anemoi.training.losses.LogCoshLoss"
-    huber = "anemoi.training.losses.HuberLoss"
-    combined = "anemoi.training.losses.combined.CombinedLoss"
-    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
-    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
-    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
-    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
+    | ReweightedGraphNodeAttributeScalerSchema,
+    Discriminator("target_"),
+]
 
 
 class BaseLossSchema(BaseModel):
-    target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
+    target_: Literal[
+        "anemoi.training.losses.RMSELoss",
+        "anemoi.training.losses.MSELoss",
+        "anemoi.training.losses.WeightedMSELoss",
+        "anemoi.training.losses.MAELoss",
+        "anemoi.training.losses.LogCoshLoss",
+    ] = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
     "Scalars to include in loss calculation"
@@ -286,11 +271,13 @@ class BaseLossSchema(BaseModel):
 
 
 class KernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
     fair: bool = True
     "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
 
 
 class AlmostFairKernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
     alpha: float = 1.0
     """Factor for linear combination of fair (unbiased, ensemble variance component
     weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
@@ -315,6 +302,7 @@ class MultiScaleLossSchema(BaseModel):
 
 
 class HuberLossSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.HuberLoss"] = Field(..., alias="_target_")
     delta: float = 1.0
     "Threshold for Huber loss."
 
@@ -322,6 +310,13 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
+    target_: Literal[
+        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.LogFFT2Distance",
+        "anemoi.training.losses.spectral.FourierCorrelationLoss",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.SpectralL2Loss",
+    ] = Field(..., alias="_target_")
     transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
 
@@ -332,7 +327,8 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
+    losses: list[Annotated[BaseLossSchema | SpectralLossSchema, Discriminator("target_")]] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -359,26 +355,22 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = (
+LossSchemas = Annotated[
     BaseLossSchema
     | HuberLossSchema
     | CombinedLossSchema
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema
     | SpectralLossSchema
-    | MultiScaleLossSchema
-)
-
-
-class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
-    ddp_ens = "anemoi.training.distributed.strategy.DDPEnsGroupStrategy"
-    ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
+    | MultiScaleLossSchema,
+    Discriminator("target_"),
+]
 
 
 class BaseDDPStrategySchema(BaseModel):
     """Strategy configuration."""
 
-    target_: ImplementedStrategiesUsingBaseDDPStrategySchema = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.distributed.strategy.DDPGroupStrategy"] = Field(..., alias="_target_")
     num_gpus_per_model: PositiveInt = Field(example=2)
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
@@ -388,11 +380,15 @@ class BaseDDPStrategySchema(BaseModel):
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
     """Strategy object from anemoi.training.strategy."""
 
+    target_: Literal["anemoi.training.distributed.strategy.DDPEnsGroupStrategy"] = Field(..., alias="_target_")
     num_gpus_per_ensemble: PositiveInt = Field(example=2)
     "Number of GPUs per ensemble."
 
 
-StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
+StrategySchemas = Annotated[
+    BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema,
+    Discriminator("target_"),
+]
 
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 

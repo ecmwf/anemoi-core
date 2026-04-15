@@ -4,14 +4,14 @@ datasets:
     general_variable:
       _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
       weights:
-        default: 1
+        default: 1.0
         q: 0.8      # ERA5-specific weight
-        t: 6        # ERA5-specific weight
+        t: 6.0        # ERA5-specific weight
         u: 0.8
         v: 0.5
         w: 0.001
-        z: 12       # Higher weight for geopotential in ERA5
-        sp: 10
+        z: 12.0       # Higher weight for geopotential in ERA5
+        sp: 10.0
         10u: 0.1    # ERA5 has 10m winds
         10v: 0.1
         2d: 0.5
@@ -53,13 +53,13 @@ datasets:
     general_variable:
       _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
       weights:
-        default: 1
+        default: 1.0
         q: 1.0      # Same as ERA5
-        t: 8        # Same as ERA5
+        t: 8.0        # Same as ERA5
         u: 0.8
         v: 0.5
         w: 0.001
-        z: 3       # Same as ERA5
+        z: 3.0       # Same as ERA5
 
     nan_mask_weights:
       _target_: anemoi.training.losses.scalers.NaNMaskScaler

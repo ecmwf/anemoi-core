@@ -9,8 +9,11 @@
 
 
 import logging
+from typing import Annotated
 from typing import Literal
+from typing import Union
 
+from pydantic import Discriminator
 from pydantic import Field
 
 from anemoi.graphs.schemas.normalise import ImplementedNormalisationSchema
@@ -73,14 +76,17 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
-SingleAttributeSchema = (
-    PlanarAreaWeightSchema
-    | MaskedPlanarAreaWeightsSchema
-    | SphericalAreaWeightSchema
-    | CutOutMaskSchema
-    | GridsMaskSchema
-    | NonmissingAnemoiDatasetVariableSchema
-)
+SingleAttributeSchema = Annotated[
+    Union[
+        PlanarAreaWeightSchema,
+        MaskedPlanarAreaWeightsSchema,
+        SphericalAreaWeightSchema,
+        CutOutMaskSchema,
+        GridsMaskSchema,
+        NonmissingAnemoiDatasetVariableSchema,
+    ],
+    Discriminator("target_"),
+]
 
 
 class BooleanOperationSchema(BaseModel):
@@ -93,4 +99,15 @@ class BooleanOperationSchema(BaseModel):
     masks: str | SingleAttributeSchema | list[str | SingleAttributeSchema]
 
 
-NodeAttributeSchemas = SingleAttributeSchema | BooleanOperationSchema
+NodeAttributeSchemas = Annotated[
+    Union[
+        PlanarAreaWeightSchema,
+        MaskedPlanarAreaWeightsSchema,
+        SphericalAreaWeightSchema,
+        CutOutMaskSchema,
+        GridsMaskSchema,
+        NonmissingAnemoiDatasetVariableSchema,
+        BooleanOperationSchema,
+    ],
+    Discriminator("target_"),
+]

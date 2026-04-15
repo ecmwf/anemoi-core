@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-from enum import Enum
 from typing import Annotated
 from typing import Any
 from typing import Literal
@@ -18,10 +17,12 @@ from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import Tag
 from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
@@ -44,31 +45,23 @@ from .residual import ResidualConnectionSchema
 LOGGER = logging.getLogger(__name__)
 
 
-class DefinedModels(str, Enum):
-    ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
-    ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
-    ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
-    ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
-    ANEMOI_MODEL_HIER_ENC_PROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator"
-    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator"
-    ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
-        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
-    )
-    ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionModelEncProcDec"
-    ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC = (
-        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
-    )
-    ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
-    ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
-    ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
-    ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
-    ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
-
-
 class Model(BaseModel):
-    target_: DefinedModels = Field(..., alias="_target_")
+    target_: Literal[
+        "anemoi.models.models.AnemoiModelEncProcDec",
+        "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec",
+        "anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator",
+        "anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator",
+        "anemoi.models.models.AnemoiModelAutoEncoder",
+        "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder",
+        "anemoi.models.models.AnemoiModelEncProcDecHierarchical",
+        "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical",
+        "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder",
+        "anemoi.models.models.hierarchical_autoencoder.AnemoiModelHierarchicalAutoEncoder",
+        "anemoi.models.models.AnemoiDiffusionModelEncProcDec",
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec",
+        "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec",
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec",
+    ] = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
     hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
     "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
@@ -76,11 +69,6 @@ class Model(BaseModel):
     "Add skip connection in latent space before/after processor."
     convert_: str = Field("all", alias="_convert_")
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
-
-
-class DiffusionModel(Model):
-    diffusion: DiffusionSchema = Field(default=None)
-    "Diffusion configuration for diffusion models"
 
 
 class TrainableParameters(PydanticBaseModel):
@@ -183,7 +171,7 @@ class Boolean1DSchema(BaseModel):
     attribute_name: str = Field(example="cutout_mask")
 
 
-OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
+OutputMaskSchemas = Annotated[Union[NoOutputMaskSchema, Boolean1DSchema], Field(discriminator="target_")]
 
 
 class DiffusionSchema(BaseModel):
@@ -220,38 +208,28 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor. Currently only in interpolator."
-    processor: Union[
-        NoOpProcessorSchema,
-        GNNProcessorSchema,
-        GraphTransformerProcessorSchema,
-        TransformerProcessorSchema,
-        PointWiseMLPProcessorSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
+    processor: Annotated[
+        Union[
+            NoOpProcessorSchema,
+            GNNProcessorSchema,
+            GraphTransformerProcessorSchema,
+            TransformerProcessorSchema,
+            PointWiseMLPProcessorSchema,
+        ],
+        Discriminator("target_"),
+    ]
     "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema, PointWiseForwardMapperSchema
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
+    encoder: Annotated[
+        Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema, PointWiseForwardMapperSchema],
+        Discriminator("target_"),
+    ]
     "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
+    decoder: Annotated[
+        Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema, PointWiseBackwardMapperSchema],
+        Discriminator("target_"),
+    ]
+    "GNN decoder schema."
+    residual: ResidualConnectionSchema
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
@@ -306,7 +284,37 @@ NoiseInjectorUnion = Annotated[
 ]
 
 
+_ENS_MODEL_TARGETS = frozenset(
+    {
+        "anemoi.models.models.AnemoiEnsModelEncProcDec",
+        "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec",
+    }
+)
+_HIERARCHICAL_MODEL_TARGETS = frozenset(
+    {
+        "anemoi.models.models.AnemoiModelEncProcDecHierarchical",
+        "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical",
+        "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder",
+        "anemoi.models.models.hierarchical_autoencoder.AnemoiModelHierarchicalAutoEncoder",
+    }
+)
+_DIFFUSION_MODEL_TARGETS = frozenset(
+    {
+        "anemoi.models.models.AnemoiDiffusionModelEncProcDec",
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec",
+    }
+)
+_DIFFUSION_TEND_MODEL_TARGETS = frozenset(
+    {
+        "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec",
+        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec",
+    }
+)
+
+
 class EnsModelSchema(BaseModelSchema):
+    "Ensemble model schema."
+
     noise_injector: NoiseInjectorUnion = Field(...)
     "Noise injection configuration. Use NoOpNoiseInjector to disable, NoiseConditioning for conditioning, or NoiseInjector for direct injection."
     condition_on_residual: bool = Field(default=False)
@@ -314,8 +322,7 @@ class EnsModelSchema(BaseModelSchema):
 
 
 class DiffusionModelSchema(BaseModelSchema):
-    model: DiffusionModel = Field(default_factory=DiffusionModel)
-    "Diffusion Model schema"
+    "Diffusion model schema."
 
     @model_validator(mode="after")
     def validate_no_bounding_for_diffusion(self) -> "DiffusionModelSchema":
@@ -330,17 +337,63 @@ class DiffusionModelSchema(BaseModelSchema):
 
 
 class DiffusionTendModelSchema(DiffusionModelSchema):
+    "Diffusion-tendency model schema."
+
     condition_on_residual: bool = Field(default=False)
     "Whether to condition the noise injection on the residual connection."
 
 
 class HierarchicalModelSchema(BaseModelSchema):
+    "Hierarchical model schema."
+
     enable_hierarchical_level_processing: bool = Field(default=False)
     "Toggle to do message passing at every downscaling and upscaling step"
     level_process_num_layers: NonNegativeInt = Field(default=1)
     "Number of message passing steps at each level"
 
 
-ModelSchema = Union[
-    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+def _model_schema_tag(data: Any) -> str:
+    """Select the correct ModelSchema branch from the nested model._target_ field.
+    The _target_ that identifies the model variant lives at model.model._target_
+    (nested under the inner model: subfield) — not at the outer model._target_ level.
+    Every other discriminated schema (losses, strategies, etc.) has its _target_
+    directly in the data being validated. Pydantic explicitly rejects AliasPath
+    in discriminated unions ("Alias ['model', '_target_'] is not supported
+    in a discriminated union"), so there's no standard way to read from a nested path.
+    The callable _model_schema_tag + Tag is pydantic's intended mechanism for exactly this case
+
+    """
+    target = ""
+    try:
+        nested = data.get("model", {})
+        target = str(nested.get("_target_", "") if nested else "")
+    except (AttributeError, TypeError):
+        pass
+    if not target:
+        try:
+            if "noise_injector" in data:
+                return "ens"
+        except (TypeError, AttributeError):
+            pass
+        return "base"
+    if target in _ENS_MODEL_TARGETS:
+        return "ens"
+    if target in _HIERARCHICAL_MODEL_TARGETS:
+        return "hierarchical"
+    if target in _DIFFUSION_TEND_MODEL_TARGETS:
+        return "diffusion_tend"
+    if target in _DIFFUSION_MODEL_TARGETS:
+        return "diffusion"
+    return "base"
+
+
+ModelSchema = Annotated[
+    Union[
+        Annotated[EnsModelSchema, Tag("ens")],
+        Annotated[HierarchicalModelSchema, Tag("hierarchical")],
+        Annotated[DiffusionTendModelSchema, Tag("diffusion_tend")],
+        Annotated[DiffusionModelSchema, Tag("diffusion")],
+        Annotated[BaseModelSchema, Tag("base")],
+    ],
+    Discriminator(_model_schema_tag),
 ]

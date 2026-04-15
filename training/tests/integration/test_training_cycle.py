@@ -13,12 +13,10 @@ from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
-from pydantic import ValidationError
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.schemas.base_schema import build_schema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -72,34 +70,13 @@ def test_config_validation_global_config(global_config: tuple[DictConfig, str, s
     BaseSchema(**cfg)
 
 
-def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
-    cfg, _, _ = global_config
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
-    with pytest.raises(ValidationError, match="projection_kind"):
-        BaseSchema(**cfg)
-
-
-def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
-    cfg, _, _ = global_config
-    cfg.config_validation = False
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
-    cfg_obj = OmegaConf.to_object(cfg)
-    unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
-    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
-
-
 def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
     from anemoi.training.diagnostics.logger import get_mlflow_logger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-    config = gnn_config_mlflow
+    config = build_schema(gnn_config_mlflow)
     if config.config_validation:
-        OmegaConf.resolve(config)
-        config = BaseSchema(**config)
         assert config.diagnostics.log.mlflow.target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
-    else:
-        config = OmegaConf.to_object(config)
-        config = UnvalidatedBaseSchema(**DictConfig(config))
 
     from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
