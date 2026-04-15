@@ -122,38 +122,47 @@ data:
       - "cos_local_time"
       - "sin_local_time"
       diagnostic: []
-      processors:
-        normalizer:
-          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-          config:
-            default: mean-std # none
-            min-max: null
-            max:
-            - "SSO_STDH"
-            - "SSO_THETA"
-            - "SSO_GAMMA"
-            - "SSO_SIGMA"
-            none:
-            - EMIS_RAD
-            - cos_latitude
-            - cos_longitude
-            - sin_latitude
-            - sin_longitude
-            - "cos_local_time"
-            - "sin_local_time"
-            std: []
 
   num_features: null
   format: zarr
 
 model:
+  _target_: anemoi.models.builder.build_anemoi_model
+  _recursive_: false
+
+  multistep_input: ${training.multistep_input}
+  multistep_output: ${training.multistep_output}
+
   output_mask:
     _target_: anemoi.training.utils.masks.NoOutputMask
   cpu_offload: False
 
-  model:
+  backbone:
     _target_: anemoi.models.models.AnemoiModelEncProcDec
+    data_nodes_name: "data"
     hidden_nodes_name: "hidden"
+
+  processors:
+    data:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: mean-std
+          min-max:
+          max:
+          - "SSO_STDH"
+          - "SSO_THETA"
+          - "SSO_GAMMA"
+          - "SSO_SIGMA"
+          none:
+          - EMIS_RAD
+          - cos_latitude
+          - cos_longitude
+          - sin_latitude
+          - sin_longitude
+          - "cos_local_time"
+          - "sin_local_time"
+          std: []
 
   keep_batch_sharded: True
 

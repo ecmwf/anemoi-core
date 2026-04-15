@@ -138,11 +138,11 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 
     # Monitor path and setting of num_chunks
     assert (
-        trainer.model.model.model.encoder[dataset_name].proc.num_chunks
+        trainer.model.model.backbone.encoder[dataset_name].proc.num_chunks
         == aicon_config_with_grid.model.encoder.num_chunks
     )
     assert (
-        trainer.model.model.model.decoder[dataset_name].proc.num_chunks
+        trainer.model.model.backbone.decoder[dataset_name].proc.num_chunks
         == aicon_config_with_grid.model.decoder.num_chunks
     )
 
