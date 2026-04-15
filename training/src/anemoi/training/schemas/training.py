@@ -9,22 +9,21 @@
 
 from enum import Enum
 from functools import partial
-from typing import Annotated
-from typing import Any
-from typing import Literal
-
-from pydantic import AfterValidator
-from pydantic import Discriminator
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import PositiveInt
-from pydantic import field_validator
-from pydantic import model_validator
-from typing_extensions import Self
+from typing import Annotated, Any, Literal
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
+from pydantic import (
+    AfterValidator,
+    Discriminator,
+    Field,
+    NonNegativeFloat,
+    NonNegativeInt,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
+from typing_extensions import Self
 
 
 class GradientClip(BaseModel):
@@ -323,6 +322,8 @@ class BaseTrainingSchema(BaseModel):
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
+    preferred_blas_backend: str | None = Field(default=None)
+    "Optionally override PyTorch's default BLAS backend."
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""

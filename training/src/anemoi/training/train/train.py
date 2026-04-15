@@ -18,27 +18,20 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from hydra.utils import get_class
-from hydra.utils import instantiate
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from anemoi.utils.provenance import gather_provenance_info
+from hydra.utils import get_class, instantiate
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from scipy.sparse import load_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.training.diagnostics.callbacks import get_callbacks
-from anemoi.training.diagnostics.logger import get_mlflow_logger
-from anemoi.training.diagnostics.logger import get_tensorboard_logger
-from anemoi.training.diagnostics.logger import get_wandb_logger
-from anemoi.training.schemas.base_schema import BaseSchema
-from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
-from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.utils.checkpoint import freeze_submodule_by_name
-from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.diagnostics.logger import get_mlflow_logger, get_tensorboard_logger, get_wandb_logger
+from anemoi.training.schemas.base_schema import BaseSchema, UnvalidatedBaseSchema, convert_to_omegaconf
+from anemoi.training.utils.checkpoint import freeze_submodule_by_name, transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,6 +64,18 @@ class AnemoiTrainer:
             # self.config = config
 
             LOGGER.info("Skipping config validation.")
+
+        # Optionally override the torch default BLAS backend.
+        _blas_backend = self.config.training.get("preferred_blas_backend", None)
+        if _blas_backend:
+            if hasattr(torch.backends.cuda, "preferred_blas_library"):
+                torch.backends.cuda.preferred_blas_library(_blas_backend)
+                LOGGER.info("BLAS backend forced to %r (config.training.preferred_blas_backend)", _blas_backend)
+            else:
+                LOGGER.warning(
+                    "config.training.preferred_blas_backend=%r ignored: API unavailable in this PyTorch version",
+                    _blas_backend,
+                )
 
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
@@ -312,12 +317,12 @@ class AnemoiTrainer:
         warm_start_path = None
 
         if warm_start_dir or warm_start_file:
-            assert (
-                warm_start_dir is not None
-            ), f"Please configure config.hardware.paths.warm_start correctly, found: {warm_start_dir}"
-            assert (
-                warm_start_file is not None
-            ), f"Please configure config.hardware.files.warm_start correctly, found: {warm_start_file}"
+            assert warm_start_dir is not None, (
+                f"Please configure config.hardware.paths.warm_start correctly, found: {warm_start_dir}"
+            )
+            assert warm_start_file is not None, (
+                f"Please configure config.hardware.files.warm_start correctly, found: {warm_start_file}"
+            )
             warm_start_path = Path(warm_start_dir) / Path(warm_start_file)
             msg = "Warm start checkpoint not found: %s", warm_start_path
             assert Path.is_file(warm_start_path), msg
@@ -381,9 +386,9 @@ class AnemoiTrainer:
     def profiler(self) -> PyTorchProfiler | None:
         """Returns a pytorch profiler object, if profiling is enabled."""
         if self.config.diagnostics.profiler:
-            assert (
-                self.config.diagnostics.log.tensorboard.enabled
-            ), "Tensorboard logging must be enabled when profiling! Check your job config."
+            assert self.config.diagnostics.log.tensorboard.enabled, (
+                "Tensorboard logging must be enabled when profiling! Check your job config."
+            )
             return PyTorchProfiler(
                 dirpath=self.config.hardware.paths.logs.tensorboard,
                 filename="anemoi-profiler",
