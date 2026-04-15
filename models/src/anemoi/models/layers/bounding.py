@@ -314,7 +314,7 @@ def _build_dataset_boundings(
     """Build the list of model-output bounding modules from configuration.
 
     This is a thin factory over Hydra's ``instantiate`` that reads the iterable
-    ``model_config.model.bounding`` and instantiates each entry while injecting
+    ``model_config.bounding`` and instantiates each entry while injecting
     the common keyword arguments required by bounding modules:
     ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
     is returned as an ``nn.ModuleList`` preserving the order of the config.
@@ -322,7 +322,7 @@ def _build_dataset_boundings(
     Parameters
     ----------
     model_config : Any
-        Object with a ``model`` attribute containing an iterable ``bounding``
+        Object with an iterable ``bounding`` attribute
         (e.g. a list of Hydra configs). If absent or empty, an empty
         ``nn.ModuleList`` is returned.
     data_indices : Any
@@ -339,7 +339,7 @@ def _build_dataset_boundings(
     -------
     torch.nn.ModuleList
         The instantiated bounding modules, in the same order as specified in
-        ``model_config.model.bounding``. May be empty.
+        ``model_config.bounding``. May be empty.
     """
 
     bounding_cfgs: Iterable[Any] = getattr(model_config, "bounding", []) or []
@@ -371,7 +371,7 @@ def build_boundings(
     Parameters
     ----------
     model_config : Any
-        Object with a ``model`` attribute containing an iterable ``bounding``
+        Object with an iterable ``bounding`` attribute
         (e.g. a list of Hydra configs). If absent or empty, an empty
         ``nn.ModuleDict`` is returned.
     data_indices : Any

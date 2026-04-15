@@ -49,7 +49,6 @@ class AnemoiModel(torch.nn.Module):
         self.pre_processors_tendencies = pre_processors_tendencies
         self.post_processors_tendencies = post_processors_tendencies
 
-        # Instantiate the backbone from model_config.model.backbone
         nn_cfg = {
             "_target_": model_config.backbone._target_,
             "_convert_": getattr(model_config.backbone, "_convert_", "none"),

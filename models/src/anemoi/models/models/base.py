@@ -146,8 +146,6 @@ class BaseGraphModel(nn.Module):
             raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
         return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:

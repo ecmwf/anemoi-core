@@ -64,8 +64,6 @@ class AnemoiTrainer(ABC):
         # Allow for lower internal precision of float32 matrix multiplications.
         # This can increase performance (and TensorCore usage, where available).
         torch.set_float32_matmul_precision("high")
-        # Resolve the config to avoid shenanigans with lazy loading
-
         if config.config_validation:
             OmegaConf.resolve(config)
             self.config = BaseSchema(**config)
