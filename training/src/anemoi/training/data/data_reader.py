@@ -21,6 +21,7 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.training.data.relative_time_indices import TimeIndices
+from anemoi.training.data.relative_time_indices import normalize_time_indices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
