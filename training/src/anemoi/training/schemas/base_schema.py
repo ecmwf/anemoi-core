@@ -66,12 +66,50 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     return config_system
 
 
+_DEPRECATED_TARGETS: dict[str, str] = {
+    "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
+        "This callback has been deprecated and removed, update your config to remove any references to it. "
+    ),
+}
+
+
+def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Recursively search for deprecated _target_ values anywhere in a config."""
+    if isinstance(data, str):
+        return None
+    if hasattr(data, "keys"):  # dict / DictConfig (not ListConfig)
+        target = data.get("_target_")
+        if target in deprecated:
+            return target, deprecated[target]
+        for v in data.values():
+            result = _find_deprecated_target(v, deprecated)
+            if result:
+                return result
+    elif hasattr(data, "__iter__"):  # list / ListConfig
+        for item in data:
+            result = _find_deprecated_target(item, deprecated)
+            if result:
+                return result
+    return None
+
+
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_deprecated_targets(cls, values: Any) -> Any:
+        """Raise before validation if any _target_ in the config is deprecated."""
+        result = _find_deprecated_target(values, _DEPRECATED_TARGETS)
+        if result:
+            target, hint = result
+            msg = f"'{target}' is deprecated and has been removed. {hint}"
+            raise ValueError(msg)
+        return values
 
     def model_post_init(self, _: Any) -> None:
         expand_paths(self.system)
