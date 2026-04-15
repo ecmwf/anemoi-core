@@ -74,8 +74,8 @@ class Model(BaseModel):
     "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
     latent_skip: bool = Field(default=True)
     "Add skip connection in latent space before/after processor."
-    convert_: str = Field("all", alias="_convert_")
-    "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
+    convert_: str = Field("none", alias="_convert_")
+    "Keep OmegaConf containers when instantiating — model code uses attribute-style access throughout."
 
 
 class DiffusionModel(Model):

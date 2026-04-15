@@ -83,17 +83,15 @@ def _validate_multiscale_loss(training: Any) -> None:
     if training_loss is None:
         return
 
+    target = str(_get(training_loss, "_target_") or "")
+    if "MultiscaleLossWrapper" not in target:
+        return
+
     loss_matrices = _get(training_loss, "loss_matrices")
-    loss_matrices_graph = _get(training_loss, "loss_matrices_graph") or False
+    multiscale_config = _get(training_loss, "multiscale_config")
 
-    file_based = loss_matrices is not None
-    graph_based = loss_matrices_graph is True or isinstance(loss_matrices_graph, list)
-
-    if file_based and graph_based:
-        msg = "Specify either loss_matrices or loss_matrices_graph, not both."
-        raise ValueError(msg)
-    if not file_based and not graph_based:
-        msg = "Specify loss_matrices, loss_matrices_graph=True, or an explicit loss_matrices_graph list."
+    if loss_matrices is not None and multiscale_config is not None:
+        msg = "Specify either loss_matrices or multiscale_config, not both."
         raise ValueError(msg)
 
 

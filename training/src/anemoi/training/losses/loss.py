@@ -110,6 +110,7 @@ def get_loss_function(
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: IndexCollection | None = None,
     graph_data: object | None = None,
+    data_node_name: str | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -129,6 +130,8 @@ def get_loss_function(
         Indices of the training data
     graph_data : object, optional
         Graph data passed to loss classes that declare ``needs_graph_data = True``.
+    data_node_name : str, optional
+        Dataset node name passed to loss classes that declare ``needs_graph_data = True``.
     kwargs : Any
         Additional arguments to pass to the loss function
 
@@ -158,12 +161,14 @@ def get_loss_function(
             scalers,
             data_indices,
             graph_data=graph_data,
+            data_node_name=data_node_name,
             **kwargs,
         )
+        graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else None
         return instantiate(
             loss_config,
             per_scale_loss=per_scale_loss,
-            **_graph_data_kwargs(target_cls, graph_data, kwargs),
+            **_graph_data_kwargs(target_cls, graph_data, graph_extra),
         )
 
     if scalers is None:

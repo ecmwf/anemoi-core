@@ -185,7 +185,7 @@ class AnemoiModelInterface(torch.nn.Module):
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
         model_instantiate_config = {
             "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "all"),
+            "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
         self.model = instantiate(
             model_instantiate_config,
