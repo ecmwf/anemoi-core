@@ -44,10 +44,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
         self._tracker_metadata = None
         self._tracker_name = None
 
-    @staticmethod
-    def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
-        return trainer.lightning_module.model
-
     @rank_zero_only
     def model_metadata(self, model: torch.nn.Module) -> dict:
         if self._model_metadata is not None:
@@ -140,12 +136,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
         del pl_module
 
         if trainer.is_global_zero:
-            model = self._torch_drop_down(trainer)
+            model = trainer.lightning_module.model
             check_classes(model)
 
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:
-            model = self._torch_drop_down(trainer)
+            model = trainer.lightning_module.model
 
             # We want a different uuid each time we save the model
             # so we can tell them apart in the catalogue (i.e. different epochs)
