@@ -55,6 +55,3 @@ training:
           scalars: []
           ignore_nans: False
           alpha: 1.0
-diagnostics:
-  plot:
-    callbacks: []
