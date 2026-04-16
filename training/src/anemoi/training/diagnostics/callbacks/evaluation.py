@@ -194,8 +194,8 @@ class RolloutEvalEns(RolloutEval):
             for ii, (loss_next, metrics_next, *_) in enumerate(
                 pl_module._step(
                     batch=batch,
+                    validation_mode=True,                    
                     rollout=self.max_rollout,
-                    validation_mode=True,
                 ),
             ):
                 loss += loss_next

@@ -250,6 +250,7 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
+        rollout: int|None = None,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
@@ -259,7 +260,10 @@ class EnsembleTraining(BaseTrainingModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
 
-        for task_kwargs in self.task.steps:
+        if rollout is None:
+            rollout = self.task.steps
+
+        for task_kwargs in rollout:
             y_pred = self(x, **task_kwargs)
             y = self._make_targets(batch, start=task_kwargs.get("rollout_step", 0))
             # Move into _make_targets() y = self._collapse_ens_dim(y)
