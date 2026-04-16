@@ -84,9 +84,13 @@ class Forecaster(BaseTask):
         input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
         # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
         output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
-        steps = tuple({"rollout_step": i} for i in range(self.rollout.step))
-        super().__init__(input_offsets=input_offsets, output_offsets=output_offsets, steps=steps)
+        super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = ForecasterPlotAdapter(self)
+
+    @property
+    def steps(self) -> tuple[dict[str, int], ...]:
+        """Return the current steps configuration based on the rollout step."""
+        return tuple({"rollout_step": i} for i in range(self.rollout.step))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
         """Get the metric name for the current step."""
