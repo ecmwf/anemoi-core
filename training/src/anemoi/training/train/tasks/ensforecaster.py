@@ -60,6 +60,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         data_indices : dict
             Indices of the training data,
         """
+        self.nens_per_device = config.training.ensemble_size_per_device
+
         super().__init__(
             model=model,
             config=config,
@@ -93,7 +95,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             self.effective_lr,
         )
 
-        self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
