@@ -13,7 +13,6 @@ import logging
 from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalerPlotAdapter
 from anemoi.training.tasks.base import BaseSingleStepTask
 from anemoi.utils.dates import as_timedelta
-from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +30,7 @@ class TemporalDownscaler(BaseSingleStepTask):
         output_right_boundary: bool = False,
         **_kwargs,
     ) -> None:
+        self.input_timestep = input_timestep
         input_timedelta = as_timedelta(input_timestep)
         output_timedelta = as_timedelta(output_timestep)
 
@@ -53,4 +53,4 @@ class TemporalDownscaler(BaseSingleStepTask):
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
-        return frequency_to_string(self.input_timedelta)
+        return self.input_timestep
