@@ -41,12 +41,14 @@ class MultiscaleLossWrapper(BaseLoss):
         per_scale_loss: BaseLoss,
         weights: list[float],
         keep_batch_sharded: bool,
-        loss_matrices_path: Path | str | None = None,
-        loss_matrices: list[Path | str] | None = None,
         multiscale_config: object | None = None,
         graph_data: HeteroData | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
         autocast: bool = False,
+        ignore_nans: bool = False,
+        # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
+        loss_matrices_path: Path | str | None = None,
+        loss_matrices: list[Path | str] | None = None,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
@@ -62,28 +64,57 @@ class MultiscaleLossWrapper(BaseLoss):
             this wrapper and multiscale smoothing follows the sharded path.
             If disabled, the loss is evaluated on replicated full-grid tensors
             on each model rank.
-        loss_matrices_path : Path | str | None
-            Path to the directory containing smoothing matrices
-        loss_matrices : list[Path | str] | None
-            Filenames of the smoothing matrices (must preserve grid size)
         multiscale_config : object | None
-            Smoother configuration (``smoothers`` mapping or compact geometric
-            spec).  When provided, a small projection subgraph is built
-            internally for each scale using the data-node positions from
-            *graph_data*.  Replaces the old ``loss_matrices_graph`` flag.
+            Configuration for the smoothing matrices.  Accepts two forms:
+
+            - **File mode** – provide ``loss_matrices`` (list of filenames) and
+              optionally ``loss_matrices_path`` (directory prefix)::
+
+                multiscale_config:
+                  loss_matrices_path: /path/to/dir
+                  loss_matrices:
+                    - filter_8x.npz   # coarsest
+                    - filter_4x.npz
+                    - null            # full resolution
+
+            - **On-the-fly mode** – provide a compact geometric-progression spec
+              or an explicit ``smoothers`` mapping (passed to
+              ``_expand_smoother_config``)::
+
+                multiscale_config:
+                  num_scales: 3
+                  base_num_nearest_neighbours: 4
+                  base_sigma: 0.1
+                  scale_factor: 2
+
         graph_data : HeteroData | None
-            Main graph; used only to copy data-node positions when building
-            internal smoother subgraphs.
+            Main graph; required for on-the-fly mode to copy data-node positions.
         data_node_name : str
             Node type in *graph_data* that holds the data-grid coordinates.
         autocast : bool
-            Whether to use automatic mixed precision for the projections
+            Whether to use automatic mixed precision for the projections.
+        ignore_nans : bool
+            Passed to :class:`BaseLoss`; ignored by the wrapper itself.
+        loss_matrices_path : Path | str | None
+            Deprecated.  Pass inside *multiscale_config* instead.
+        loss_matrices : list[Path | str] | None
+            Deprecated.  Pass inside *multiscale_config* instead.
         """
-        super().__init__()
+        super().__init__(ignore_nans=ignore_nans)
+
+        if loss_matrices is not None or loss_matrices_path is not None:
+            LOGGER.warning(
+                "Passing 'loss_matrices' / 'loss_matrices_path' as top-level kwargs is deprecated. "
+                "Move them inside 'multiscale_config' instead.",
+            )
+            cfg = dict(multiscale_config) if multiscale_config is not None else {}
+            if loss_matrices is not None:
+                cfg.setdefault("loss_matrices", loss_matrices)
+            if loss_matrices_path is not None:
+                cfg.setdefault("loss_matrices_path", loss_matrices_path)
+            multiscale_config = cfg
 
         self.smoothing_matrices = self._load_smoothing_matrices(
-            loss_matrices_path,
-            loss_matrices,
             multiscale_config,
             graph_data,
             data_node_name,
@@ -126,18 +157,35 @@ class MultiscaleLossWrapper(BaseLoss):
 
     def _load_smoothing_matrices(
         self,
-        loss_matrices_path: Path | str | None,
-        loss_matrices: list[Path | str] | None,
         multiscale_config: object | None,
         graph_data: HeteroData | None,
         data_node_name: str,
     ) -> list[ProjectionGraphProvider | None]:
-        """Load smoothing matrices for multi-scale loss computation."""
-        if multiscale_config is not None:
-            assert graph_data is not None, "graph_data must be provided when using multiscale_config."
-            return self._build_graph_smoothing_matrices(multiscale_config, graph_data, data_node_name)
+        """Load smoothing matrices for multi-scale loss computation.
 
-        return self._load_file_smoothing_matrices(loss_matrices_path, loss_matrices)
+        Dispatches to file mode when *multiscale_config* contains a
+        ``loss_matrices`` key, otherwise to on-the-fly graph mode.
+        """
+        if multiscale_config is None:
+            LOGGER.info("No multiscale_config specified, using single scale without smoothing")
+            return [None]
+
+        from omegaconf import OmegaConf
+
+        cfg = (
+            OmegaConf.to_container(multiscale_config, resolve=True)
+            if OmegaConf.is_config(multiscale_config)
+            else dict(multiscale_config)
+        )
+
+        if "loss_matrices" in cfg:
+            return self._load_file_smoothing_matrices(
+                cfg.get("loss_matrices_path"),
+                cfg["loss_matrices"],
+            )
+
+        assert graph_data is not None, "graph_data must be provided for on-the-fly multiscale_config."
+        return self._build_graph_smoothing_matrices(cfg, graph_data, data_node_name)
 
     def _build_graph_smoothing_matrices(
         self,

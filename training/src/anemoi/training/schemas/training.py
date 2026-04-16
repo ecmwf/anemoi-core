@@ -314,20 +314,10 @@ class MultiScaleLossSchema(BaseModel):
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
     weights: list[float]
     keep_batch_sharded: bool
+    multiscale_config: dict | None = None
+    # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
-    multiscale_config: dict | None = None
-
-    @model_validator(mode="after")
-    def validate_weights_length(self) -> Self:
-        """Validate that weights length matches the number of matrices."""
-        if self.loss_matrices is not None and len(self.weights) != len(self.loss_matrices):
-            msg = "weights must have same length as loss_matrices"
-            raise ValueError(msg)
-        if self.loss_matrices is not None and self.multiscale_config is not None:
-            msg = "Specify either loss_matrices or multiscale_config, not both."
-            raise ValueError(msg)
-        return self
 
 
 class HuberLossSchema(BaseLossSchema):
