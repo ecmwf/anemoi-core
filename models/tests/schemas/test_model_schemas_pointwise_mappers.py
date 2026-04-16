@@ -12,6 +12,7 @@ from anemoi.models.schemas.models import BaseModelSchema
 
 def test_base_model_schema_accepts_pointwise_mapper_configuration():
     schema = BaseModelSchema(
+        multistep_input=1,
         num_channels=64,
         keep_batch_sharded=True,
         model={
