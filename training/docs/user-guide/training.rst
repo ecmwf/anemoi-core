@@ -41,7 +41,8 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
--  Choose the task, training method, and model type from :ref:`Models <Models>`.
+-  Choose the task (see :doc:`tasks`), training method
+   (see :doc:`training-methods`), and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
 
@@ -130,112 +131,6 @@ Make sure you have a GPU available and simply call:
 .. code:: bash
 
    anemoi-training train
-
-.. _tasks target:
-
-*******
- Tasks
-*******
-
-A **task** defines the temporal I/O structure of a training sample: which
-time steps are loaded as model inputs and which are used as prediction
-targets. Tasks are defined in ``anemoi.training.tasks`` and are
-configured under the ``training.task`` key. The task is independent of
-the model architecture and the training method.
-
-The three built-in tasks are:
-
-``Forecaster``
-   Autoregressive rollout training. Inputs are ``multistep_input``
-   consecutive frames ending at ``t=0``; outputs are
-   ``multistep_output`` frames per rollout step. The rollout window
-   grows progressively from ``rollout.start`` up to ``rollout.maximum``
-   every ``rollout.epoch_increment`` epochs.
-
-   .. code:: yaml
-
-      training:
-        task:
-          _target_: anemoi.training.tasks.Forecaster
-          multistep_input: 2
-          multistep_output: 1
-          timestep: "6H"
-          rollout:
-            start: 1
-            epoch_increment: 1
-            maximum: 12
-
-``TemporalDownscaler``
-   Generates a dense sequence of intermediate time steps between two
-   coarse input frames. The output resolution must evenly divide the
-   input resolution.
-
-   .. code:: yaml
-
-      training:
-        task:
-          _target_: anemoi.training.tasks.TemporalDownscaler
-          input_timestep: "6H"
-          output_timestep: "3H"
-          output_left_boundary: true   # include t=0 in targets
-
-``Autoencoder``
-   Single-snapshot reconstruction: both input and output are at
-   ``t=0``. No temporal structure required.
-
-   .. code:: yaml
-
-      training:
-        task:
-          _target_: anemoi.training.tasks.Autoencoder
-
-For full API details see :doc:`../modules/tasks`.
-
-.. _training-methods target:
-
-*******************
- Training Methods
-*******************
-
-The **training method** is the PyTorch Lightning module that implements
-the forward pass, loss computation, and metric calculation. It is
-separate from the task: the task says *what* time steps to load; the
-method says *how* to train on them. Methods are configured via Hydra
-under ``training.training_method``.
-
-All methods inherit from
-:class:`~anemoi.training.train.methods.base.BaseTrainingModule`, which
-provides distributed training, loss scaling, normalization, and
-validation metric hooks.
-
-The three built-in methods are:
-
-``SingleTraining`` (``anemoi.training.train.methods.single``)
-   Deterministic single-member training. Suitable for ``Forecaster``,
-   ``TemporalDownscaler``, and ``Autoencoder`` tasks. Uses
-   ``DDPGroupStrategy`` for distributed execution.
-
-``EnsembleTraining`` (``anemoi.training.train.methods.ensemble``)
-   Ensemble (multi-member) training. Generates ``ensemble_size_per_device``
-   members per device during training. Uses ``DDPEnsGroupStrategy`` for
-   distributed execution.
-
-   .. code:: yaml
-
-      training:
-        ensemble_size_per_device: 4
-
-``DiffusionTraining`` (``anemoi.training.train.methods.diffusion``)
-   Base class for diffusion-based probabilistic forecasters. Applies
-   stepwise pre/post-processors and handles the noise-conditioned
-   forward pass.
-
-.. note::
-
-   ``EnsembleTraining`` and ``DiffusionTraining`` require the GNN
-   model type to be replaced with a compatible architecture (e.g.
-   GraphTransformer). The plain GNN processor is not supported for
-   these methods.
 
 .. _restart target:
 

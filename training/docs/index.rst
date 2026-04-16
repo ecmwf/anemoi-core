@@ -38,8 +38,8 @@ This package provides the *Anemoi* training functionality.
    user-guide/configuring
    user-guide/multi-datasets
    user-guide/training
-   user-guide/kcrps-set-up
-   user-guide/diffusion-set-up
+   user-guide/tasks
+   user-guide/training-methods
    user-guide/models
    user-guide/tracking
    user-guide/benchmarking
