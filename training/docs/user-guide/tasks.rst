@@ -7,7 +7,7 @@
 A **task** defines the temporal I/O structure of a training sample: which
 time steps are loaded as model inputs and which are used as prediction
 targets. Tasks are defined in ``anemoi.training.tasks`` and are
-configured under the ``training.task`` key. The task is independent of
+configured under the ``task`` key. The task is independent of
 the model architecture and the training method.
 
 The three built-in tasks are:
@@ -21,16 +21,15 @@ The three built-in tasks are:
 
    .. code:: yaml
 
-      training:
-        task:
-          _target_: anemoi.training.tasks.Forecaster
-          multistep_input: 2
-          multistep_output: 1
-          timestep: "6H"
-          rollout:
-            start: 1
-            epoch_increment: 1
-            maximum: 12
+      task:
+        _target_: anemoi.training.tasks.Forecaster
+        multistep_input: 2
+        multistep_output: 1
+        timestep: "6H"
+        rollout:
+          start: 1
+          epoch_increment: 1
+          maximum: 12
 
 ``TemporalDownscaler``
    Generates a dense sequence of intermediate time steps between two
@@ -39,12 +38,11 @@ The three built-in tasks are:
 
    .. code:: yaml
 
-      training:
-        task:
-          _target_: anemoi.training.tasks.TemporalDownscaler
-          input_timestep: "6H"
-          output_timestep: "3H"
-          output_left_boundary: true   # include t=0 in targets
+      task:
+        _target_: anemoi.training.tasks.TemporalDownscaler
+        input_timestep: "6H"
+        output_timestep: "3H"
+        output_left_boundary: true   # include t=0 in targets
 
 ``Autoencoder``
    Single-snapshot reconstruction: both input and output are at
@@ -52,8 +50,7 @@ The three built-in tasks are:
 
    .. code:: yaml
 
-      training:
-        task:
-          _target_: anemoi.training.tasks.Autoencoder
+      task:
+        _target_: anemoi.training.tasks.Autoencoder
 
 For full API details see :doc:`../modules/tasks`.
