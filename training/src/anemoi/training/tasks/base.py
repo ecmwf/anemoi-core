@@ -106,7 +106,7 @@ class BaseTask(ABC):
     @property
     def num_steps(self) -> int:
         """Number of steps in the task."""
-        return len(self._steps)
+        return len(self.steps)
 
     def get_metric_name(self, **_step_kwargs) -> str:
         """Get the metric name for the current step (if any)."""
