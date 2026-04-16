@@ -554,14 +554,14 @@ def diffusion_config(
     params=[
         pytest.param(
             [
-                "model=graphtransformer_diffusion",
+                "model=graphtransformer_diffusion_multi",
                 "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
-                "model=graphtransformer_diffusiontend",
+                "model=graphtransformer_diffusiontend_multi",
                 "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
             ],
             id="diffusiontend",

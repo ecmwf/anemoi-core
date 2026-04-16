@@ -80,8 +80,8 @@ class GraphMultiOutInterpolator(BaseGraphModule):
             **kwargs,
         )
 
-        self.boundary_times = config.training.explicit_times.input
-        self.interp_times = config.training.explicit_times.target
+        self.boundary_times = list(config.training.explicit_times.input)
+        self.interp_times = list(config.training.explicit_times.target)
         self.n_step_output = len(self.interp_times)
         sorted_indices = sorted(set(self.boundary_times + self.interp_times))
         self.imap = {data_index: batch_index for batch_index, data_index in enumerate(sorted_indices)}
