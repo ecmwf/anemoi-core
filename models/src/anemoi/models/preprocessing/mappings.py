@@ -155,7 +155,7 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
     return x.pow_(lambd)
 
 
-def inverse_power_transform(x, lambd=0.33, tangent_linear_above_one=False):
+def inverse_power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one=False):
     """Inverse power transform with optional inverse tangent-linear branch above 1."""
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
     if tangent_linear_above_one:
