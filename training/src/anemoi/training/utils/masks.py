@@ -49,7 +49,7 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
     @property
     def supporting_arrays(self) -> dict:
-        return {"output_mask": self.mask.numpy()}
+        return {"output_mask": self.mask.cpu().numpy()}
 
     def broadcast_like(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         assert x.shape[dim] == len(
