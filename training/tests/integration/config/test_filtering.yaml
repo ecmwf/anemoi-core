@@ -8,14 +8,15 @@ data:
       forcing: []
       diagnostic: []
       target: [imerg]
-      processors:
-        normalizer:
-          config:
-            std: ["tp", "imerg"]
-            max: []
-            min-max: []
-            mean-std: []
-            none: []
+
+model:
+  processors:
+    data:
+      normalizer:
+        config:
+          std: ["tp", "imerg"]
+          max: []
+          none: []
 
 diagnostics:
   log:
