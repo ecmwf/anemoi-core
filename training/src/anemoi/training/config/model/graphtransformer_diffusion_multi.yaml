@@ -1,5 +1,5 @@
 defaults:
-  - graphtransformer
+  - graphtransformer_diffusion
   - override /processors@processors: multi
 
 backbone:
