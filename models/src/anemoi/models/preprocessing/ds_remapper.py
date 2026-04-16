@@ -277,7 +277,10 @@ class FieldRemapper(nn.Module):
             )
         for i, remapper, kwargs in zip(idx, self.remappers, self.remapper_kwargs):
             if i is not None:
-                x[..., i] = remapper(x[..., i], **kwargs)
+                try:
+                    x[..., i] = remapper(x[..., i], **kwargs)
+                except Exception as e:
+                    raise ValueError(f"Got bad value for x while using remapper {i}: {remapper}, with kwargs: {kwargs}.")
         return x
 
     def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
