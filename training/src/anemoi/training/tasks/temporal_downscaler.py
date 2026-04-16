@@ -53,5 +53,4 @@ class TemporalDownscaler(BaseSingleStepTask):
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
-        timestep = self.input_offsets[-1]
-        return frequency_to_string(timestep)
+        return frequency_to_string(self.input_timedelta)
