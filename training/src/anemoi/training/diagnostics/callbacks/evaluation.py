@@ -73,19 +73,12 @@ class RolloutEval(Callback):
         )
 
         with torch.no_grad():
-            for ii, (loss_next, metrics_next, _) in enumerate(
-                pl_module._step(
-                    batch,
-                    rollout=range(self.max_rollout),
-                    validation_mode=True,
-                ),
-            ):
-                loss += loss_next
-                if ii + 1 in self.rollout:
-                    metrics.update(metrics_next)
-
-            # scale loss
-            loss *= 1.0 / self.max_rollout
+            rollout = tuple({"rollout_step": i} for i in range(self.max_rollout))
+            loss, metrics, _ = pl_module._step(
+                batch,
+                rollout=rollout,
+                validation_mode=True,
+            )
             self._log(pl_module, loss, metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
@@ -191,19 +184,12 @@ class RolloutEvalEns(RolloutEval):
 
         metrics = {}
         with torch.no_grad():
-            for ii, (loss_next, metrics_next, *_) in enumerate(
-                pl_module._step(
-                    batch=batch,
-                    validation_mode=True,
-                    rollout=range(self.max_rollout),
-                ),
-            ):
-                loss += loss_next
-                if ii + 1 in self.rollout:
-                    metrics.update(metrics_next)
-
-            # scale loss
-            loss *= 1.0 / self.max_rollout
+            rollout = tuple({"rollout_step": i} for i in range(self.max_rollout))
+            loss, metrics, _ = pl_module._step(
+                batch=batch,
+                validation_mode=True,
+                rollout=rollout,
+            )
             self._log(pl_module, loss, metrics, batch_shape[0])
 
     def on_validation_batch_end(

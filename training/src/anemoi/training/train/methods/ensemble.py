@@ -263,7 +263,10 @@ class EnsembleTraining(BaseTrainingModule):
         if rollout is None:
             rollout = self.task.steps
 
+        n_steps = 0
         for task_kwargs in rollout:
+            if isinstance(task_kwargs, int):
+                task_kwargs = {"rollout_step": task_kwargs}
             y_pred = self(x, **task_kwargs)
             y = self._make_targets(batch, start=task_kwargs.get("rollout_step", 0))
             # Move into _make_targets() y = self._collapse_ens_dim(y)
@@ -291,6 +294,8 @@ class EnsembleTraining(BaseTrainingModule):
             loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
+            n_steps += 1
 
-        loss *= 1.0 / self.task.num_steps
+        if n_steps > 0:
+            loss *= 1.0 / n_steps
         return loss, metrics, y_preds

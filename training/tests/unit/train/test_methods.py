@@ -1426,3 +1426,44 @@ def test_ensemble_make_targets_requires_singleton_ensemble_dim() -> None:
 
     with pytest.raises(AssertionError, match="Expected singleton ensemble dimension"):
         forecaster._make_targets(batch, start=0)
+
+
+# ── per-step metric key suffixes ──────────────────────────────────────────────
+
+
+def test_single_compute_metrics_produces_per_step_key_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SingleTraining._compute_metrics passes rollout_step as 'step' to calculate_val_metrics.
+
+    Produces distinct metric key suffixes (/1, /2, ...) for each rollout step.
+    """
+    data_indices = _data_indices_single()
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    module = _make_single_training(task, data_indices)
+
+    # Capture the 'step' kwarg that reaches calculate_val_metrics
+    captured_steps: list[int | None] = []
+
+    def _stub_calculate_val_metrics(
+        _self: SingleTraining,
+        _y_pred: torch.Tensor,
+        _y: torch.Tensor,
+        step: int | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, torch.Tensor]:
+        captured_steps.append(step)
+        suffix = "" if step is None else f"/{step + 1}"
+        return {f"rmse_metric/data/z500{suffix}": torch.tensor(1.0)}
+
+    monkeypatch.setattr(SingleTraining, "calculate_val_metrics", _stub_calculate_val_metrics, raising=True)
+
+    b, g, v = 2, 4, len(_NAME_TO_INDEX)
+    y_pred = y = torch.zeros(b, g, v)
+
+    metrics_step0 = module._compute_metrics(y_pred, y, dataset_name="data", rollout_step=0)
+    metrics_step1 = module._compute_metrics(y_pred, y, dataset_name="data", rollout_step=1)
+
+    assert captured_steps == [0, 1]
+    assert "rmse_metric/data/z500/1" in metrics_step0
+    assert "rmse_metric/data/z500/2" in metrics_step1
+    # Keys must be distinct across steps
+    assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))

@@ -621,6 +621,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        rollout_step: int | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -633,6 +634,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        rollout_step : int | None
+            Current rollout step index, used to produce per-step metric key suffixes.
 
         Returns
         -------
@@ -642,6 +645,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return self.calculate_val_metrics(
             y_pred,
             y,
+            step=rollout_step,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
