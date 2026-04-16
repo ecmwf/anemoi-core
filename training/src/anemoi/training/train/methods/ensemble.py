@@ -250,7 +250,7 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-        rollout: int|None = None,
+        rollout: int | None = None,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
