@@ -66,9 +66,9 @@ training:
       -  Deterministic
       -  CRPS
 
-   -  -  Forecaster
-      -  :class:`GraphForecaster`
-      -  :class:`GraphEnsForecaster`
+   -  -  Training method
+      -  :class:`SingleTraining`
+      -  :class:`EnsembleTraining`
 
    -  -  Strategy
       -  :class:`DDPGroupStrategy`
@@ -82,9 +82,6 @@ training:
       -  :class:`AnemoiModelEncProcDec`
       -  :class:`AnemoiEnsModelEncProcDec`
 
-   -  -  Datamodule
-      -  :class:`AnemoiDatasetsDataModule`
-      -  :class:`AnemoiDatasetsDataModule`
 
 Changes in System config
 ========================
@@ -106,19 +103,6 @@ the input to the model.
 The CRPS training uses a different DDP strategy which requires to
 specify the number of GPUs per ensemble.
 
-Changes in datamodule config
-============================
-
-.. literalinclude:: yaml/example_crps_config.yaml
-   :language: yaml
-   :start-after: # Changes in datamodule
-   :end-before: data:
-
-The `datamodule` needs to be set to
-:class:`AnemoiEnsDatasetsDataModule`.
-:class:`AnemoiEnsDatasetsDataModule` can be used with a single initial
-condition for all ensembles or with perturbed initial conditions. The
-perturbed initial conditions need to be part of your dataset.
 
 Changes in model config
 =======================
