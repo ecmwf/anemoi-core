@@ -74,7 +74,7 @@ class RolloutEval(Callback):
 
         with torch.no_grad():
             for ii, (loss_next, metrics_next, _) in enumerate(
-                pl_module._rollout_step(
+                pl_module._step(
                     batch,
                     rollout=self.max_rollout,
                     validation_mode=True,
@@ -192,7 +192,7 @@ class RolloutEvalEns(RolloutEval):
         metrics = {}
         with torch.no_grad():
             for ii, (loss_next, metrics_next, *_) in enumerate(
-                pl_module._rollout_step(
+                pl_module._step(
                     batch=batch,
                     rollout=self.max_rollout,
                     validation_mode=True,
