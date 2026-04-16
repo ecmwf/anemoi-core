@@ -7,6 +7,7 @@ data:
   frequency: 6h
 
 task:
+  _target_: anemoi.training.tasks.TemporalDownscaler
   input_timestep: 12h
   output_timestep: 6h
   output_right_boundary: True

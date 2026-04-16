@@ -81,7 +81,7 @@ class SingleTraining(BaseTrainingModule):
         if rollout is None:
             rollout = self.task.steps
 
-        for task_kwargs in rollout:
+        for task_kwargs in range(rollout):
             y_pred = self(x)
             y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
 

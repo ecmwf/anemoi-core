@@ -263,7 +263,7 @@ class EnsembleTraining(BaseTrainingModule):
         if rollout is None:
             rollout = self.task.steps
 
-        for task_kwargs in rollout:
+        for task_kwargs in range(rollout):
             y_pred = self(x, **task_kwargs)
             y = self._make_targets(batch, start=task_kwargs.get("rollout_step", 0))
             # Move into _make_targets() y = self._collapse_ens_dim(y)
