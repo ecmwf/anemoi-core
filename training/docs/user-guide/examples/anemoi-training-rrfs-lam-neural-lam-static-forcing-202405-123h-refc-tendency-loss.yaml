@@ -1,0 +1,19 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss
+  - _self_
+
+training:
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_range_weight_factors', 'refc_tendency_weight_factors']
+  scalers:
+    datasets:
+      data:
+        refc_tendency_weight_factors:
+          _target_: anemoi.training.losses.scalers.TargetTendencyRangeScaler
+          variable: refc
+          apply_to: all
+          normalization: min-max
+          thresholds: [1.0, 5.0, 10.0]
+          range_weight_factors: [1.0, 5.0, 20.0, 50.0]

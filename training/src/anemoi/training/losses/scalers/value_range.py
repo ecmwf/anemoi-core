@@ -196,3 +196,83 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
             self._logged_first_batch = True
 
         return weights
+
+
+class TargetTendencyRangeScaler(TargetValueRangeScaler):
+    """Apply multiplicative loss factors based on target tendency ranges.
+
+    This scaler is intended for persistence-like failures. It computes
+    ``abs(target - previous_state)`` in raw units for the reference variable and
+    maps that tendency magnitude to piecewise-constant multiplicative factors.
+
+    For multi-output forecasts, the tendency is computed between consecutive
+    states:
+
+    - output step 0: ``abs(X[t+1] - X[t])``
+    - output step 1: ``abs(X[t+2] - X[t+1])``
+    - output step 2: ``abs(X[t+3] - X[t+2])``
+
+    The produced tensor is multiplied with the other active Anemoi loss scalers.
+    """
+
+    def on_batch_start(
+        self,
+        model: AnemoiModelInterface,
+        dataset_name: str | None = None,
+        batch: dict[str, torch.Tensor] | torch.Tensor | None = None,
+    ) -> torch.Tensor | None:
+        if batch is None:
+            return None
+
+        dataset_batch = batch
+        if isinstance(batch, dict):
+            assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            dataset_batch = batch[dataset_name]
+
+        if not torch.is_tensor(dataset_batch):
+            return None
+        if dataset_batch.ndim != 5:
+            LOGGER.warning(
+                "%s expected a 5D batch tensor (bs,time,ens,grid,var), got shape=%s",
+                self.__class__.__name__,
+                tuple(dataset_batch.shape),
+            )
+            return None
+
+        n_step_input = int(getattr(model, "n_step_input"))
+        n_step_output = int(getattr(model.config.training, "multistep_output", 1))
+
+        target_slice = dataset_batch[:, n_step_input : n_step_input + n_step_output, 0, :, self.full_var_idx]
+        previous_slice = dataset_batch[:, n_step_input - 1 : n_step_input + n_step_output - 1, 0, :, self.full_var_idx]
+
+        raw_target = self._to_raw_units(target_slice)
+        raw_previous = self._to_raw_units(previous_slice)
+        raw_tendency_magnitude = torch.abs(raw_target - raw_previous)
+        variable_weights = self._bucketize_weights(raw_tendency_magnitude)
+
+        bsz, tlen, grid = variable_weights.shape
+        nvars = len(self.data_indices.model.output.full)
+        weights = torch.ones((bsz, tlen, grid, nvars), device=variable_weights.device, dtype=torch.float32)
+        weights[..., self.output_var_indices] = variable_weights.unsqueeze(-1)
+
+        if not self._logged_first_batch:
+            unique_weights = torch.unique(variable_weights.detach().cpu()).tolist()
+            bucket_counts = {
+                str(float(weight)): int((variable_weights == weight).sum().detach().cpu())
+                for weight in self.range_weight_factors
+            }
+            total_count = int(variable_weights.numel())
+            LOGGER.info(
+                "%s applied for variable=%s dataset=%s raw_abs_tendency_range=[%.3f, %.3f] unique_range_weights=%s bucket_counts=%s total_count=%d",
+                self.__class__.__name__,
+                self.variable,
+                dataset_name,
+                float(raw_tendency_magnitude.min().detach().cpu()),
+                float(raw_tendency_magnitude.max().detach().cpu()),
+                unique_weights,
+                bucket_counts,
+                total_count,
+            )
+            self._logged_first_batch = True
+
+        return weights

@@ -145,6 +145,15 @@ class TargetValueRangeScalerSchema(BaseModel):
     "Optional normalization method for the resulting scaler tensor."
 
 
+class TargetTendencyRangeScalerSchema(TargetValueRangeScalerSchema):
+    target_: Literal["anemoi.training.losses.scalers.TargetTendencyRangeScaler"] = Field(..., alias="_target_")
+    "Reference-variable tendency magnitude whose ranges define multiplicative factors."
+    thresholds: list[float] = Field(example=[1.0, 5.0, 10.0], min_length=1)
+    "Thresholds in raw absolute tendency units used to assign piecewise-constant factors."
+    range_weight_factors: list[float] = Field(example=[1.0, 5.0, 20.0, 50.0], min_length=2)
+    "Multiplicative factors for absolute-tendency bins; must have len(thresholds) + 1 entries."
+
+
 class VariableMaskingScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.VariableMaskingLossScaler"] = Field(..., alias="_target_")
     variables: list[str] = Field(defaultexample=["tp"])
@@ -254,6 +263,7 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | TargetValueRangeScalerSchema
+    | TargetTendencyRangeScalerSchema
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
