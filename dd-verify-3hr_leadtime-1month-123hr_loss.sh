@@ -20,7 +20,9 @@ cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
 #clt run_id="8f3510f7-a380-46f0-a670-6d5a341c2882"
 #cltrun_id="1fdd1f40-f4f7-4dca-9a69-c9a16f2459d5"
-run_id="7be32a16-2f83-479c-8370-1dc631dbbf81"
+#run_id="7be32a16-2f83-479c-8370-1dc631dbbf81"
+#run_id="7be32a16-2f83-479c-8370-1dc631dbbf81"
+run_id="58a03191-bccf-45c6-9b3c-19b314d1fbe7"
 training/docs/user-guide/examples/run_rrfs_verify_export_1to3h.sh \
   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/${run_id}/inference-last.ckpt \
   2024-05-05T00:00:00 2024-05-05T23:00:00 1h
