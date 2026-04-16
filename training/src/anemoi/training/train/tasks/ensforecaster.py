@@ -104,6 +104,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
 
+    def _ensemble_size(self) -> int:
+        return self.nens_per_device
+
     def set_ens_comm_group(
         self,
         ens_comm_group: ProcessGroup,

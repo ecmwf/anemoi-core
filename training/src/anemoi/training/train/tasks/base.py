@@ -39,6 +39,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.timesteps import compute_relative_date_indices
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
@@ -291,6 +292,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.grid_dim = -2
 
+        self._fill_metadata_inference()
+
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
         read_group_supports_sharding = reader_group_size == self.config.system.hardware.num_gpus_per_model
@@ -326,6 +329,48 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
         return self._plot_adapter
+
+    def _fill_metadata_inference(self) -> None:
+        """Fill per-dataset inference metadata owned by the task."""
+        input_relative = list(range(self.n_step_input))
+        output_relative = list(range(self.n_step_input, self.n_step_input + self.n_step_output))
+        timesteps = {
+            "relative_date_indices_training": compute_relative_date_indices(self.config),
+            "input_relative_date_indices": input_relative,
+            "output_relative_date_indices": output_relative,
+            "timestep": self.config.data.timestep,
+        }
+        for dataset_name in self.dataset_names:
+            data_indices = self.data_indices[dataset_name]
+            self.metadata["metadata_inference"][dataset_name] = {}
+            ds_meta = self.metadata["metadata_inference"][dataset_name]
+
+            ds_meta["timesteps"] = timesteps
+
+            ds_meta["data_indices"] = {
+                "input": data_indices.model.input.name_to_index,
+                "output": data_indices.model.output.name_to_index,
+            }
+
+            input_data_indices = data_indices.data.input.todict()
+            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
+            ds_meta["variable_types"] = {
+                "forcing": [input_index_to_name[int(i)] for i in input_data_indices["forcing"]],
+                "target": [input_index_to_name[int(i)] for i in input_data_indices["target"]],
+                "prognostic": [input_index_to_name[int(i)] for i in input_data_indices["prognostic"]],
+                "diagnostic": [input_index_to_name[int(i)] for i in input_data_indices["diagnostic"]],
+            }
+
+            ds_meta["shapes"] = {
+                "variables": len(data_indices.model.input.name_to_index),
+                "input_timesteps": self.n_step_input,
+                "ensemble": self._ensemble_size(),
+                "grid": self.grid_sizes[dataset_name],
+            }
+
+    def _ensemble_size(self) -> int:
+        """Return the ensemble size for this task (1 for non-ensemble tasks)."""
+        return 1
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
