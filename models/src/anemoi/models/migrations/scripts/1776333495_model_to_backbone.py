@@ -38,7 +38,7 @@ def migrate(ckpt: CkptType) -> CkptType:
 
     keys_to_rename = [k for k in ckpt["state_dict"] if k.startswith(old_prefix)]
     for old_key in keys_to_rename:
-        new_key = new_prefix + old_key[len(old_prefix):]
+        new_key = new_prefix + old_key[len(old_prefix) :]
         ckpt["state_dict"][new_key] = ckpt["state_dict"].pop(old_key)
 
     return ckpt
@@ -62,7 +62,7 @@ def rollback(ckpt: CkptType) -> CkptType:
 
     keys_to_rename = [k for k in ckpt["state_dict"] if k.startswith(old_prefix)]
     for old_key in keys_to_rename:
-        new_key = new_prefix + old_key[len(old_prefix):]
+        new_key = new_prefix + old_key[len(old_prefix) :]
         ckpt["state_dict"][new_key] = ckpt["state_dict"].pop(old_key)
 
     return ckpt
