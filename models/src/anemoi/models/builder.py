@@ -18,6 +18,10 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.interface import DiffusionModelInterface
+from anemoi.models.interface import DiffusionTendencyModelInterface
+from anemoi.models.models import AnemoiDiffusionModel
+from anemoi.models.models import AnemoiDiffusionTendencyModel
 from anemoi.models.models import AnemoiModel
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -171,7 +175,7 @@ def build_anemoi_model(
         dataset_names=list(runtime_artifacts.statistics.keys()),
     )
 
-    return AnemoiModel(
+    model = AnemoiModel(
         model_config=model_config,
         graph_data=runtime_artifacts.graph_data,
         statistics=runtime_artifacts.statistics,
@@ -184,3 +188,10 @@ def build_anemoi_model(
         pre_processors_tendencies=pre_processors_tendencies,
         post_processors_tendencies=post_processors_tendencies,
     )
+
+    if isinstance(model.backbone, DiffusionTendencyModelInterface):
+        model.__class__ = AnemoiDiffusionTendencyModel
+    elif isinstance(model.backbone, DiffusionModelInterface):
+        model.__class__ = AnemoiDiffusionModel
+
+    return model
