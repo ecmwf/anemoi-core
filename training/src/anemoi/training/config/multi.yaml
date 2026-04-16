@@ -4,8 +4,7 @@ defaults:
 - diagnostics: evaluation_multi
 - system: example
 - graph: multi
-- model: graphtransformer
-- override /processors@model.processors: multi
+- model: graphtransformer_multi
 - training: multi
 - _self_
 
