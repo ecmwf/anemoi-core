@@ -22,12 +22,13 @@ data:
 #  length: 18 #in number of dates (* frequency for actual time)
 
 model:
-  model:
+  backbone:
     _target_: anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator
     latent_skip: False # True/False for skip connection on latent mesh
   residual:
     _target_: anemoi.models.layers.residual.SkipConnection
     step: 0 # use the previous step as skip connection
+  explicit_times: ${training.explicit_times}
 
 training:
   model_task: anemoi.training.train.tasks.GraphMultiOutInterpolator

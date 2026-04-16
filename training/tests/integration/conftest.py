@@ -148,6 +148,8 @@ def global_config(
 
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
+    cfg.model.multistep_input = 3
+    cfg.model.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
@@ -209,6 +211,8 @@ def multidatasets_config(
 
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
+    cfg.model.multistep_input = 3
+    cfg.model.multistep_output = 2
 
     return cfg, [url_dataset, url_dataset_b]
 
@@ -294,6 +298,8 @@ def ensemble_config(
 
     cfg.training.multistep_input = 3
     cfg.training.multistep_output = 2
+    cfg.model.multistep_input = 3
+    cfg.model.multistep_output = 2
     return cfg, url_dataset
 
 
