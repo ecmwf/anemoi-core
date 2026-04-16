@@ -279,8 +279,10 @@ class FieldRemapper(nn.Module):
             if i is not None:
                 try:
                     x[..., i] = remapper(x[..., i], **kwargs)
-                except Exception as e:
-                    raise ValueError(f"Got bad value for x while using remapper {i}: {remapper}, with kwargs: {kwargs}.")
+                except Exception:
+                    raise ValueError(
+                        f"Got bad value for x while using remapper {i}: {remapper}, with kwargs: {kwargs}."
+                    )
         return x
 
     def inverse_transform(self, x, in_place: bool = True) -> torch.Tensor:
