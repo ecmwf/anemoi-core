@@ -56,7 +56,7 @@ class TestDownloadWithRetry:
             assert dest_path.exists()
             assert dest_path.stat().st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             pytest.skip(f"Network request failed: {e}")
 
     @pytest.mark.unit
