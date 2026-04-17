@@ -77,7 +77,7 @@ class BaseTask(ABC):
 
     def steps(self, mode: str = "training") -> Iterable[dict]:
         """Get the steps for the task."""
-        return ({}, ) # default is a single step with no kwargs
+        return ({},)  # default is a single step with no kwargs
 
     @property
     def offsets(self) -> list[datetime.timedelta]:
