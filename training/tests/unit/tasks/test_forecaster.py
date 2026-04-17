@@ -69,17 +69,28 @@ def test_forecaster_multi_output_offsets() -> None:
     assert task.output_offsets == [datetime.timedelta(hours=6), datetime.timedelta(hours=12)]
 
 
-def test_forecaster_steps_on_init_is_single_element() -> None:
+def test_forecaster_steps_is_single_element() -> None:
     """Default rollout start=1 produces steps=({"rollout_step": 0},)."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 1})
-    assert list(task.steps) == [{"rollout_step": 0}]
+    assert list(task.steps("training")) == [{"rollout_step": 0}]
+    assert list(task.steps("validation")) == [{"rollout_step": 0}]
+    assert list(task.steps("testing")) == [{"rollout_step": 0}]
 
 
-def test_forecaster_steps_on_init_reflect_rollout_start() -> None:
+def test_forecaster_steps_reflect_rollout_start() -> None:
     """Rollout start=2 produces two steps at construction time."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2})
-    assert list(task.steps) == [{"rollout_step": 0}, {"rollout_step": 1}]
-    assert task.num_steps == 2
+    assert list(task.steps("training")) == [{"rollout_step": 0}, {"rollout_step": 1}]
+    assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}]
+    assert list(task.steps("testing")) == [{"rollout_step": 0}, {"rollout_step": 1}]
+
+
+def test_forecaster_steps_reflect_validation_rollout() -> None:
+    """Rollout with validation_rollout=3 produces three steps for validation only."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"validation_rollout": 3})
+    assert list(task.steps("training")) == [{"rollout_step": 0}]
+    assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}, {"rollout_step": 2}]
+    assert list(task.steps("testing")) == [{"rollout_step": 0}]
 
 
 def test_forecaster_metric_name_encodes_rollout_step() -> None:

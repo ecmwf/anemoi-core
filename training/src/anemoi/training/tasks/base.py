@@ -75,7 +75,7 @@ class BaseTask(ABC):
         """
         return self._output_offsets
 
-    def steps(self, mode: str = "training") -> Iterable[dict]:
+    def steps(self, mode: str = "training") -> Iterable[dict]:  # noqa: ARG002
         """Get the steps for the task."""
         return ({},)  # default is a single step with no kwargs
 

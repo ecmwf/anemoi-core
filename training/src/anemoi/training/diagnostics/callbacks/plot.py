@@ -650,7 +650,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            for i, task_kwargs in enumerate(pl_module.task.steps):
+            for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs[1][i][dataset_name]
                 y_true = pl_module.task.get_targets(
                     batch={dataset_name: batch[dataset_name]},
