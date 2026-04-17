@@ -23,7 +23,6 @@ diagnostics:
       tracking_uri: 'https://mlflow.ecmwf.int'
       authentication: True
       terminal: False
-      on_resume_create_child: False
 
     wandb:
       enabled: False
