@@ -42,8 +42,6 @@ class SingleTraining(BaseTrainingModule):
 
         n_steps = 0
         for task_kwargs in rollout:
-            if isinstance(task_kwargs, int):
-                task_kwargs = {"rollout_step": task_kwargs}
             y_pred = self(x)
             y = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
 

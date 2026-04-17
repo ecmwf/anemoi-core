@@ -265,11 +265,8 @@ class EnsembleTraining(BaseTrainingModule):
 
         n_steps = 0
         for task_kwargs in rollout:
-            if isinstance(task_kwargs, int):
-                task_kwargs = {"rollout_step": task_kwargs}
             y_pred = self(x, **task_kwargs)
             y = self._make_targets(batch, start=task_kwargs.get("rollout_step", 0))
-            # Move into _make_targets() y = self._collapse_ens_dim(y)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
