@@ -677,7 +677,7 @@ def test_single_training_advance_input_called_once_per_step(monkeypatch: pytest.
     batch = {"data": torch.randn(b, 2, e, g, v)}
     module._step(batch, validation_mode=False)
 
-    assert len(advance_call_count) == task.num_steps
+    assert len(advance_call_count) == len(list(task.steps("training")))
 
 
 # ── DiffusionTraining._step integration ───────────────────────────────────────
@@ -794,7 +794,7 @@ def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch)
 
     assert isinstance(loss, torch.Tensor)
     assert isinstance(y_preds, list)
-    assert len(y_preds) == task.num_steps  # 1 rollout step
+    assert len(y_preds) == len(list(task.steps("training")))  # 1 rollout step
     # y_pred shape: (b, n_step_output, nens_per_device, g, v)
     assert y_preds[0]["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
 

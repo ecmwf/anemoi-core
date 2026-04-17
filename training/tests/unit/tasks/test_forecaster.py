@@ -81,13 +81,13 @@ def test_forecaster_steps_reflect_rollout_start() -> None:
     """Rollout start=2 produces two steps at construction time."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2})
     assert list(task.steps("training")) == [{"rollout_step": 0}, {"rollout_step": 1}]
-    assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}]
+    assert list(task.steps("validation")) == [{"rollout_step": 0}]
     assert list(task.steps("testing")) == [{"rollout_step": 0}, {"rollout_step": 1}]
 
 
 def test_forecaster_steps_reflect_validation_rollout() -> None:
     """Rollout with validation_rollout=3 produces three steps for validation only."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"validation_rollout": 3})
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", validation_rollout=3)
     assert list(task.steps("training")) == [{"rollout_step": 0}]
     assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}, {"rollout_step": 2}]
     assert list(task.steps("testing")) == [{"rollout_step": 0}]

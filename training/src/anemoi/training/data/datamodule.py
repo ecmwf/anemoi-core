@@ -127,7 +127,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
-        relative_date_indices = compute_relative_date_indices(self.task, data_readers, label=label)
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
         return MultiDataset(
             data_readers=data_readers,
