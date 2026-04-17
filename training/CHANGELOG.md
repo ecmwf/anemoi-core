@@ -8,31 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
-## [Unreleased]
-
-### ⚠ BREAKING CHANGES
-
-* **tasks:** Task classes moved to new `anemoi.training.tasks` module.
-  `anemoi.training.train.tasks.{forecaster,ensforecaster,temporal_downscaler,autoencoder}`
-  no longer exist.
-* **tasks:** `GraphForecaster` renamed to `Forecaster`;
-  `GraphTemporalDownscaler` renamed to `TemporalDownscaler`;
-  `GraphAutoEncoder` renamed to `Autoencoder`.
-  `GraphEnsForecaster` and `GraphDiffusionForecaster` have been removed.
-* **tasks:** `BaseTask` properties `num_inputs` and `num_outputs` renamed to
-  `num_input_timesteps` and `num_output_timesteps`.
-
-### Features
-
-* **tasks:** New `anemoi.training.tasks` module with `BaseTask`,
-  `BaseSingleStepTask`, `Forecaster`, `TemporalDownscaler`, and `Autoencoder`.
-* **tasks:** New `RolloutConfig` class encapsulating progressive rollout
-  schedule (`start`, `epoch_increment`, `maximum`).
-* **diagnostics:** New `plot_adapter` module with `BasePlotAdapter`,
-  `ForecasterPlotAdapter`, `TemporalDownscalerPlotAdapter`, and
-  `AutoencoderPlotAdapter`, consolidating task-specific plotting logic.
-
-(https://github.com/ecmwf/anemoi-core/compare/training-0.10.0...training-0.11.0) (2026-03-26)
+## [0.11.0](https://github.com/ecmwf/anemoi-core/compare/training-0.10.0...training-0.11.0) (2026-03-26)
 
 
 ### ⚠ BREAKING CHANGES
