@@ -5,7 +5,7 @@
 The ``anemoi.training.tasks`` module defines the temporal structure of a
 training sample independently of the Lightning module. Each task
 specifies which time steps are loaded as inputs and which are used as
-targets, and provides helpers for mapping those offsets to batch
+targets, referred as offsets as they are defined as relative positions in time compared to a reference point, and provides helpers for mapping those offsets to batch
 positions.
 
 This separation lets plotting callbacks, dataloaders, and the trainer
