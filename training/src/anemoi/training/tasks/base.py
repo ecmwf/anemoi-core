@@ -40,8 +40,6 @@ class BaseTask(ABC):
         Number of input time steps for the task.
     num_outputs : int
         Number of output time steps for the task.
-    num_steps : int
-        Number of steps in the task (for multi-step tasks).
 
     Methods
     -------
@@ -49,7 +47,7 @@ class BaseTask(ABC):
         Get the list of input time offsets.
     get_output_offsets(**kwargs) -> list[datetime.timedelta]
         Get the list of output time offsets.
-    get_offsets() -> list[datetime.timedelta]
+    get_offsets(**kwargs) -> list[datetime.timedelta]
         Get the full list of input and output time offsets.
     """
 
@@ -59,11 +57,9 @@ class BaseTask(ABC):
         self,
         input_offsets: list[datetime.timedelta],
         output_offsets: list[datetime.timedelta],
-        steps: Iterable[dict] | None = None,
     ) -> None:
         self._input_offsets = sorted(input_offsets)
         self._output_offsets = sorted(output_offsets)
-        self._steps = steps if steps is not None else ({},)
 
     @property
     def input_offsets(self) -> list[datetime.timedelta]:
@@ -79,10 +75,9 @@ class BaseTask(ABC):
         """
         return self._output_offsets
 
-    @property
-    def steps(self) -> Iterable[dict]:
+    def steps(self, mode: str = "training") -> Iterable[dict]:
         """Get the steps for the task."""
-        return self._steps
+        return ({}, ) # default is a single step with no kwargs
 
     @property
     def offsets(self) -> list[datetime.timedelta]:
@@ -102,11 +97,6 @@ class BaseTask(ABC):
     def num_output_timesteps(self) -> int:
         """Number of output time steps."""
         return len(self._output_offsets)
-
-    @property
-    def num_steps(self) -> int:
-        """Number of steps in the task."""
-        return len(self.steps)
 
     def get_metric_name(self, **_step_kwargs) -> str:
         """Get the metric name for the current step (if any)."""

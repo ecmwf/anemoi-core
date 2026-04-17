@@ -73,12 +73,7 @@ class RolloutEval(Callback):
         )
 
         with torch.no_grad():
-            rollout = tuple({"rollout_step": i} for i in range(self.max_rollout))
-            loss, metrics, _ = pl_module._step(
-                batch,
-                rollout=rollout,
-                validation_mode=True,
-            )
+            loss, metrics, _ = pl_module.validation_step(batch, validation_mode=True)
             self._log(pl_module, loss, metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
