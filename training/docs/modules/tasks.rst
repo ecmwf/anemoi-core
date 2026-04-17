@@ -102,7 +102,7 @@ Multistep Input and Output
 ==========================
 
 The forecaster task uses ``multistep_input`` and ``multistep_output`` to control how many time
-steps the model injests as input and predicts in a single forward pass.
+steps the model ingests as input and predicts in a single forward pass.
 
 -  ``multistep_input``: number of past timesteps provided as model input. When set to 1, only `t_{0}` is used.
 -  ``multistep_output``: number of future timesteps predicted per forward pass.
