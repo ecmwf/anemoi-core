@@ -60,33 +60,11 @@ class BaseTask(ABC):
     ) -> None:
         self._input_offsets = sorted(input_offsets)
         self._output_offsets = sorted(output_offsets)
-
-    @property
-    def input_offsets(self) -> list[datetime.timedelta]:
-        """Sorted input time offsets."""
-        return self._input_offsets
-
-    @property
-    def output_offsets(self) -> list[datetime.timedelta]:
-        """Sorted output time offsets for the current step.
-
-        Subclasses may override this to support parametrised output
-        selection (e.g. per rollout step).
-        """
-        return self._output_offsets
+        self._offsets = sorted(set(self._input_offsets + self._output_offsets))
 
     def steps(self, mode: str = "training") -> Iterable[dict]:  # noqa: ARG002
         """Get the steps for the task."""
         return ({},)  # default is a single step with no kwargs
-
-    @property
-    def offsets(self) -> list[datetime.timedelta]:
-        """Full sorted union of input and output offsets.
-
-        This is used by the datamodule to compute
-        ``data_relative_time_indices``.
-        """
-        return sorted(set(self._input_offsets + self._output_offsets))
 
     @property
     def num_input_timesteps(self) -> int:
@@ -97,6 +75,11 @@ class BaseTask(ABC):
     def num_output_timesteps(self) -> int:
         """Number of output time steps."""
         return len(self._output_offsets)
+
+    @property
+    def num_steps(self) -> int:
+        """Number of training steps (rollout length)."""
+        return len(self.steps("training"))
 
     def get_metric_name(self, **_step_kwargs) -> str:
         """Get the metric name for the current step (if any)."""
@@ -117,13 +100,13 @@ class BaseTask(ABC):
     def get_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of offsets for a given mode (e.g. "training", "validation", "test").
 
-        By default, this returns ``self.offsets``, but can be overridden by subclasses to return
+        By default, this returns ``self._offsets``, but can be overridden by subclasses to return
         different offsets per mode for example (e.g different rollout in training vs validation).
         """
-        return self.offsets
+        return self._offsets
 
     def _offset_to_batch_indices(self, offsets: list[datetime.timedelta], **kwargs) -> list[int]:
-        """Map a list of offsets to their positions in ``self.offsets``."""
+        """Map a list of offsets to their positions in ``self._offsets``."""
         full = self.get_offsets(**kwargs)
         return [full.index(o) for o in offsets]
 
@@ -222,8 +205,8 @@ class BaseTask(ABC):
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
             "timestep": timestep,  # backwards compatibility with inference
-            "input_offsets": [frequency_to_string(o) for o in self.input_offsets],
-            "output_offsets": [frequency_to_string(o) for o in self.output_offsets],
+            "input_offsets": [frequency_to_string(o) for o in self._input_offsets],
+            "output_offsets": [frequency_to_string(o) for o in self._output_offsets],
         }
 
         dataset_names = md_dict["metadata_inference"]["dataset_names"]

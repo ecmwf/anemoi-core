@@ -533,6 +533,7 @@ def test_plot_loss_diffusion():
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
+    pl_module.task.steps.return_value = [{}]
     pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
     pl_module.task.get_metric_name.return_value = ""
 
@@ -594,6 +595,7 @@ def test_plot_loss_forecaster():
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
     )
     callback.loss = {"data": MSELoss()}
+    pl_module.task.steps.return_value = [{"rollout_step": i} for i in range(output_times)]
     pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
     pl_module.task.get_metric_name.return_value = ""
 

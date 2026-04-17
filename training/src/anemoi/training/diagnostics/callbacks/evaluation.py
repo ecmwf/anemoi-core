@@ -64,8 +64,6 @@ class RolloutEval(Callback):
         batch_tensor = batch
         if isinstance(batch, dict):
             batch_tensor = next(iter(batch.values()))
-        loss = torch.zeros(1, dtype=batch_tensor.dtype, device=pl_module.device, requires_grad=False)
-        metrics = {}
 
         assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
@@ -73,7 +71,8 @@ class RolloutEval(Callback):
         )
 
         with torch.no_grad():
-            loss, metrics, _ = pl_module.validation_step(batch, validation_mode=True)
+            rollout = tuple({"rollout_step": i} for i in range(self.max_rollout))
+            loss, metrics, _ = pl_module._step(batch, rollout=rollout, validation_mode=True)
             self._log(pl_module, loss, metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:

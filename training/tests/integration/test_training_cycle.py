@@ -215,6 +215,7 @@ def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_te
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
+@skip_if_offline
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
     BaseSchema(**cfg)
