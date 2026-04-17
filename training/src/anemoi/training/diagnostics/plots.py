@@ -10,10 +10,6 @@
 
 import logging
 
-import matplotlib as mpl
-
-mpl.use("Agg")
-
 import datashader as dsh
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
