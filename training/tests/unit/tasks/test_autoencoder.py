@@ -25,8 +25,9 @@ def test_autoencoder_input_and_output_offsets_are_both_zero() -> None:
 def test_autoencoder_has_exactly_one_step_with_no_kwargs() -> None:
     """Autoencoder runs exactly one step and passes no step-specific kwargs."""
     task = Autoencoder()
-    assert list(task.steps) == [{}]
-    assert task.num_steps == 1
+    assert list(task.steps("training")) == [{}]
+    assert list(task.steps("validation")) == [{}]
+    assert list(task.steps("testing")) == [{}]
 
 
 def test_autoencoder_advance_input_returns_input_unchanged() -> None:
