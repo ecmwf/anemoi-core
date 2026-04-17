@@ -115,10 +115,10 @@ class BaseTask(ABC):
         return self._output_offsets
 
     def get_offsets(self, **_kwargs) -> list[datetime.timedelta]:
-        """Get the list of offsets for a given label (e.g. "training", "validation", "test").
+        """Get the list of offsets for a given mode (e.g. "training", "validation", "test").
 
         By default, this returns ``self.offsets``, but can be overridden by subclasses to return
-        different offsets per label for example (e.g different rollout in training vs validation).
+        different offsets per mode for example (e.g different rollout in training vs validation).
         """
         return self.offsets
 
