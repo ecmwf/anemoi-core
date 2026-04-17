@@ -75,6 +75,9 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
+        # Structural graph nodes (e.g. truncation intermediates) are not learnable; default to 0.
+        for node_name in graph_data.node_types:
+            trainable_parameters.setdefault(node_name, 0)
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
