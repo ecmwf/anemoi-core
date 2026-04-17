@@ -51,6 +51,8 @@ class DummyModule(BoringModel):
     def __init__(self, *, config: DotDict, metadata: dict) -> None:
         super().__init__()
         self.model = DummyModel(config=config, metadata=metadata)
+        self.metadata = metadata
+        self.supporting_arrays = {}
         self.save_hyperparameters()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

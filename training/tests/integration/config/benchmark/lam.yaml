@@ -39,30 +39,30 @@ data:
       diagnostic:
         - "tp"
 
-      processors:
-        normalizer:
-          config:
-            default: "mean-std"
-            std:
-              - "tp"
-            min-max:
-            max:
-            none:
-              - "cos_latitude"
-              - "cos_longitude"
-              - "sin_latitude"
-              - "sin_longitude"
-              - "cos_julian_day"
-              - "cos_local_time"
-              - "sin_julian_day"
-              - "sin_local_time"
-
 training:
   max_epochs: 1
   num_sanity_val_steps: 0
 
 model:
   num_channels: 512
+  processors:
+    data:
+      normalizer:
+        config:
+          default: "mean-std"
+          std:
+            - "tp"
+          min-max:
+          max:
+          none:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "cos_local_time"
+            - "sin_julian_day"
+            - "sin_local_time"
   output_mask:
     _target_: anemoi.training.utils.masks.Boolean1DMask
     attribute_name: cutout_mask

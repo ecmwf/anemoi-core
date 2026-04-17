@@ -23,29 +23,6 @@ datasets:
     - "slor"
     - "z"
     diagnostic: [tp, cp]
-    processors:
-      normalizer:
-        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config:
-          default: "mean-std"
-          std:
-          - "tp"
-          min-max:
-          max:
-          - "sdor"
-          - "slor"
-          - "z"
-          none:
-          - "cos_latitude"
-          - "cos_longitude"
-          - "sin_latitude"
-          - "sin_longitude"
-          - "cos_julian_day"
-          - "cos_local_time"
-          - "sin_julian_day"
-          - "sin_local_time"
-          - "insolation"
-          - "lsm"
 
   cerra:
     forcing:
@@ -58,28 +35,6 @@ datasets:
     - "sin_julian_day"
     - "sin_local_time"
     diagnostic: [tp]
-    processors:
-      normalizer:
-        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
-        config:
-          default: "mean-std"
-          std:
-          - "tp"
-          min-max:
-          max:
-          none:
-          - "cos_latitude"
-          - "cos_longitude"
-          - "sin_latitude"
-          - "sin_longitude"
-          - "cos_julian_day"
-          - "cos_local_time"
-          - "sin_julian_day"
-          - "sin_local_time"
-      const_imputer:
-        _target_: anemoi.models.preprocessing.imputer.InputImputer
-        config:
-          default: "mean"
 
 # Values set in the code
 num_features: null # number of features in the forecast state

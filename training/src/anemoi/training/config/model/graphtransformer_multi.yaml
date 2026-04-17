@@ -1,0 +1,6 @@
+defaults:
+  - graphtransformer
+  - override /processors@processors: multi
+
+backbone:
+  data_nodes_name: ["era5", "cerra"]

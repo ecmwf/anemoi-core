@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
 
 
 LOGGER = logging.getLogger(__name__)
@@ -38,18 +39,19 @@ class GraphAutoEncoder(BaseGraphModule):
     def __init__(
         self,
         *,
+        model: ModelInterface,
         config: DictConfig,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: IndexCollection,
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network interpolator.
 
         Parameters
         ----------
+        model : ModelInterface
         config : DictConfig
             Job configuration
         graph_data : HeteroData
@@ -58,20 +60,16 @@ class GraphAutoEncoder(BaseGraphModule):
             Statistics of the training data
         data_indices : IndexCollection
             Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
 
         """
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
         assert (
@@ -79,6 +77,15 @@ class GraphAutoEncoder(BaseGraphModule):
         ), "Autoencoders must have the same number of input and output steps."
 
         self._plot_adapter = AutoencoderPlotAdapter(self)
+
+        self.fill_metadata(self.metadata)
+
+    def fill_metadata(self, metadata: dict) -> None:
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            rel = ts["relative_date_indices_training"]
+            ts["input_relative_date_indices"] = rel[: self.n_step_input]
+            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
 
     def _step(
         self,

@@ -147,3 +147,5 @@ trace.txt
 *.prof
 prof/
 *.gz
+graphs
+storage

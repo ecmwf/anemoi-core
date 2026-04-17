@@ -1,3 +1,13 @@
+defaults:
+  - /processors@processors: default
+
+_target_: anemoi.models.builder.build_anemoi_model
+_recursive_: false
+
+multistep_input: ${training.multistep_input}
+multistep_output: ${training.multistep_output}
+
+
 num_channels: 1024
 condition_on_residual: False
 output_mask:
@@ -6,8 +16,9 @@ cpu_offload: False
 
 keep_batch_sharded: True
 
-model:
+backbone:
   _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+  data_nodes_name: "data"
   hidden_nodes_name: "hidden"
   latent_skip: True
 

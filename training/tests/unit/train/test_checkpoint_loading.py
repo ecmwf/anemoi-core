@@ -66,6 +66,9 @@ class DummyGraphModule(BaseGraphModule):
     def __init__(self) -> None:
         pass
 
+    def fill_metadata(self, metadata: dict) -> None:
+        pass
+
     def _step(self, batch, validation_mode: bool = False) -> Never:  # noqa: ANN001
         raise NotImplementedError
 

@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.interface import DiffusionModelInterface
+from anemoi.models.interface import DiffusionTendencyModelInterface
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -38,30 +41,43 @@ class BaseDiffusionForecaster(BaseGraphModule):
     def __init__(
         self,
         *,
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
 
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
-        self.rho = config.model.model.diffusion.rho
+        if not isinstance(model, DiffusionModelInterface):
+            msg = f"{self.__class__.__name__} requires a diffusion-capable model interface."
+            raise TypeError(msg)
+
+        self.rho = config.model.backbone.diffusion.rho
 
         from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
 
         self._plot_adapter = DiffusionPlotAdapter(self)
+
+        self.fill_metadata(self.metadata)
+
+    def fill_metadata(self, metadata: dict) -> None:
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            rel = ts["relative_date_indices_training"]
+            ts["input_relative_date_indices"] = rel[: self.n_step_input]
+            ts["output_relative_date_indices"] = rel[-self.n_step_output :]
 
     def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Get input tensor shape for diffusion model."""
@@ -122,7 +138,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        return self.model.model.fwd_with_preconditioning(
+        return self.model.forward_with_preconditioning(
             x,
             y_noised,
             sigma,
@@ -268,11 +284,12 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
+        sigma_max, sigma_min, sigma_data = self.model.get_diffusion_parameters()
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
-            sigma_max=self.model.model.sigma_max,
-            sigma_min=self.model.model.sigma_min,
-            sigma_data=self.model.model.sigma_data,
+            sigma_max=sigma_max,
+            sigma_min=sigma_min,
+            sigma_data=sigma_data,
             rho=self.rho,
             device=next(iter(batch.values())).device,
         )
@@ -301,23 +318,26 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     def __init__(
         self,
         *,
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
+        if not isinstance(model, DiffusionTendencyModelInterface):
+            msg = f"{self.__class__.__name__} requires a diffusion-tendency model interface."
+            raise TypeError(msg)
         self._tendency_pre_processors: dict[str, object] = {}
         self._tendency_post_processors: dict[str, object] = {}
         self._validate_tendency_processors()
@@ -325,12 +345,6 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     def _validate_tendency_processors(self) -> None:
         stats = self.statistics_tendencies
         assert stats is not None, "Tendency statistics are required for diffusion tendency models."
-
-        pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
-        post_processors_tendencies = getattr(self.model, "post_processors_tendencies", None)
-        assert (
-            pre_processors_tendencies is not None and post_processors_tendencies is not None
-        ), "Per-step tendency processors are required for multi-output diffusion tendency models."
 
         def _wrap_if_needed(
             kind: str,
@@ -365,15 +379,11 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
                 lead_time in dataset_stats for lead_time in lead_times
             ), "Missing tendency statistics for one or more output steps."
 
-            assert (
-                dataset_name in pre_processors_tendencies
-            ), "Per-step tendency processors are required for multi-output diffusion tendency models."
-            assert (
-                dataset_name in post_processors_tendencies
-            ), "Per-step tendency processors are required for multi-output diffusion tendency models."
-
-            pre_tend = pre_processors_tendencies[dataset_name]
-            post_tend = post_processors_tendencies[dataset_name]
+            try:
+                pre_tend, post_tend = self.model.get_tendency_processors(dataset_name)
+            except (AttributeError, KeyError) as exc:
+                msg = "Per-step tendency processors are required for multi-output diffusion tendency models."
+                raise AttributeError(msg) from exc
             pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
             post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
             assert (
@@ -402,14 +412,12 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             for step, pre_proc in enumerate(pre_tend):
                 y_step = y_dataset[:, step : step + 1]
                 x_ref_step = x_ref[dataset_name].unsqueeze(1)
-                tendency_step = self.model.model.compute_tendency(
-                    {dataset_name: y_step},
-                    {dataset_name: x_ref_step},
-                    {dataset_name: self.model.pre_processors[dataset_name]},
-                    {dataset_name: pre_proc},
-                    input_post_processor={dataset_name: self.model.post_processors[dataset_name]},
-                    skip_imputation=True,
-                )[dataset_name]
+                tendency_step = self.model.compute_tendency_step(
+                    dataset_name=dataset_name,
+                    y_step=y_step,
+                    x_ref_step=x_ref_step,
+                    tendency_pre_processor=pre_proc,
+                )
                 tendency_steps.append(tendency_step)
             tendencies[dataset_name] = torch.cat(tendency_steps, dim=1)
         return tendencies
@@ -427,17 +435,15 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
             for step, post_proc in enumerate(post_tend):
                 x_ref_step = x_ref[dataset_name].unsqueeze(1)
                 tendency_step = tendency_dataset[:, step : step + 1]
-                state_step = self.model.model.add_tendency_to_state(
-                    {dataset_name: x_ref_step},
-                    {dataset_name: tendency_step},
-                    {dataset_name: self.model.post_processors[dataset_name]},
-                    {dataset_name: post_proc},
-                    output_pre_processor={dataset_name: self.model.pre_processors[dataset_name]},
-                    skip_imputation=True,
-                )[dataset_name]
+                state_step = self.model.add_tendency_to_state_step(
+                    dataset_name=dataset_name,
+                    x_ref_step=x_ref_step,
+                    tendency_step=tendency_step,
+                    tendency_post_processor=post_proc,
+                )
                 state_steps.append(state_step)
             out_dataset = torch.cat(state_steps, dim=1)
-            out_dataset = self.model.model._apply_imputer_inverse(self.model.post_processors, dataset_name, out_dataset)
+            out_dataset = self.model.apply_imputer_inverse(dataset_name, out_dataset)
             states[dataset_name] = out_dataset
         return states
 
@@ -484,11 +490,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
             y_pred_state_full, y_state_full, grid_shard_slice = self._prepare_tensors_for_loss(
                 y_pred_state[dataset_name],
-                self.model.model._apply_imputer_inverse(
-                    self.model.post_processors,
-                    dataset_name,
-                    y_state[dataset_name],
-                ),
+                self.model.apply_imputer_inverse(dataset_name, y_state[dataset_name]),
                 validation_mode=validation_mode,
                 dataset_name=dataset_name,
             )
@@ -534,15 +536,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         state_target = self.get_target(batch)
         y_data_output = self.get_data_output_target(state_target)
 
-        pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
-        if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
-            msg = (
-                "pre_processors_tendencies not found. This is required for tendency-based diffusion models. "
-                "Ensure that statistics_tendencies is provided during model initialization."
-            )
-            raise AttributeError(msg)
-
-        x_ref = self.model.model.apply_reference_state_truncation(
+        x_ref = self.model.apply_reference_state_truncation(
             x,
             self.grid_shard_shapes,
             self.model_comm_group,
@@ -555,11 +549,12 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
 
         # get noise level and associated loss weights
         shapes = {k: target.shape for k, target in tendency_target.items()}
+        sigma_max, sigma_min, sigma_data = self.model.get_diffusion_parameters()
         sigma, noise_weights = self._get_noise_level(
             shape=shapes,
-            sigma_max=self.model.model.sigma_max,
-            sigma_min=self.model.model.sigma_min,
-            sigma_data=self.model.model.sigma_data,
+            sigma_max=sigma_max,
+            sigma_min=sigma_min,
+            sigma_data=sigma_data,
             rho=self.rho,
             device=next(iter(batch.values())).device,
         )

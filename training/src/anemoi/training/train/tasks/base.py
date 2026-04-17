@@ -29,7 +29,6 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -40,6 +39,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.timesteps import compute_relative_date_indices
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -96,7 +97,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     Attributes
     ----------
-    model : AnemoiModelInterface
+    model : ModelInterface
         Wrapper for the underlying GNN model and its pre/post-processing logic.
     loss : BaseLoss
         Training loss function, optionally supporting variable scaling and sharding.
@@ -128,7 +129,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
     See Also
     --------
-    - `AnemoiModelInterface`
+    - `ModelInterface`
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
@@ -139,6 +140,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def __init__(
         self,
         *,
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
@@ -160,9 +162,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
+            Provenance and inference metadata.
 
         """
         super().__init__()
@@ -172,35 +172,23 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         # Handle dictionary of graph_data
         graph_data = graph_data.to(self.device)
-        self.dataset_names = list(data_indices.keys())
+        data_nodes = model.data_nodes_name
+        self.dataset_names = [data_nodes] if isinstance(data_nodes, str) else list(data_nodes)
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {
             name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
         }
 
-        # Handle supporting_arrays merge with all output masks
-        combined_supporting_arrays = supporting_arrays.copy()
-        for dataset_name, mask in self.output_mask.items():
-            combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
-
         if not hasattr(self.__class__, "task_type"):
             msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
                 indicating the type of task (e.g., 'forecaster', 'time-interpolator')."""
             raise AttributeError(msg)
 
-        metadata["metadata_inference"]["task"] = self.task_type
-
-        self.model = AnemoiModelInterface(
-            statistics=statistics,
-            statistics_tendencies=statistics_tendencies,
-            data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=combined_supporting_arrays,
-            graph_data=graph_data,
-            config=config,
-        )
+        self.model = model
         self.config = config
+        self.metadata = metadata
+        self.supporting_arrays = supporting_arrays
 
         self.data_indices = data_indices
 
@@ -304,6 +292,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         self.grid_dim = -2
 
+        self._fill_metadata_inference()
+
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
         read_group_supports_sharding = reader_group_size == self.config.system.hardware.num_gpus_per_model
@@ -339,6 +329,48 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
         return self._plot_adapter
+
+    def _fill_metadata_inference(self) -> None:
+        """Fill per-dataset inference metadata owned by the task."""
+        input_relative = list(range(self.n_step_input))
+        output_relative = list(range(self.n_step_input, self.n_step_input + self.n_step_output))
+        timesteps = {
+            "relative_date_indices_training": compute_relative_date_indices(self.config),
+            "input_relative_date_indices": input_relative,
+            "output_relative_date_indices": output_relative,
+            "timestep": self.config.data.timestep,
+        }
+        for dataset_name in self.dataset_names:
+            data_indices = self.data_indices[dataset_name]
+            self.metadata["metadata_inference"][dataset_name] = {}
+            ds_meta = self.metadata["metadata_inference"][dataset_name]
+
+            ds_meta["timesteps"] = timesteps
+
+            ds_meta["data_indices"] = {
+                "input": data_indices.model.input.name_to_index,
+                "output": data_indices.model.output.name_to_index,
+            }
+
+            input_data_indices = data_indices.data.input.todict()
+            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
+            ds_meta["variable_types"] = {
+                "forcing": [input_index_to_name[int(i)] for i in input_data_indices["forcing"]],
+                "target": [input_index_to_name[int(i)] for i in input_data_indices["target"]],
+                "prognostic": [input_index_to_name[int(i)] for i in input_data_indices["prognostic"]],
+                "diagnostic": [input_index_to_name[int(i)] for i in input_data_indices["diagnostic"]],
+            }
+
+            ds_meta["shapes"] = {
+                "variables": len(data_indices.model.input.name_to_index),
+                "input_timesteps": self.n_step_input,
+                "ensemble": self._ensemble_size(),
+                "grid": self.grid_sizes[dataset_name],
+            }
+
+    def _ensemble_size(self) -> int:
+        """Return the ensemble size for this task (1 for non-ensemble tasks)."""
+        return 1
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -731,9 +763,11 @@ class BaseGraphModule(pl.LightningModule, ABC):
         # Compute metrics if in validation mode
         metrics_next = {}
         if validation_mode:
+            y_pred_postprocessed = self.model.post_process({dataset_name: y_pred_full})[dataset_name]
+            y_postprocessed = self.model.post_process({dataset_name: y_full})[dataset_name]
             metrics_next = self._compute_metrics(
-                y_pred_full,
-                y_full,
+                y_pred_postprocessed,
+                y_postprocessed,
                 grid_shard_slice=grid_shard_slice,
                 dataset_name=dataset_name,
                 **kwargs,
@@ -812,15 +846,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Batch after transfer
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
-
-        # Batch normalization
-        batch = self._normalize_batch(batch)
-
-        # Prepare scalers, e.g. init delayed scalers and update scalers
+        batch = self.model.pre_process(batch)
         self._prepare_loss_scalers()
-
         return batch
 
     def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -873,24 +901,6 @@ class BaseGraphModule(pl.LightningModule, ABC):
             )
         return transferred_batch
 
-    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Normalize batch for training and validation before every step.
-
-        Parameters
-        ----------
-        batch : dict[str, torch.Tensor]
-            Batch to prepare
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Normalized batch
-        """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        for dataset_name in batch:
-            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
-        return batch
-
     def _prepare_loss_scalers(self) -> None:
         """Prepare scalers for training and validation before every step."""
         # Delayed scalers need to be initialized after the pre-processors once
@@ -899,6 +909,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             self.is_first_step = False
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
         return
+
+    @abstractmethod
+    def fill_metadata(self, metadata: dict) -> None:
+        """Fill inference metadata with task-specific timestep indices."""
 
     @abstractmethod
     def _step(
@@ -969,13 +983,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         metrics = {}
 
-        # Handle multi-dataset case for post-processors
-        post_processor = self.model.post_processors[dataset_name]
         metrics_dict = self.metrics[dataset_name]
         val_metric_ranges = self.val_metric_ranges[dataset_name]
-
-        y_postprocessed = post_processor(y, in_place=False)
-        y_pred_postprocessed = post_processor(y_pred, in_place=False)
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
@@ -1011,7 +1020,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                         grid_shard_shapes=self.grid_shard_shapes[dataset_name],
                     )
 
-                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                metrics[metric_step_name] = metric(y_pred, y, **metric_kwargs)
 
         return metrics
 

@@ -48,8 +48,8 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             Graph definition
         """
         model_config = DotDict(model_config)
-        self.input_times = model_config.training.explicit_times.input
-        self.output_times = model_config.training.explicit_times.target
+        self.input_times = model_config.explicit_times.input
+        self.output_times = model_config.explicit_times.target
 
         super().__init__(
             model_config=model_config,
@@ -58,7 +58,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             graph_data=graph_data,
         )
 
-        self.latent_skip = model_config.model.latent_skip
+        self.latent_skip = model_config.backbone.latent_skip
 
     # Overwrite base class
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -249,21 +249,3 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
             )
 
         return x_out_dict
-
-    def fill_metadata(self, md_dict):
-        for dataset in self.input_dim.keys():
-            input_rel_date_indices = self.input_times
-            output_rel_date_indices = self.output_times
-
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": len(input_rel_date_indices),
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices

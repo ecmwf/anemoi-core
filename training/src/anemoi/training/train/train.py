@@ -30,6 +30,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.models.utils.runtime_artifacts import RuntimeArtifacts
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -63,8 +64,6 @@ class AnemoiTrainer(ABC):
         # Allow for lower internal precision of float32 matrix multiplications.
         # This can increase performance (and TensorCore usage, where available).
         torch.set_float32_matmul_precision("high")
-        # Resolve the config to avoid shenanigans with lazy loading
-
         if config.config_validation:
             OmegaConf.resolve(config)
             self.config = BaseSchema(**config)
@@ -220,11 +219,11 @@ class AnemoiTrainer(ABC):
             return
 
         # Validate each dataset in current config against checkpoint
-        for dataset_name, data_indices in self.data_indices.items():
+        for dataset_name, dataset_indices in self.data_indices.items():
             if dataset_name in model._ckpt_model_name_to_index:
                 # Dataset found in checkpoint - validate variables match
                 ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
-                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                dataset_indices.compare_variables(ckpt_name_to_index, dataset_indices.name_to_index)
                 loaded_datasets.append(dataset_name)
             else:
                 # Dataset not found in checkpoint - will be randomly initialized
@@ -254,34 +253,24 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "layer_kernels" in self.config.model.processor
-                and "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
+        model_task = get_class(self.config.training.model_task)
+
+        model_partial = instantiate(self.config.model, _partial_=True)
+        model = model_partial(runtime_artifacts=self.runtime_artifacts)
+
+        self.metadata["metadata_inference"]["task"] = model_task.task_type
 
         kwargs = {
+            "model": model,
             "config": self.config,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
+            "supporting_arrays": self.supporting_arrays,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
-            "supporting_arrays": self.supporting_arrays,
         }
 
-        model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
         # Load the model weights
@@ -378,6 +367,18 @@ class AnemoiTrainer(ABC):
         return get_callbacks(self.config)
 
     @cached_property
+    def runtime_artifacts(self) -> RuntimeArtifacts:
+        """Package raw runtime data for the model builder."""
+        return RuntimeArtifacts(
+            statistics=self.datamodule.statistics,
+            statistics_tendencies=self.datamodule.statistics_tendencies,
+            data_indices=self.datamodule.data_indices,
+            supporting_arrays=self.datamodule.supporting_arrays,
+            graph_data=self.graph_data,
+            metadata=self.metadata,
+        )
+
+    @cached_property
     def metadata(self) -> dict:
         """Metadata and provenance information."""
         metadata_inference = {
@@ -410,7 +411,9 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        return self.datamodule.supporting_arrays
+        from anemoi.models.utils.supporting_arrays import build_combined_supporting_arrays
+
+        return build_combined_supporting_arrays(self.config.model, self.graph_data, self.datamodule.supporting_arrays)
 
     @cached_property
     def _logger_kwargs(self) -> dict:

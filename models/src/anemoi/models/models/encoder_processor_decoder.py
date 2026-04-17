@@ -39,14 +39,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=model_config.encoder.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=model_config.encoder.get("trainable_size", 0),
             )
 
             self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
+                model_config.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
@@ -57,14 +57,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
             graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            trainable_size=model_config.processor.get("trainable_size", 0),
         )
 
         self.processor = instantiate(
-            model_config.model.processor,
+            model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
@@ -76,14 +76,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=model_config.decoder.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=model_config.decoder.get("trainable_size", 0),
             )
 
             self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
+                model_config.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
@@ -314,21 +314,3 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         return x_out_dict
-
-    def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-
-            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[: self.n_step_input]
-            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices

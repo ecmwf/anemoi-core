@@ -1,0 +1,18 @@
+_target_: anemoi.models.models.naive.NaiveModel
+_recursive_: false
+
+keep_batch_sharded: false
+
+n_input: 111
+n_output: 100
+n_step_input: ${training.multistep_input}
+n_step_output: ${training.multistep_output}
+
+trainable_parameters:
+  data: 0
+  hidden: 0
+
+bounding: []
+
+output_mask:
+  _target_: anemoi.training.utils.masks.NoOutputMask

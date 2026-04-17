@@ -102,7 +102,7 @@ class EnsemblePlotMixin:
             members = [members]
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+            self.latlons[dataset_name] = pl_module.model.backbone._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         total_targets = pl_module.plot_adapter.get_total_plot_targets()
@@ -288,7 +288,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
+                pl_module.model.backbone._graph_data,
                 self.latlons[dataset_name],
                 data,
                 output_tensor,

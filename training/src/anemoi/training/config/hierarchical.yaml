@@ -20,7 +20,7 @@ config_validation: True
 
 model:
   keep_batch_sharded: False # not yet supported for Hierarchical
-  model:
+  backbone:
     _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
     hidden_nodes_name: ["hidden_1", "hidden_2", "hidden_3"]
   enable_hierarchical_level_processing: True

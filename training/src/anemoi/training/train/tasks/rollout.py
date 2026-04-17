@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.interface import ModelInterface
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -40,18 +41,19 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
     def __init__(
         self,
         *,
+        model: ModelInterface,
         config: BaseSchema,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
+        model : ModelInterface
         config : DictConfig
             Job configuration
         graph_data : HeteroData
@@ -60,20 +62,16 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
             Indices of the training data,
-        metadata : dict
-            Provenance information
-        supporting_arrays : dict
-            Supporting NumPy arrays to store in the checkpoint
 
         """
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
         self.rollout = config.training.rollout.start
@@ -85,6 +83,15 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         LOGGER.debug("Rollout max : %d", self.rollout_max)
 
         self._plot_adapter = ForecasterPlotAdapter(self)
+
+        self.fill_metadata(self.metadata)
+
+    def fill_metadata(self, metadata: dict) -> None:
+        for dataset_name in self.dataset_names:
+            ts = metadata["metadata_inference"][dataset_name]["timesteps"]
+            rel = ts["relative_date_indices_training"]
+            ts["input_relative_date_indices"] = rel[: self.n_step_input]
+            ts["output_relative_date_indices"] = rel[self.n_step_input :]
 
     def _advance_dataset_input(
         self,

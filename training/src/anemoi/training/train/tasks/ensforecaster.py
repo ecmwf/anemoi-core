@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.models.interface import ModelInterface
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -38,35 +40,36 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
     def __init__(
         self,
         *,
+        model: ModelInterface,
         config: DictConfig,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
-        metadata: dict,
-        supporting_arrays: dict,
+        **kwargs,
     ) -> None:
         """Initialize graph neural network forecaster.
 
         Parameters
         ----------
+        model : ModelInterface
         config : DictConfig
             Job configuration
         statistics : dict
             Statistics of the training data
         data_indices : dict
             Indices of the training data,
-        metadata : dict
-            Provenance information
         """
+        self.nens_per_device = config.training.ensemble_size_per_device
+
         super().__init__(
+            model=model,
             config=config,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            metadata=metadata,
-            supporting_arrays=supporting_arrays,
+            **kwargs,
         )
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)
@@ -92,7 +95,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             self.effective_lr,
         )
 
-        self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
@@ -102,6 +104,9 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_group_rank = None
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
+
+    def _ensemble_size(self) -> int:
+        return self.nens_per_device
 
     def set_ens_comm_group(
         self,

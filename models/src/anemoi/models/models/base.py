@@ -63,29 +63,31 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = model_config.backbone.hidden_nodes_name
+        self.hidden_nodes_name = self._graph_name_hidden
+        self.data_nodes_name = model_config.backbone.data_nodes_name
 
-        self.n_step_input = model_config.training.multistep_input
-        self.n_step_output = model_config.training.multistep_output
-        self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.model.latent_skip
+        self.n_step_input = model_config.multistep_input
+        self.n_step_output = model_config.multistep_output
+        self.num_channels = model_config.num_channels
+        self.latent_skip = model_config.backbone.latent_skip
 
         trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
+            model_config.trainable_parameters,
             data=self.dataset_names,
-            hidden=self._graph_name_hidden,
+            hidden=self.hidden_nodes_name,
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self._assert_hidden_nodes_name(self._graph_name_hidden)
+        self._assert_hidden_nodes_name(self.hidden_nodes_name)
 
         # build networks
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self._build_residual(model_config.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -129,7 +131,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        nodes_name = self.hidden_nodes_name if isinstance(self.hidden_nodes_name, str) else self.hidden_nodes_name[0]
         return self.node_attributes.attr_ndims[nodes_name]
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
@@ -144,8 +146,6 @@ class BaseGraphModel(nn.Module):
             raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
         return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
@@ -332,8 +332,3 @@ class BaseGraphModel(nn.Module):
                     y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
 
         return y_hat
-
-    @abstractmethod
-    def fill_metadata(self, md_dict) -> None:
-        """To be implemented in subclasses to fill model-specific metadata."""
-        pass

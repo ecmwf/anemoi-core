@@ -18,6 +18,7 @@ from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import ConfigDict
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
@@ -26,6 +27,7 @@ from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
+from .data_processor import PreprocessorSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -45,6 +47,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class DefinedModels(str, Enum):
+    NAIVE_MODEL = "anemoi.models.models.NaiveModel"
     ANEMOI_MODEL_ENC_PROC_DEC = "anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec"
     ANEMOI_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDec"
     ANEMOI_ENS_MODEL_ENC_PROC_DEC = "anemoi.models.models.ens_encoder_processor_decoder.AnemoiEnsModelEncProcDec"
@@ -72,6 +75,8 @@ class Model(BaseModel):
     "Model object defined in anemoi.models.model."
     hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
     "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
+    data_nodes_name: str | list[str] = Field(examples=["data", ["data1", "data2"]])
+    "Name of the data nodes. If multi-dataset, it can be a list of names."
     latent_skip: bool = Field(default=True)
     "Add skip connection in latent space before/after processor."
     convert_: str = Field("all", alias="_convert_")
@@ -206,12 +211,18 @@ class DiffusionSchema(BaseModel):
 
 
 class BaseModelSchema(PydanticBaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    multistep_input: PositiveInt = Field(example=2)
+    "Number of input timesteps."
+    multistep_output: PositiveInt = Field(default=1)
+    "Number of output timesteps."
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
     keep_batch_sharded: bool = Field(default=True)
     "Keep the input batch and the output of the model sharded"
-    model: Model = Field(default_factory=Model)
-    "Model schema."
+    backbone: Optional[Model] = Field(default=None)
+    "Backbone model schema."
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
     bounding: list[Bounding]
@@ -253,6 +264,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "Residual connection schema."
+    processors: dict[str, dict[str, PreprocessorSchema]] = Field(default_factory=dict)
+    "Pre/post processors per dataset, keyed by dataset name then processor name."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
 
@@ -314,8 +327,8 @@ class EnsModelSchema(BaseModelSchema):
 
 
 class DiffusionModelSchema(BaseModelSchema):
-    model: DiffusionModel = Field(default_factory=DiffusionModel)
-    "Diffusion Model schema"
+    backbone: Optional[DiffusionModel] = Field(default=None)
+    "Diffusion backbone schema."
 
     @model_validator(mode="after")
     def validate_no_bounding_for_diffusion(self) -> "DiffusionModelSchema":
@@ -341,6 +354,28 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
+class NaiveModelSchema(PydanticBaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    backbone: Optional[Model] = Field(default=None)
+    "Backbone model schema."
+    trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
+    "Learnable node and edge parameters."
+    bounding: list[Bounding] = Field(default_factory=list)
+    "List of bounding configurations."
+    output_mask: OutputMaskSchemas = Field(
+        default_factory=lambda: NoOutputMaskSchema(_target_="anemoi.training.utils.masks.NoOutputMask"),
+    )
+    "Output mask."
+    num_channels: NonNegativeInt = Field(default=0)
+    "Unused for naive model, kept for config compatibility."
+
+
 ModelSchema = Union[
-    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+    NaiveModelSchema,
+    BaseModelSchema,
+    EnsModelSchema,
+    HierarchicalModelSchema,
+    DiffusionModelSchema,
+    DiffusionTendModelSchema,
 ]

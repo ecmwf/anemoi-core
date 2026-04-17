@@ -442,7 +442,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         epoch: int,
     ) -> None:
         _ = epoch
-        model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
+        model = pl_module.model.module.backbone if hasattr(pl_module.model, "module") else pl_module.model.backbone
         node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
 
         for dataset_name in dataset_names:
@@ -636,7 +636,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             parameter_positions = list[int](data_indices.model.output.name_to_index.values())
             # reorder parameter_names by position
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
-            metadata_variables = pl_module.model.metadata["dataset"].get("variables_metadata")
+            metadata_variables = pl_module.metadata["dataset"][dataset_name].get("variables_metadata")
 
             # Sort the list using the custom key
             argsort_indices = argsort_variablename_variablelevel(
@@ -770,7 +770,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+            self.latlons[dataset_name] = pl_module.model.backbone._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
         # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
@@ -907,7 +907,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
+                pl_module.model.backbone._graph_data,
                 self.latlons[dataset_name],
                 data,
                 output_tensor,
@@ -1011,7 +1011,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
+                pl_module.model.backbone._graph_data,
                 self.latlons[dataset_name],
                 data,
                 output_tensor,
@@ -1143,7 +1143,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             )
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
+                pl_module.model.backbone._graph_data,
                 self.latlons[dataset_name],
                 data,
                 output_tensor,

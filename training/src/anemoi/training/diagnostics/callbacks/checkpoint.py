@@ -44,12 +44,6 @@ class AnemoiCheckpoint(ModelCheckpoint):
         self._tracker_metadata = None
         self._tracker_name = None
 
-    @staticmethod
-    def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
-        # Get the model from the DataParallel wrapper, for single and multi-gpu cases
-        assert hasattr(trainer, "model"), "Trainer has no attribute 'model'! Is the Pytorch Lightning version correct?"
-        return trainer.model.module.model if hasattr(trainer.model, "module") else trainer.model.model
-
     @rank_zero_only
     def model_metadata(self, model: torch.nn.Module) -> dict:
         if self._model_metadata is not None:
@@ -142,12 +136,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
         del pl_module
 
         if trainer.is_global_zero:
-            model = self._torch_drop_down(trainer)
+            model = trainer.lightning_module.model
             check_classes(model)
 
     def _save_checkpoint(self, trainer: pl.Trainer, lightning_checkpoint_filepath: str) -> None:
         if trainer.is_global_zero:
-            model = self._torch_drop_down(trainer)
+            model = trainer.lightning_module.model
 
             # We want a different uuid each time we save the model
             # so we can tell them apart in the catalogue (i.e. different epochs)
@@ -165,28 +159,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             Path(lightning_checkpoint_filepath).parent.mkdir(parents=True, exist_ok=True)
 
-            save_config = model.config
-            model.config = None
-
-            tmp_metadata = model.metadata
-            model.metadata = None
-
-            tmp_supporting_arrays = model.supporting_arrays
-            model.supporting_arrays = None
-
-            # Make sure we don't accidentally modify these
-            metadata = tmp_metadata.copy()
-            supporting_arrays = tmp_supporting_arrays.copy()
+            metadata = trainer.lightning_module.metadata.copy()
+            supporting_arrays = trainer.lightning_module.supporting_arrays.copy()
 
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             torch.save(model, inference_checkpoint_filepath)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
-
-            model.config = save_config
-            model.metadata = tmp_metadata
-            model.supporting_arrays = tmp_supporting_arrays
 
             self._last_global_step_saved = trainer.global_step
 
@@ -210,9 +190,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
                 trainer.lightning_module._hparams["metadata"]["uuid"] = checkpoint_uuid
 
                 # Extract and save metadata for lightning checkpoint
-                model = self._torch_drop_down(trainer)
-                metadata = model.metadata.copy()
-                supporting_arrays = model.supporting_arrays.copy()
+                metadata = trainer.lightning_module.metadata.copy()
+                supporting_arrays = trainer.lightning_module.supporting_arrays.copy()
 
                 save_metadata(lightning_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 
