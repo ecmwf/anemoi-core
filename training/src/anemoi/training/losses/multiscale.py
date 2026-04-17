@@ -102,13 +102,15 @@ class MultiscaleLossWrapper(BaseLoss):
         """
         super().__init__(ignore_nans=ignore_nans)
 
-        if loss_matrices is not None or loss_matrices_path is not None:
+        # Treat [None] (Hydra-coerced null list) as absent, same as None.
+        _has_matrices = loss_matrices and any(m is not None for m in loss_matrices)
+        if _has_matrices or loss_matrices_path is not None:
             LOGGER.warning(
                 "Passing 'loss_matrices' / 'loss_matrices_path' as top-level kwargs is deprecated. "
                 "Move them inside 'multiscale_config' instead.",
             )
             cfg = dict(multiscale_config) if multiscale_config is not None else {}
-            if loss_matrices is not None:
+            if _has_matrices:
                 cfg.setdefault("loss_matrices", loss_matrices)
             if loss_matrices_path is not None:
                 cfg.setdefault("loss_matrices_path", loss_matrices_path)

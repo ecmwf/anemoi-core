@@ -22,42 +22,36 @@ class SkipConnectionSchema(BaseModel):
 class TruncatedConnectionSchema(BaseModel):
     """Schema for truncated connection residuals.
 
-    Supports two modes:
-    - **Config-based** (preferred): provide ``truncation_config`` with a ``grid``
-      (or ``node_builder``) spec.  The truncation subgraph is built internally.
+    Supports two modes, both specified via ``truncation_config``:
+
+    - **On-the-fly**: provide ``grid`` (or ``node_builder``) — truncation subgraph
+      is built internally from the main graph::
+
+        truncation_config:
+          grid: o32
+          num_nearest_neighbours: 3
+          sigma: 1.0
+
     - **File-based**: provide ``truncation_up_file_path`` and
-      ``truncation_down_file_path`` to load pre-computed projection matrices.
+      ``truncation_down_file_path`` inside ``truncation_config``::
+
+        truncation_config:
+          truncation_down_file_path: /path/to/down.npz
+          truncation_up_file_path: /path/to/up.npz
     """
 
     target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
     truncation_config: dict | None = Field(
         None,
-        description="Truncation projection config. Required keys: 'grid' (or 'node_builder'). "
-        "Optional: 'num_nearest_neighbours' (default 3), 'sigma' (default 1.0). "
-        "Edge weights use 'gauss_weight' with l1-normalised Gaussian distances.",
+        description="Truncation config. For on-the-fly mode provide 'grid' (or 'node_builder'). "
+        "For file mode provide 'truncation_up_file_path' and 'truncation_down_file_path'.",
     )
-    src_node_weight_attribute: str | None = Field(
-        None,
-        description="Optional source-node attribute to multiply into edge weights.",
-    )
-    truncation_up_file_path: str | None = Field(
-        None,
-        description="File path (.npz) for the up-projection matrix (file-based mode).",
-    )
-    truncation_down_file_path: str | None = Field(
-        None,
-        description="File path (.npz) for the down-projection matrix (file-based mode).",
-    )
-    autocast: bool = Field(False, description="Enable mixed-precision autocasting during projection.")
-    row_normalize: bool = Field(False, description="Normalize projection matrix rows so each sums to 1.")
-
-    @model_validator(mode="after")
-    def check_instantiation_method(self) -> Any:
-        file_based = self.truncation_up_file_path is not None and self.truncation_down_file_path is not None
-        config_based = self.truncation_config is not None
-        if file_based and config_based:
-            raise ValueError("Specify either truncation_config or file paths, not both.")
-        return self
+    src_node_weight_attribute: str | None = Field(None)
+    autocast: bool = Field(False)
+    row_normalize: bool = Field(False)
+    # Deprecated: pass inside truncation_config instead.
+    truncation_up_file_path: str | None = Field(None)
+    truncation_down_file_path: str | None = Field(None)
 
 
 ResidualConnectionSchema = Annotated[

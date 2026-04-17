@@ -128,22 +128,37 @@ class TruncatedConnection(BaseResidualConnection):
         self,
         graph: Optional[HeteroData] = None,
         src_node_weight_attribute: Optional[str] = None,
-        truncation_up_file_path: Optional[str] = None,
-        truncation_down_file_path: Optional[str] = None,
+        truncation_config: Optional[dict] = None,
         truncation_up_edges_name: Optional[tuple[str, str, str]] = None,
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
-        truncation_config: Optional[dict] = None,
         data_node_name: str = "data",
         autocast: bool = False,
         row_normalize: bool = False,
+        # Deprecated: pass inside truncation_config instead.
+        truncation_up_file_path: Optional[str] = None,
+        truncation_down_file_path: Optional[str] = None,
+        **_,
     ) -> None:
         super().__init__()
-        if truncation_config is not None:
-            from anemoi.graphs.builders import build_truncation_subgraph
 
-            graph = build_truncation_subgraph(graph, data_node_name, truncation_config)
-            truncation_down_edges_name = (data_node_name, "to", "truncation")
-            truncation_up_edges_name = ("truncation", "to", data_node_name)
+        truncation_config = self._normalise_truncation_config(
+            truncation_config,
+            truncation_up_file_path,
+            truncation_down_file_path,
+        )
+
+        if truncation_config is not None:
+            up_path = truncation_config.get("truncation_up_file_path")
+            down_path = truncation_config.get("truncation_down_file_path")
+            if up_path is not None and down_path is not None:
+                truncation_up_file_path = up_path
+                truncation_down_file_path = down_path
+            else:
+                from anemoi.graphs.builders import build_truncation_subgraph
+
+                graph = build_truncation_subgraph(graph, data_node_name, truncation_config)
+                truncation_down_edges_name = (data_node_name, "to", "truncation")
+                truncation_up_edges_name = ("truncation", "to", data_node_name)
 
         up_edges, down_edges = self._resolve_edges(
             graph=graph,
@@ -172,6 +187,28 @@ class TruncatedConnection(BaseResidualConnection):
         )
 
         self.projector = SparseProjector(autocast=autocast)
+
+    @staticmethod
+    def _normalise_truncation_config(
+        truncation_config: Optional[dict],
+        truncation_up_file_path: Optional[str],
+        truncation_down_file_path: Optional[str],
+    ) -> Optional[dict]:
+        """Forward deprecated top-level file-path kwargs into truncation_config."""
+        has_files = truncation_up_file_path is not None or truncation_down_file_path is not None
+        if not has_files:
+            return truncation_config
+        import logging
+        logging.getLogger(__name__).warning(
+            "Passing 'truncation_up_file_path' / 'truncation_down_file_path' as top-level kwargs "
+            "is deprecated. Move them inside 'truncation_config' instead."
+        )
+        cfg = dict(truncation_config) if truncation_config is not None else {}
+        if truncation_up_file_path is not None:
+            cfg.setdefault("truncation_up_file_path", truncation_up_file_path)
+        if truncation_down_file_path is not None:
+            cfg.setdefault("truncation_down_file_path", truncation_down_file_path)
+        return cfg
 
     @staticmethod
     def _resolve_edges(
