@@ -4,16 +4,7 @@
 overwrite: True
 
 nodes:
-  era5:
-    node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.era5.dataset_config}
-    attributes: ${graph.attributes.nodes}
-  cerra:
-    node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.cerra.dataset_config}
-    attributes: ${graph.attributes.nodes}
+  # Hidden Nodes
   hidden:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes
