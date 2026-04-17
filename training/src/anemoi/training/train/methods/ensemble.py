@@ -202,19 +202,14 @@ class EnsembleTraining(BaseTrainingModule):
     def _make_targets(
         self,
         batch: dict[str, torch.Tensor],
-        *,
-        start: int,
+        **task_step_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Build loss targets for ensemble rollout.
 
         Ground-truth targets are provided with a singleton ensemble axis and
         are reduced to `(batch, time, grid, vars)` for loss computation.
         """
-        y_full = self.task.get_targets(
-            batch,
-            data_indices=self.data_indices,
-            rollout_step=start,
-        )
+        y_full = self.task.get_targets(batch, data_indices=self.data_indices, **task_step_kwargs)
 
         y: dict[str, torch.Tensor] = {}
         for dataset_name, target in y_full.items():
@@ -250,7 +245,6 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-        rollout: int | None = None,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
@@ -260,19 +254,16 @@ class EnsembleTraining(BaseTrainingModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
 
-        if rollout is None:
-            rollout = self.task.steps
-
-        n_steps = 0
-        for task_kwargs in rollout:
-            y_pred = self(x, **task_kwargs)
-            y = self._make_targets(batch, start=task_kwargs.get("rollout_step", 0))
+        task_steps = self.task.steps("training" if not validation_mode else "validation")
+        for task_step_kwargs in task_steps:
+            y_pred = self(x, **task_step_kwargs)
+            y = self._make_targets(batch, **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                **task_kwargs,
+                **task_step_kwargs,
                 validation_mode=validation_mode,
                 pred_layout=IndexSpace.MODEL_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,
@@ -284,15 +275,13 @@ class EnsembleTraining(BaseTrainingModule):
                 x,
                 y_preds_next,
                 batch,
-                **task_kwargs,
+                **task_step_kwargs,
                 data_indices=self.data_indices,
             )
 
             loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
-            n_steps += 1
 
-        if n_steps > 0:
-            loss *= 1.0 / n_steps
+        loss *= 1.0 / len(task_steps)
         return loss, metrics, y_preds

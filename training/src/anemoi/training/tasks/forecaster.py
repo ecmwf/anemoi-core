@@ -87,10 +87,10 @@ class Forecaster(BaseTask):
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = ForecasterPlotAdapter(self)
 
-    @property
-    def steps(self) -> tuple[dict[str, int], ...]:
+    def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
         """Return the current steps configuration based on the rollout step."""
-        return tuple({"rollout_step": i} for i in range(self.rollout.step))
+        max_rollout = self.rollout.step if mode == "training" else self.validation_rollout
+        return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
         """Get the metric name for the current step."""
@@ -110,24 +110,24 @@ class Forecaster(BaseTask):
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
-    def get_offsets(self, label: str = "training") -> list[datetime.timedelta]:
-        if label == "training":
+    def get_offsets(self, mode: str = "training") -> list[datetime.timedelta]:
+        if mode == "training":
             rollout_step = self.rollout.maximum
-        elif label == "validation":
+        elif mode == "validation":
             rollout_step = self.validation_rollout
         else:
             LOGGER.debug(
-                "Unknown label '%s' for %s.get_offsets(), defaulting to training rollout.",
-                label,
+                "Unknown mode '%s' for %s.get_offsets(), defaulting to training rollout.",
+                mode,
                 self.__class__.__name__,
             )
             rollout_step = max(self.rollout.maximum, self.validation_rollout)
 
         return self._compute_rollout_offsets(rollout_step)
 
-    def get_output_offsets(self, rollout_step: int = 0, label: str = "training", **_kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(self, rollout_step: int = 0, mode: str = "training", **_kwargs) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
-        rollout_step = rollout_step if label == "training" else self.validation_rollout
+        rollout_step = rollout_step if mode == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
