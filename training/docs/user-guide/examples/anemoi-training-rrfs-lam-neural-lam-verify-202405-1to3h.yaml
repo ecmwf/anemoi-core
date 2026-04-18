@@ -113,11 +113,38 @@ diagnostics:
       epoch: 1
     sample_idx: 0
     parameters:
+      - clmr_500
+      - clmr_850
+      - clmr_925
+      - grle_500
+      - grle_850
+      - grle_925
+      - height_200
       - height_500
+      - height_850
+      - height_925
+      - icmr_500
+      - icmr_850
+      - icmr_925
       - refc
+      - rwmr_500
+      - rwmr_850
+      - rwmr_925
+      - snmr_500
+      - snmr_850
+      - snmr_925
+      - temp_200
       - temp_500
+      - temp_850
+      - temp_925
+      - ugrd_200
       - ugrd_500
+      - ugrd_850
+      - ugrd_925
+      - vgrd_200
       - vgrd_500
+      - vgrd_850
+      - vgrd_925
     precip_and_related_fields: []
     colormaps: {}
     callbacks:
@@ -137,11 +164,38 @@ diagnostics:
     every_n_batches: 1
     sample_idx: 0
     parameters:
+      - clmr_500
+      - clmr_850
+      - clmr_925
+      - grle_500
+      - grle_850
+      - grle_925
+      - height_200
       - height_500
+      - height_850
+      - height_925
+      - icmr_500
+      - icmr_850
+      - icmr_925
       - refc
+      - rwmr_500
+      - rwmr_850
+      - rwmr_925
+      - snmr_500
+      - snmr_850
+      - snmr_925
+      - temp_200
       - temp_500
+      - temp_850
+      - temp_925
+      - ugrd_200
       - ugrd_500
+      - ugrd_850
+      - ugrd_925
+      - vgrd_200
       - vgrd_500
+      - vgrd_850
+      - vgrd_925
     output_dir: ${system.output.root}/predictions
     start: ${dataloader.training.datasets.data.start}
     frequency: ${data.frequency}
