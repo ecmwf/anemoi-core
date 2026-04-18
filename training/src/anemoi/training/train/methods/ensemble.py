@@ -273,7 +273,7 @@ class EnsembleTraining(BaseTrainingModule):
             # Advance input state for each dataset
             x = self.task.advance_input(
                 x,
-                y_preds_next,
+                y_pred,
                 batch,
                 **task_step_kwargs,
                 data_indices=self.data_indices,
