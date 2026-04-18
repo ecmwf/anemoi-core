@@ -48,25 +48,25 @@ def _data_indices_single() -> dict[str, IndexCollection]:
 def test_forecaster_single_input_offset() -> None:
     """multistep_input=1 produces a single input offset at t=0."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
-    assert task.input_offsets == [datetime.timedelta(0)]
+    assert task._input_offsets == [datetime.timedelta(0)]
 
 
 def test_forecaster_multi_input_offsets_are_sorted() -> None:
     """multistep_input=2 produces sorted offsets [-6h, 0h]."""
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
-    assert task.input_offsets == [datetime.timedelta(hours=-6), datetime.timedelta(0)]
+    assert task._input_offsets == [datetime.timedelta(hours=-6), datetime.timedelta(0)]
 
 
 def test_forecaster_single_output_offset() -> None:
     """multistep_output=1 produces one output offset at +1 timestep."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
-    assert task.output_offsets == [datetime.timedelta(hours=6)]
+    assert task._output_offsets == [datetime.timedelta(hours=6)]
 
 
 def test_forecaster_multi_output_offsets() -> None:
     """multistep_output=2 produces offsets [+6h, +12h]."""
     task = Forecaster(multistep_input=1, multistep_output=2, timestep="6h")
-    assert task.output_offsets == [datetime.timedelta(hours=6), datetime.timedelta(hours=12)]
+    assert task._output_offsets == [datetime.timedelta(hours=6), datetime.timedelta(hours=12)]
 
 
 def test_forecaster_steps_is_single_element() -> None:

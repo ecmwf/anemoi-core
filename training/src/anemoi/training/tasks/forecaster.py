@@ -89,7 +89,7 @@ class Forecaster(BaseTask):
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
         """Return the current steps configuration based on the rollout step."""
-        max_rollout = self.rollout.step if mode == "training" else self.validation_rollout
+        max_rollout = self.validation_rollout if mode == "validation" else self.rollout.step
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:

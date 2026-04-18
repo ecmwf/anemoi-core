@@ -17,9 +17,9 @@ from anemoi.training.tasks import Autoencoder
 def test_autoencoder_input_and_output_offsets_are_both_zero() -> None:
     """Autoencoder operates on a single snapshot at t=0."""
     task = Autoencoder()
-    assert task.input_offsets == [datetime.timedelta(0)]
-    assert task.output_offsets == [datetime.timedelta(0)]
-    assert task.offsets == [datetime.timedelta(0)]
+    assert task._input_offsets == [datetime.timedelta(0)]
+    assert task._output_offsets == [datetime.timedelta(0)]
+    assert task._offsets == [datetime.timedelta(0)]
 
 
 def test_autoencoder_has_exactly_one_step_with_no_kwargs() -> None:

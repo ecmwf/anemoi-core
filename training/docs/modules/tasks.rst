@@ -26,13 +26,11 @@ the hierarchy. It is constructed from two lists of
 - ``output_offsets`` — time offsets of the model targets, e.g. ``[6H]``
   for a single-step forecast.
 
-The union of these two lists (``task.offsets``) tells the datamodule
+The union of these two lists (``task._offsets``) tells the datamodule
 which time steps to load for each sample.
 
 Key properties and methods:
 
-- ``input_offsets`` / ``output_offsets`` — sorted timedelta lists.
-- ``offsets`` — full sorted union, used by the datamodule.
 - ``num_input_timesteps`` / ``num_output_timesteps`` — lengths of the
   offset lists.
 - ``steps`` — iterable of per-step dicts (e.g. ``{"rollout_step": 0}``);
@@ -43,6 +41,9 @@ Key properties and methods:
   within the full batch tensor's time dimension.
 - ``get_inputs`` / ``get_targets`` — extract and index-select the
   appropriate slices from a batch dict.
+- ``get_input_offsets()`` / ``get_output_offsets()`` / ``get_offsets()``
+  — return the input, output, and full list of time offsets,
+  respectively. Used by the datamodule.
 
 .. automodule:: anemoi.training.tasks.base
    :members:

@@ -21,7 +21,7 @@ def test_temporal_downscaler_interior_offsets_only() -> None:
         output_right_boundary=False,
     )
     expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
-    assert task.output_offsets == expected
+    assert task._output_offsets == expected
 
 
 def test_temporal_downscaler_left_boundary_included() -> None:
@@ -33,7 +33,7 @@ def test_temporal_downscaler_left_boundary_included() -> None:
         output_right_boundary=False,
     )
     expected = [datetime.timedelta(hours=0), datetime.timedelta(hours=2), datetime.timedelta(hours=4)]
-    assert task.output_offsets == expected
+    assert task._output_offsets == expected
 
 
 def test_temporal_downscaler_right_boundary_included() -> None:
@@ -45,7 +45,7 @@ def test_temporal_downscaler_right_boundary_included() -> None:
         output_right_boundary=True,
     )
     expected = [datetime.timedelta(hours=2), datetime.timedelta(hours=4), datetime.timedelta(hours=6)]
-    assert task.output_offsets == expected
+    assert task._output_offsets == expected
 
 
 def test_temporal_downscaler_both_boundaries_included() -> None:
@@ -62,7 +62,7 @@ def test_temporal_downscaler_both_boundaries_included() -> None:
         datetime.timedelta(hours=4),
         datetime.timedelta(hours=6),
     ]
-    assert task.output_offsets == expected
+    assert task._output_offsets == expected
 
 
 def test_temporal_downscaler_num_output_timesteps_matches_offsets() -> None:
@@ -73,10 +73,10 @@ def test_temporal_downscaler_num_output_timesteps_matches_offsets() -> None:
         output_left_boundary=True,
         output_right_boundary=True,
     )
-    assert task.num_output_timesteps == len(task.output_offsets) == 4
+    assert task.num_output_timesteps == len(task._output_offsets) == 4
 
 
 def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
     """Input offsets are always [0h, input_timestep] regardless of output settings."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
-    assert task.input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
+    assert task._input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
