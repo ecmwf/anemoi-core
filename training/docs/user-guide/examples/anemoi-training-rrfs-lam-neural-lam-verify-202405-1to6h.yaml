@@ -1,0 +1,19 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1to3h
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with multistep_output=3.
+# This runs two rollout steps, so validation covers +1h through +6h:
+# - rstep00 out00/out01/out02 -> +1h/+2h/+3h
+# - rstep01 out00/out01/out02 -> +4h/+5h/+6h
+
+dataloader:
+  validation_rollout: 2
+
+training:
+  rollout:
+    start: 2
+    epoch_increment: 0
+    max: 2
