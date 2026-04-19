@@ -1,0 +1,11 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-refc-tendency-loss
+  - _self_
+
+data:
+  datasets:
+    data:
+      # Keep refc as a predicted variable, but remove it from the model input.
+      # In Anemoi, diagnostic variables are forecast outputs that are not fed back in as state inputs.
+      diagnostic:
+        - refc

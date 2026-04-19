@@ -449,6 +449,7 @@ def plot_predicted_multilevel_flat_sample(
     y_pred: np.ndarray,
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
+    diagnostic_input_reference_fields: list[str] | None = None,
     colormaps: dict[str, Colormap] | None = None,
     time_label: str | None = None,
     input_time_label: str | None = None,
@@ -503,6 +504,7 @@ def plot_predicted_multilevel_flat_sample(
         valid_time_label = time_label
     if input_time_label is None and time_label is not None:
         input_time_label = time_label
+    diagnostic_input_reference_fields = diagnostic_input_reference_fields or []
 
     for plot_idx, (variable_idx, (variable_name, output_only)) in enumerate(parameters.items()):
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * int(output_only)
@@ -534,6 +536,7 @@ def plot_predicted_multilevel_flat_sample(
             time_label=time_label,
             input_time_label=input_time_label,
             valid_time_label=valid_time_label,
+            use_input_reference_title=(variable_name in diagnostic_input_reference_fields),
         )
     return fig
 
@@ -555,6 +558,7 @@ def plot_flat_sample(
     time_label: str | None = None,
     input_time_label: str | None = None,
     valid_time_label: str | None = None,
+    use_input_reference_title: bool = False,
 ) -> None:
     """Plot a "flat" 1D sample.
 
@@ -612,6 +616,15 @@ def plot_flat_sample(
         f"{vname} increment [pred - input]",
         f"{vname} persist err",
     ]
+    if use_input_reference_title:
+        titles = [
+            f"{vname} prior-state ref",
+            f"{vname} target",
+            f"{vname} pred",
+            f"{vname} pred err",
+            f"{vname} increment [pred - prior-state ref]",
+            f"{vname} persist err [target - prior-state ref]",
+        ]
     if valid_time_label is None and time_label is not None:
         valid_time_label = time_label
     if input_time_label is None and time_label is not None:

@@ -111,9 +111,11 @@ class BasePlotCallback(Callback, ABC):
         name_to_index: dict[str, int],
         parameters: list[str],
         diagnostics: list[str] | None = None,
+        force_input_reference_fields: list[str] | None = None,
         label: str | None = None,
     ) -> dict[int, tuple[str, bool]]:
         diagnostics = [] if diagnostics is None else diagnostics
+        force_input_reference_fields = [] if force_input_reference_fields is None else force_input_reference_fields
         missing = [p for p in parameters if p not in name_to_index]
         if missing:
             tag = f" ({label})" if label else ""
@@ -123,7 +125,11 @@ class BasePlotCallback(Callback, ABC):
                 tag,
                 missing[:10],
             )
-        return {name_to_index[p]: (p, p not in diagnostics) for p in parameters if p in name_to_index}
+        return {
+            name_to_index[p]: (p, (p not in diagnostics) or (p in force_input_reference_fields))
+            for p in parameters
+            if p in name_to_index
+        }
 
     def _get_init_step(self, rollout_step: int, mode: tuple) -> int:
         """Return index of initial step for plotting."""
@@ -1215,6 +1221,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         accumulation_levels_plot: list[float],
         output_steps: int,
         precip_and_related_fields: list[str] | None = None,
+        diagnostic_input_reference_fields: list[str] | None = None,
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
@@ -1251,6 +1258,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.parameters = parameters
 
         self.precip_and_related_fields = precip_and_related_fields
+        self.diagnostic_input_reference_fields = diagnostic_input_reference_fields or []
         self.accumulation_levels_plot = accumulation_levels_plot
         self.output_steps = output_steps
         self.per_sample = per_sample
@@ -1299,6 +1307,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                     pl_module.data_indices[dataset_name].model.output.name_to_index,
                     param_chunk,
                     diagnostics,
+                    force_input_reference_fields=self.diagnostic_input_reference_fields,
                     label=dataset_name,
                 )
                 if not plot_parameters_dict:
@@ -1353,6 +1362,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 pred_field,
                                 datashader=self.datashader_plotting,
                                 precip_and_related_fields=self.precip_and_related_fields,
+                                diagnostic_input_reference_fields=self.diagnostic_input_reference_fields,
                                 colormaps=self.colormaps,
                                 input_time_label=input_time_label,
                                 valid_time_label=time_label,
@@ -1415,6 +1425,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                             pred_field,
                             datashader=self.datashader_plotting,
                             precip_and_related_fields=self.precip_and_related_fields,
+                            diagnostic_input_reference_fields=self.diagnostic_input_reference_fields,
                             colormaps=self.colormaps,
                             input_time_label=input_time_label,
                             valid_time_label=time_label,

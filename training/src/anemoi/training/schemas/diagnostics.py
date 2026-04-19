@@ -140,6 +140,8 @@ class PlotSampleSchema(BaseModel):
     "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
+    diagnostic_input_reference_fields: list[str] | None = Field(default=None)
+    "Diagnostic/output-only variables that should still show input-style panels using the prior state as a reference."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
