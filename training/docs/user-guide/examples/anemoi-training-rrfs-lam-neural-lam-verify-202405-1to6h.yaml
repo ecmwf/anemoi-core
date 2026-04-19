@@ -17,3 +17,37 @@ training:
     start: 2
     epoch_increment: 0
     max: 2
+
+diagnostics:
+  plot:
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        sample_idx: 0
+        parameters: ${diagnostics.plot.parameters}
+        per_sample: 6
+        accumulation_levels_plot: [0.01]
+        output_steps: ${training.multistep_output}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        colormaps: ${diagnostics.plot.colormaps}
+        every_n_batches: 1
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        sample_idx: 6
+        parameters: ${diagnostics.plot.parameters}
+        per_sample: 6
+        accumulation_levels_plot: [0.01]
+        output_steps: ${training.multistep_output}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        colormaps: ${diagnostics.plot.colormaps}
+        every_n_batches: 1
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+        sample_idx: 12
+        parameters: ${diagnostics.plot.parameters}
+        per_sample: 6
+        accumulation_levels_plot: [0.01]
+        output_steps: ${training.multistep_output}
+        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+        colormaps: ${diagnostics.plot.colormaps}
+        every_n_batches: 1
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
