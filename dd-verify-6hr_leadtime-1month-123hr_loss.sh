@@ -9,8 +9,8 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=0
 #SBATCH -t 8:00:00
-#SBATCH -o anemoi-gpu-1mon-3hrleadtime_123hr_loss-verify.%j.out
-#SBATCH -e anemoi-gpu-1mon-3hrleadtime-123hr_loss-verify.%j.err
+#SBATCH -o anemoi-gpu-1mon-6hrleadtime_123hr_loss-verify.%j.out
+#SBATCH -e anemoi-gpu-1mon-6hrleadtime-123hr_loss-verify.%j.err
 
 set -euo pipefail
 
@@ -25,9 +25,9 @@ cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 #run_id="58a03191-bccf-45c6-9b3c-19b314d1fbe7"
 #run_id="5cdef9b4-a3fa-4105-8a31-edfbe0cc0c79"
 run_id="5cdef9b4-a3fa-4105-8a31-edfbe0cc0c79"
-training/docs/user-guide/examples/run_rrfs_verify_export_1to3h.sh \
+training/docs/user-guide/examples/run_rrfs_verify_export_1to6h.sh \
   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/${run_id}/inference-last.ckpt \
-  2024-05-05T00:00:00 2024-05-30T23:00:00 1h
+  2024-05-02T09:00:00 2024-05-31T20:00:00 1h
 
 
 
