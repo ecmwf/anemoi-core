@@ -15,7 +15,6 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -205,8 +204,6 @@ class BaseTask(ABC):
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
             "timestep": timestep,  # backwards compatibility with inference
-            "input_offsets": [frequency_to_string(o) for o in self._input_offsets],
-            "output_offsets": [frequency_to_string(o) for o in self._output_offsets],
         }
 
         dataset_names = md_dict["metadata_inference"]["dataset_names"]
