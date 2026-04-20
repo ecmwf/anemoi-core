@@ -148,9 +148,14 @@ class EnsembleTraining(BaseTrainingModule):
         Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
         dimension.
         """
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, :, 0, ...]
+        y: dict[str, torch.Tensor] = {}
+        for dataset_name, target in batch.items():
+            msg = (
+                "Expected singleton ensemble dimension in target for "
+                f"{dataset_name}, got shape {tuple(target.shape)}."
+            )
+            assert target.ndim == 5 and target.shape[2] == 1, msg
+            y[dataset_name] = target[:, :, 0, :, :]
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
 
         return y
@@ -199,30 +204,6 @@ class EnsembleTraining(BaseTrainingModule):
 
         return loss, metrics_next, y_pred_ens
 
-    def _make_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-        **task_step_kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Build loss targets for ensemble rollout.
-
-        Ground-truth targets are provided with a singleton ensemble axis and
-        are reduced to `(batch, time, grid, vars)` for loss computation.
-        """
-        y_full = self.task.get_targets(batch, data_indices=self.data_indices, **task_step_kwargs)
-
-        y: dict[str, torch.Tensor] = {}
-        for dataset_name, target in y_full.items():
-            msg = (
-                "Expected singleton ensemble dimension in target for "
-                f"{dataset_name}, got shape {tuple(target.shape)}."
-            )
-            assert target.ndim == 5 and target.shape[2] == 1, msg
-            y[dataset_name] = target[:, :, 0, :, :]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-
-        return y
-
     def forward(self, x: dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
@@ -257,7 +238,9 @@ class EnsembleTraining(BaseTrainingModule):
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for task_step_kwargs in task_steps:
             y_pred = self(x, **task_step_kwargs)
-            y = self._make_targets(batch, **task_step_kwargs)
+
+            y_full = self.task.get_targets(batch, **task_step_kwargs)
+            y = self._collapse_ens_dim(y_full)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,

@@ -152,20 +152,13 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
-    def get_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-        data_indices: dict[str, IndexCollection],  # noqa: ARG002
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    def get_targets(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Extract model targets from a batch.
 
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
             Full batch keyed by dataset name.
-        data_indices : dict[str, IndexCollection]
-            Data indices per dataset.
         **kwargs
             Forwarded to ``get_batch_output_indices`` (e.g.
             ``rollout_step``).
