@@ -104,14 +104,14 @@ class BaseTask(ABC):
         """
         return self._offsets
 
-    def _offset_to_batch_indices(self, offsets: list[datetime.timedelta], **kwargs) -> list[int]:
+    def _offsets_to_batch_indices(self, offsets: list[datetime.timedelta], **kwargs) -> list[int]:
         """Map a list of offsets to their positions in ``self._offsets``."""
         full = self.get_offsets(**kwargs)
         return [full.index(o) for o in offsets]
 
     def get_batch_input_indices(self, **kwargs) -> list[int]:
         """Positions of the input offsets within the full batch ``_offsets``."""
-        return self._offset_to_batch_indices(self.get_input_offsets(**kwargs))
+        return self._offsets_to_batch_indices(self.get_input_offsets(**kwargs))
 
     def get_batch_output_indices(self, **kwargs) -> list[int]:
         """Positions of the output offsets within the full batch ``_offsets``.
@@ -120,7 +120,7 @@ class BaseTask(ABC):
         subclasses can parametrise the output selection (e.g. per
         rollout step).
         """
-        return self._offset_to_batch_indices(self.get_output_offsets(**kwargs))
+        return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
     def get_inputs(
         self,
