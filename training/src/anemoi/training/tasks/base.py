@@ -15,7 +15,7 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.data.relative_time_indices import normalize_time_indices
+from anemoi.training.utils.time_indices import normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
