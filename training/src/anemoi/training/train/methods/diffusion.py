@@ -284,7 +284,7 @@ class DiffusionTraining(BaseDiffusionTraining):
         return loss, metrics, [y_pred]
 
 
-class DiffusionTendTraining(BaseDiffusionTraining):
+class DiffusionTendencyTraining(BaseDiffusionTraining):
     """Graph neural network for diffusion tendency prediction."""
 
     def __init__(

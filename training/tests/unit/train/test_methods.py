@@ -30,7 +30,7 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.diffusion import BaseDiffusionTraining
-from anemoi.training.train.methods.diffusion import DiffusionTendTraining
+from anemoi.training.train.methods.diffusion import DiffusionTendencyTraining
 from anemoi.training.train.methods.diffusion import DiffusionTraining
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
@@ -1240,7 +1240,7 @@ def test_diffusion_training_target_reduction_fast_paths() -> None:
 def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DiffusionTendTraining.compute_dataset_loss_metrics must use DATA_FULL for validation metrics.
+    """DiffusionTendencyTraining.compute_dataset_loss_metrics must use DATA_FULL for validation metrics.
 
     The state-space targets (y_state) originate from get_targets() which returns DATA_FULL.
     After applying the imputer inverse they are compared against the predicted state using
@@ -1249,7 +1249,7 @@ def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_sta
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
 
-    forecaster = DiffusionTendTraining.__new__(DiffusionTendTraining)
+    forecaster = DiffusionTendencyTraining.__new__(DiffusionTendencyTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
 
@@ -1274,7 +1274,7 @@ def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_sta
     forecaster.model = _DummyOuter()
 
     def _prepare_tensors_stub(
-        self: DiffusionTendTraining,
+        self: DiffusionTendencyTraining,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         validation_mode: bool = False,
@@ -1284,7 +1284,7 @@ def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_sta
         return y_pred, y, slice(0, 1)
 
     def _compute_loss_stub(
-        self: DiffusionTendTraining,
+        self: DiffusionTendencyTraining,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         **kwargs: Any,
@@ -1294,7 +1294,7 @@ def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_sta
         return torch.tensor(0.0)
 
     def _compute_metrics_stub(
-        self: DiffusionTendTraining,
+        self: DiffusionTendencyTraining,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         **kwargs: Any,
@@ -1304,9 +1304,9 @@ def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_data_full_sta
         captured["metric_kwargs"] = kwargs
         return {"dummy": torch.tensor(1.0)}
 
-    monkeypatch.setattr(DiffusionTendTraining, "_prepare_tensors_for_loss", _prepare_tensors_stub, raising=True)
-    monkeypatch.setattr(DiffusionTendTraining, "_compute_loss", _compute_loss_stub, raising=True)
-    monkeypatch.setattr(DiffusionTendTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
+    monkeypatch.setattr(DiffusionTendencyTraining, "_prepare_tensors_for_loss", _prepare_tensors_stub, raising=True)
+    monkeypatch.setattr(DiffusionTendencyTraining, "_compute_loss", _compute_loss_stub, raising=True)
+    monkeypatch.setattr(DiffusionTendencyTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
 
     b, e, g = 2, 1, 4
     n_model = len(data_indices["data"].model.output.full)

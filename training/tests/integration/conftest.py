@@ -393,7 +393,7 @@ def benchmark_config(
     elif test_case == "diffusiontend":
         overrides = [
             "model=graphtransformer_diffusiontend",
-            "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
+            "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
         ]
         base_config = "diffusion"
     else:
@@ -520,7 +520,7 @@ def imerg_target_config(
         [],
         [
             "model=graphtransformer_diffusiontend",
-            "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
+            "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
         ],
     ],
     ids=["diffusion", "diffusiontend"],
@@ -556,7 +556,7 @@ def diffusion_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.training_method=anemoi.training.train.methods.DiffusionTendTraining",
+                "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
             ],
             id="diffusiontend",
         ),
