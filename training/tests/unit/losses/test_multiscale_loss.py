@@ -20,7 +20,6 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -95,14 +94,14 @@ def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, t
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
 
 
-def test_multiscale_schema_validates_file_weights_length() -> None:
-    with pytest.raises(ValueError, match="weights must have same length as loss_matrices"):
-        MultiScaleLossSchema(
-            _target_="anemoi.training.losses.MultiscaleLossWrapper",
-            per_scale_loss={"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
-            weights=[1.0],
+def test_multiscale_weights_length_mismatch_raises() -> None:
+    per_scale_loss = MSELoss()
+    with pytest.raises(AssertionError):
+        MultiscaleLossWrapper(
+            per_scale_loss=per_scale_loss,
+            weights=[1.0],  # 1 weight but multiscale_config gives 2 scales (1 smoothed + full-res)
             keep_batch_sharded=False,
-            loss_matrices=["matrix.npz", None],
+            multiscale_config={"loss_matrices": ["matrix.npz", None]},
         )
 
 
@@ -134,7 +133,6 @@ def test_multi_scale(
     )
 
     multiscale_loss = MultiscaleLossWrapper(
-        loss_matrices=[None, "fake"],
         per_scale_loss=per_scale_loss,
         weights=weights,
         keep_batch_sharded=False,

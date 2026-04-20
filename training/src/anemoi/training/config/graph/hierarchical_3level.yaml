@@ -1,7 +1,4 @@
 ---
-defaults:
-  - _self_
-
 overwrite: True
 
 

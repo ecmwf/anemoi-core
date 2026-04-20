@@ -1,7 +1,4 @@
 ---
-defaults:
-  - _self_
-
 overwrite: False
 
 # This config file can be used to load a graph from your local filesystem

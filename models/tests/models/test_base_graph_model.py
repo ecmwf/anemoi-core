@@ -75,9 +75,6 @@ def _make_hierarchical_graph() -> HeteroData:
 def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
-            "graph": {
-                "projections": {},
-            },
             "training": {
                 "multistep_input": 1,
                 "multistep_output": 1,
@@ -114,9 +111,6 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
 def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
-            "graph": {
-                "projections": {},
-            },
             "training": {
                 "multistep_input": 1,
                 "multistep_output": 1,
@@ -153,9 +147,6 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 def test_base_graph_model_accepts_dotdict_model_config() -> None:
     model_config = DotDict(
         {
-            "graph": {
-                "projections": {},
-            },
             "training": {
                 "multistep_input": 1,
                 "multistep_output": 1,
