@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
+from anemoi.training.utils.masks import Boolean1DMask
 
 
 def _make_minimal_index_collection(
@@ -225,3 +226,30 @@ def test_rollout_advance_input_keeps_latest_steps(
     )
     for idx, value in enumerate(expected):
         assert torch.all(updated[:, idx] == value)
+
+
+def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() -> None:
+    """Boundary-masked prognostics are reset from truth before the next rollout step."""
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = _make_minimal_index_collection(name_to_index, forcing=["force"])
+    output_mask = Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask")
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+
+    x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
+    y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
+    batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
+    batch[:, 2, 0, :, 0] = torch.tensor([100.0, 200.0])
+    batch[:, 2, 0, :, 1] = torch.tensor([1000.0, 2000.0])
+
+    updated = task._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask=output_mask,
+        grid_shard_slice=slice(None),
+    )
+
+    torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
+    torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
