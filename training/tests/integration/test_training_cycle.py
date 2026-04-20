@@ -67,25 +67,19 @@ def test_training_cycle_global(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_global_config(
-    global_config: tuple[DictConfig, str, str],
-) -> None:
+def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     BaseSchema(**cfg)
 
 
-def test_config_validation_rejects_invalid_projection_kind(
-    global_config: tuple[DictConfig, str, str],
-) -> None:
+def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     cfg.diagnostics.plot.projection_kind = "invalid_projection"
     with pytest.raises(ValidationError, match="projection_kind"):
         BaseSchema(**cfg)
 
 
-def test_config_without_validation_accepts_invalid_projection_kind(
-    global_config: tuple[DictConfig, str, str],
-) -> None:
+def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     cfg.config_validation = False
     cfg.diagnostics.plot.projection_kind = "invalid_projection"
@@ -159,9 +153,7 @@ def test_training_cycle_stretched(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_stretched(
-    stretched_config: tuple[DictConfig, list[str]],
-) -> None:
+def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = stretched_config
     BaseSchema(**cfg)
 
@@ -180,9 +172,7 @@ def test_training_cycle_multidatasets(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_multidatasets(
-    multidatasets_config: tuple[DictConfig, list[str]],
-) -> None:
+def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidatasets_config
     BaseSchema(**cfg)
 
@@ -251,9 +241,7 @@ def test_training_cycle_ensemble_graph_multiscale(
     trainer.train()
 
 
-def test_config_validation_ensemble_graph_multiscale(
-    ensemble_graph_multiscale_config: tuple[DictConfig, str],
-) -> None:
+def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_graph_multiscale_config
     BaseSchema(**cfg)
 
@@ -298,9 +286,7 @@ def test_training_cycle_hierarchical(
     AnemoiTrainer(cfg).train()
 
 
-def test_config_validation_hierarchical(
-    hierarchical_config: tuple[DictConfig, list[str]],
-) -> None:
+def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = hierarchical_config
     BaseSchema(**cfg)
 
@@ -319,9 +305,7 @@ def test_training_cycle_autoencoder(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_autoencoder(
-    autoencoder_config: tuple[DictConfig, list[str]],
-) -> None:
+def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = autoencoder_config
     BaseSchema(**cfg)
 
@@ -394,9 +378,7 @@ def test_training_cycle_interpolator(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_interpolator(
-    interpolator_config: tuple[DictConfig, str],
-) -> None:
+def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
     """Schema-level validation for the temporal interpolation config."""
     cfg, _ = interpolator_config
     BaseSchema(**cfg)

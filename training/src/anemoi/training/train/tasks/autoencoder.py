@@ -54,7 +54,6 @@ class GraphAutoEncoder(BaseGraphModule):
             Job configuration
         graph_data : HeteroData
             Graph object
-            Per-dataset projection metadata resolved from the graph.
         statistics : dict
             Statistics of the training data
         data_indices : IndexCollection
