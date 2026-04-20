@@ -213,15 +213,6 @@ class BaseDiffusionTraining(BaseTrainingModule):
 class DiffusionTraining(BaseDiffusionTraining):
     """Graph neural network for diffusion."""
 
-    def _get_diffusion_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Return (model-output targets for noising, full targets for loss)."""
-        target = self.task.get_targets(batch, data_indices=self.data_indices)
-        y = self.reduce_data_output_target_to_model_output(self.get_data_output_target(target))
-        return y, target
-
     def _step(
         self,
         batch: dict[str, torch.Tensor],
@@ -247,7 +238,9 @@ class DiffusionTraining(BaseDiffusionTraining):
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
-        y, target = self._get_diffusion_targets(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        target = self.task.get_targets(batch)
+        target_data_output = self.get_data_output_target(target)  # (bs, n_step_output, ens, latlon, nvar)
+        y = self.reduce_data_output_target_to_model_output(target_data_output)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -517,9 +510,8 @@ class DiffusionTendTraining(BaseDiffusionTraining):
         # batch is already normalized in BaseTrainingModule._normalize_batch
         # x: data.input.full (normalized), state_target: data.full (normalized slice view)
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
-        state_target = self.task.get_targets(batch, data_indices=self.data_indices)
+        state_target = self.task.get_targets(batch)
         y_data_output = self.get_data_output_target(state_target)  # (bs, n_step_output, ens, latlon, nvar)
-        # Move to get_target()?, y = self.task.get_targets(batch, data_indices=self.data_indices)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:

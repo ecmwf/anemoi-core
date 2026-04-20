@@ -15,7 +15,6 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -105,14 +104,14 @@ class BaseTask(ABC):
         """
         return self._offsets
 
-    def _offset_to_batch_indices(self, offsets: list[datetime.timedelta], **kwargs) -> list[int]:
+    def _offsets_to_batch_indices(self, offsets: list[datetime.timedelta], **kwargs) -> list[int]:
         """Map a list of offsets to their positions in ``self._offsets``."""
         full = self.get_offsets(**kwargs)
         return [full.index(o) for o in offsets]
 
     def get_batch_input_indices(self, **kwargs) -> list[int]:
         """Positions of the input offsets within the full batch ``_offsets``."""
-        return self._offset_to_batch_indices(self.get_input_offsets(**kwargs))
+        return self._offsets_to_batch_indices(self.get_input_offsets(**kwargs))
 
     def get_batch_output_indices(self, **kwargs) -> list[int]:
         """Positions of the output offsets within the full batch ``_offsets``.
@@ -121,7 +120,7 @@ class BaseTask(ABC):
         subclasses can parametrise the output selection (e.g. per
         rollout step).
         """
-        return self._offset_to_batch_indices(self.get_output_offsets(**kwargs))
+        return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
     def get_inputs(
         self,
@@ -153,20 +152,13 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
-    def get_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-        data_indices: dict[str, IndexCollection],  # noqa: ARG002
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    def get_targets(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Extract model targets from a batch.
 
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
             Full batch keyed by dataset name.
-        data_indices : dict[str, IndexCollection]
-            Data indices per dataset.
         **kwargs
             Forwarded to ``get_batch_output_indices`` (e.g.
             ``rollout_step``).
@@ -205,8 +197,6 @@ class BaseTask(ABC):
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
             "timestep": timestep,  # backwards compatibility with inference
-            "input_offsets": [frequency_to_string(o) for o in self._input_offsets],
-            "output_offsets": [frequency_to_string(o) for o in self._output_offsets],
         }
 
         dataset_names = md_dict["metadata_inference"]["dataset_names"]
