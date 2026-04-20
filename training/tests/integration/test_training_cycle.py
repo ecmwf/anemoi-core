@@ -228,8 +228,8 @@ def test_training_cycle_ensemble_graph_multiscale(
     get_test_archive: GetTestArchive,
 ) -> None:
     cfg, url = ensemble_graph_multiscale_config
-    assert cfg.training.multistep_output == 2
-    assert cfg.training.multistep_input == 3
+    assert cfg.task.multistep_output == 2
+    assert cfg.task.multistep_input == 3
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)
@@ -254,8 +254,8 @@ def test_training_cycle_ensemble_truncated_connection(
     get_test_archive: GetTestArchive,
 ) -> None:
     cfg, url = ensemble_truncated_connection_config
-    assert cfg.training.multistep_output == 2
-    assert cfg.training.multistep_input == 3
+    assert cfg.task.multistep_output == 2
+    assert cfg.task.multistep_input == 3
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)

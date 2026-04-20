@@ -260,11 +260,12 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
                 tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
         if tmp_path_loss_matrices is not None:
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
+            OmegaConf.set_struct(training_loss_cfg, False)
             training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
 
-            cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
-                Path(tmp_path_loss_matrices).parent,
-            )
+            multiscale_cfg = cfg.training.validation_metrics.datasets[dataset_name].multiscale
+            OmegaConf.set_struct(multiscale_cfg, False)
+            multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
         cfg.training.training_loss.datasets[dataset_name] = training_loss_cfg
     return cfg
 
@@ -305,7 +306,6 @@ def ensemble_graph_multiscale_config(
     overrides = [
         "model=graphtransformer_ens",
         "graph=multi_scale",
-        "graph/projections/multiscale=4scale_o96",
     ]
 
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_graph"):
@@ -327,8 +327,8 @@ def ensemble_graph_multiscale_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
     return cfg, url_dataset
 
 
@@ -340,7 +340,6 @@ def ensemble_truncated_connection_config(
     overrides = [
         "model=graphtransformer_ens",
         "graph=multi_scale",
-        "graph/projections/truncation=o32",
     ]
 
     with initialize(
@@ -373,8 +372,8 @@ def ensemble_truncated_connection_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
     return cfg, url_dataset
 
 

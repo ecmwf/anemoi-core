@@ -99,9 +99,9 @@ def test_multiscale_weights_length_mismatch_raises() -> None:
     with pytest.raises(AssertionError):
         MultiscaleLossWrapper(
             per_scale_loss=per_scale_loss,
-            weights=[1.0],  # 1 weight but multiscale_config gives 2 scales (1 smoothed + full-res)
+            weights=[1.0],  # 1 weight but multiscale_config gives 2 scales
             keep_batch_sharded=False,
-            multiscale_config={"loss_matrices": ["matrix.npz", None]},
+            multiscale_config={"loss_matrices": [None, None]},
         )
 
 

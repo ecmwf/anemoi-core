@@ -149,12 +149,10 @@ class DummyDiffusionModel(DummyModel):
             out: dict[str, torch.Tensor] = {}
             for dataset_name, pred_tensor in pred.items():
                 sigma_tensor = sigma[dataset_name]
-                y_noised_tensor = y_noised[dataset_name]
+                _ = y_noised[dataset_name]
                 assert sigma_tensor.shape[0] == pred_tensor.shape[0]
                 assert all(sigma_tensor.shape[i] == 1 for i in range(1, sigma_tensor.ndim))
-                if y_noised_tensor.ndim == 4:
-                    y_noised_tensor = y_noised_tensor.unsqueeze(1)
-                out[dataset_name] = y_noised_tensor + 0.1 * pred_tensor
+                out[dataset_name] = pred_tensor
             return out
         return pred
 
