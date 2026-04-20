@@ -617,3 +617,19 @@ frozen and only the encoder and decoder will be trained:
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
+
+****************************
+ Precision and BLAS Backend
+****************************
+
+Anemoi supports Lightning's native mixed precision training as well as the option to select a preferred BLAS backend
+to be used by PyTorch. For example:
+
+.. code:: yaml
+
+   training:
+      precision: bf16-mixed
+      preferred_blas_backend: "cublas"
+
+Note that both entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
+default selection of PyTorch.

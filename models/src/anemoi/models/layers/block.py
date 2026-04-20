@@ -621,6 +621,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edges: Tensor,
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
+        edge_length_bias: Optional[Tensor] = None,
     ) -> Tensor:
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
@@ -628,9 +629,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         if self.graph_attention_backend == "triton":
             csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)
             edges_csc = edges.index_select(0, perm)
-            args_conv = (edges_csc, csc, reverse)
+            b_csc = edge_length_bias.index_select(0, perm) if edge_length_bias is not None else None
+            args_conv = (edges_csc, csc, reverse, b_csc)
         else:
-            args_conv = (edges, edge_index, conv_size)
+            args_conv = (edges, edge_index, conv_size, edge_length_bias)
 
         return self.conv(query, key, value, *args_conv)
 
@@ -643,6 +645,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
         num_chunks: int,
+        edge_length_bias: Optional[Tensor] = None,
     ) -> Tensor:
         # split 1-hop edges into chunks, compute self.conv chunk-wise
         if num_chunks > 1:
@@ -653,10 +656,24 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
             for i in range(num_chunks):
                 out += self.apply_gt(
-                    query=query, key=key, value=value, edges=edge_attr_list[i], edge_index=edge_index_list[i], size=size
+                    query=query,
+                    key=key,
+                    value=value,
+                    edges=edge_attr_list[i],
+                    edge_index=edge_index_list[i],
+                    size=size,
+                    edge_length_bias=edge_length_bias,
                 )
         else:
-            out = self.apply_gt(query=query, key=key, value=value, edges=edges, edge_index=edge_index, size=size)
+            out = self.apply_gt(
+                query=query,
+                key=key,
+                value=value,
+                edges=edges,
+                edge_index=edge_index,
+                size=size,
+                edge_length_bias=edge_length_bias,
+            )
 
         return out
 
@@ -805,6 +822,8 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edge_length_bias_scale: Optional[Tensor] = None,
+        edge_length_attr_index: int = 0,
         **layer_kwargs,
     ):
         x_skip = x
@@ -820,6 +839,12 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         x_r = self.lin_self(x[1])
 
+        # Compute per-edge scalar logit bias from raw edge_attr before projection
+        if edge_length_bias_scale is not None:
+            edge_length_bias = edge_length_bias_scale * edge_attr[:, edge_length_attr_index]
+        else:
+            edge_length_bias = None
+
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
         if self.shard_strategy == "heads":
@@ -833,7 +858,9 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks=1)
+        out = self.attention_block(
+            query, key, value, edges, edge_index, size, num_chunks=1, edge_length_bias=edge_length_bias
+        )
 
         if self.shard_strategy == "heads":
             out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)

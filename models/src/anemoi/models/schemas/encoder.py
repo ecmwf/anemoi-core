@@ -11,6 +11,7 @@ from typing import Any
 from typing import Literal
 from typing import Union
 
+from pydantic import BaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -70,6 +71,26 @@ class TransformerEncoderSchema(TransformerModelComponent):
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)
     "Use alibi slopes for attention implementation. Default to False."
+
+
+class VerticalGroupSchema(BaseModel):
+    name: str
+    "Name of the vertical group (e.g. 'surface', 'mid', 'upper')."
+    variable_indices: list[NonNegativeInt]
+    "Indices into the source feature vector that belong to this group."
+    initial_bias_scale: float = -1.0
+    "Initial log-scale value for the learnable locality bias. Default -1.0."
+
+
+class VerticalGroupGraphTransformerEncoderSchema(GraphTransformerEncoderSchema):
+    target_: Literal["anemoi.models.layers.mapper.VerticalGroupGraphTransformerForwardMapper"] = Field(
+        ..., alias="_target_"
+    )
+    "Vertical-group graph transformer encoder with per-group edge-length bias."
+    vertical_groups: list[VerticalGroupSchema]
+    "List of vertical groups, each with variable indices and an optional bias scale."
+    edge_length_attr_index: NonNegativeInt = Field(default=0)
+    "Column index of the edge-length scalar in the edge_attr tensor. Default 0."
 
 
 class PointWiseForwardMapperSchema(PointWiseMapperComponent):

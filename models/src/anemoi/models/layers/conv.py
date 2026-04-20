@@ -105,6 +105,7 @@ class GraphTransformerConv(MessagePassing):
         edge_attr: OptTensor,
         edge_index: Adj,
         size: Optional[Size] = None,
+        edge_length_bias: OptTensor = None,
     ):
         dim_size = query.shape[0]
         heads = query.shape[1]
@@ -118,6 +119,7 @@ class GraphTransformerConv(MessagePassing):
             query=query,
             key=key,
             value=value,
+            edge_length_bias=edge_length_bias,
         )
 
         return out
@@ -129,6 +131,7 @@ class GraphTransformerConv(MessagePassing):
         key_j: Tensor,
         value_j: Tensor,
         edge_attr: OptTensor,
+        edge_length_bias: OptTensor,
         index: Tensor,
         ptr: OptTensor,
         size_i: Optional[int],
@@ -137,6 +140,9 @@ class GraphTransformerConv(MessagePassing):
             key_j = key_j + edge_attr
 
         alpha = (query_i * key_j).sum(dim=-1) / self.out_channels**0.5
+
+        if edge_length_bias is not None:
+            alpha = alpha + edge_length_bias.unsqueeze(-1)
 
         alpha = softmax(alpha, index, ptr, size_i)
         alpha = dropout(alpha, p=self.dropout, training=self.training)
