@@ -199,6 +199,7 @@ class TruncatedConnection(BaseResidualConnection):
         if not has_files:
             return truncation_config
         import logging
+
         logging.getLogger(__name__).warning(
             "Passing 'truncation_up_file_path' / 'truncation_down_file_path' as top-level kwargs "
             "is deprecated. Move them inside 'truncation_config' instead."

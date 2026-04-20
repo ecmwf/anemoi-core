@@ -67,7 +67,7 @@ class MultiscaleLossWrapper(BaseLoss):
         multiscale_config : object | None
             Configuration for the smoothing matrices.  Accepts two forms:
 
-            - **File mode** – provide ``loss_matrices`` (list of filenames) and
+            - **File mode** provide ``loss_matrices`` (list of filenames) and
               optionally ``loss_matrices_path`` (directory prefix)::
 
                 multiscale_config:
@@ -77,7 +77,7 @@ class MultiscaleLossWrapper(BaseLoss):
                     - filter_4x.npz
                     - null            # full resolution
 
-            - **On-the-fly mode** – provide a compact geometric-progression spec
+            - **On-the-fly mode** provide a compact geometric-progression spec
               or an explicit ``smoothers`` mapping (passed to
               ``_expand_smoother_config``)::
 

@@ -87,7 +87,6 @@ def test_forward_with_edges_name(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-
 def test_skipconnection(flat_data):
     mapper = SkipConnection()
     out = mapper.forward(flat_data)

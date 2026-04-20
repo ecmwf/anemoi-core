@@ -87,59 +87,22 @@ deterministic:
  Multiscale Loss Functions
 ***************************
 
-The `MultiscaleLossWrapper` implements the multiscale loss formulation
-presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
-functions such as the `AlmostFairKernelCRPSLoss` to provide scale-aware
-model training.
+The ``MultiscaleLossWrapper`` wraps any base loss (e.g.
+``AlmostFairKernelCRPS``) and evaluates it at multiple spatial scales
+by progressively smoothing both predictions and targets. Each scale
+loss is computed on the *residual* between successive smoothing levels,
+so coarser scales capture large-scale errors and finer scales capture
+small-scale structure.
 
-The multiscale wrapper supports two ways to supply smoothing matrices:
+The number of weights must equal the number of smoothing levels. A final
+``null`` entry in ``loss_matrices`` (or the implicit full-resolution
+scale appended when using on-the-fly generation) represents the
+unsmoothed field.
 
-#. **Graph-based** (recommended): build sparse matrices from
-   ``config.graph.projections.multiscale.smoothers`` at runtime, or
-   provide an explicit list of graph edge references.
-#. **File-based**: load precomputed ``.npz`` matrices from disk.
+All smoothing configuration is provided through the single
+``multiscale_config`` key, which supports two modes:
 
-Graph-based auto-generation (recommended):
-
-.. code:: yaml
-
-   graph:
-      projections:
-         multiscale:
-            smoothers:
-               smooth_1x:
-                  edge_weight_attribute: gauss_weight
-                  gaussian_norm: l1
-                  num_nearest_neighbours: 16
-                  sigma: 0.00471
-               smooth_2x:
-                  edge_weight_attribute: gauss_weight
-                  gaussian_norm: l1
-                  num_nearest_neighbours: 32
-                  sigma: 0.00942
-
-   training_loss:
-      datasets:
-         your_dataset_name:
-            _target_: anemoi.training.losses.MultiscaleLossWrapper
-            loss_matrices_graph: true
-            weights:
-               - 1.0
-               - 1.0
-               - 1.0
-            per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-               scalers: ['node_weights']
-               ignore_nans: False
-               no_autocast: True
-               alpha: 1.0
-
-With ``loss_matrices_graph: true``, the wrapper derives one self-edge per
-smoother from ``graph.projections.multiscale.smoothers``. It uses
-``node_name`` if provided, otherwise the smoother key itself, and applies
-dataset-prefix rewriting automatically for fused multi-dataset graphs.
-
-Graph-based manual edge list:
+On-the-fly mode (builds smoothing matrices from the graph at runtime):
 
 .. code:: yaml
 
@@ -147,16 +110,13 @@ Graph-based manual edge list:
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            loss_matrices_graph:
-               - edges_name: [smooth_8x, to, smooth_8x]
-                 edge_weight_attribute: gauss_weight
-               - edges_name: [smooth_4x, to, smooth_4x]
-                 edge_weight_attribute: gauss_weight
-               - null
-            weights:
-               - 1.0
-               - 1.0
-               - 1.0
+            keep_batch_sharded: false
+            weights: [0.5, 0.25, 0.15, 0.1]   # num_scales + 1 entries
+            multiscale_config:
+               num_scales: 3                   # 3 smoothed + 1 full-res appended automatically
+               base_num_nearest_neighbours: 4
+               base_sigma: 0.1
+               scale_factor: 2                 # neighbours and sigma double each level
             per_scale_loss:
                _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
                scalers: ['node_weights']
@@ -164,17 +124,7 @@ Graph-based manual edge list:
                no_autocast: True
                alpha: 1.0
 
-Each manual ``loss_matrices_graph`` entry must include an ``edges_name``
-tuple ``[source, relation, target]`` and may optionally include
-``edge_weight_attribute``, ``src_node_weight_attribute``, and
-``row_normalize``. In the manual mode, the names are taken literally, so
-for fused multi-dataset graphs they must already match the concrete graph
-edge types.
-
-Set either ``loss_matrices_graph`` or ``loss_matrices_path``/``loss_matrices``,
-not both.
-
-File-based configuration (still supported):
+File-based mode (load precomputed ``.npz`` matrices from disk):
 
 .. code:: yaml
 
@@ -182,18 +132,27 @@ File-based configuration (still supported):
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            loss_matrices_path: ${system.input.loss_matrices_path}
-            loss_matrices: ["matrix.npz", null]
-            weights:
-               - 1.0
-               - 1.0
-
+            keep_batch_sharded: false
+            weights: [0.5, 0.25, 0.15, 0.1]   # must match number of loss_matrices entries
+            multiscale_config:
+               loss_matrices_path: /path/to/truncation-matrices
+               loss_matrices:
+                  - filter_O96_w=gaussian_d=8.0x.npz   # coarsest scale
+                  - filter_O96_w=gaussian_d=4.0x.npz
+                  - filter_O96_w=gaussian_d=2.0x.npz
+                  - null                                # full resolution (no smoothing)
             per_scale_loss:
                _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
                alpha: 1.0
+
+.. note::
+
+   The top-level ``loss_matrices_path`` and ``loss_matrices`` kwargs are
+   still accepted for backward compatibility but are deprecated. Move
+   them inside ``multiscale_config``.
 
 ************************
 Spectral loss functions

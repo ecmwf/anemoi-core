@@ -1,9 +1,7 @@
 from typing import Annotated
-from typing import Any
 from typing import Literal
 
 from pydantic import Field
-from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 

@@ -168,146 +168,111 @@ main purposes:
 #. **Multi-scale Loss Computation**: For ensemble training, truncation
    matrices can be used to compute losses at different scales.
 
-**************
-Matrix Types
-**************
-
-The truncation system supports several types of transformation matrices:
-
-**Truncation Matrix (``truncation``)**
-   The forward transformation matrix that applies the truncation filter
-   to the skipped connection.
-
-**Inverse Truncation Matrix (``truncation_inv``)**
-   The inverse transformation matrix.
-
-**Truncation Edge Names (``truncation_down_edges_name``, ``truncation_up_edges_name``)**
-   Graph edge identifiers for the down/up projections when using
-   :class:`anemoi.models.layers.residual.TruncatedConnection` with
-   graph-based projections. Each entry is a tuple
-   ``[source, relation, target]``.
-
-**Loss Matrices Path (``loss_matrices_path``)**
-   Path to the directory containing smoothing matrices for multi-scale
-   loss computation. The list of matrix filenames is configured directly
-   in the ``training_loss`` section as ``loss_matrices``. Works only for
-   ensemble training. Each matrix corresponds to a different scale for
-   loss evaluation. These need to be ordered so that the first matrix
-   corresponds to the largest scales. The following matrices then
-   include smaller and smaller scales.
-
-**Loss Matrices Graph (``loss_matrices_graph``)**
-   Graph-based smoothing definitions used by
-   ``MultiscaleLossWrapper``. This field supports two modes:
-
-   - ``true``: auto-build one smoothing matrix per
-     ``graph.projections.multiscale.smoothers`` entry.
-   - ``[...]``: use a manual explicit list of graph edge references.
-
-   Gaussian distance weights computed with ``norm: l1`` should be used
-   as ``edge_weight_attribute`` (commonly ``gauss_weight`` in the
-   projection graph).
-
 .. note::
 
-   The truncation matrices required for field truncation can be
-   generated using the ``anemoi-graphs`` package, or constructed at
-   runtime via graph-based projections defined in
-   ``config.graph.projections``.
+   Truncation matrices can be generated using the ``anemoi-graphs``
+   package, or constructed at runtime (on-the-fly mode). For detailed
+   instructions on how to create these matrices, see
+   :ref:`Create sparse matrices with anemoi-graphs
+   <anemoi-graphs:usage-create_sparse_matrices>`.
 
-   For detailed instructions on how to create these matrices, see the
-   documentation at :ref:`Create sparse matrices with anemoi-graphs
-   <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
+**********************
+ TruncatedConnection
+**********************
 
-Graph-based configuration (recommended)
-***************************************
+:class:`anemoi.models.layers.residual.TruncatedConnection` applies a
+coarse-graining and reconstruction step to the skip-connection features.
+It is configured via a single ``truncation_config`` key that supports
+two modes.
 
-Define projection graphs under ``config.graph.projections`` and reference
-them from the loss and residual configs. The projection nodes and edges
-are merged into the main graph at startup, so you can keep all matrix
-definitions alongside the rest of your graph config.
-Use either the graph-based options or the file-based options, not both.
-For both multiscale smoothing and truncation, Gaussian distance weights
-with ``norm: l1`` should be used as ``edge_weight_attribute`` (commonly
-``gauss_weight`` in the projection graph).
+**On-the-fly mode** — build the projection graph at startup from a
+coarser grid:
 
 .. code:: yaml
-
-   # graph config
-   graph:
-     projections:
-       multiscale:
-         smoothers:
-           smooth_1x:
-             edge_weight_attribute: gauss_weight
-             gaussian_norm: l1
-             num_nearest_neighbours: 16
-             sigma: 0.00471
-           smooth_2x:
-             edge_weight_attribute: gauss_weight
-             gaussian_norm: l1
-             num_nearest_neighbours: 32
-             sigma: 0.00942
-       truncation:
-         truncation:
-           grid: o32
-           edge_weight_attribute: gauss_weight
-           gaussian_norm: l1
-           num_nearest_neighbours: 32
-           sigma: 0.18840
-
-.. code:: yaml
-
-   # training + model config, auto-generated loss graphs
-   training:
-     training_loss:
-       datasets:
-         your_dataset_name:
-           _target_: anemoi.training.losses.MultiscaleLossWrapper
-           loss_matrices_graph: true
-           weights: [1.0, 1.0, 1.0]
-           per_scale_loss:
-             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-             scalers: ['node_weights']
 
    model:
      residual:
        _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_config:
+         grid: o32
+         num_nearest_neighbours: 3
+         sigma: 1.0
+
+**File-based mode** — load pre-computed sparse matrices from disk:
 
 .. code:: yaml
 
-   # training config, manual explicit loss graphs
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_config:
+         truncation_down_file_path: /path/to/truncation_down.npz
+         truncation_up_file_path: /path/to/truncation_up.npz
+
+.. _multiscale-loss-userguide:
+
+**********************
+ Multiscale Loss
+**********************
+
+The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
+presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
+functions such as the ``AlmostFairKernelCRPSLoss`` to provide
+scale-aware model training.
+
+The wrapper is configured via a single ``multiscale_config`` key that
+supports two modes.
+
+**On-the-fly mode** — build smoothing graphs at startup from a
+geometric progression of KNN smoothers:
+
+.. code:: yaml
+
    training:
      training_loss:
        datasets:
          your_dataset_name:
            _target_: anemoi.training.losses.MultiscaleLossWrapper
-           loss_matrices_graph:
-             - edges_name: [smooth_2x, to, smooth_2x]
-               edge_weight_attribute: gauss_weight
-             - edges_name: [smooth_1x, to, smooth_1x]
-               edge_weight_attribute: gauss_weight
-             - null
-           weights: [1.0, 1.0, 1.0]
+           weights: [0.5, 0.25, 0.15, 0.1]
+           keep_batch_sharded: false
+           multiscale_config:
+             num_scales: 3          # builds 3 smoothed + 1 full-res = 4 scales
+             base_num_nearest_neighbours: 4
+             base_sigma: 0.1
+             scale_factor: 2
            per_scale_loss:
              _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
              scalers: ['node_weights']
 
-With ``loss_matrices_graph: true``, the smoother node names are derived
-from ``graph.projections.multiscale.smoothers`` using ``node_name`` if
-present, otherwise the smoother key itself. In fused graphs, those names
-are adapted to the dataset-specific graph node names automatically. With
-the manual list form, the names are taken literally and must already
-match the concrete graph edge types.
+**File-based mode** — load pre-computed sparse matrices from disk:
 
-File-based configuration (still supported)
-******************************************
+.. code:: yaml
 
-If you prefer precomputed sparse matrices, continue to use file paths and
-``loss_matrices_path``. For truncation, set
-``truncation_down_file_path`` and ``truncation_up_file_path`` in the
-``model.residual`` config, typically pointing to
-``system.input.truncation`` and ``system.input.truncation_inv``.
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           weights: [0.5, 0.25, 0.15, 0.1]
+           keep_batch_sharded: false
+           multiscale_config:
+             loss_matrices_path: /path/to/matrices
+             loss_matrices:
+               - filter_8x.npz   # coarsest scale
+               - filter_4x.npz
+               - filter_2x.npz
+               - null            # full resolution
+           per_scale_loss:
+             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             scalers: ['node_weights']
+
+The loss at each scale is computed on the *residual* between successive
+smoothing levels, so that each scale captures the energy in its
+frequency band. Scales must be ordered coarsest-first; the final
+``null`` entry always applies no smoothing (full resolution).
+
+The number of entries in ``weights`` must equal the total number of
+scales (smoothed + full-res).
 
 ***************
  Ensemble Size
