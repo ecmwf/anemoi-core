@@ -27,8 +27,38 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
+NESTED_LOSS_CLASS_NAMES = {
+    "MultiscaleLossWrapper",
+}
+GRAPH_DATA_WRAPPER_CLASS_NAMES = {
+    "MultiscaleLossWrapper",
+    "CombinedLoss",
+    "FilteringLossWrapper",
+}
 LOGGER = logging.getLogger(__name__)
+
+
+def _target_class_name(loss_config: dict) -> str | None:
+    """Return the class name from Hydra's `_target_` field."""
+    target = loss_config.get("_target_")
+    if isinstance(target, str):
+        return target.rsplit(".", maxsplit=1)[-1]
+    return None
+
+
+def _wrapper_context_kwargs(
+    *,
+    target_class_name: str | None,
+    graph_data: object | None,
+    kwargs: dict,
+) -> dict:
+    if target_class_name not in GRAPH_DATA_WRAPPER_CLASS_NAMES:
+        return {}
+
+    wrapper_kwargs = dict(kwargs)
+    if graph_data is not None:
+        wrapper_kwargs["graph_data"] = graph_data
+    return wrapper_kwargs
 
 
 @dataclass(frozen=True)
@@ -97,7 +127,8 @@ def _extract_constructor_context(
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
-    data_indices: IndexCollection | None = None,
+    data_indices: dict | None = None,
+    graph_data: object | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -136,10 +167,26 @@ def get_loss_function(
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+    target_class_name = _target_class_name(loss_config)
+
+    if target_class_name in NESTED_LOSS_CLASS_NAMES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
-        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+        per_scale_loss = get_loss_function(
+            OmegaConf.create(per_scale_loss_config),
+            scalers,
+            data_indices,
+            graph_data=graph_data,
+            **kwargs,
+        )
+        return instantiate(
+            loss_config,
+            per_scale_loss=per_scale_loss,
+            **_wrapper_context_kwargs(
+                target_class_name=target_class_name,
+                graph_data=graph_data,
+                kwargs=kwargs,
+            ),
+        )
 
     if scalers is None:
         scalers = {}
@@ -157,7 +204,13 @@ def get_loss_function(
         context=factory_context,
     )
 
-    loss_function = instantiate(loss_config, **constructor_kwargs, **kwargs, _recursive_=False)
+    loss_function = instantiate(
+        loss_config,
+        **constructor_kwargs,
+        **_wrapper_context_kwargs(target_class_name=target_class_name, graph_data=graph_data, kwargs=kwargs),
+        **kwargs,
+        _recursive_=False,
+    )
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
