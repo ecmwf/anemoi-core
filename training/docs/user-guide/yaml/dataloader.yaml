@@ -10,8 +10,6 @@ training:
       start: null
       end: 2020
 
-validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
-
 validation:
   datasets:
     your_dataset_name:

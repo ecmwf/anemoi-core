@@ -45,6 +45,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
 
@@ -63,6 +65,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
         )
 
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
@@ -757,14 +761,6 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             }
             md_dict["metadata_inference"][dataset]["shapes"] = shapes
 
-            rel_date_indices = md_dict["metadata_inference"][dataset]["timesteps"]["relative_date_indices_training"]
-            input_rel_date_indices = rel_date_indices[: self.n_step_input]
-            output_rel_date_indices = rel_date_indices[-self.n_step_output :]
-            md_dict["metadata_inference"][dataset]["timesteps"]["input_relative_date_indices"] = input_rel_date_indices
-            md_dict["metadata_inference"][dataset]["timesteps"][
-                "output_relative_date_indices"
-            ] = output_rel_date_indices
-
 
 class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     """Diffusion model for tendency prediction."""
@@ -775,6 +771,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
         model_config = DotDict(model_config)
@@ -784,6 +782,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             model_config=model_config,
             data_indices=data_indices,
             statistics=statistics,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
             graph_data=graph_data,
         )
 

@@ -19,7 +19,7 @@ When multiple datasets are configured:
 #. A single shared processor operates on the combined latent representation.
 
 .. warning::
-    All datasets must share the same time resolution and forecast horizon or interpolation target times.
+    All datasets must share the same time resolution and forecast horizon or target times.
 
 
 Dataset-Specific Configuration

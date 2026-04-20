@@ -295,7 +295,7 @@ class AnemoiProfiler(AnemoiTrainer):
         for dataset_name in batch:
             example_input_array[dataset_name] = batch[dataset_name][
                 :,
-                0 : self.config.training.multistep_input,
+                0 : self.config.task.multistep_input,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]

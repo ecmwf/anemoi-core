@@ -78,17 +78,6 @@ class SWA(BaseModel):
     "Learning rate for SWA."
 
 
-class Rollout(BaseModel):
-    """Rollout configuration."""
-
-    start: NonNegativeInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(example=1)
-    "Maximum number of rollouts."
-
-
 class OptimizationSchema(BaseModel):
     """Optimizer and LR scheduler configuration."""
 
@@ -207,8 +196,6 @@ class TimeStepScalerSchema(BaseModel):
 
 class UniformTimeStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
-    multistep_output: PositiveInt = Field(example=5)
-    "Number of output time steps."
 
 
 class LeadTimeDecayScalerSchema(BaseModel):
@@ -415,7 +402,7 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
+    "This flag picks a task to train for, examples: forecaster, autoencoder, temporal_downscaler.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -435,15 +422,6 @@ class BaseTrainingSchema(BaseModel):
     "Precision"
     preferred_blas_backend: str | None = Field(default=None)
     "Optionally override PyTorch's default BLAS backend."
-    multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model.
-    E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
-    multistep_output: PositiveInt = Field(example=1, default=1)
-    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
-    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)].
-    During rollout, if multistep_output > multistep_input, only the latest multistep_input outputs
-    are fed into the next step."""
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
@@ -479,53 +457,30 @@ class BaseTrainingSchema(BaseModel):
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
-class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphForecaster",] = Field(..., alias="model_task")
-    "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
-
-
-class ForecasterEnsSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
+class SingleTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
-class DiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+class EnsembleTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
-class DiffusionTendForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+class DiffusionTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
+    "Training objective."
+
+
+class DiffusionTendTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.DiffusionTendTraining"] = Field(
         ...,
-        alias="model_task",
+        alias="training_method",
     )
     "Training objective."
 
 
-class AutoencoderSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
-    "Training objective."
-
-
-class InterpolationMultiSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-
-    # Needed to allow to override default training configuration
-    # Forced to be None (null)
-    rollout: Literal[None] = None
-
-
 TrainingSchema = Annotated[
-    ForecasterSchema
-    | ForecasterEnsSchema
-    | InterpolationMultiSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema
-    | AutoencoderSchema,
-    Discriminator("model_task"),
+    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendTrainingSchema,
+    Discriminator("training_method"),
 ]

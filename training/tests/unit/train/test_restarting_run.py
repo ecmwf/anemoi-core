@@ -75,6 +75,7 @@ def build_mock_config(
         "dataloader": {},
         "graph": {},
         "model": {},
+        "task": {},
     }
     return OmegaConf.create(config_dict)
 

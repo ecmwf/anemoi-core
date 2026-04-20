@@ -51,8 +51,6 @@ class DefinedModels(str, Enum):
     ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator"
-    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator"
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
     )
@@ -219,7 +217,7 @@ class BaseModelSchema(PydanticBaseModel):
     output_mask: OutputMaskSchemas  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
-    "Add skip connection in latent space before/after processor. Currently only in interpolator."
+    "Add skip connection in latent space before/after processor."
     processor: Union[
         NoOpProcessorSchema,
         GNNProcessorSchema,

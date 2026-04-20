@@ -16,29 +16,28 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.training.train.training_task.base import BaseTask
+
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphEnsForecaster(BaseRolloutGraphModule):
+class EnsembleTraining(BaseTrainingModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
-
-    task_type = "forecaster"
 
     def __init__(
         self,
         *,
         config: DictConfig,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -52,6 +51,8 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         ----------
         config : DictConfig
             Job configuration
+        task : BaseTask
+            Training task
         statistics : dict
             Statistics of the training data
         data_indices : dict
@@ -61,6 +62,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         """
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -131,12 +133,39 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
+    def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device, 1, 1)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+
+        return x
+
+    def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Collapse ensemble dimension.
+
+        Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
+        dimension.
+        """
+        y: dict[str, torch.Tensor] = {}
+        for dataset_name, target in batch.items():
+            msg = (
+                "Expected singleton ensemble dimension in target for "
+                f"{dataset_name}, got shape {tuple(target.shape)}."
+            )
+            assert target.ndim == 5 and target.shape[2] == 1, msg
+            y[dataset_name] = target[:, :, 0, :, :]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+
+        return y
+
     def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         dataset_name: str,
-        step: int | None = None,
+        rollout_step: int | None = None,
         validation_mode: bool = False,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
@@ -166,7 +195,7 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
             metrics_next = self._compute_metrics(
                 y_pred_ens,
                 y,
-                step=step,
+                rollout_step=rollout_step,
                 dataset_name=dataset_name,
                 grid_shard_slice=self.grid_shard_slice[dataset_name],
                 pred_layout=pred_layout,
@@ -175,117 +204,67 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
 
         return loss, metrics_next, y_pred_ens
 
-    def _make_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-        *,
-        start: int,
-    ) -> dict[str, torch.Tensor]:
-        """Build loss targets for ensemble rollout.
+    def forward(self, x: dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs) -> dict[str, torch.Tensor]:
+        """Forward method.
 
-        Ground-truth targets are provided with a singleton ensemble axis and
-        are reduced to `(batch, time, grid, vars)` for loss computation.
+        This method calls the model's forward method with the appropriate
+        communication group and sharding information.
         """
-        y_full = self.get_target(
-            batch,
-            start=start,
+        if rollout_step is not None:
+            kwargs["fcstep"] = rollout_step
+        else:
+            kwargs["fcstep"] = 0  # TODO(Mario,Simon): set the conditioning on the step optional
+
+        return self.model(
+            x,
+            model_comm_group=self.model_comm_group,
+            grid_shard_shapes=self.grid_shard_shapes,
+            **kwargs,
         )
 
-        y: dict[str, torch.Tensor] = {}
-        for dataset_name, target in y_full.items():
-            msg = (
-                "Expected singleton ensemble dimension in target for "
-                f"{dataset_name}, got shape {tuple(target.shape)}."
-            )
-            assert target.ndim == 5 and target.shape[2] == 1, msg
-            y[dataset_name] = target[:, :, 0, :, :]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-
-        return y
-
-    def _rollout_step(
+    def _step(
         self,
         batch: dict[str, torch.Tensor],
-        rollout: int | None = None,
         validation_mode: bool = False,
-    ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
-        """Rollout step for the forecaster.
+    ) -> tuple[torch.Tensor, dict, list]:
+        """Training / validation step."""
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
 
-        Parameters
-        ----------
-        batch : torch.Tensor
-            Normalized batch to use for rollout (assumed to be already preprocessed)
-        rollout : int, optional
-            Number of times to rollout for, by default None
-            If None, will use self.rollout
-        validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self._expand_ens_dim(x)
 
-        Yields
-        ------
-        Generator[tuple[torch.Tensor | None, dict, list], None, None]
-            Loss value, metrics, and predictions (per step)
+        task_steps = self.task.steps("training" if not validation_mode else "validation")
+        for task_step_kwargs in task_steps:
+            y_pred = self(x, **task_step_kwargs)
 
-        Returns
-        -------
-        None
-            None
-        """
-        rollout_steps = rollout or self.rollout
-        required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
+            y_full = self.task.get_targets(batch, **task_step_kwargs)
+            y = self._collapse_ens_dim(y_full)
 
-        # Stack the analysis nens_per_device times along an ensemble dimension
-        # start rollout of preprocessed batch
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.n_step_input,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, n_step_input, latlon, nvar)
-            msg = (
-                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
-            )
-            assert dataset_batch.shape[1] >= required_time_steps, msg
-
-        for dataset_name in self.dataset_names:
-            x[dataset_name] = torch.cat(
-                [x[dataset_name]] * self.nens_per_device,
-                dim=2,
-            )  # shape == (bs, ms, nens_per_device, latlon, nvar)
-            LOGGER.debug("Shapes: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-
-            assert (
-                len(x[dataset_name].shape) == 5
-            ), f"Expected a 5-D tensor and got {len(x[dataset_name].shape)} dimensions, shape {x[dataset_name].shape}!"
-            assert (x[dataset_name].shape[1] == self.n_step_input) and (
-                x[dataset_name].shape[2] == self.nens_per_device
-            ), (
-                "Shape mismatch in x! "
-                f"Expected ({self.n_step_input}, {self.nens_per_device}), "
-                f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
-            )
-
-        for rollout_step in range(rollout_steps):
-            # prediction at rollout step rollout_step, shape = (bs, n_step_output, ens_size, latlon, nvar)
-            y_pred = self(x, fcstep=rollout_step)
-            start = self.n_step_input + rollout_step * self.n_step_output
-            y = self._make_targets(batch, start=start)
-
-            loss, metrics_next, y_pred_ens_group = checkpoint(
+            loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
                 y,
-                step=rollout_step,
+                **task_step_kwargs,
                 validation_mode=validation_mode,
                 pred_layout=IndexSpace.MODEL_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 
-            x = self._advance_input(x, y_pred, batch, rollout_step)
+            # Advance input state for each dataset
+            x = self.task.advance_input(
+                x,
+                y_pred,
+                batch,
+                **task_step_kwargs,
+                data_indices=self.data_indices,
+            )
 
-            yield loss, metrics_next, y_pred_ens_group
+            loss = loss + loss_next
+            metrics.update(metrics_next)
+            y_preds.append(y_preds_next)
+
+        loss *= 1.0 / len(task_steps)
+        return loss, metrics, y_preds
