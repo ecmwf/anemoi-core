@@ -10,14 +10,19 @@
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
@@ -56,6 +61,68 @@ def _wrapper_context_kwargs(
     return wrapper_kwargs
 
 
+@dataclass(frozen=True)
+class LossFactoryContext:
+    """Factory-supplied context that only selected loss classes use."""
+
+    available_scalers: dict[str, TENSOR_SPEC] | None = None
+    data_indices: IndexCollection | None = None
+
+    def for_loss_class(self, loss_class: type[BaseLoss]) -> tuple[dict, bool, bool]:
+        """Return the context kwargs explicitly declared by a loss class."""
+        context_keys = getattr(loss_class, "factory_context_keys", frozenset())
+
+        constructor_kwargs = {}
+        takes_scalers = _has_factory_context_key(context_keys, LossFactoryContextKey.AVAILABLE_SCALERS)
+        takes_data_indices = self.data_indices is not None and _has_factory_context_key(
+            context_keys,
+            LossFactoryContextKey.DATA_INDICES,
+        )
+
+        if takes_scalers:
+            constructor_kwargs["available_scalers"] = self.available_scalers
+
+        if takes_data_indices:
+            constructor_kwargs["data_indices"] = self.data_indices
+
+        return constructor_kwargs, takes_scalers, takes_data_indices
+
+
+def _has_factory_context_key(
+    context_keys: frozenset[LossFactoryContextKey | str],
+    key: LossFactoryContextKey,
+) -> bool:
+    """Accept enum keys while remaining compatible with any existing string declarations."""
+    return key in context_keys or key.value in context_keys
+
+
+def _filter_scalers(
+    scalers_to_include: list[str],
+    scalers: dict[str, TENSOR_SPEC],
+) -> dict[str, TENSOR_SPEC]:
+    """Return the subset of named scalers requested by the loss config."""
+    filtered_scalers = {}
+    for name in scalers_to_include:
+        if name not in scalers:
+            error_msg = f"Scaler {name!r} not found in valid scalers: {list(scalers.keys())}"
+            raise ValueError(error_msg)
+        filtered_scalers[name] = scalers[name]
+    return filtered_scalers
+
+
+def _extract_constructor_context(
+    loss_config: dict,
+    *,
+    context: LossFactoryContext,
+) -> tuple[dict, bool, bool]:
+    """Collect optional constructor kwargs declared by the target loss class."""
+    target = loss_config.get("_target_")
+    if target is None:
+        return {}, False, False
+
+    return context.for_loss_class(get_class(target))
+
+
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
@@ -77,7 +144,7 @@ def get_loss_function(
         If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
         For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
         `variable` will be added to the scaler of the loss function.
-    data_indices : dict, optional
+    data_indices : IndexCollection, optional
         Indices of the training data
     kwargs : Any
         Additional arguments to pass to the loss function
@@ -95,7 +162,10 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
+    has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
+    predicted_variables = loss_config.pop("predicted_variables", None)
+    target_variables = loss_config.pop("target_variables", None)
 
     target_class_name = _target_class_name(loss_config)
 
@@ -124,21 +194,42 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
+    available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
+    factory_context = LossFactoryContext(
+        available_scalers=available_scalers,
+        data_indices=data_indices,
+    )
+    constructor_kwargs, takes_scalers, takes_data_indices = _extract_constructor_context(
+        loss_config,
+        context=factory_context,
+    )
+
     loss_function = instantiate(
         loss_config,
-        **_wrapper_context_kwargs(
-            target_class_name=target_class_name,
-            graph_data=graph_data,
-            kwargs=kwargs,
-        ),
+        **constructor_kwargs,
+        **_wrapper_context_kwargs(target_class_name=target_class_name, graph_data=graph_data, kwargs=kwargs),
+        **kwargs,
         _recursive_=False,
     )
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
-    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
 
+    if takes_scalers:
+        scalers_to_include = []
+        scalers = {}
+    if takes_data_indices:
+        data_indices = None
+
+    if data_indices is not None:
+        loss_function = LossVariableMapper(
+            loss=loss_function,
+            predicted_variables=predicted_variables,
+            target_variables=target_variables,
+            data_indices=data_indices,
+        )
+    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 
 
@@ -146,7 +237,7 @@ def _apply_scalers(
     loss_function: BaseLoss,
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
-    data_indices: dict | None,
+    data_indices: IndexCollection | None,
 ) -> None:
     """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
@@ -161,9 +252,6 @@ def _apply_scalers(
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
-
-        if hasattr(loss_function, "set_data_indices"):
-            loss_function.set_data_indices(data_indices)
 
 
 def get_metric_ranges(
