@@ -10,7 +10,6 @@
 
 import logging
 import warnings
-from typing import Any
 from typing import Callable
 from typing import Optional
 from typing import Union
@@ -18,6 +17,7 @@ from typing import Union
 import einops
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -42,15 +42,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
     def __init__(
         self,
         *,
-        model_config: Any,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
     ) -> None:
 
-        model_config_local = DotDict(model_config)
+        model_config = DotDict(model_config)
 
-        diffusion_config = model_config_local.model.model.diffusion
+        diffusion_config = model_config.model.model.diffusion
         self.noise_channels = diffusion_config.noise_channels
         self.noise_cond_dim = diffusion_config.noise_cond_dim
         self.sigma_data = diffusion_config.sigma_data
@@ -68,7 +68,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self.noise_embedder = instantiate(diffusion_config.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
-    def _build_networks(self, model_config: Any) -> None:
+    def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
@@ -772,14 +772,14 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: Any,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
     ) -> None:
-        model_config_local = DotDict(model_config)
+        model_config = DotDict(model_config)
 
-        self.condition_on_residual = model_config_local.model.condition_on_residual
+        self.condition_on_residual = model_config.model.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,

@@ -10,7 +10,6 @@
 
 import logging
 from abc import abstractmethod
-from typing import Any
 from typing import Optional
 
 import torch
@@ -31,6 +30,7 @@ from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.utils.config import broadcast_config_keys
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ class BaseGraphModel(nn.Module):
         return dim_sizes[0]
 
     @abstractmethod
-    def _build_networks(self, model_config: Any) -> None:
+    def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
         pass
 
@@ -233,7 +233,7 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(self, residual_config: Any) -> None:
+    def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:

@@ -8,12 +8,11 @@
 #
 
 import logging
-from typing import Any
 from typing import Optional
 
 import einops
 import torch
-from omegaconf import OmegaConf
+from omegaconf import DictConfig
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -32,7 +31,7 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: Any,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -41,20 +40,15 @@ class AnemoiModelEncProcDecMultiOutInterpolator(AnemoiModelEncProcDec):
 
         Parameters
         ----------
-        config : DotDict
-            Job configuration
+        model_config : DictConfig
+            Model configuration
         data_indices : dict
             Data indices
         graph_data : HeteroData
             Graph definition
         """
-        if type(model_config) is dict and not OmegaConf.is_config(model_config):
-            model_config_local = OmegaConf.create(model_config)
-        else:
-            model_config_local = model_config
-
-        self.input_times = list(model_config_local.training.explicit_times.input)
-        self.output_times = list(model_config_local.training.explicit_times.target)
+        self.input_times = list(model_config.training.explicit_times.input)
+        self.output_times = list(model_config.training.explicit_times.target)
 
         super().__init__(
             model_config=model_config,

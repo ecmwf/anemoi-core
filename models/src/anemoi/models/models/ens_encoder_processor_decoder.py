@@ -9,12 +9,12 @@
 
 
 import logging
-from typing import Any
 from typing import Optional
 
 import einops
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
@@ -33,7 +33,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: Any,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -46,7 +46,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=graph_data,
         )
 
-    def _build_networks(self, model_config):
+    def _build_networks(self, model_config: DotDict) -> None:
         super()._build_networks(model_config)
 
         self.noise_injector = instantiate(
