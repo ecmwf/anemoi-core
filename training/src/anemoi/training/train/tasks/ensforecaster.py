@@ -52,7 +52,6 @@ class GraphEnsForecaster(BaseRolloutGraphModule):
         ----------
         config : DictConfig
             Job configuration
-            Per-dataset projection metadata resolved from the graph.
         statistics : dict
             Statistics of the training data
         data_indices : dict

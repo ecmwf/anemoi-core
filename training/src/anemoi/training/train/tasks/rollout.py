@@ -56,7 +56,6 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
             Job configuration
         graph_data : HeteroData
             Graph object representing the graph data
-            Per-dataset projection metadata resolved from the graph.
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
