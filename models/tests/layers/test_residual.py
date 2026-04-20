@@ -13,8 +13,10 @@ def graph_data():
     g["hidden"].num_nodes = 1
     g["hidden", "to", "data"].edge_index = torch.tensor([[0, 0], [0, 1]])
     g["hidden", "to", "data"].edge_length = torch.tensor([1.0, 2.0])
+    g["hidden", "to", "data"].gauss_weight = torch.tensor([0.5, 0.5])
     g["data", "to", "hidden"].edge_index = torch.tensor([[0, 1], [0, 0]])
     g["data", "to", "hidden"].edge_length = torch.tensor([1.0, 2.0])
+    g["data", "to", "hidden"].gauss_weight = torch.tensor([0.5, 0.5])
     g["data"].weight = torch.tensor([1.0, 0.5])  # Example weights for data nodes
     g["hidden"].weight = torch.tensor([0.8])  # Example weight for hidden node
     return g

@@ -75,10 +75,6 @@ def _make_hierarchical_graph() -> HeteroData:
 def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
-            "training": {
-                "multistep_input": 1,
-                "multistep_output": 1,
-            },
             "model": {
                 "num_channels": 8,
                 "trainable_parameters": {
@@ -101,6 +97,8 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
+        n_step_input=1,
+        n_step_output=1,
         graph_data=_make_graph(),
     )
 
@@ -111,10 +109,6 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
 def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
-            "training": {
-                "multistep_input": 1,
-                "multistep_output": 1,
-            },
             "model": {
                 "num_channels": 8,
                 "trainable_parameters": {
@@ -137,6 +131,8 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
+        n_step_input=1,
+        n_step_output=1,
         graph_data=_make_hierarchical_graph(),
     )
 
@@ -147,10 +143,6 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 def test_base_graph_model_accepts_dotdict_model_config() -> None:
     model_config = DotDict(
         {
-            "training": {
-                "multistep_input": 1,
-                "multistep_output": 1,
-            },
             "model": {
                 "num_channels": 8,
                 "trainable_parameters": {
@@ -173,6 +165,8 @@ def test_base_graph_model_accepts_dotdict_model_config() -> None:
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
+        n_step_input=1,
+        n_step_output=1,
         graph_data=_make_graph(),
     )
 

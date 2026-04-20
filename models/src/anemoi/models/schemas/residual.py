@@ -44,6 +44,7 @@ class TruncatedConnectionSchema(BaseModel):
         description="Truncation config. For on-the-fly mode provide 'grid' (or 'node_builder'). "
         "For file mode provide 'truncation_up_file_path' and 'truncation_down_file_path'.",
     )
+    edge_weight_attribute: str | None = Field(None)
     src_node_weight_attribute: str | None = Field(None)
     autocast: bool = Field(False)
     row_normalize: bool = Field(False)

@@ -128,6 +128,7 @@ class TruncatedConnection(BaseResidualConnection):
         self,
         graph: Optional[HeteroData] = None,
         src_node_weight_attribute: Optional[str] = None,
+        edge_weight_attribute: Optional[str] = None,
         truncation_config: Optional[dict] = None,
         truncation_up_edges_name: Optional[tuple[str, str, str]] = None,
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
@@ -160,6 +161,10 @@ class TruncatedConnection(BaseResidualConnection):
                 truncation_down_edges_name = (data_node_name, "to", "truncation")
                 truncation_up_edges_name = ("truncation", "to", data_node_name)
 
+        _edge_weight_attr = (
+            edge_weight_attribute if edge_weight_attribute is not None else DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+        )
+
         up_edges, down_edges = self._resolve_edges(
             graph=graph,
             truncation_up_file_path=truncation_up_file_path,
@@ -171,7 +176,7 @@ class TruncatedConnection(BaseResidualConnection):
         self.provider_down = ProjectionGraphProvider(
             graph=graph,
             edges_name=down_edges,
-            edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
+            edge_weight_attribute=_edge_weight_attr,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_down_file_path,
             row_normalize=row_normalize,
@@ -180,7 +185,7 @@ class TruncatedConnection(BaseResidualConnection):
         self.provider_up = ProjectionGraphProvider(
             graph=graph,
             edges_name=up_edges,
-            edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
+            edge_weight_attribute=_edge_weight_attr,
             src_node_weight_attribute=src_node_weight_attribute,
             file_path=truncation_up_file_path,
             row_normalize=row_normalize,
