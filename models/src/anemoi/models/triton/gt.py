@@ -83,7 +83,6 @@ def _gt_fwd(
     K_ptr,  # [N_src, H, C]
     V_ptr,  # [N_src, H, C]
     E_ptr,  # [M, H, C]
-    B_ptr,  # [M] per-edge scalar logit bias (or None-like zero pointer when unused)
     M_ptr,  # [M, H]
     ROW_ptr,  # [M]
     COLPTR_ptr,  # [N_dst+1]
@@ -91,7 +90,6 @@ def _gt_fwd(
     N_dst,
     H: tl.constexpr,
     C: tl.constexpr,
-    USE_BIAS: tl.constexpr,
     out_dtype: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -145,10 +143,6 @@ def _gt_fwd(
 
         qk = tl.sum(q * k_e, axis=-1) * qk_scale  # Shape: [H]
 
-        if USE_BIAS:
-            bias_val = tl.load(B_ptr + e_idx).to(tl.float32)
-            qk = qk + bias_val  # broadcast scalar bias to all heads
-
         m_ij = tl.maximum(m_i, qk)  # new running max
         alpha_ij = tl.exp(qk - m_ij)  # attention weight for current edge
         correction = tl.exp(m_i - m_ij)  # correction factor for previous accumulations
@@ -190,7 +184,6 @@ def _gt_bwd_dst_pass(
     K_ptr,
     V_ptr,
     E_ptr,
-    B_ptr,  # [M] per-edge scalar logit bias
     OUT_ptr,  # saved forward outputs o_i
     M_ptr,  # saved m_i + ln l_i
     ROW_ptr,  # [M] (edge -> src)
@@ -201,7 +194,6 @@ def _gt_bwd_dst_pass(
     N_dst,
     H: tl.constexpr,
     C: tl.constexpr,
-    USE_BIAS: tl.constexpr,
     out_dtype: tl.constexpr,
 ):
     dst_idx = tl.program_id(0)
@@ -251,9 +243,6 @@ def _gt_bwd_dst_pass(
         # score and alpha using saved M
         m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        if USE_BIAS:
-            bias_val = tl.load(B_ptr + e_idx).to(tl.float32)
-            s_ij = s_ij + bias_val
         alpha_ij = tl.exp(s_ij - m_j)
 
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
@@ -285,7 +274,6 @@ def _gt_bwd_src_pass(
     K_ptr,
     V_ptr,
     E_ptr,
-    B_ptr,  # [M] per-edge scalar logit bias
     ROWPTR_ptr,  # [N_src+1]
     EDGE_IDS_ptr,  # [M] edge id list grouped by src
     EDGE_DST_ptr,  # [M] dst node for each edge
@@ -295,11 +283,9 @@ def _gt_bwd_src_pass(
     D_K_ptr,  # [N_src * H * C]
     D_V_ptr,  # [N_src * H * C]
     D_E_ptr,  # [M * H * C]
-    D_B_ptr,  # [M] gradient for bias
     N_src: tl.constexpr,
     H: tl.constexpr,
     C: tl.constexpr,
-    USE_BIAS: tl.constexpr,
     out_dtype: tl.constexpr,
 ):
     src_idx = tl.program_id(0)
@@ -352,17 +338,9 @@ def _gt_bwd_src_pass(
 
         # some recomputations from dst-pass
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        if USE_BIAS:
-            bias_val = tl.load(B_ptr + e_idx).to(tl.float32)
-            s_ij = s_ij + bias_val
         alpha_ij = tl.exp(s_ij - m_j)
         dalpha = tl.sum(d_out * ve, axis=-1)
         dS = alpha_ij * (dalpha - Dj)
-
-        if USE_BIAS:
-            # gradient for scalar bias: sum over heads of dS
-            dB_val = tl.sum(dS)
-            tl.store(D_B_ptr + e_idx, dB_val.to(out_dtype))
 
         # per-edge k, v contributions, summing up to per-edge e contribution
         dV_edge = alpha_ij[:, None] * d_out
@@ -410,7 +388,7 @@ class GraphTransformerFunction(torch.autograd.Function):
             )
 
     @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse, b=None):
+    def forward(ctx, q, k, v, e, csc, reverse):
         """Args:
         q: [N_dst, H, C]
         k: [N_src, H, C]
@@ -418,7 +396,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         e: [num_edges, H, C]
         csc: (row, colptr)
         reverse: (rowptr, edge_ids, edge_dst)
-        b: [num_edges] optional per-edge scalar logit bias
         """
         row, colptr = csc
         rowptr, edge_ids, edge_dst = reverse
@@ -426,10 +403,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         # Ensure contiguous memory layout for Triton
         q, k, v, e = [x.contiguous() for x in (q, k, v, e)]
         row, colptr, rowptr, edge_ids, edge_dst = [x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst)]
-
-        use_bias = b is not None
-        if use_bias:
-            b = b.contiguous()
 
         N_dst, H, C = q.shape
         out = torch.empty_like(q)
@@ -447,25 +420,17 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
-        ctx.use_bias = use_bias
 
-        b_ptr = b if use_bias else q  # dummy pointer when unused; USE_BIAS=False guards all loads
-        _gt_fwd[(N_dst,)](q, k, v, e, b_ptr, m, row, colptr, out, N_dst, H, C, use_bias, out_dtype)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
 
         # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, b if use_bias else None, out, m, row, colptr, rowptr, edge_ids, edge_dst)
+        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
         return out
 
     @staticmethod
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        saved = ctx.saved_tensors
-        # unpack with optional bias
-        if ctx.use_bias:
-            q, k, v, e, b, out, m, row, colptr, rowptr, edge_ids, edge_dst = saved
-        else:
-            q, k, v, e, _, out, m, row, colptr, rowptr, edge_ids, edge_dst = saved
-            b = None
+        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
@@ -475,21 +440,14 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        dB = torch.empty(e.shape[0], device=q.device, dtype=q.dtype) if ctx.use_bias else None
         D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
 
-        b_ptr = b if ctx.use_bias else q  # dummy pointer when unused
-        dB_ptr = dB if ctx.use_bias else q  # dummy pointer when unused
-
         # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](
-            q, k, v, e, b_ptr, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.use_bias, ctx.out_dtype
-        )
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, b_ptr, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, dB_ptr,
-            N_src, H, C, ctx.use_bias, ctx.out_dtype
+            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype
         )
 
-        return dQ, dK, dV, dE, None, None, dB
+        return dQ, dK, dV, dE, None, None
