@@ -44,4 +44,3 @@ def test_offset_time_indices_shifts_indices() -> None:
     assert offset2 == [8, 10, 12, 14]
     assert isinstance(offset3, slice)
     assert (offset3.start, offset3.stop, offset3.step) == (8, 15, 2)
-

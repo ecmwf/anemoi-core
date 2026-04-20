@@ -7,9 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
 from collections.abc import Sequence
 from itertools import pairwise
+
+import numpy as np
 
 TimeIndices = slice | int | list[int] | np.ndarray
 
