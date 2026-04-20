@@ -162,10 +162,9 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
 def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     """get_targets extracts multistep_output time steps from the batch."""
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
-    data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, 3, e, g, v)}
-    y = task.get_targets(batch, data_indices)
+    y = task.get_targets(batch)
     assert y["data"].shape[1] == 1  # multistep_output=1
 
 

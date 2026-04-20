@@ -738,7 +738,7 @@ def test_ensemble_collapse_ens_dim_takes_first_ensemble_member() -> None:
     forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)
 
-    b, t, e, g, v = 2, 1, 4, 4, 2
+    b, t, e, g, v = 2, 4, 1, 4, 2
     sentinel = torch.full((b, t, g, v), 99.0)
     batch_tensor = torch.zeros(b, t, e, g, v)
     batch_tensor[:, :, 0, :, :] = sentinel
@@ -1425,7 +1425,7 @@ def test_ensemble_make_targets_requires_singleton_ensemble_dim() -> None:
     batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
 
     with pytest.raises(AssertionError, match="Expected singleton ensemble dimension"):
-        forecaster._make_targets(batch, start=0)
+        forecaster._collapse_ens_dim(batch)
 
 
 # ── per-step metric key suffixes ──────────────────────────────────────────────
