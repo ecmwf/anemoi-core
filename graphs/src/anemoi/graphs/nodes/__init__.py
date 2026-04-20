@@ -17,7 +17,6 @@ from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
 from .builders.from_icon import ICONMultiMeshNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
-from .builders.from_reference import ReferenceNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
 from .builders.from_refined_icosahedron import LimitedAreaTriNodes
@@ -36,7 +35,6 @@ __all__ = [
     "LimitedAreaNPZFileNodes",
     "LimitedAreaTriNodes",
     "LimitedAreaHexNodes",
-    "ReferenceNodes",
     "ReducedGaussianGridNodes",
     "StretchedTriNodes",
     "ICONMultiMeshNodes",
