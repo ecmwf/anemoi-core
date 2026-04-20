@@ -225,15 +225,6 @@ class BaseDiffusionTraining(BaseTrainingModule):
 class DiffusionTraining(BaseDiffusionTraining):
     """Graph neural network for diffusion."""
 
-    def _get_diffusion_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Return (model-output targets for noising, full targets for loss)."""
-        target = self.task.get_targets(batch, data_indices=self.data_indices)
-        y = self.reduce_data_output_target_to_model_output(self.get_data_output_target(target))
-        return y, target
-
     def _step(
         self,
         batch: dict[str, torch.Tensor],
@@ -259,7 +250,8 @@ class DiffusionTraining(BaseDiffusionTraining):
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
-        y, target = self._get_diffusion_targets(batch)  # (bs, n_step_output, ens, latlon, nvar)
+        target = self.task.get_targets(batch, data_indices=self.data_indices)
+        y = self.get_data_output_target(target)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
