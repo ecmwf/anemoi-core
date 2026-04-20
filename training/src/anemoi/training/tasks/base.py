@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.data.relative_time_indices import normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ class BaseTask(ABC):
             ``(bs, num_inputs, grid, nvar)``.
         """
         time_indices = self.get_batch_input_indices()
+        time_indices = normalize_time_indices(time_indices)
 
         x = {}
         for dataset_name, dataset_batch in batch.items():
@@ -171,6 +173,7 @@ class BaseTask(ABC):
             variable space (all variables including forcings).
         """
         time_indices = self.get_batch_output_indices(**kwargs)
+        time_indices = normalize_time_indices(time_indices)
 
         y = {}
         for dataset_name, dataset_batch in batch.items():
