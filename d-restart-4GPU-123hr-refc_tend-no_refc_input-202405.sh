@@ -33,10 +33,10 @@ test -f "${CKPT}"
 srun --gpu-bind=closest \
   --export=ALL,TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}/${SLURM_PROCID} \
   anemoi-training train \
-    training.run_id=${RUN_ID} \
-    training.max_epochs=1860 \
     --config-path /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples \
     --config-name anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-refc-tendency-loss-no-refc-input \
+    training.run_id=${RUN_ID} \
+    training.max_epochs=1860 \
     system.hardware.num_gpus_per_node=2 \
     system.hardware.num_nodes=2 \
     system.hardware.num_gpus_per_model=1
