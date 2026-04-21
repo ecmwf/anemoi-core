@@ -9,7 +9,6 @@
 
 
 import logging
-import operator
 
 import yaml
 from omegaconf import OmegaConf
@@ -30,58 +29,33 @@ class IndexCollection:
     def __init__(self, config, name_to_index) -> None:
         self.config = OmegaConf.to_container(config, resolve=True)
 
-        self.forcing = (
-            []
-            if config.data.forcing is None
-            else OmegaConf.to_container(config.data.forcing, resolve=True)
-        )
+        self.forcing = [] if config.data.forcing is None else OmegaConf.to_container(config.data.forcing, resolve=True)
         self.diagnostic = (
-            []
-            if config.data.diagnostic is None
-            else OmegaConf.to_container(config.data.diagnostic, resolve=True)
+            [] if config.data.diagnostic is None else OmegaConf.to_container(config.data.diagnostic, resolve=True)
         )
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
         )
-        self.name_to_index_input_lres = dict(
-            sorted(name_to_index[0].items(), key=lambda x: x[1])
-        )
+        self.name_to_index_input_lres = dict(sorted(name_to_index[0].items(), key=lambda x: x[1]))
 
-        self.name_to_index_input_hres = dict(
-            sorted(name_to_index[1].items(), key=lambda x: x[1])
-        )
+        self.name_to_index_input_hres = dict(sorted(name_to_index[1].items(), key=lambda x: x[1]))
 
-        self.name_to_index_output = dict(
-            sorted(name_to_index[2].items(), key=lambda x: x[1])
-        )
+        self.name_to_index_output = dict(sorted(name_to_index[2].items(), key=lambda x: x[1]))
 
         name_to_index_model_input_lres = {
             name: i
-            for i, name in enumerate(
-                key
-                for key in self.name_to_index_input_lres.keys()
-                if key not in self.diagnostic
-            )
+            for i, name in enumerate(key for key in self.name_to_index_input_lres.keys() if key not in self.diagnostic)
         }
 
         name_to_index_model_input_hres = {
             name: i
-            for i, name in enumerate(
-                key
-                for key in self.name_to_index_input_hres.keys()
-                if key not in self.diagnostic
-            )
+            for i, name in enumerate(key for key in self.name_to_index_input_hres.keys() if key not in self.diagnostic)
         }
 
         name_to_index_model_output = {
-            name: i
-            for i, name in enumerate(
-                key
-                for key in self.name_to_index_output.keys()
-                if key not in self.forcing
-            )
+            name: i for i, name in enumerate(key for key in self.name_to_index_output.keys() if key not in self.forcing)
         }
 
         self.data = DataIndex(
@@ -117,9 +91,7 @@ class IndexCollection:
     def representer(dumper, data):
         return dumper.represent_scalar(f"!{data.__class__.__name__}", repr(data))
 
-    def compare_variables(
-        self, ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]
-    ) -> None:
+    def compare_variables(self, ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
         """Compare the order of the variables in the model from checkpoint and the data.
 
         Parameters
@@ -137,9 +109,7 @@ class IndexCollection:
             return
 
         if ckpt_name_to_index == data_name_to_index:
-            LOGGER.info(
-                "The order of the variables in the model matches the order in the data."
-            )
+            LOGGER.info("The order of the variables in the model matches the order in the data.")
             LOGGER.debug("%s, %s", ckpt_name_to_index, data_name_to_index)
             return
 

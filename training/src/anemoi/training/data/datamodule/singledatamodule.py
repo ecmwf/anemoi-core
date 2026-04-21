@@ -52,9 +52,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 "No end date specified for training data, setting default before validation start date %s.",
                 self.config.dataloader.validation.start - 1,
             )
-            self.config.dataloader.training.end = (
-                self.config.dataloader.validation.start - 1
-            )
+            self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
 
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
@@ -82,12 +80,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def relative_date_indices(self, val_rollout: int = 1) -> list:
         """Determine a list of relative time indices to load for each batch."""
         if hasattr(self.config.training, "explicit_times"):
-            return sorted(
-                set(
-                    self.config.training.explicit_times.input
-                    + self.config.training.explicit_times.target
-                )
-            )
+            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
 
         # Calculate indices using multistep, timeincrement and rollout.
         # Use the maximum rollout to be expected
@@ -126,16 +119,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             return data_reader
 
         mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
-        mr_len = (
-            self.config.dataloader.model_run_info.length
-        )  # model run length in number of date indices
-        if (
-            hasattr(self.config.training, "rollout")
-            and self.config.training.rollout.max is not None
-        ):
-            max_rollout_index = max(
-                self.relative_date_indices(self.config.training.rollout.max)
-            )
+        mr_len = self.config.dataloader.model_run_info.length  # model run length in number of date indices
+        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
+            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
             assert (
                 max_rollout_index < mr_len
             ), f"""Requested data length {max_rollout_index + 1}
@@ -188,17 +174,23 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_train(self) -> NativeGridDataset:
+        ds = open_dataset(self.config.dataloader.training)
+        overfit_on_date = getattr(self.config.dataloader, "overfit_on_date", None)
+        overfit_on_index = getattr(self.config.dataloader, "overfit_on_index", None)
+        if overfit_on_date is not None:
+            assert (
+                np.datetime64(overfit_on_date) in ds.dates
+            ), f"overfit_on_date={overfit_on_date} was not found in training dataset dates."
+            overfit_on_index = np.where(ds.dates == np.datetime64(overfit_on_date))[0][0]
         return self._get_dataset(
-            open_dataset(self.config.dataloader.training),
+            ds,
             label="train",
+            overfit_on_index=overfit_on_index,
         )
 
     @cached_property
     def ds_valid(self) -> NativeGridDataset:
-        if (
-            not self.config.dataloader.training.end
-            < self.config.dataloader.validation.start
-        ):
+        if not self.config.dataloader.training.end < self.config.dataloader.validation.start:
             LOGGER.warning(
                 "Training end date %s is not before validation start date %s.",
                 self.config.dataloader.training.end,
@@ -213,15 +205,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     @cached_property
     def ds_test(self) -> NativeGridDataset:
-        assert (
-            self.config.dataloader.training.end < self.config.dataloader.test.start
-        ), (
+        assert self.config.dataloader.training.end < self.config.dataloader.test.start, (
             f"Training end date {self.config.dataloader.training.end} is not before"
             f"test start date {self.config.dataloader.test.start}"
         )
-        assert (
-            self.config.dataloader.validation.end < self.config.dataloader.test.start
-        ), (
+        assert self.config.dataloader.validation.end < self.config.dataloader.test.start, (
             f"Validation end date {self.config.dataloader.validation.end} is not before"
             f"test start date {self.config.dataloader.test.start}"
         )
@@ -239,9 +227,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> NativeGridDataset:
 
-        data_reader = self.add_trajectory_ids(
-            data_reader
-        )  # NOTE: Functionality to be moved to anemoi datasets
+        data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
 
         return NativeGridDataset(
             data_reader=data_reader,

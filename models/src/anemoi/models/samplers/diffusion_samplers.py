@@ -204,7 +204,6 @@ class DiffusionSampler(ABC):
 
 
 ### WARNING : MODIFIED TEMPORARILY FOR DOWNSCALING
-from icecream import ic
 
 
 class EDMHeunSampler(DiffusionSampler):
@@ -272,9 +271,7 @@ class EDMHeunSampler(DiffusionSampler):
                 x_in_interp,
                 x_in_hres,
                 y.to(dtype=x_in_interp.dtype),
-                sigma_effective.view(1, 1, 1, 1)
-                .expand(batch_size, ensemble_size, 1, 1)
-                .to(x_in_interp.dtype),
+                sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x_in_interp.dtype),
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
@@ -289,9 +286,7 @@ class EDMHeunSampler(DiffusionSampler):
                     x_in_interp,
                     x_in_hres,
                     y_next.to(dtype=x_in_interp.dtype),
-                    sigma_next.view(1, 1, 1, 1)
-                    .expand(batch_size, ensemble_size, 1, 1)
-                    .to(dtype=x_in_interp.dtype),
+                    sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype=x_in_interp.dtype),
                     model_comm_group,
                     grid_shard_shapes,
                 ).to(dtype)
@@ -334,12 +329,8 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = sigma.view(1, 1, 1, 1).expand(
-                batch_size, ensemble_size, 1, 1
-            )
-            denoised = denoising_fn(
-                x, y, sigma_expanded, model_comm_group, grid_shard_shapes
-            )
+            sigma_expanded = sigma.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1)
+            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
 
             if sigma_next == 0:
                 y = denoised

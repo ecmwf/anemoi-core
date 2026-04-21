@@ -323,6 +323,8 @@ class BaseTrainingSchema(BaseModel):
     "This flag sets the torch.backends.cudnn.deterministic flag. Might be slower, but ensures reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
+    preferred_blas_backend: str | None = Field(default=None)
+    "Optionally override PyTorch's default BLAS backend."
     multistep_input: PositiveInt = Field(example=2)
     """Number of input steps for the model. E.g. 1 = single step scheme, X(t-1) used to predict X(t),
     k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)."""

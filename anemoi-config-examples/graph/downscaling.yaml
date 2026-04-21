@@ -28,7 +28,7 @@ nodes:
   hidden:
     node_builder:
       _target_:  anemoi.graphs.nodes.NPZFileNodes # options: ZarrDatasetNodes, NPZFileNodes, TriNodes
-      grid_definition_path: ${hardware.paths.grids}      
+      grid_definition_path: ${hardware.paths.grids}
       resolution: o96 # grid resolution for npz (o32, o48, ...)
     attributes: ${graph.attributes.nodes}
 

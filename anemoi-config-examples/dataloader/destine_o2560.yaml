@@ -28,7 +28,7 @@ limit_batches:
 # ============
 
 steps: [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72]
-select: [2t, 10u, 10v, msl] 
+select: [2t, 10u, 10v, msl]
 select_forcings: [cos_julian_day, cos_latitude, cos_local_time, cos_longitude, lsm, sin_julian_day, sin_latitude, sin_local_time, sin_longitude, z]
 
 
@@ -51,7 +51,7 @@ training:
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
       - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
       select: ${dataloader.select}
@@ -66,11 +66,11 @@ training:
 
 validation:
   start: 1900
-  end: 1901  
+  end: 1901
   frequency: ${data.frequency}
   dataset:
     zip:
-    - dataset: 
+    - dataset:
         - ${hardware.paths.data}/${hardware.files.dataset_x}
       name: lres
       select: ${dataloader.select}

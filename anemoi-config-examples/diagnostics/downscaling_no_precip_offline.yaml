@@ -57,7 +57,7 @@ log:
     expand_hyperparams: # Which keys in hyperparams to expand
       - config
     http_max_retries: 35
-    max_params_length: 2000    
+    max_params_length: 2000
   interval: 100
 
 enable_progress_bar: True
