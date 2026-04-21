@@ -373,7 +373,7 @@ The training configuration for diffusion models requires changes:
    training_method: anemoi.training.train.methods.DiffusionTraining
 
    # For tendency-based diffusion:
-   training_method: anemoi.training.train.methods.DiffusionTendTraining
+   training_method: anemoi.training.train.methods.DiffusionTendencyTraining
 
    # Standard training configuration remains similar
    multistep_input: 2
@@ -427,7 +427,7 @@ Uses `graphtransformer_diffusiontend.yaml` or
 -  Predicts the tendency (change) between timesteps
 -  Applies noise to the tendency rather than the state
 -  Model class: :class:`AnemoiDiffusionTendModelEncProcDec`
--  Training method: :class:`DiffusionTendTraining`
+-  Training method: :class:`DiffusionTendencyTraining`
 -  Requires `statistics_tendencies` for normalization
 -  Use single-step rollout (`rollout.max: 1`)
 
@@ -474,7 +474,7 @@ For tendency-based diffusion, change the model config and model task:
 
    # Select training method for tendency-based diffusion
    training:
-     training_method: anemoi.training.train.methods.DiffusionTendTraining
+     training_method: anemoi.training.train.methods.DiffusionTendencyTraining
 
    # Ensure statistics_tendencies are available
    config_validation: True

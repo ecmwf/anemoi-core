@@ -23,9 +23,11 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.relative_time_indices import offset_time_indices
 from anemoi.training.data.usable_indices import compute_valid_data_indices
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.training.utils.time_indices import offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ class MultiDataset(IterableDataset):
     def __init__(
         self,
         data_readers: dict[str, BaseAnemoiReader],
-        relative_date_indices: dict[str, list[int]],
+        relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
     ) -> None:
@@ -47,7 +49,7 @@ class MultiDataset(IterableDataset):
         data_readers : dict[str, BaseAnemoiReader]
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
-        relative_date_indices : dict[str, list[int]]
+        relative_date_indices : dict[str, TimeIndices]
             Precomputed relative date indices for each data reader
         shuffle : bool, optional
             Shuffle batches, by default True
@@ -63,7 +65,7 @@ class MultiDataset(IterableDataset):
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
-            name: offset_time_indices(0, indices) for name, indices in relative_date_indices.items()
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
 
         self._lazy_init_model_and_reader_group_info()
