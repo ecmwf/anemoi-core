@@ -70,8 +70,8 @@ class RolloutEval(Callback):
             f"Set `task.validation_rollout` to at least {self.max_rollout}"
         )
 
-        # NOTE: This callback only works correctly when its configured rollout matches
-        # `task.validation_rollout`, because `_step(..., validation_mode=True)` uses the task setting.
+        # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,
+        # because `_step(..., validation_mode=True)` uses the task setting to determine step count.
         with torch.no_grad():
             loss, metrics, _ = pl_module._step(batch, validation_mode=True)
             self._log(pl_module, loss, metrics, batch_tensor.shape[0])
@@ -178,8 +178,8 @@ class RolloutEvalEns(RolloutEval):
         )
 
         metrics = {}
-        # NOTE: This callback only works correctly when its configured rollout matches
-        # `task.validation_rollout`, because `_step(..., validation_mode=True)` uses the task setting.
+        # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,
+        # because `_step(..., validation_mode=True)` uses the task setting to determine step count.
         with torch.no_grad():
             loss, metrics, _ = pl_module._step(
                 batch=batch,
