@@ -234,6 +234,7 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     output_mask = Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask")
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
 
+    # dims: (batch, time, ens, grid, variable)
     x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
     batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
@@ -250,5 +251,8 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
         grid_shard_slice=slice(None),
     )
 
-    torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 20.0]))
+    # prognostic variable, 1st grid point (cutout_mask=True) should be from y_pred,
+    # 2nd grid point (cutout_mask=False) should be from batch
+    torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
+    # forcing variable should be refreshed from batch for both grid points
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
