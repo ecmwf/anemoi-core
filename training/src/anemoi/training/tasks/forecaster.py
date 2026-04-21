@@ -16,8 +16,6 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
-from anemoi.training.utils.masks import BaseMask
-from anemoi.training.utils.masks import NoOutputMask
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
@@ -140,7 +138,7 @@ class Forecaster(BaseTask):
         batch: torch.Tensor,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
-        output_mask: BaseMask = NoOutputMask(),
+        output_mask: object | None = None,
         grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
