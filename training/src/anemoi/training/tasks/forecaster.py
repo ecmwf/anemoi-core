@@ -110,7 +110,7 @@ class Forecaster(BaseTask):
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
-    def get_offsets(self, mode: str = "training") -> list[datetime.timedelta]:
+    def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
         if mode == "training":
             rollout_step = self.rollout.maximum
         elif mode == "validation":
