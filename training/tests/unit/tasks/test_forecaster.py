@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
 from anemoi.training.utils.masks import Boolean1DMask
+from anemoi.training.utils.masks import NoOutputMask
 
 
 def _make_minimal_index_collection(
@@ -216,6 +217,7 @@ def test_rollout_advance_input_keeps_latest_steps(
         y_pred,
         batch,
         rollout_step=0,
+        output_mask=NoOutputMask(),
         data_indices=data_indices,
     )
     kept_steps = updated[0, :, 0, 0, 0].tolist()
@@ -234,7 +236,7 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     output_mask = Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask")
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
 
-    # dims: (batch, time, ens, grid, variable)
+    # tensor dims: (batch, time, ens, grid, variable)
     x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
     batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
