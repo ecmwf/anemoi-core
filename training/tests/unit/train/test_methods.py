@@ -219,6 +219,7 @@ def _wire_training_module(
     obj.model_comm_group_size = 1
     obj.grid_shard_shapes = {"data": None}
     obj.grid_shard_slice = {"data": None}
+    obj.output_mask = {name: NoOutputMask() for name in data_indices}
     if task is not None:
         obj.task = task
 
@@ -660,24 +661,30 @@ def test_single_training_advance_input_called_once_per_step(monkeypatch: pytest.
         rollout={"start": 2, "maximum": 2},
     )
     module = _make_single_training(task, data_indices)
+    module.grid_shard_slice = {"data": slice(1, 3)}
+    module.output_mask = {"data": NoOutputMask()}
 
-    advance_call_count: list[int] = []
+    advance_calls: list[dict[str, Any]] = []
     dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
     monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
     monkeypatch.setattr(module, "compute_loss_metrics", lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y))
-    monkeypatch.setattr(
-        task,
-        "advance_input",
-        lambda x, *_a, **_kw: (advance_call_count.append(1), x)[1],
-    )
+
+    def _advance_input(x: dict[str, torch.Tensor], *_args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+        advance_calls.append(kwargs.copy())
+        return x
+
+    monkeypatch.setattr(task, "advance_input", _advance_input)
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, 2, e, g, v)}
     module._step(batch, validation_mode=False)
 
-    assert len(advance_call_count) == task.num_steps
+    assert len(advance_calls) == task.num_steps
+    for kwargs in advance_calls:
+        assert kwargs["output_mask"] is module.output_mask
+        assert kwargs["grid_shard_slice"] is module.grid_shard_slice
 
 
 # ── DiffusionTraining._step integration ───────────────────────────────────────

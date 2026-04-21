@@ -61,24 +61,6 @@ class BaseDiffusionTraining(BaseTrainingModule):
 
         self.rho = config.model.model.diffusion.rho
 
-    def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Get input tensor shape for diffusion model."""
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            msg = (
-                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {self.n_step_input + self.n_step_output}"
-            )
-            assert dataset_batch.shape[1] >= self.n_step_input + self.n_step_output, msg
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.n_step_input,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, n_step_input, latlon, nvar)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
-
     def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Project full targets into data-output variable space."""
         y = {}
@@ -144,20 +126,26 @@ class BaseDiffusionTraining(BaseTrainingModule):
         Parameters
         ----------
         y_pred : torch.Tensor
-            Predicted values
+            Predicted values.
         y : torch.Tensor
-            Target values
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+            Target values.
+        dataset_name : str
+            Dataset name for multi-dataset scenarios.
         weights : torch.Tensor
-            Noise weights for diffusion loss computation
+            Noise weights for diffusion loss computation.
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training.
+        pred_layout : IndexSpace | str | None
+            Layout of the prediction tensor.
+        target_layout : IndexSpace | str | None
+            Layout of the target tensor.
         **_kwargs
-            Additional arguments
+            Additional arguments.
 
         Returns
         -------
         torch.Tensor
-            Computed loss with noise weighting applied
+            Computed loss with noise weighting applied.
         """
         assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
 
@@ -239,13 +227,13 @@ class DiffusionTraining(BaseDiffusionTraining):
         batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+            Whether in validation mode and to calculate validation metrics, by default False.
+            If False, metrics will be empty.
 
         Returns
         -------
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
-            Loss value, metrics, and predictions (per step)
+            Loss value, metrics, and predictions (per step).
         """
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
 
@@ -511,13 +499,13 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
         batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+            Whether in validation mode and to calculate validation metrics, by default False.
+            If False, metrics will be empty.
 
         Returns
         -------
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
-            Loss value, metrics, and predictions (per step)
+            Loss value, metrics, and predictions (per step).
         """
         # batch is already normalized in BaseTrainingModule._normalize_batch
         # x: data.input.full (normalized), state_target: data.full (normalized slice view)
