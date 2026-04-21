@@ -167,12 +167,12 @@ class Forecaster(BaseTask):
             if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
                 true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
 
-            x[:, -(i + 1)] = output_mask.rollout_boundary(
-                x[:, -(i + 1)],
-                true_state,
-                data_indices,
-                grid_shard_slice=grid_shard_slice,
-            )
+                x[:, -(i + 1)] = output_mask.rollout_boundary(
+                  x[:, -(i + 1)],
+                  true_state,
+                  data_indices,
+                  grid_shard_slice=grid_shard_slice,
+                )
 
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
