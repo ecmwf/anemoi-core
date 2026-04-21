@@ -54,20 +54,25 @@ class FilteringLossWrapper(BaseLoss):
             BaseLoss,
         ), f"Invalid loss type provided: {type(loss)}. Expected a str or dict or BaseLoss."
         self.loss = loss
+        self.scaler = loss.scaler
         self.predicted_variables = predicted_variables
         self.target_variables = target_variables
 
     @functools.wraps(ScaleTensor.add_scaler)
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
-        dimension = dimension if isinstance(dimension, int) else dimension[0]
-        if dimension == TensorDim.VARIABLE and self.predicted_variables is not None:
+        dims = (dimension,) if isinstance(dimension, int) else tuple(dimension)
+        if TensorDim.VARIABLE in dims and self.predicted_variables is not None:
             # filter scaler to only predicted variables
             # target variables will be scaled like the predicted variables since that is what
             # it compares to in the loss
             # even if a different scaling exists for the target variable
             scaler = scaler[self.predicted_indices]
         # Pass scalers to the inner loss so they are actually applied during loss computation
-        self.loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
+        self.loss.add_scaler(dimension=dims, scaler=scaler, name=name)
+
+    @functools.wraps(ScaleTensor.update_scaler)
+    def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
+        self.loss.update_scaler(name=name, scaler=scaler, override=override)
 
     def set_data_indices(self, data_indices: IndexCollection) -> BaseLoss:
         """Hook to set the data indices for the loss."""

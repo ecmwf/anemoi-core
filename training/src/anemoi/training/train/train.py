@@ -9,6 +9,7 @@
 
 
 import datetime
+import os
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -46,6 +47,37 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
+
+def _is_rank0() -> bool:
+    try:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            return torch.distributed.get_rank() == 0
+    except Exception:
+        return True
+    rank_env = os.environ.get("RANK") or os.environ.get("SLURM_PROCID")
+    if rank_env is None:
+        return True
+    try:
+        return int(rank_env) == 0
+    except ValueError:
+        return True
+
+
+class _RankZeroInfoFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno == logging.INFO and not _is_rank0():
+            return False
+        return True
+
+
+def _install_rank0_info_filter() -> None:
+    root = logging.getLogger()
+    filt = _RankZeroInfoFilter()
+    root.addFilter(filt)
+    for handler in root.handlers:
+        handler.addFilter(filt)
+
+PL_VERSION = version.parse(pl.__version__)
 
 
 class AnemoiTrainer(ABC):
@@ -228,8 +260,11 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            for dataset_name, data_indices in self.data_indices.items():
+                data_indices.compare_variables(
+                    model._ckpt_model_name_to_index[dataset_name],
+                    data_indices.name_to_index,
+                )
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -546,6 +581,7 @@ class AnemoiTrainer(ABC):
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
+    _install_rank0_info_filter()
     AnemoiTrainer(config).train()
 
 

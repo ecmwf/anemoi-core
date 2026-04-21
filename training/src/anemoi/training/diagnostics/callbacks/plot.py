@@ -1262,16 +1262,16 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if pl_module.task_type == "forecaster":
             total_targets *= pl_module.n_step_output
 
-        input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
+        input_relative = [int(i) for i in pl_module.dataset_input_relative_time_indices[dataset_name]]
+        target_relative = [int(i) for i in pl_module.dataset_target_relative_time_indices[dataset_name]][:total_targets]
+        plot_relative = input_relative[-1:] + target_relative
+        if not plot_relative:
+            msg = "No input/target relative times available for dataset %s." % dataset_name
+            raise ValueError(msg)
+        plot_index = torch.tensor(plot_relative, device=batch[dataset_name].device, dtype=torch.long)
+        input_tensor = batch[dataset_name].index_select(1, plot_index)
+        input_tensor = input_tensor[..., pl_module.data_indices[dataset_name].data.output.full]
+        input_tensor = input_tensor.detach().cpu()
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
@@ -1540,6 +1540,7 @@ class MultiStepPlot(BasePlotAdditionalMetrics):
 
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, output_times)
 
+            _pred_array = output_tensor.detach().cpu().numpy() if isinstance(output_tensor, torch.Tensor) else np.asarray(output_tensor)
             latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],

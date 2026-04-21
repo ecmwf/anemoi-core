@@ -77,10 +77,12 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         self.rollout = config.training.rollout.start
         self.rollout_epoch_increment = config.training.rollout.epoch_increment
         self.rollout_max = config.training.rollout.max
+        self.rollout_reset_epoch = getattr(config.training.rollout, "reset_epoch", None)
 
         LOGGER.debug("Rollout window length: %d", self.rollout)
         LOGGER.debug("Rollout increase every : %d epochs", self.rollout_epoch_increment)
         LOGGER.debug("Rollout max : %d", self.rollout_max)
+        LOGGER.debug("Rollout reset epoch : %s", self.rollout_reset_epoch)
 
     def _advance_dataset_input(
         self,
@@ -221,11 +223,15 @@ class BaseRolloutGraphModule(BaseGraphModule, ABC):
         pass
 
     def on_train_epoch_end(self) -> None:
-        if (
-            self.rollout_epoch_increment > 0
-            and self.current_epoch > 0
-            and self.current_epoch % self.rollout_epoch_increment == 0
-        ):
+        should_increment = False
+        if self.rollout_epoch_increment > 0:
+            if self.rollout_reset_epoch is None:
+                should_increment = self.current_epoch > 0 and self.current_epoch % self.rollout_epoch_increment == 0
+            else:
+                rollout_epoch = self.current_epoch - self.rollout_reset_epoch
+                should_increment = rollout_epoch >= 0 and (rollout_epoch + 1) % self.rollout_epoch_increment == 0
+
+        if should_increment:
             self.rollout += 1
             LOGGER.debug("Rollout window length: %d", self.rollout)
         self.rollout = min(self.rollout, self.rollout_max)

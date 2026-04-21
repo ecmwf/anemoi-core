@@ -87,6 +87,8 @@ class OptimizationSchema(BaseModel):
     "Number of epochs to increment the rollout."
     max: NonNegativeInt = Field(example=1)
     "Maximum number of rollouts."
+    reset_epoch: NonNegativeInt | None = Field(default=None, example=14)
+    "Absolute trainer epoch to treat as rollout epoch 0 when resuming."
 
 
 class LR(BaseModel):

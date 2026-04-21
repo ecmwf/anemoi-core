@@ -752,8 +752,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
             **loss_kwargs,
         )
 
-        # Compute metrics if in validation mode
         metrics_next = {}
+        if not validation_mode and loss is not None and not torch.isfinite(loss).all():
+            metrics_next = self._compute_loss_component_metrics(
+                y_pred_full,
+                y_full,
+                grid_shard_slice=grid_shard_slice,
+                dataset_name=dataset_name,
+                **loss_kwargs,
+            )
+
+
         if validation_mode:
             metrics_next = self._compute_loss_component_metrics(
                 y_pred_full,
@@ -1138,8 +1147,31 @@ class BaseGraphModule(pl.LightningModule, ABC):
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
-        train_loss, *_ = self._step(batch)
+        train_loss, metrics, _ = self._step(batch)
         train_loss = train_loss.sum()
+        if not torch.isfinite(train_loss).all():
+            if getattr(self, "global_rank", 0) == 0:
+                LOGGER.error("Non-finite training loss detected.")
+                for mname, mval in metrics.items():
+                    if "_loss_component_" in mname:
+                        try:
+                            mval_f = float(mval.detach().sum().item())
+                        except Exception:
+                            mval_f = mval
+                        LOGGER.error("  %s = %s", mname, mval_f)
+                nan_params = 0
+                inf_params = 0
+                total_params = 0
+                for p in self.model.parameters():
+                    if p is None:
+                        continue
+                    total_params += p.numel()
+                    if torch.isnan(p).any():
+                        nan_params += 1
+                    if torch.isinf(p).any():
+                        inf_params += 1
+                LOGGER.error("Param NaN/Inf check: params_with_nan=%d params_with_inf=%d total_params=%d", nan_params, inf_params, total_params)
+            raise RuntimeError("Non-finite training loss detected; see logs for component breakdown.")
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",

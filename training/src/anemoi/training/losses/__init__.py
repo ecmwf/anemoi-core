@@ -25,8 +25,11 @@ from .spectral import LogSpectralDistance
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
 from .ssim import SSIMLoss
+from .ssim import MaskedLogSSIMLoss
 from .weighted_mse import WeightedMSELoss
 from .wet_area_loss import WeightedSoftWetAreaLoss
+from .optical_flow import OpticalFlowConsistencyLoss
+from .optical_flow import SoftWetMaskAdvectiveConsistencyLoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
@@ -38,9 +41,11 @@ __all__ = [
     "LogFFT2Distance",
     "LogSpectralDistance",
     "MAELoss",
+    "MaskedLogSSIMLoss",
     "MSELoss",
     "MultiscaleLossWrapper",
     "OpticalFlowConsistencyLoss",
+    "SoftWetMaskAdvectiveConsistencyLoss",
     "RMSELoss",
     "RollingAccumulationHuberLoss",
     "SpectralCRPSLoss",

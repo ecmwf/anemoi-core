@@ -9,6 +9,8 @@
 
 
 import logging
+import os
+import warnings
 from abc import ABC
 from typing import Optional
 
@@ -20,6 +22,26 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _is_rank0() -> bool:
+    try:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            return torch.distributed.get_rank() == 0
+    except Exception:
+        return True
+    rank_env = os.environ.get("RANK") or os.environ.get("SLURM_PROCID")
+    if rank_env is None:
+        return True
+    try:
+        return int(rank_env) == 0
+    except ValueError:
+        return True
+
+
+def _log_rank0(msg: str, *args: object) -> None:
+    if _is_rank0():
+        LOGGER.info(msg, *args)
 
 
 class BaseImputer(BasePreprocessor, ABC):
@@ -111,7 +133,7 @@ class BaseImputer(BasePreprocessor, ABC):
             else:
                 raise TypeError(f"Statistics {type(statistics)} is optional and not a dictionary")
 
-            LOGGER.info(f"Imputer: replacing NaNs in {name} with value {self.replacement[-1]}")
+            _log_rank0(f"Imputer: replacing NaNs in {name} with value {self.replacement[-1]}")
 
     def get_nans(self, x: torch.Tensor) -> torch.Tensor:
         """Get NaN mask from data
@@ -636,7 +658,7 @@ class InputOnlyImputer(BasePreprocessor):
             self.multi_step = config.get("multi_step", 2)
         else:
             self.multi_step = getattr(config, "multi_step", 2)
-        LOGGER.info(
+        _log_rank0(
             f"InputOnlyImputer: will impute first {self.multi_step} timesteps only (inputs), "
             f"leaving remaining timesteps (targets) with NaNs for loss to ignore"
         )
@@ -706,7 +728,7 @@ class InputOnlyImputer(BasePreprocessor):
                 forcing_indices_training.append(idx_training)
                 if idx_inference is not None:
                     forcing_indices_inference.append(idx_inference)
-                LOGGER.info(
+                _log_rank0(
                     f"InputOnlyImputer: replacing NaNs in forcing variable {name} "
                     f"across ALL timesteps with value {value}"
                 )
@@ -714,7 +736,7 @@ class InputOnlyImputer(BasePreprocessor):
                 non_forcing_indices_training.append(idx_training)
                 if idx_inference is not None:
                     non_forcing_indices_inference.append(idx_inference)
-                LOGGER.info(
+                _log_rank0(
                     f"InputOnlyImputer: replacing NaNs in prognostic/diagnostic variable {name} "
                     f"in first {self.multi_step} timesteps only with value {value}"
                 )
@@ -858,6 +880,205 @@ class InputOnlyImputer(BasePreprocessor):
 
     def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
         """No-op: outputs are not modified, NaNs handled by loss function."""
+        return x
+
+
+class QCImputer(ConstantImputer):
+    """Constant imputer that also zeroes QC-invalid values on input and restores NaNs on output."""
+
+    supports_skip_imputation = True
+
+    @classmethod
+    def _process_config(cls, config):
+        _special_keys = [
+            "default",
+            "remap",
+            "normalizer",
+            "invalid_bit_indices",
+            "qc_var_name",
+        ]
+        default = config.get("default", "none")
+        remap = config.get("remap", {})
+        normalizer = config.get("normalizer", "none")
+        method_config = {k: v for k, v in config.items() if k not in _special_keys and v is not None and v != "none"}
+
+        if not method_config:
+            LOGGER.warning(
+                f"{cls.__name__}: Using default method {default} for all variables not specified in the config.",
+            )
+        for m in method_config:
+            if isinstance(method_config[m], str):
+                method_config[m] = {method_config[m]: f"{m}_{method_config[m]}"}
+            elif isinstance(method_config[m], list):
+                method_config[m] = {method: f"{m}_{method}" for method in method_config[m]}
+
+        return default, remap, normalizer, method_config
+
+    def __init__(
+        self,
+        config=None,
+        data_indices: Optional[IndexCollection] = None,
+        statistics: Optional[dict] = None,
+    ) -> None:
+        super().__init__(config=config, data_indices=data_indices, statistics=statistics)
+
+        if config is None:
+            invalid_bit_indices = []
+            self.qc_var_name = "qc_flags"
+        elif isinstance(config, DictConfig):
+            invalid_bit_indices = list(config.get("invalid_bit_indices", []))
+            self.qc_var_name = str(config.get("qc_var_name", "qc_flags"))
+        elif hasattr(config, "get"):
+            invalid_bit_indices = list(config.get("invalid_bit_indices", []))
+            self.qc_var_name = str(config.get("qc_var_name", "qc_flags"))
+        else:
+            invalid_bit_indices = list(getattr(config, "invalid_bit_indices", []))
+            self.qc_var_name = str(getattr(config, "qc_var_name", "qc_flags"))
+
+        if not invalid_bit_indices:
+            raise ValueError("QCImputer requires non-empty invalid_bit_indices")
+
+        mask = 0
+        for bit in invalid_bit_indices:
+            mask |= 1 << int(bit)
+
+        self.register_buffer("invalid_mask", torch.tensor(mask, dtype=torch.int64), persistent=False)
+        self.register_buffer("last_qc_flags", torch.empty(0, dtype=torch.int64), persistent=False)
+        self.register_buffer("invalid_locations", torch.empty(0, dtype=torch.bool), persistent=False)
+
+    def _get_qc_index(self, x: torch.Tensor, *, training_input: bool) -> int | None:
+        primary = self.data_indices.data.input.name_to_index if training_input else self.data_indices.model.input.name_to_index
+        qc_idx = primary.get(self.qc_var_name, None)
+        if qc_idx is not None and int(qc_idx) < x.shape[-1]:
+            return int(qc_idx)
+
+        fallback = self.data_indices.data.input.name_to_index.get(self.qc_var_name, None)
+        if fallback is not None and int(fallback) < x.shape[-1]:
+            return int(fallback)
+
+        return None
+
+    def _store_qc_flags(self, x: torch.Tensor, *, training_input: bool) -> int | None:
+        qc_idx = self._get_qc_index(x, training_input=training_input)
+        if qc_idx is None:
+            self.last_qc_flags = torch.empty(0, dtype=torch.int64, device=x.device)
+            self.invalid_locations = torch.empty(0, dtype=torch.bool, device=x.device)
+            return None
+
+        qc_flags = x[:, 0, ..., qc_idx]
+        while qc_flags.ndim > 2:
+            qc_flags = qc_flags.select(1, 0)
+
+        self.last_qc_flags = qc_flags.to(torch.int64)
+        invalid_mask = self.invalid_mask.to(self.last_qc_flags.device)
+        self.invalid_locations = (self.last_qc_flags & invalid_mask) != 0
+        return qc_idx
+
+    def _get_invalid_mask(self, x: torch.Tensor, qc_idx: int | None) -> torch.Tensor | None:
+        if qc_idx is None:
+            return None
+        qc_flags = x[..., qc_idx].to(torch.int64)
+        return (qc_flags & self.invalid_mask.to(qc_flags.device)) != 0
+
+    @staticmethod
+    def _expand_grid_mask(x: torch.Tensor, grid_mask: torch.Tensor) -> torch.Tensor:
+        for _ in x.shape[1:-2]:
+            grid_mask = grid_mask.unsqueeze(1)
+        return grid_mask.expand(-1, *x.shape[1:-2], -1)
+
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        if not in_place:
+            x = x.clone()
+        if skip_imputation:
+            return x
+
+        nan_locations = self.get_nans(x)
+
+        if x.shape[-1] == self.num_training_input_vars:
+            if (
+                len(self.nan_locations.shape) > 1
+                and self.nan_locations.shape[0] == nan_locations.shape[0]
+                and self.nan_locations.shape[1] == nan_locations.shape[2]
+            ):
+                self.nan_locations[:] = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+            else:
+                self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+
+            index = self.index_training_input
+            qc_idx = self._store_qc_flags(x, training_input=True)
+            invalid_mask = self._get_invalid_mask(x, qc_idx)
+
+            n_outputs = len(self.data_indices.model.output.name_to_index)
+            self.loss_mask_training = torch.ones((x.shape[0], x.shape[-2], n_outputs), device=x.device)
+            for idx_src, idx_dst in zip(self.index_training_input, self.index_inference_output):
+                if idx_src is not None and idx_dst is not None:
+                    valid_mask = ~nan_locations[:, 0, ..., idx_src]
+                    if qc_idx is not None and idx_src != qc_idx and self.invalid_locations.numel() > 0:
+                        valid_mask = valid_mask & ~self.invalid_locations
+                    self.loss_mask_training[..., idx_dst] = valid_mask.int()
+
+        elif x.shape[-1] == self.num_inference_input_vars:
+            self.nan_locations = nan_locations[:, 0]
+            index = self.index_inference_input
+            qc_idx = self._store_qc_flags(x, training_input=False)
+            invalid_mask = self._get_invalid_mask(x, qc_idx)
+        else:
+            raise ValueError(
+                f"Input tensor ({x.shape[-1]}) does not match the training "
+                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
+            )
+
+        x = self.fill_with_value(x, index, nan_locations, index)
+
+        if invalid_mask is not None:
+            for idx_dst, value in zip(index, self.replacement):
+                if idx_dst is not None and idx_dst != qc_idx:
+                    x[..., idx_dst][invalid_mask] = value
+
+        return x
+
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
+        if not in_place:
+            x = x.clone()
+        if skip_imputation:
+            return x
+
+        if x.shape[-1] == self.num_training_output_vars:
+            index = self.index_training_output
+        elif x.shape[-1] == self.num_inference_output_vars:
+            index = self.index_inference_output
+        else:
+            raise ValueError(
+                f"Input tensor ({x.shape[-1]}) does not match the training "
+                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
+            )
+
+        assert (
+            x.shape[0] == self.nan_locations.shape[0]
+        ), f"Batch dimension of input tensor ({x.shape[0]}) does not match the batch dimension of nan locations ({self.nan_locations.shape[0]}). Are you using the postprocessors without running the preprocessor first?"
+
+        for idx_src, idx_dst in zip(self.index_inference_input, index):
+            if idx_src is not None and idx_dst is not None:
+                x[..., idx_dst][self._expand_subset_mask(x, idx_src, self.nan_locations)] = torch.nan
+
+        if self.invalid_locations.numel() > 0:
+            invalid_mask = self._expand_grid_mask(x, self.invalid_locations)
+            for idx_dst in index:
+                if idx_dst is not None:
+                    x[..., idx_dst][invalid_mask] = torch.nan
+
         return x
 
 

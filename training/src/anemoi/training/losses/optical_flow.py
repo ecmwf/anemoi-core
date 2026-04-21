@@ -16,6 +16,7 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 from torch.distributed.distributed_c10d import ProcessGroup
+from anemoi.training.utils.enums import TensorDim
 
 from anemoi.training.losses.base import BaseLoss
 
@@ -297,4 +298,363 @@ class OpticalFlowConsistencyLoss(BaseLoss):
             squash,
             group=group if is_sharded else None,
             squash_mode=kwargs.get("squash_mode", "avg"),
+        )
+
+def _dilate_mask(mask: torch.Tensor, kernel_size: int) -> torch.Tensor:
+    if kernel_size <= 1:
+        return mask
+    return F.max_pool2d(
+        mask.to(dtype=torch.float32),
+        kernel_size=kernel_size,
+        stride=1,
+        padding=kernel_size // 2,
+    ).gt(0.0)
+
+def _masked_reduce_scaled(
+    loss: BaseLoss,
+    out_scaled: torch.Tensor,
+    mask_scaled: torch.Tensor,
+    squash: bool,
+    *,
+    squash_mode: str = "avg",
+    group: ProcessGroup | None = None,
+    eps: float = 1.0e-6,
+) -> torch.Tensor:
+    if squash:
+        if squash_mode == "avg":
+            out_scaled = loss.avg_function(out_scaled, dim=TensorDim.VARIABLE, keepdim=True)
+            mask_scaled = loss.avg_function(mask_scaled, dim=TensorDim.VARIABLE, keepdim=True)
+        elif squash_mode == "sum":
+            out_scaled = loss.sum_function(out_scaled, dim=TensorDim.VARIABLE, keepdim=True)
+            mask_scaled = loss.sum_function(mask_scaled, dim=TensorDim.VARIABLE, keepdim=True)
+        else:
+            raise ValueError(f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'")
+
+    numerator = loss.sum_function(
+        out_scaled,
+        dim=(TensorDim.TIME, TensorDim.GRID),
+        keepdim=True,
+    )
+    denominator = loss.sum_function(
+        mask_scaled,
+        dim=(TensorDim.TIME, TensorDim.GRID),
+        keepdim=True,
+    ).clamp_min(eps)
+
+    reduced = numerator / denominator
+    out = loss.avg_function(
+        reduced,
+        dim=(TensorDim.BATCH_SIZE, TensorDim.TIME, TensorDim.ENSEMBLE_DIM),
+    ).squeeze()
+    return out if group is None else reduce_tensor(out, group)
+
+
+class SoftWetMaskAdvectiveConsistencyLoss(OpticalFlowConsistencyLoss):
+    """
+    Short-lead auxiliary term encouraging predicted rainy support to move
+    consistently with input-derived optical flow.
+    """
+
+    def __init__(
+        self,
+        x_dim: int,
+        y_dim: int,
+        *,
+        input_variable_index: int = 0,
+        patch_size: int = 21,
+        search_radius: int = 6,
+        seed_spacing: int = 24,
+        max_seeds: int = 192,
+        rain_threshold: float = 0.1,
+        filter_k: int = 6,
+        filter_z_thresh: float = 2.5,
+        range_fallback: float = 12.0,
+        kriging_nugget: float = 0.05,
+        downsample: int = 4,
+        preprocess_sigma: float = 1.0,
+        ignore_nans: bool = False,
+        wet_threshold: float = 0.1,
+        wet_temperature: float = 0.05,
+        teacher_support_threshold: float = 0.20,
+        teacher_mask_dilation: int = 3,
+        loss_type: Literal["huber", "l1", "bce"] = "huber",
+        delta: float = 0.10,
+        lead_decay: float = 0.7,
+        max_reg_leads: int = 6,
+        normalise_by_mask: bool = True,
+        include_target_mask: bool = False,
+        flow_history: int = 4,
+        history_decay: float = 0.8,
+    ) -> None:
+        super().__init__(
+            x_dim=x_dim,
+            y_dim=y_dim,
+            input_variable_index=input_variable_index,
+            patch_size=patch_size,
+            search_radius=search_radius,
+            seed_spacing=seed_spacing,
+            max_seeds=max_seeds,
+            rain_threshold=rain_threshold,
+            filter_k=filter_k,
+            filter_z_thresh=filter_z_thresh,
+            range_fallback=range_fallback,
+            kriging_nugget=kriging_nugget,
+            downsample=downsample,
+            preprocess_sigma=preprocess_sigma,
+            delta=delta,
+            mask_threshold=None,
+            loss_type="huber",
+            ignore_nans=ignore_nans,
+        )
+        if wet_temperature <= 0:
+            raise ValueError(f"wet_temperature must be positive, got {wet_temperature}")
+        if not 0 <= teacher_support_threshold <= 1:
+            raise ValueError(
+                f"teacher_support_threshold must be in [0, 1], got {teacher_support_threshold}"
+            )
+        if teacher_mask_dilation <= 0 or teacher_mask_dilation % 2 == 0:
+            raise ValueError(
+                f"teacher_mask_dilation must be a positive odd integer, got {teacher_mask_dilation}"
+            )
+        if lead_decay <= 0:
+            raise ValueError(f"lead_decay must be positive, got {lead_decay}")
+        if max_reg_leads <= 0:
+            raise ValueError(f"max_reg_leads must be positive, got {max_reg_leads}")
+        if flow_history < 2:
+            raise ValueError(f"flow_history must be >= 2, got {flow_history}")
+        if history_decay <= 0:
+            raise ValueError(f"history_decay must be positive, got {history_decay}")
+
+        self.wet_threshold = float(wet_threshold)
+        self.wet_temperature = float(wet_temperature)
+        self.teacher_support_threshold = float(teacher_support_threshold)
+        self.teacher_mask_dilation = int(teacher_mask_dilation)
+        self.aux_loss_type = str(loss_type)
+        self.delta = float(delta)
+        self.lead_decay = float(lead_decay)
+        self.max_reg_leads = int(max_reg_leads)
+        self.normalise_by_mask = bool(normalise_by_mask)
+        self.include_target_mask = bool(include_target_mask)
+        self.flow_history = int(flow_history)
+        self.history_decay = float(history_decay)
+
+    @property
+    def name(self) -> str:
+        return "wetmask_advective_consistency"
+
+    def _maps_sequence_to_like(self, seq_maps: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
+        batch_size, _, ensemble_size, grid_size, _ = like.shape
+        seq_maps = seq_maps.reshape(batch_size, ensemble_size, like.shape[1], self.y_dim * self.x_dim)
+        return seq_maps.permute(0, 2, 1, 3).unsqueeze(-1)
+
+    def _soft_wet_mask(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.to(dtype=torch.float32).clamp_min_(0.0)
+        return torch.sigmoid((x - self.wet_threshold) / self.wet_temperature)
+
+    def _lead_weights(self, n_leads: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        lead_ids = torch.arange(n_leads, device=device, dtype=dtype)
+        weights = torch.pow(torch.tensor(self.lead_decay, device=device, dtype=dtype), lead_ids)
+        if self.max_reg_leads < n_leads:
+            weights[self.max_reg_leads:] = 0.0
+        return weights
+
+    def _estimate_history_flow_from_inputs(
+        self,
+        input_context: torch.Tensor,
+        pred: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Estimate a mean per-step flow from the last `flow_history` input frames.
+
+        Returns:
+            mean_flow_x: (B*E, 1, Y, X)
+            mean_flow_y: (B*E, 1, Y, X)
+            last_frame:   (B*E, 1, Y, X)
+        """
+        if input_context.ndim != 5:
+            raise ValueError("input_context must have shape (batch, time, ensemble, grid, vars)")
+        if input_context.shape[-1] <= self.input_variable_index:
+            raise ValueError("input_variable_index exceeds available input channels")
+
+        batch_size, _, ensemble_size, _, _ = input_context.shape
+
+        n_hist = min(self.flow_history, input_context.shape[1])
+        if n_hist < 2:
+            raise ValueError("Need at least two input frames to estimate history flow")
+
+        hist = input_context[:, -n_hist:, :, :, self.input_variable_index]
+        hist = hist.reshape(batch_size, n_hist, ensemble_size, self.y_dim, self.x_dim)
+        hist = hist.permute(0, 2, 1, 3, 4).reshape(batch_size * ensemble_size, n_hist, 1, self.y_dim, self.x_dim)
+        hist = hist.to(device=pred.device, dtype=torch.float32)
+
+        flow_xs = []
+        flow_ys = []
+        weights = []
+
+        for pair_idx in range(1, n_hist):
+            prev_frame = hist[:, pair_idx - 1]
+            curr_frame = hist[:, pair_idx]
+            try:
+                flow_x, flow_y = self._estimate_dense_flow(prev_frame, curr_frame)
+            except Exception as exc:  # pragma: no cover
+                LOGGER.warning(
+                    "Skipping history flow pair %d/%d after flow estimation failure: %s",
+                    pair_idx,
+                    n_hist - 1,
+                    exc,
+                )
+                continue
+
+            # More recent pairs get larger weight.
+            age = (n_hist - 1) - pair_idx
+            weight = self.history_decay ** age
+
+            flow_xs.append(flow_x)
+            flow_ys.append(flow_y)
+            weights.append(weight)
+
+        if not flow_xs:
+            last_frame = hist[:, -1]
+            zeros = last_frame.new_zeros((last_frame.shape[0], 1, self.y_dim, self.x_dim))
+            return zeros, zeros.clone(), last_frame
+
+        weight_tensor = hist.new_tensor(weights).view(-1, 1, 1, 1, 1)
+        weight_tensor = weight_tensor / weight_tensor.sum().clamp_min(1.0e-6)
+
+        mean_flow_x = (torch.stack(flow_xs, dim=0) * weight_tensor).sum(dim=0)
+        mean_flow_y = (torch.stack(flow_ys, dim=0) * weight_tensor).sum(dim=0)
+        last_frame = hist[:, -1]
+
+        return mean_flow_x, mean_flow_y, last_frame
+
+    def _teacher_rollout_masks(
+        self,
+        input_context: torch.Tensor,
+        pred: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Build an advected wet-mask teacher from the last `flow_history` input frames.
+        Output shape: (B*E, T, 1, Y, X)
+        """
+        if pred.shape[-2] != self.x_dim * self.y_dim:
+            raise ValueError(
+                f"Expected grid size {self.x_dim * self.y_dim}, got {pred.shape[-2]}"
+            )
+
+        _, lead_steps, _, _, _ = pred.shape
+
+        flow_x, flow_y, last_frame = self._estimate_history_flow_from_inputs(input_context, pred)
+        last_mask = self._soft_wet_mask(last_frame)
+
+        teacher_masks = []
+        for lead_step in range(1, lead_steps + 1):
+            advected = self._advect_torch(last_mask, flow_x, flow_y, step_scale=float(lead_step))
+            teacher_masks.append(advected.clamp_(0.0, 1.0))
+
+        return torch.stack(teacher_masks, dim=1)  # (B*E, T, 1, Y, X)
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        input_context: torch.Tensor | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        if input_context is None:
+            raise ValueError("SoftWetMaskAdvectiveConsistencyLoss requires input_context")
+        if pred.shape[-1] != 1 or target.shape[-1] != 1:
+            raise ValueError("SoftWetMaskAdvectiveConsistencyLoss expects a single output variable")
+
+        is_sharded = grid_shard_slice is not None
+        batch_size, lead_steps, ensemble_size, _, _ = pred.shape
+
+        with torch.no_grad():
+            teacher_masks = self._teacher_rollout_masks(input_context, pred)
+
+        pred_maps = pred[..., 0].reshape(batch_size * ensemble_size, lead_steps, 1, self.y_dim, self.x_dim)
+        pred_masks = self._soft_wet_mask(pred_maps)
+
+        target_maps = target[..., 0].reshape(batch_size * ensemble_size, lead_steps, 1, self.y_dim, self.x_dim)
+        valid_mask = None
+        if self.ignore_nans:
+            valid_mask = ~torch.isnan(target_maps)
+            target_maps = target_maps.masked_fill(~valid_mask, 0.0)
+            pred_masks = pred_masks.masked_fill(~valid_mask, 0.0)
+            teacher_masks = teacher_masks.masked_fill(~valid_mask, 0.0)
+
+        support = teacher_masks.gt(self.teacher_support_threshold)
+        support = _dilate_mask(
+            support.reshape(batch_size * ensemble_size * lead_steps, 1, self.y_dim, self.x_dim),
+            self.teacher_mask_dilation,
+        ).reshape(batch_size * ensemble_size, lead_steps, 1, self.y_dim, self.x_dim)
+
+        if self.include_target_mask:
+            target_support = self._soft_wet_mask(target_maps).gt(self.teacher_support_threshold)
+            support.logical_or_(target_support)
+
+        if valid_mask is not None:
+            support.logical_and_(valid_mask)
+
+        if self.aux_loss_type == "l1":
+            loss_maps = torch.abs(pred_masks - teacher_masks)
+        elif self.aux_loss_type == "bce":
+            teacher_prob = teacher_masks.clamp(1.0e-4, 1.0 - 1.0e-4)
+            pred_prob = pred_masks.clamp(1.0e-4, 1.0 - 1.0e-4)
+            loss_maps = F.binary_cross_entropy(pred_prob, teacher_prob, reduction="none")
+        elif self.aux_loss_type == "huber":
+            loss_maps = F.huber_loss(pred_masks, teacher_masks, reduction="none", delta=self.delta)
+        else:
+            raise ValueError(f"Unsupported loss_type: {self.aux_loss_type}")
+
+        lead_weights = self._lead_weights(lead_steps, device=loss_maps.device, dtype=loss_maps.dtype)
+        loss_maps = loss_maps * lead_weights.view(1, lead_steps, 1, 1, 1)
+        loss_maps = loss_maps * support.to(dtype=loss_maps.dtype)
+
+        out = self._maps_sequence_to_like(loss_maps, pred)
+        mask = self._maps_sequence_to_like(
+            support.to(dtype=loss_maps.dtype) * lead_weights.view(1, lead_steps, 1, 1, 1),
+            pred,
+        )
+
+        squash_mode = kwargs.get("squash_mode", "avg")
+
+        if self.normalise_by_mask:
+            out_scaled = self.scale(
+                out,
+                scaler_indices,
+                without_scalers=without_scalers,
+                grid_shard_slice=grid_shard_slice,
+            )
+            mask_scaled = self.scale(
+                mask,
+                scaler_indices,
+                without_scalers=without_scalers,
+                grid_shard_slice=grid_shard_slice,
+            )
+            return _masked_reduce_scaled(
+                self,
+                out_scaled,
+                mask_scaled,
+                squash,
+                squash_mode=squash_mode,
+                group=group if is_sharded else None,
+            )
+
+        out = self.scale(
+            out,
+            scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
+        return self.reduce(
+            out,
+            squash,
+            group=group if is_sharded else None,
+            squash_mode=squash_mode,
         )

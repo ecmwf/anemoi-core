@@ -285,7 +285,11 @@ class CombinedLoss(BaseLoss):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         for i, spec in self._loss_scaler_specification.items():
             if "*" in spec or name in spec:
-                self.losses[i].update_scaler(name=name, scaler=scaler, override=override)
-
-    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
-        return any(loss.has_scaler_for_dim(dim=dim) for loss in self.losses)
+                scaler_obj = getattr(self.losses[i], "scaler", None)
+                if scaler_obj is None:
+                    loss_name = getattr(self.losses[i], "name", type(self.losses[i]).__name__)
+                    raise ValueError("CombinedLoss: loss[%d] (%s) has no scaler; cannot update %s." % (i, loss_name, name))
+                if name not in scaler_obj:
+                    loss_name = getattr(self.losses[i], "name", type(self.losses[i]).__name__)
+                    raise ValueError("CombinedLoss: loss[%d] (%s) missing scaler %s. Available: %s" % (i, loss_name, name, list(scaler_obj.tensors.keys())))
+                scaler_obj.update_scaler(name, scaler=scaler, override=override)
