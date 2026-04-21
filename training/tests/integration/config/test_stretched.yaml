@@ -69,6 +69,8 @@ training:
         node_weights:
           weight_frac_of_total: 0.25
 
+task:
+  validation_rollout: 2
 
 diagnostics:
   callbacks:

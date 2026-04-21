@@ -55,6 +55,9 @@ data:
             - "sin_julian_day"
             - "sin_local_time"
 
+task:
+  validation_rollout: 2
+
 diagnostics:
   callbacks:
     - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
