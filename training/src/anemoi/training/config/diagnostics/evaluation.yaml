@@ -7,7 +7,7 @@ defaults:
 
 # another alternative if you don't have any callbacks is to remove it from the
 # defaults list and just use
-# callbacks: []
+callbacks: []
 
 debug:
   # this will detect and trace back NaNs / Infs etc. but will slow down training

@@ -18,16 +18,6 @@ deterministic: False
 # miscellaneous
 precision: 16-mixed
 
-# multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-multistep_input: 2
-
-# multistep output
-# 1 = single step output scheme, single model forward predicts X(t)
-# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-multistep_output: 1
-
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
@@ -50,7 +40,7 @@ swa:
 # =====================================================================
 
 # select model
-model_task: anemoi.training.train.tasks.GraphForecaster
+training_method: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:
@@ -64,13 +54,6 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-# length of the "rollout" window (see Keisler's paper)
-rollout:
-  start: 1
-  # increase rollout every n epochs
-  epoch_increment: 0
-  # maximum rollout to use
-  max: 1
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
