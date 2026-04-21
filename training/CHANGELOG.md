@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.0](https://github.com/ecmwf/anemoi-core/compare/training-0.11.0...training-0.12.0) (2026-04-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** decouple training method & task ([#896](https://github.com/ecmwf/anemoi-core/issues/896))
+* **training:** make LR scheduler configurable through Hydra and clean up optimization config ([#986](https://github.com/ecmwf/anemoi-core/issues/986)) fx
+
+### Features
+
+* Deprecate LongRolloutPlots ([#1020](https://github.com/ecmwf/anemoi-core/issues/1020)) ([42af828](https://github.com/ecmwf/anemoi-core/commit/42af8286da370b2dbefb9e1e12dc71b30288a558))
+* Make blas backend configurable ([#1042](https://github.com/ecmwf/anemoi-core/issues/1042)) ([7a19bd8](https://github.com/ecmwf/anemoi-core/commit/7a19bd8ebd7ad0427af2afe50057e5b97a7c1008))
+* **models:** Point-wise forward/backward mappers ([#990](https://github.com/ecmwf/anemoi-core/issues/990)) ([8f29f92](https://github.com/ecmwf/anemoi-core/commit/8f29f9294739072ac4fa7fdfc9b76864b5a60874))
+* **training:** Decouple training method & task ([#896](https://github.com/ecmwf/anemoi-core/issues/896)) ([08f6536](https://github.com/ecmwf/anemoi-core/commit/08f6536658c41d9f4e257e6fe65b656696b57150))
+* **training:** Make LR scheduler configurable through Hydra and clean up optimization config ([#986](https://github.com/ecmwf/anemoi-core/issues/986)) fx ([acf58b8](https://github.com/ecmwf/anemoi-core/commit/acf58b8af4b2adaae0c3328b1c255d7687003a8f))
+
+
+### Bug Fixes
+
+* Allow control of multiprocessing context in the DataLoader ([#1000](https://github.com/ecmwf/anemoi-core/issues/1000)) ([70da85d](https://github.com/ecmwf/anemoi-core/commit/70da85ddf777460210b423542745f1718c186072))
+* Don't crash if config.dataloader.multiprocessing is not set ([#1024](https://github.com/ecmwf/anemoi-core/issues/1024)) ([a1f769d](https://github.com/ecmwf/anemoi-core/commit/a1f769d393c583da74694ab826a925e0e43b253c))
+
+
+### Documentation
+
+* **training:** Update optimizer and scheduler documentation ([#1040](https://github.com/ecmwf/anemoi-core/issues/1040)) ([98b14a3](https://github.com/ecmwf/anemoi-core/commit/98b14a31daaff363edc6bea04e375e476f320cc6)), closes [#1038](https://github.com/ecmwf/anemoi-core/issues/1038)
+
 ## [0.11.0](https://github.com/ecmwf/anemoi-core/compare/training-0.10.0...training-0.11.0) (2026-03-26)
 
 
