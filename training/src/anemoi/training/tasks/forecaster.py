@@ -16,6 +16,8 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils.masks import BaseMask
+from anemoi.training.utils.masks import NoOutputMask
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
@@ -138,7 +140,7 @@ class Forecaster(BaseTask):
         batch: torch.Tensor,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
-        output_mask: object | None = None,
+        output_mask: BaseMask = NoOutputMask(),
         grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
@@ -162,18 +164,17 @@ class Forecaster(BaseTask):
             ]
 
             batch_time_index = output_batch_indices[-(i + 1)]
+            true_state = batch[:, batch_time_index]
 
-            if output_mask is not None:
-                true_state = batch[:, batch_time_index]
-                if true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
-                    true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
 
-                x[:, -(i + 1)] = output_mask.rollout_boundary(
-                    x[:, -(i + 1)],
-                    true_state,
-                    data_indices,
-                    grid_shard_slice=grid_shard_slice,
-                )
+            x[:, -(i + 1)] = output_mask.rollout_boundary(
+                x[:, -(i + 1)],
+                true_state,
+                data_indices,
+                grid_shard_slice=grid_shard_slice,
+            )
 
             # get new "constants" needed for time-varying fields
             x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
