@@ -245,7 +245,8 @@ def lam_config_with_graph(
 
     url_graph = "anemoi-integration-tests/training/graphs/lam-graph-2026-02-19.pt"
     cfg.system.input.graph = Path(get_test_data(url_graph))
-    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in lam training cycle test
+    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in the lam training cycle test
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in the lam training cycle test
     return cfg, urls
 
 
@@ -312,6 +313,8 @@ def hierarchical_config(
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
+
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset]
@@ -349,6 +352,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
     return cfg, url_dataset
 
 
@@ -455,6 +459,7 @@ def global_config_with_checkpoint(
     cfg.training.max_epochs = 3
 
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
 
     return cfg, dataset_url
 
