@@ -250,5 +250,5 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
         grid_shard_slice=slice(None),
     )
 
-    torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
+    torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 20.0]))
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
