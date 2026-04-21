@@ -9,21 +9,22 @@
 
 from enum import Enum
 from functools import partial
-from typing import Annotated, Any, Literal
+from typing import Annotated
+from typing import Any
+from typing import Literal
+
+from pydantic import AfterValidator
+from pydantic import Discriminator
+from pydantic import Field
+from pydantic import NonNegativeFloat
+from pydantic import NonNegativeInt
+from pydantic import PositiveInt
+from pydantic import field_validator
+from pydantic import model_validator
+from typing_extensions import Self
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
-from pydantic import (
-    AfterValidator,
-    Discriminator,
-    Field,
-    NonNegativeFloat,
-    NonNegativeInt,
-    PositiveInt,
-    field_validator,
-    model_validator,
-)
-from typing_extensions import Self
 
 
 class GradientClip(BaseModel):
