@@ -13,7 +13,14 @@ dataloader:
       data:
         start: 2017-01-08 18:00:00
 
+task:
+  validation_rollout: 2
+
 diagnostics:
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
+      rollout: [1, 2]
+      every_n_batches: 4
   log:
     mlflow:
       authentication: True

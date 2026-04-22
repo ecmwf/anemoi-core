@@ -472,8 +472,8 @@ class DiffusionTrainingSchema(BaseTrainingSchema):
     "Training objective."
 
 
-class DiffusionTendTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTendTraining"] = Field(
+class DiffusionTendencyTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.DiffusionTendencyTraining"] = Field(
         ...,
         alias="training_method",
     )
@@ -481,6 +481,6 @@ class DiffusionTendTrainingSchema(BaseTrainingSchema):
 
 
 TrainingSchema = Annotated[
-    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendTrainingSchema,
+    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendencyTrainingSchema,
     Discriminator("training_method"),
 ]
