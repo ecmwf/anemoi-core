@@ -100,7 +100,6 @@ data:
   resolution: mrl${data.refinement}
   refinement: 3
   frequency: 6h
-  timestep: 6h
   datasets:
     data:
       forcing:
@@ -206,18 +205,27 @@ model:
     - _target_: anemoi.models.layers.bounding.ReluBounding
       variables: []
 
+task:
+  _target_: anemoi.training.tasks.Forecaster
+  multistep_input: 2
+  multistep_output: 1
+  timestep: 6h
+  rollout:
+    start: 1
+    epoch_increment: 1
+    maximum: 1
+  validation_rollout: 1
+
 training:
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning
-  model_task: anemoi.training.train.tasks.GraphForecaster
+  training_method: anemoi.training.train.methods.SingleTraining
   submodules_to_freeze: []
   num_sanity_val_steps: 2
   load_weights_only: False
   deterministic: false
   precision: 16-mixed
-  multistep_input: 2
-  multistep_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
@@ -244,10 +252,6 @@ training:
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
   loss_gradient_scaling: False
-  rollout:
-    start: 1
-    epoch_increment: 1
-    max: 1
   max_epochs: 1
   scalers:
     datasets:
@@ -438,4 +442,3 @@ dataloader:
     training: 2
     validation: 2
     test: 1
-  validation_rollout: 1
