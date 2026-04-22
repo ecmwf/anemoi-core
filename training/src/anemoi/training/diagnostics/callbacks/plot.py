@@ -715,7 +715,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 trainer,
                 pl_module,
                 output,
-                batch,
+                pl_module.plot_adapter.prepare_loss_batch(batch),
                 batch_idx,
             )
 
@@ -746,6 +746,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
+        members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
@@ -763,6 +764,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
             The batch of data
+        members : int | list[int] | None, optional
+            Ensemble members to select. Only used when the plot adapter is ensemble-aware.
+            None returns all members. Default is 0 (first member).
 
         Returns
         -------
@@ -790,9 +794,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                    self.sample_idx : self.sample_idx + 1
-                ]
+                pl_module.plot_adapter.select_members(
+                    self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                        self.sample_idx : self.sample_idx + 1
+                    ],
+                    members,
+                )
                 for x in outputs[1]
             ),
         )
