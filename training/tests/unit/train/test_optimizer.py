@@ -6,15 +6,15 @@ from pytorch_lightning.utilities.types import LRSchedulerConfig
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 
 _ADAM_CFG = OmegaConf.create({"_target_": "torch.optim.Adam", "betas": [0.9, 0.95], "weight_decay": 0.1})
 
 
 @pytest.fixture
-def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
-    """Create a lightweight mock BaseGraphModule instance with real methods bound."""
-    module = mocker.MagicMock(spec=BaseGraphModule)
+def mocked_module(mocker: MockerFixture) -> BaseTrainingModule:
+    """Create a lightweight mock BaseTrainingModule instance with real methods bound."""
+    module = mocker.MagicMock(spec=BaseTrainingModule)
 
     module.effective_lr = 0.001
     module.parameters.return_value = [torch.nn.Parameter(torch.randn(2, 2))]
@@ -24,9 +24,9 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
     module.config.training.optimization.lr_scheduler = None
 
     # Bind real methods from the class so they work on this mock
-    module.configure_optimizers = BaseGraphModule.configure_optimizers.__get__(module)
-    module.log_optimizer = BaseGraphModule.log_optimizer
-    module.lr_scheduler_step = BaseGraphModule.lr_scheduler_step.__get__(module)
+    module.configure_optimizers = BaseTrainingModule.configure_optimizers.__get__(module)
+    module.log_optimizer = BaseTrainingModule.log_optimizer
+    module.lr_scheduler_step = BaseTrainingModule.lr_scheduler_step.__get__(module)
     module.current_epoch = 0
     module.trainer = mocker.MagicMock()
     module.trainer.global_step = 0
@@ -37,7 +37,7 @@ def mocked_module(mocker: MockerFixture) -> BaseGraphModule:
 # ---- Tests ----
 
 
-def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
+def test_create_optimizer_from_config(mocked_module: BaseTrainingModule) -> None:
     mocked_module.config.training.optimization.optimizer = _ADAM_CFG
 
     result = mocked_module.configure_optimizers()
@@ -49,7 +49,7 @@ def test_create_optimizer_from_config(mocked_module: BaseGraphModule) -> None:
     assert result.defaults["betas"] == (0.9, 0.95)
 
 
-def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -> None:
+def test_create_optimizer_from_config_ademamix(mocked_module: BaseTrainingModule) -> None:
     mocked_module.config.training.optimization.optimizer = OmegaConf.create(
         {
             "_target_": "anemoi.training.optimizers.AdEMAMix.AdEMAMix",
@@ -67,7 +67,7 @@ def test_create_optimizer_from_config_ademamix(mocked_module: BaseGraphModule) -
     assert result.defaults["betas"] == (0.9, 0.95, 0.9999)
 
 
-def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) -> None:
+def test_create_optimizer_from_config_invalid(mocked_module: BaseTrainingModule) -> None:
     mocked_module.config.training.optimization.optimizer = OmegaConf.create(
         {"_target_": "nonexistent.OptimizerClass"},
     )
@@ -75,7 +75,7 @@ def test_create_optimizer_from_config_invalid(mocked_module: BaseGraphModule) ->
         mocked_module.configure_optimizers()
 
 
-def test_create_scheduler(mocked_module: BaseGraphModule) -> None:
+def test_create_scheduler(mocked_module: BaseTrainingModule) -> None:
     """Ensure cosine scheduler is constructed correctly via configure_optimizers."""
     mocked_module.config.training.optimization.optimizer = _ADAM_CFG
     mocked_module.config.training.optimization.lr_scheduler = OmegaConf.create(
@@ -99,7 +99,7 @@ def test_create_scheduler(mocked_module: BaseGraphModule) -> None:
 
 
 def test_create_timm_scheduler_defaults_to_step_interval(
-    mocked_module: BaseGraphModule,
+    mocked_module: BaseTrainingModule,
 ) -> None:
     mocked_module.config.training.optimization.optimizer = _ADAM_CFG
     mocked_module.config.training.optimization.lr_scheduler = OmegaConf.create(
@@ -123,7 +123,7 @@ def test_create_timm_scheduler_defaults_to_step_interval(
 
 
 def test_lr_scheduler_step_uses_step_update_for_step_interval(
-    mocked_module: BaseGraphModule,
+    mocked_module: BaseTrainingModule,
     mocker: MockerFixture,
 ) -> None:
     optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.effective_lr)
@@ -140,7 +140,7 @@ def test_lr_scheduler_step_uses_step_update_for_step_interval(
 
 
 def test_lr_scheduler_step_uses_epoch_step_for_epoch_interval(
-    mocked_module: BaseGraphModule,
+    mocked_module: BaseTrainingModule,
     mocker: MockerFixture,
 ) -> None:
     optimizer = torch.optim.Adam(mocked_module.parameters(), lr=mocked_module.effective_lr)

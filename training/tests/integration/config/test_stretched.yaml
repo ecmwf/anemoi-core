@@ -69,8 +69,14 @@ training:
         node_weights:
           weight_frac_of_total: 0.25
 
+task:
+  validation_rollout: 2
 
 diagnostics:
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
+      rollout: [1, 2]
+      every_n_batches: 4
   plot:
     # Parameters to plot
     parameters:
@@ -92,7 +98,6 @@ diagnostics:
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 6
         parameters: ${diagnostics.plot.parameters}
-        output_steps: ${training.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         #Defining the accumulation levels for precipitation related fields and the colormap
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
@@ -108,7 +113,6 @@ diagnostics:
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
-        output_steps: ${training.multistep_output}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         precip_and_related_fields: ["tp"]
         parameters:
