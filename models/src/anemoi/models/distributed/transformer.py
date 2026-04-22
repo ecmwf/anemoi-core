@@ -16,49 +16,23 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.utils import get_memory_format
+from anemoi.models.distributed.primitives import _alltoallwrapper
 
 
-def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
-    """Wrapper function for all_to_all across NCCL, MPI and Gloo backends.
-    There is no all_to_all primitive for the Gloo backend. In that case each
-    process broadcasts its tensor asynchronously.
+def _comm_send_chunks(chunks: tuple[Tensor, ...]) -> list[Tensor]:
+    """Normalize collective inputs to always use contiguous format."""
+    return [chunk.clone(memory_format=torch.contiguous_format) for chunk in chunks]
 
-    Retuns nothing but modifies output_list in-place
 
-    """
-    comm_size = dist.get_world_size(group=group)
-
-    if dist.get_backend(group) == "gloo":
-
-        # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
-        torch_version = torch.__version__.split(".")
-        torch_major_version = int(torch_version[0])
-        torch_minor_version = int(torch_version[1])
-        if torch_major_version <= 2 and torch_minor_version < 6:
-            raise NotImplementedError("Gloo all_to_all not implemented for torch < v2.6")
-
-        reqs = []
-        rank = dist.get_rank(group=group)
-        # Here we implement the linear shift algorithm from Hofmann and Ruenger, 2013
-        for i in range(0, comm_size):
-            j = (i - rank + comm_size) % comm_size
-            if j != rank:
-                # exchange data with rank j
-                reqs.append(dist.isend(input_list[j], group_dst=j, group=group))
-                reqs.append(dist.irecv(output_list[j], group_src=j, group=group))
-            else:
-                output_list[rank] = input_list[rank]
-        for req in reqs:
-            req.wait()
-    else:
-        dist.all_to_all(output_list, input_list, group=group)
+def _comm_recv_chunks_like(chunks: list[Tensor]) -> list[Tensor]:
+    """Allocate contiguous receive buffers for collective communication."""
+    return [torch.empty_like(chunk, memory_format=torch.contiguous_format) for chunk in chunks]
 
 
 def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the head dimension.
 
-    Split input along dimension dim_split and join after all_to_all along dimesion
+    Split input along dimension dim_split and join after all_to_all along dimension
     dim_concatenate.
     """
     comm_size = dist.get_world_size(group=group)
@@ -68,34 +42,30 @@ def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] =
 
     myrank = dist.get_rank(group=group)
 
-    # get input format
-    input_format = get_memory_format(input_)
-
     num_heads = input_.shape[-3]
     assert num_heads >= comm_size, f"Number of heads ({num_heads}) must be >= number of GPUs ({comm_size})"
     head_split_sizes = get_balanced_partition_sizes(num_heads, comm_size)
-    input_list = [x.contiguous() for x in torch.split(input_, head_split_sizes, dim=-3)]
+    input_list = _comm_send_chunks(torch.split(input_, head_split_sizes, dim=-3))
 
     input_shape = [x.shape for x in input_list]  # (b h n c)
     heads_per_rank = [x.shape[-3] for x in input_list]
     channels_per_rank = [x.shape[-1] for x in input_list]
     seq_per_rank = [x[0] for x in shapes]
 
-    output_list = [
+    recv_templates = [
         torch.empty(
             (*input_shape[rank][:-3], heads_per_rank[myrank], seq_per_rank[rank], channels_per_rank[rank]),
             dtype=input_.dtype,
             layout=input_.layout,
             device=input_.device,
-            memory_format=input_format,
         )
         for rank in range(comm_size)
     ]
+    output_list = _comm_recv_chunks_like(recv_templates)
 
     _alltoallwrapper(output_list, input_list, group=group)
 
-    # Note: torch.cat already creates a contiguous tensor.
-    return torch.cat(output_list, dim=-2).contiguous(memory_format=input_format)
+    return torch.cat(output_list, dim=-2)
 
 
 def _seqalltoall(input_: Tensor, shapes: list, num_heads: int, group: Optional[ProcessGroup] = None) -> Tensor:
@@ -111,31 +81,27 @@ def _seqalltoall(input_: Tensor, shapes: list, num_heads: int, group: Optional[P
 
     comm_rank = dist.get_rank(group=group)
 
-    # get input format
-    input_format = get_memory_format(input_)
-
     seq_per_rank = [x[0] for x in shapes]
-    input_list = [x.contiguous() for x in torch.split(input_, seq_per_rank, dim=-2)]
+    input_list = _comm_send_chunks(torch.split(input_, seq_per_rank, dim=-2))
 
     input_shape = [x.shape for x in input_list]
     heads_per_rank = get_balanced_partition_sizes(num_heads, comm_size)
     channels_per_rank = [x.shape[-1] for x in input_list]
 
-    output_list = [
+    recv_templates = [
         torch.empty(
             (*input_shape[rank][:-3], heads_per_rank[rank], seq_per_rank[comm_rank], channels_per_rank[rank]),
             dtype=input_.dtype,
             layout=input_.layout,
             device=input_.device,
-            memory_format=input_format,
         )
         for rank in range(comm_size)
     ]
+    output_list = _comm_recv_chunks_like(recv_templates)
 
     _alltoallwrapper(output_list, input_list, group=group)
 
-    # Note: torch.cat already creates a contiguous tensor.
-    return torch.cat(output_list, dim=-3).contiguous(memory_format=input_format)
+    return torch.cat(output_list, dim=-3)
 
 
 def shard_heads(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
