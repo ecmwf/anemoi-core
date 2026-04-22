@@ -485,17 +485,60 @@ class GraphForecaster(pl.LightningModule):
 
             y = batch[:, self.multi_step + rollout_step, ..., self.data_indices.internal_data.output.full]
             # y includes the auxiliary variables, so we must leave those out when computing the loss
-            loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
+            
+            if rollout_step >= 1:
+                # single out only pressure variables if rollout >= 1
+                # get pressure Indices
+                p_indices_model = [v for  k, v in self.data_indices.model.output.name_to_index.items() if k.startswith("P")]
+                mask = torch.zeros_like(y_pred)  # same shape
+                mask[..., p_indices_model] = 1.0  # 1 where you want to train
+                y_pred_p = y_pred * mask  
+                y_p = y * mask  
 
-            x = self.advance_input(x, y_pred, batch, rollout_step)
+                loss = checkpoint(
+                    self.loss, 
+                    y_pred_p,
+                    y_p,
+                    rollout_step,
+                    # validation_mode,
+                    use_reentrant=False,
+                )
 
-            metrics_next = {}
-            if validation_mode:
-                metrics_next = self.calculate_val_metrics(
+                metrics_next = {}
+                if validation_mode:
+                    metrics_next = self.calculate_val_metrics(
+                        y_pred_p,
+                        y,
+                        rollout_step,
+                    )
+            else:
+                loss = checkpoint(
+                    self.loss,
                     y_pred,
                     y,
                     rollout_step,
+                    # validation_mode,
+                    use_reentrant=False,
                 )
+
+                metrics_next = {}
+                if validation_mode:
+                    metrics_next = self.calculate_val_metrics(
+                        y_pred,
+                        y,
+                        rollout_step,
+                    )
+            # loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
+
+            x = self.advance_input(x, y_pred, batch, rollout_step)
+
+            # metrics_next = {}
+            # if validation_mode:
+            #     metrics_next = self.calculate_val_metrics(
+            #         y_pred,
+            #         y,
+            #         rollout_step,
+            #     )
             yield loss, metrics_next, y_pred
 
     def _step(

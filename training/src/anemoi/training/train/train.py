@@ -267,15 +267,17 @@ class AnemoiTrainer:
     @cached_property
     def last_checkpoint(self) -> str | None:
         """Path to the last checkpoint."""
-        if not self.start_from_checkpoint:
-            return None
+        # want to start from checkpoint on disk, not on mlflow 
+        # and warm_start alone does not make self.start_from_checkpoint = True
+        # if not self.start_from_checkpoint:
+        #     return None
 
         fork_id = self.fork_run_server2server or self.config.training.fork_run_id
-        checkpoint = Path(
-            self.config.hardware.paths.checkpoints.parent,
-            fork_id or self.lineage_run,
-            self.config.hardware.files.warm_start or "last.ckpt",
-        )
+        checkpoint = Path( self.config.hardware.files.warm_start)
+            # self.config.hardware.paths.checkpoints.parent,
+            # fork_id or self.lineage_run,
+            # self.config.hardware.files.warm_start or "last.ckpt",
+        # )
         # Check if the last checkpoint exists
         if Path(checkpoint).exists():
             LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
