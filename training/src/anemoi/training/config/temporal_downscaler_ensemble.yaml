@@ -3,8 +3,8 @@ defaults:
 - dataloader: native_grid
 - diagnostics: evaluation_ens
 - system: example
-- graph: encoder_decoder_only
-- model: transformer_ens
+- graph: multi_scale
+- model: graphtransformer_ens
 - task: temporal_downscaler
 - training: ensemble
 - _self_
@@ -26,10 +26,8 @@ diagnostics:
 
 system:
   input:
-    graph: graph_anemoi_new_${data.resolution}.pt
-    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2022-6h-v6
-    truncation: ${data.resolution}-o32-linear.mat.npz
-    truncation_inv: o32-${data.resolution}-linear.mat.npz
+    graph: graph_anemoi_new.pt
+    dataset: aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51
     loss_matrices_path: null
   hardware:
     accelerator: auto
@@ -41,9 +39,5 @@ system:
 model:
   num_channels: 128
 
-data:
-  resolution: o96
-
 training:
   ensemble_size_per_device: 2
-  max_epochs: 1
