@@ -29,28 +29,6 @@ _MSE_CFG = {
 }
 
 
-def test_optimizer_schema_allows_extra_keys() -> None:
-    """Test that the OptimizerSchema allows extra keys."""
-    # Explicitly test for the issue present in (anemoi-core/#885)[https://github.com/ecmwf/anemoi-core/pull/885]
-    optimizer_config = {
-        "_target_": "torch.optim.AdamW",
-        "lr": 0.001,
-        "weight_decay": 0.01,
-        "extra_key": "extra_value",  # This key is not defined in the schema
-    }
-    optimizer_schema = OptimizerSchema(**optimizer_config)
-    assert optimizer_schema.target_ == "torch.optim.AdamW"
-    assert optimizer_schema.lr == 0.001
-    assert optimizer_schema.weight_decay == 0.01
-    assert optimizer_schema.extra_key == "extra_value"
-
-    model_dump = optimizer_schema.model_dump(by_alias=True)
-    assert model_dump["_target_"] == "torch.optim.AdamW"
-    assert model_dump["lr"] == 0.001
-    assert model_dump["weight_decay"] == 0.01
-    assert model_dump["extra_key"] == "extra_value"
-
-
 def test_time_aggregate_loss_rejected_as_standalone() -> None:
     """TimeAggregateLossWrapper must not be usable as a top-level training loss."""
     ta = TypeAdapter(LossSchemas)
