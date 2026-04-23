@@ -101,6 +101,10 @@ class SpectralLoss(BaseLoss):
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
 
+        # Some transforms are proven to be linear, so we can compute the pred - target difference before taking the
+        # transform for those. This reduces the number of required transforms from two to one
+        self.diff_before_transform = False
+
         if transform == "fft2d":
             LOGGER.info("Using FFT2D spectral transform in spectral loss.")
             self.transform = FFT2D(**kwargs)
@@ -112,11 +116,13 @@ class SpectralLoss(BaseLoss):
             # optional args: truncation
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
+            self.diff_before_transform = True
         elif transform == "octahedral_sht":
             # expected additional args: nlat
             # optional args: truncation
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
+            self.diff_before_transform = True
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
@@ -153,10 +159,13 @@ class SpectralL2Loss(SpectralLoss):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        pred_spectral = self._to_spectral_flat(pred)
-        target_spectral = self._to_spectral_flat(target)
-
-        diff = torch.abs(pred_spectral - target_spectral) ** 2
+        # If we know for sure this transform is linear, we can compute the residual before taking the transform
+        if self.diff_before_transform:
+            diff = torch.abs(self._to_spectral_flat(pred - target)) ** 2
+        else:
+            pred_spectral = self._to_spectral_flat(pred)
+            target_spectral = self._to_spectral_flat(target)
+            diff = torch.abs(pred_spectral - target_spectral) ** 2
 
         result = self.scale(
             diff,
