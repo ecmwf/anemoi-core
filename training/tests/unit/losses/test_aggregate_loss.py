@@ -10,7 +10,7 @@
 import pytest
 import torch
 
-from anemoi.training.losses.aggregate import AggregateLossWrapper
+from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
@@ -64,15 +64,15 @@ def target() -> torch.Tensor:
 
 
 def test_is_base_loss() -> None:
-    wrapper = AggregateLossWrapper(["mean"], _make_loss())
+    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss())
     assert isinstance(wrapper, BaseLoss)
 
 
 def test_stores_loss_fn_and_agg_types() -> None:
     inner = _make_loss()
-    wrapper = AggregateLossWrapper(["mean", "diff"], inner)
+    wrapper = TimeAggregateLossWrapper(["mean", "diff"], inner)
     assert wrapper.loss_fn is inner
-    assert wrapper.aggregation_types == ["mean", "diff"]
+    assert wrapper.time_aggregation_types == ["mean", "diff"]
 
 
 # ---------------------------------------------------------------------------
@@ -82,14 +82,14 @@ def test_stores_loss_fn_and_agg_types() -> None:
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
 def test_returns_scalar_tensor(agg_op: str, pred: torch.Tensor, target: torch.Tensor) -> None:
-    wrapper = AggregateLossWrapper([agg_op], _make_loss())
+    wrapper = TimeAggregateLossWrapper([agg_op], _make_loss())
     result = wrapper(pred, target)
     assert isinstance(result, torch.Tensor)
     assert result.numel() == 1
 
 
 def test_multiple_agg_ops_return_scalar(pred: torch.Tensor, target: torch.Tensor) -> None:
-    wrapper = AggregateLossWrapper(["mean", "max", "diff"], _make_loss())
+    wrapper = TimeAggregateLossWrapper(["mean", "max", "diff"], _make_loss())
     result = wrapper(pred, target)
     assert result.numel() == 1
 
@@ -100,7 +100,7 @@ def test_multiple_agg_ops_return_scalar(pred: torch.Tensor, target: torch.Tensor
 
 
 def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor) -> None:
-    wrapper = AggregateLossWrapper([], _make_loss())
+    wrapper = TimeAggregateLossWrapper([], _make_loss())
     result = wrapper(pred, target)
     assert torch.allclose(result, torch.zeros(1))
 
@@ -115,13 +115,13 @@ def test_zero_loss_for_perfect_predictions(agg_op: str) -> None:
     x = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     # target matches pred (broadcast ens dimension away)
     perfect_target = x[:, :, 0, :, :]  # (bs, time, latlon, nvar)
-    wrapper = AggregateLossWrapper([agg_op], _make_loss())
+    wrapper = TimeAggregateLossWrapper([agg_op], _make_loss())
     result = wrapper(x, perfect_target)
     assert torch.allclose(result, torch.zeros(1), atol=1e-6), f"{agg_op}: expected zero loss for perfect predictions"
 
 
 # ---------------------------------------------------------------------------
-# Correctness: accumulation across multiple aggregation types
+# Correctness: accumulation across multiple  time aggregation types
 # ---------------------------------------------------------------------------
 
 
@@ -129,9 +129,9 @@ def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tenso
     """Combined wrapper loss equals sum of individual wrapper losses."""
     inner = _make_loss()
 
-    wrapper_mean = AggregateLossWrapper(["mean"], inner)
-    wrapper_diff = AggregateLossWrapper(["diff"], inner)
-    wrapper_both = AggregateLossWrapper(["mean", "diff"], inner)
+    wrapper_mean = TimeAggregateLossWrapper(["mean"], inner)
+    wrapper_diff = TimeAggregateLossWrapper(["diff"], inner)
+    wrapper_both = TimeAggregateLossWrapper(["mean", "diff"], inner)
 
     loss_mean = wrapper_mean(pred, target)
     loss_diff = wrapper_diff(pred, target)
@@ -155,7 +155,7 @@ def test_diff_aggregation_computes_temporal_differences() -> None:
     pred_diff = pred[:, 1:, ...] - pred[:, :-1, ...]
     target_diff = target[:, 1:, ...] - target[:, :-1, ...]
 
-    wrapper_diff = AggregateLossWrapper(["diff"], inner)
+    wrapper_diff = TimeAggregateLossWrapper(["diff"], inner)
     expected = inner(pred_diff, target_diff)
     result = wrapper_diff(pred, target)
 
@@ -184,7 +184,7 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
         target_agg = target_result
 
     expected = inner(pred_agg, target_agg)
-    result = AggregateLossWrapper([agg_op], inner)(pred, target)
+    result = TimeAggregateLossWrapper([agg_op], inner)(pred, target)
 
     assert torch.allclose(result, expected, atol=1e-6)
 
@@ -196,10 +196,10 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
 def test_crps_returns_scalar_tensor(agg_op: str) -> None:
-    """AggregateLossWrapper with AlmostFairKernelCRPS should return a scalar for each agg type."""
+    """TimeAggregateLossWrapper with AlmostFairKernelCRPS should return a scalar for each agg type."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
-    wrapper = AggregateLossWrapper([agg_op], _make_crps_loss())
+    wrapper = TimeAggregateLossWrapper([agg_op], _make_crps_loss())
     result = wrapper(pred, target)
     assert isinstance(result, torch.Tensor)
     assert result.numel() == 1
@@ -209,7 +209,7 @@ def test_crps_multiple_agg_ops_return_scalar() -> None:
     """Multiple aggregation types should accumulate into a single scalar."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
-    wrapper = AggregateLossWrapper(["mean", "diff"], _make_crps_loss())
+    wrapper = TimeAggregateLossWrapper(["mean", "diff"], _make_crps_loss())
     result = wrapper(pred, target)
     assert result.numel() == 1
 
@@ -220,9 +220,9 @@ def test_crps_loss_accumulates_across_agg_ops() -> None:
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
 
-    loss_mean = AggregateLossWrapper(["mean"], inner)(pred, target)
-    loss_diff = AggregateLossWrapper(["diff"], inner)(pred, target)
-    loss_both = AggregateLossWrapper(["mean", "diff"], inner)(pred, target)
+    loss_mean = TimeAggregateLossWrapper(["mean"], inner)(pred, target)
+    loss_diff = TimeAggregateLossWrapper(["diff"], inner)(pred, target)
+    loss_both = TimeAggregateLossWrapper(["mean", "diff"], inner)(pred, target)
 
     assert torch.allclose(loss_both, loss_mean + loss_diff, atol=1e-6)
 
@@ -245,7 +245,7 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
         target_agg = target_result
 
     expected = inner(pred_agg, target_agg, squash_mode="avg")
-    result = AggregateLossWrapper([agg_op], inner)(pred, target)
+    result = TimeAggregateLossWrapper([agg_op], inner)(pred, target)
 
     assert torch.allclose(result, expected, atol=1e-6)
 
@@ -256,7 +256,7 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
 
 
 def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None:
-    wrapper = AggregateLossWrapper(["sum"], _make_loss())
+    wrapper = TimeAggregateLossWrapper(["sum"], _make_loss())
     with pytest.raises(ValueError, match="Unknown aggregation type"):
         wrapper(pred, target)
 
@@ -267,12 +267,12 @@ def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None
 
 
 def test_ignore_nans_flag() -> None:
-    wrapper = AggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
+    wrapper =  TimeAggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
     assert wrapper.avg_function is torch.nanmean
     assert wrapper.sum_function is torch.nansum
 
 
 def test_default_no_ignore_nans() -> None:
-    wrapper = AggregateLossWrapper(["mean"], _make_loss())
+    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss())
     assert wrapper.avg_function is torch.mean
     assert wrapper.sum_function is torch.sum

@@ -13,10 +13,10 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class AggregateLossWrapper(BaseLoss):
+class TimeAggregateLossWrapper(BaseLoss):
     """Wraps a base loss and applies it to time-aggregated predictions.
 
-    Supported aggregation types:
+    Supported time aggregation types:
 
     - ``"diff"``  - temporal differences (``pred[:, 1:] - pred[:, :-1]``)
     - ``"mean"``, ``"min"``, ``"max"`` - applied over the time window
@@ -24,12 +24,12 @@ class AggregateLossWrapper(BaseLoss):
 
     def __init__(
         self,
-        aggregation_types: list[str],
+        time_aggregation_types: list[str],
         loss_fn: BaseLoss,
         ignore_nans: bool = False,
     ) -> None:
         super().__init__(ignore_nans=ignore_nans)
-        self.aggregation_types = aggregation_types
+        self.time_aggregation_types = time_aggregation_types
         self.loss_fn = loss_fn
 
     def forward(
@@ -45,7 +45,7 @@ class AggregateLossWrapper(BaseLoss):
         squash_mode: str = "avg",
         **kwargs,
     ) -> torch.Tensor:
-        """Compute the aggregate loss over all aggregation types.
+        """Compute the time aggregate loss over all time aggregation types.
 
         Parameters
         ----------
@@ -71,6 +71,8 @@ class AggregateLossWrapper(BaseLoss):
         torch.Tensor
             Accumulated loss across all aggregation types.
         """
+
+        assert pred.shape[1] > 1, "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
         loss = torch.zeros(1, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         shared_kwargs = dict(
@@ -83,7 +85,7 @@ class AggregateLossWrapper(BaseLoss):
             **kwargs,
         )
 
-        for agg_op in self.aggregation_types:
+        for agg_op in self.time_aggregation_types:
             if agg_op == "diff":
                 pred_agg = pred[:, 1:, ...] - pred[:, :-1, ...]  # (bs, time-1, ens, latlon, nvar)
                 target_agg = target[:, 1:, ...] - target[:, :-1, ...]  # (bs, time-1, latlon, nvar)
