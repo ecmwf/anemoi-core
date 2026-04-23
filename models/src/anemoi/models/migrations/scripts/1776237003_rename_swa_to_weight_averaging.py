@@ -54,19 +54,3 @@ def migrate(ckpt: CkptType) -> CkptType:
     training.pop("swa", None)
     training.weight_averaging = None
     return ckpt
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollback the checkpoint.
-
-    Parameters
-    ----------
-    ckpt : CkptType
-        The checkpoint dict.
-
-    Returns
-    -------
-    CkptType
-        The rollbacked checkpoint dict.
-    """
-    return ckpt
