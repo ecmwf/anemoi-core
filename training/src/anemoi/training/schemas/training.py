@@ -254,7 +254,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
     combined = "anemoi.training.losses.combined.CombinedLoss"
-    aggregate = "anemoi.training.losses.TimeAggregateLossWrapper"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
@@ -362,7 +361,6 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = (
     BaseLossSchema
     | HuberLossSchema
-    | TimeAggregateLossWrapperSchema
     | CombinedLossSchema
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema

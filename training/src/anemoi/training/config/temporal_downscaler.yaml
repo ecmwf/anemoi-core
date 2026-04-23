@@ -28,7 +28,7 @@ training:
   training_loss:
     datasets:
       data:
-        _target_: anemoi.training.losses.CombinedLoss
+        _target_: anemoi.training.losses.combined.CombinedLoss
         loss_weights: [1.0, 1.0]
         losses:
           - _target_: anemoi.training.losses.MSELoss
