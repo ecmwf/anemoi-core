@@ -9,7 +9,6 @@
 
 
 import logging
-import types
 from collections.abc import Callable
 from collections.abc import Iterable
 from datetime import timedelta
@@ -26,6 +25,7 @@ from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
+from anemoi.training.diagnostics.callbacks.weight_averaging import _get_weight_averaging_callback
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.checkpoint import RegisterMigrations
 
@@ -55,96 +55,6 @@ CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bo
         LearningRateMonitor,
     ),
 ]
-
-
-def _safe_swap_models(self: Any, pl_module: Any) -> None:
-    """Swap buffers between the averaged model and the current model.
-
-    Uses name-based matching to allow buffer reordering as can happen with dynamic scalers (e.g.
-    NaNMaskScaler).
-
-    Args:
-        pl_module : The PyTorch Lightning module
-    """
-    assert self._average_model is not None
-
-    avg_params = dict(self._average_model.module.named_parameters())
-    for name, current_param in pl_module.named_parameters():
-        avg_param = avg_params[name]
-        tmp = avg_param.data.clone()
-        avg_param.data.copy_(current_param.data)
-        current_param.data.copy_(tmp)
-
-    avg_buffers = dict(self._average_model.module.named_buffers())
-    for name, current_buf in pl_module.named_buffers():
-        if name not in avg_buffers:
-            continue
-        avg_buf = avg_buffers[name]
-        if avg_buf.shape != current_buf.shape:
-            continue
-        tmp = avg_buf.data.clone()
-        avg_buf.data.copy_(current_buf.data)
-        current_buf.data.copy_(tmp)
-
-
-def _safe_copy_average_to_current(self: Any, pl_module: Any) -> None:
-    """Copy averaged buffers to the current model.
-
-    Same as ``_safe_swap_models`` but for the copy performed at the end of training.
-    """
-    assert self._average_model is not None
-
-    avg_params = dict(self._average_model.module.named_parameters())
-    for name, current_param in pl_module.named_parameters():
-        current_param.data.copy_(avg_params[name].data)
-
-    avg_buffers = dict(self._average_model.module.named_buffers())
-    for name, current_buf in pl_module.named_buffers():
-        if name not in avg_buffers:
-            continue
-        avg_buf = avg_buffers[name]
-        if avg_buf.shape != current_buf.shape:
-            continue
-        current_buf.data.copy_(avg_buf.data)
-
-
-def _get_weight_averaging_callback(config: DictConfig) -> list[Callback]:
-    """Get weight averaging callback.
-
-    Supported are ExponentialMovingAverage and StochasticWeightAveraging.
-
-    Example config:
-        weight_averaging:
-          _target_: anemoi.training.diagnostics.callbacks.optimiser.ExponentialMovingAverage
-          decay: 0.999
-
-    Parameters
-    ----------
-    config : DictConfig
-        Job configuration
-
-    Returns
-    -------
-    list[Callback]
-        List containing the weight averaging callback, or empty list if not configured.
-    """
-    weight_averaging_config = nestedget(config, "training.weight_averaging", None)
-    if weight_averaging_config is None:
-        return []
-    if not isinstance(weight_averaging_config, dict | DictConfig):
-        return []
-    if "_target_" not in weight_averaging_config:
-        return []
-
-    callback = instantiate(weight_averaging_config)
-
-    # Patch swap/copy methods to use name-based matching. Needed for dynamic scalers like NaNMaskScaler.
-    if hasattr(callback, "_swap_models"):
-        callback._swap_models = types.MethodType(_safe_swap_models, callback)
-    if hasattr(callback, "_copy_average_to_current"):
-        callback._copy_average_to_current = types.MethodType(_safe_copy_average_to_current, callback)
-
-    return [callback]
 
 
 def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
