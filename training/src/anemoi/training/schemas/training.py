@@ -310,7 +310,7 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     target_: Literal["anemoi.training.losses.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
     time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
     "Time Aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: BaseLossSchema
+    loss_fn: AlmostFairKernelCRPSSchema | KernelCRPSSchema | HuberLossSchema | BaseLossSchema
     "Inner loss function applied to each time aggregated output."
 
 
@@ -327,10 +327,17 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema | TimeAggregateLossWrapperSchema] = Field(min_length=1)
+    scalers: list[str] = Field(default_factory=list)  # type: ignore[assignment]
+    "Scalers to include in loss calculation. Defaults to empty (scalers applied per inner loss)."
+    losses: list[HuberLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema | SpectralLossSchema | TimeAggregateLossWrapperSchema | MultiScaleLossSchema | BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
+
+    class Config(BaseModel.Config):
+        """Allow extra fields from Hydra config merging (e.g. leftover fields from a replaced loss type)."""
+
+        extra = "ignore"
 
     @field_validator("losses", mode="before")
     @classmethod
@@ -340,8 +347,9 @@ class CombinedLossSchema(BaseLossSchema):
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
-            if "TimeAggregateLossWrapper" in loss.get("_target_", ""):
-                continue  # TimeAggregateLossWrapperSchema has no scalers field
+            target = loss.get("_target_", "")
+            if "TimeAggregateLossWrapper" in target or "MultiscaleLossWrapper" in target:
+                continue  # these schemas have no scalers field
             if "scalers" not in loss:
                 if isinstance(loss, DictConfig):
                     with open_dict(loss):
