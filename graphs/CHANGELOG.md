@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.2...graphs-0.9.3) (2026-04-23)
+
+
+### Features
+
+* **graphs:** Option to exclude self edges in KNN graphs ([#1065](https://github.com/ecmwf/anemoi-core/issues/1065)) ([04c881d](https://github.com/ecmwf/anemoi-core/commit/04c881dd293a0d90d05079ea1ce13a7b4ce602f5))
+
+
+### Bug Fixes
+
+* **graphs,aicon:** Icon mesh vertex mask ([#975](https://github.com/ecmwf/anemoi-core/issues/975)) ([e19b259](https://github.com/ecmwf/anemoi-core/commit/e19b25995535e451df97439f8f349dafa8d9e9d4))
+
+
+### Documentation
+
+* **graphs:** Correct a diagram on how multiscale edges work ([#1051](https://github.com/ecmwf/anemoi-core/issues/1051)) ([48c180c](https://github.com/ecmwf/anemoi-core/commit/48c180ce455708941a86a4a4273754c3f6f93102))
+
 ## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.1...graphs-0.9.2) (2026-04-21)
 
 
