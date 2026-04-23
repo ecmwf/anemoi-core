@@ -1,2 +1,3 @@
 _target_: pytorch_lightning.callbacks.EMAWeightAveraging
 decay: 0.999
+update_starting_at_step: ${training.lr.warmup}
