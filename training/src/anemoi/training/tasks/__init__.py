@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .base import ConfigurableBaseTask
 from .forecaster import BaseForecaster
 from .forecaster import FlexibleForecaster
 from .forecaster import Forecaster
@@ -20,7 +19,6 @@ __all__ = [
     "Autoencoder",
     "BaseForecaster",
     "BaseTaskOffsets",
-    "ConfigurableBaseTask",
     "FlexibleForecaster",
     "ForecastOffsets",
     "Forecaster",

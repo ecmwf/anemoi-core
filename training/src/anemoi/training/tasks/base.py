@@ -202,32 +202,6 @@ class BaseTask(ABC):
             md_dict["metadata_inference"][dataset_name]["timesteps"] = timesteps
 
 
-class ConfigurableBaseTask(BaseTask):
-    """A ``BaseTask`` whose offsets are specified explicitly via config.
-
-    Subclass this instead of ``BaseTask`` when you want to express input and
-    output time offsets as plain duration strings in a Hydra YAML file rather
-    than deriving them from higher-level parameters such as ``timestep`` and
-    ``multistep_input``.
-
-    Parameters
-    ----------
-    input_offsets : list[str]
-        Duration strings for the input time steps, e.g. ``["-6H", "0H"]``.
-        Negative values are supported with a leading ``-``.
-    output_offsets : list[str]
-        Duration strings for the output time steps, e.g. ``["6H", "12H"]``.
-    """
-
-    def __init__(
-        self,
-        input_offsets: list[str],
-        output_offsets: list[str],
-        **_kwargs,
-    ) -> None:
-        super().__init__(offsets=BaseTaskOffsets(input_offsets=input_offsets, output_offsets=output_offsets))
-
-
 class BaseSingleStepTask(BaseTask):
     """Base class for single-step tasks."""
 
