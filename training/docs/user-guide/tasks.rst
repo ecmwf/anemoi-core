@@ -180,7 +180,7 @@ the bottom of the same file:
        ForecasterSchema
        | AutoencoderTaskSchema
        | TemporalDownscalerSchema
-       | BackwardForecasterSchema,
+       | **BackwardForecasterSchema**,
        Discriminator("target_"),
    ]
 
