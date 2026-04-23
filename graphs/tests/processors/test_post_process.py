@@ -12,6 +12,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.processors.post_process import RemoveSelfEdges
 from anemoi.graphs.processors.post_process import RemoveUnconnectedNodes
 from anemoi.graphs.processors.post_process import RestrictEdgeLength
 from anemoi.graphs.processors.post_process import SubsetNodesInArea
@@ -163,6 +164,19 @@ def test_restrict_edge_length_target_mask(graph_long_and_short_edges: HeteroData
 
     assert torch.equal(restricted_graph["test_nodes", "to", "test_nodes"].edge_index, expected_edge_index)
     assert torch.equal(restricted_graph["test_nodes"].x, expected_nodes_x)
+
+
+def test_remove_self_edges():
+    graph = HeteroData()
+    graph["test_nodes"].x = torch.tensor([[0], [1], [2]])
+    graph["test_nodes", "to", "test_nodes"].edge_index = torch.tensor([[0, 1, 1, 2], [0, 0, 1, 2]])
+    graph["test_nodes", "to", "test_nodes"].edge_attr = torch.tensor([[10], [11], [12], [13]])
+
+    processor = RemoveSelfEdges("test_nodes", "test_nodes")
+    processed_graph = processor.update_graph(graph)
+
+    assert torch.equal(processed_graph["test_nodes", "to", "test_nodes"].edge_index, torch.tensor([[1], [0]]))
+    assert torch.equal(processed_graph["test_nodes", "to", "test_nodes"].edge_attr, torch.tensor([[11]]))
 
 
 def test_subset_nodes_in_area(graph_long_and_short_edges: HeteroData):
