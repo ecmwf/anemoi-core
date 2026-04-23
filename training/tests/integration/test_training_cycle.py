@@ -447,3 +447,16 @@ def test_training_cycle_multidatasets_diffusion(
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = temporal_downscaler_ensemble_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
