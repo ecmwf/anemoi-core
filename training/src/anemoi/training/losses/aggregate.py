@@ -7,7 +7,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
 
-
 LOGGER = logging.getLogger(__name__)
 
 
