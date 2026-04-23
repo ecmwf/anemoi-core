@@ -8,10 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
+from pydantic import ValidationError
 
-from anemoi.training.schemas.training import CombinedLossSchema, LossSchemas, OptimizerSchema
-
+from anemoi.training.schemas.training import CombinedLossSchema
+from anemoi.training.schemas.training import LossSchemas
+from anemoi.training.schemas.training import OptimizerSchema
 
 _AGGREGATE_LOSS_CFG = {
     "_target_": "anemoi.training.losses.TimeAggregateLossWrapper",
