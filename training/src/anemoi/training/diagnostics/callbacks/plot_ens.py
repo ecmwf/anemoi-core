@@ -287,7 +287,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
+            latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
                 data,
@@ -310,7 +310,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
                 fig = plot_predicted_ensemble(
                     parameters=plot_parameters_dict,
                     n_plots_per_sample=4,
-                    latlons=self.latlons[dataset_name],
+                    latlons=latlons,
                     clevels=self.accumulation_levels_plot,
                     y_true=y_true,
                     y_pred=y_pred,
