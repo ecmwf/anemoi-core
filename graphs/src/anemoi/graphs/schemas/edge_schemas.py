@@ -26,8 +26,6 @@ class KNNEdgeSchema(BaseModel):
     "KNN based edges implementation from anemoi.graphs.edges."
     num_nearest_neighbours: PositiveInt = Field(example=3)
     "Number of nearest neighbours. Default to 3."
-    exclude_self_edges: bool = Field(default=False, example=True)
-    "Drop self edges when source and target refer to the same node set. Default to False."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])

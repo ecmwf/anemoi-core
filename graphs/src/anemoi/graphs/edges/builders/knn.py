@@ -55,18 +55,15 @@ class KNNEdges(BaseDistanceEdgeBuilders):
         num_nearest_neighbours: int,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
-        exclude_self_edges: bool = False,
     ) -> None:
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
-        self.exclude_self_edges = exclude_self_edges
 
         LOGGER.info(
-            "Using KNN-Edges (with %d nearest neighbours%s) between %s and %s.",
+            "Using KNN-Edges (with %d nearest neighbours) between %s and %s.",
             self.num_nearest_neighbours,
-            ", excluding self edges" if self.exclude_self_edges else "",
             self.source_name,
             self.target_name,
         )
@@ -85,16 +82,6 @@ class KNNEdges(BaseDistanceEdgeBuilders):
         ).tocoo()
 
         return adj_matrix
-
-    def _should_exclude_self_edges(self) -> bool:
-        return self.exclude_self_edges and self.source_name == self.target_name
-
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        edge_index = super().compute_edge_index(source_nodes, target_nodes)
-        if not self._should_exclude_self_edges():
-            return edge_index
-
-        return edge_index[:, edge_index[0] != edge_index[1]]
 
 
 class ReversedKNNEdges(KNNEdges):
