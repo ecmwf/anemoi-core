@@ -209,7 +209,7 @@ Open ``src/anemoi/training/tasks/__init__.py`` and add the new task:
        "TemporalDownscaler",
    ]
 
-This is only needed to import it directly from ``anemoi.training.tasks``. 
+This is only needed to import it directly from ``anemoi.training.tasks``.
 
 
  **Step 5** — Use the new task
@@ -237,6 +237,6 @@ The training loop will:
    ``t = +6 H``).
 #. Feed ``t = 0`` and ``t = +6 H`` as model inputs.
 #. Compare the model output against ``t = −6 H``.
-#. Compute the loss. 
+#. Compute the loss.
 #. Backpropagate the gradients.
 #. Update the model parameters.
