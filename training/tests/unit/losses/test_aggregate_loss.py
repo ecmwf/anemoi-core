@@ -1,0 +1,195 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+import pytest
+import torch
+
+from anemoi.training.losses.aggregate import AggregateLossWrapper
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.utils.enums import TensorDim
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+class MAELossFn(FunctionalLoss):
+    """Minimal MAE-style functional loss for testing."""
+
+    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return torch.abs(pred - target)
+
+
+def _make_loss() -> FunctionalLoss:
+    """Return an MAE loss with a unit grid scaler (4 grid points)."""
+    loss = MAELossFn()
+    loss.add_scaler(TensorDim.GRID, torch.ones(4), name="unit_grid")
+    return loss
+
+
+# Shapes used throughout: (bs=1, time=3, ens=1, latlon=4, nvar=2)
+BS, TIME, ENS, LATLON, NVAR = 1, 3, 1, 4, 2
+
+
+@pytest.fixture
+def pred() -> torch.Tensor:
+    return torch.rand(BS, TIME, ENS, LATLON, NVAR)
+
+
+@pytest.fixture
+def target() -> torch.Tensor:
+    return torch.rand(BS, TIME, LATLON, NVAR)
+
+
+# ---------------------------------------------------------------------------
+# Construction
+# ---------------------------------------------------------------------------
+
+def test_is_base_loss() -> None:
+    wrapper = AggregateLossWrapper(["mean"], _make_loss())
+    assert isinstance(wrapper, BaseLoss)
+
+
+def test_stores_loss_fn_and_agg_types() -> None:
+    inner = _make_loss()
+    wrapper = AggregateLossWrapper(["mean", "diff"], inner)
+    assert wrapper.loss_fn is inner
+    assert wrapper.aggregation_types == ["mean", "diff"]
+
+
+# ---------------------------------------------------------------------------
+# Output shape / type
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
+def test_returns_scalar_tensor(agg_op: str, pred: torch.Tensor, target: torch.Tensor) -> None:
+    wrapper = AggregateLossWrapper([agg_op], _make_loss())
+    result = wrapper(pred, target)
+    assert isinstance(result, torch.Tensor)
+    assert result.numel() == 1
+
+
+def test_multiple_agg_ops_return_scalar(pred: torch.Tensor, target: torch.Tensor) -> None:
+    wrapper = AggregateLossWrapper(["mean", "max", "diff"], _make_loss())
+    result = wrapper(pred, target)
+    assert result.numel() == 1
+
+
+# ---------------------------------------------------------------------------
+# Empty aggregation list
+# ---------------------------------------------------------------------------
+
+def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor) -> None:
+    wrapper = AggregateLossWrapper([], _make_loss())
+    result = wrapper(pred, target)
+    assert torch.allclose(result, torch.zeros(1))
+
+
+# ---------------------------------------------------------------------------
+# Correctness: perfect predictions yield zero loss
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
+def test_zero_loss_for_perfect_predictions(agg_op: str) -> None:
+    x = torch.rand(BS, TIME, ENS, LATLON, NVAR)
+    # target matches pred (broadcast ens dimension away)
+    perfect_target = x[:, :, 0, :, :]  # (bs, time, latlon, nvar)
+    wrapper = AggregateLossWrapper([agg_op], _make_loss())
+    result = wrapper(x, perfect_target)
+    assert torch.allclose(result, torch.zeros(1), atol=1e-6), f"{agg_op}: expected zero loss for perfect predictions"
+
+
+# ---------------------------------------------------------------------------
+# Correctness: accumulation across multiple aggregation types
+# ---------------------------------------------------------------------------
+
+def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tensor) -> None:
+    """Combined wrapper loss equals sum of individual wrapper losses."""
+    inner = _make_loss()
+
+    wrapper_mean = AggregateLossWrapper(["mean"], inner)
+    wrapper_diff = AggregateLossWrapper(["diff"], inner)
+    wrapper_both = AggregateLossWrapper(["mean", "diff"], inner)
+
+    loss_mean = wrapper_mean(pred, target)
+    loss_diff = wrapper_diff(pred, target)
+    loss_both = wrapper_both(pred, target)
+
+    assert torch.allclose(loss_both, loss_mean + loss_diff, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Correctness: "diff" aggregation uses temporal differences
+# ---------------------------------------------------------------------------
+
+def test_diff_aggregation_computes_temporal_differences() -> None:
+    """The diff wrapper should apply loss on (pred[:,1:]-pred[:,:-1]) vs (target[:,1:]-target[:,:-1])."""
+    inner = _make_loss()
+
+    pred = torch.rand(BS, TIME, ENS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+
+    pred_diff = pred[:, 1:, ...] - pred[:, :-1, ...]
+    target_diff = target[:, 1:, ...] - target[:, :-1, ...]
+
+    wrapper_diff = AggregateLossWrapper(["diff"], inner)
+    expected = inner(pred_diff, target_diff)
+    result = wrapper_diff(pred, target)
+
+    assert torch.allclose(result, expected, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Correctness: "mean"/"min"/"max" aggregation reduces over time dim
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("agg_op", ["mean", "min", "max"])
+def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
+    inner = _make_loss()
+    pred = torch.rand(BS, TIME, ENS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+
+    agg_fn = getattr(torch, agg_op)
+    pred_agg = agg_fn(pred, dim=1)
+    target_agg = agg_fn(target, dim=1)
+    if agg_op in {"min", "max"}:
+        pred_agg = pred_agg[0]
+        target_agg = target_agg[0]
+
+    expected = inner(pred_agg, target_agg)
+    result = AggregateLossWrapper([agg_op], inner)(pred, target)
+
+    assert torch.allclose(result, expected, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Unknown aggregation type raises ValueError
+# ---------------------------------------------------------------------------
+
+def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None:
+    wrapper = AggregateLossWrapper(["sum"], _make_loss())
+    with pytest.raises(ValueError, match="Unknown aggregation type"):
+        wrapper(pred, target)
+
+
+# ---------------------------------------------------------------------------
+# ignore_nans flag is forwarded to BaseLoss
+# ---------------------------------------------------------------------------
+
+def test_ignore_nans_flag() -> None:
+    wrapper = AggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
+    assert wrapper.avg_function is torch.nanmean
+    assert wrapper.sum_function is torch.nansum
+
+
+def test_default_no_ignore_nans() -> None:
+    wrapper = AggregateLossWrapper(["mean"], _make_loss())
+    assert wrapper.avg_function is torch.mean
+    assert wrapper.sum_function is torch.sum

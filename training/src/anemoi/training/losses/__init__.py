@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .aggregate import AggregateLossWrapper
 from .combined import CombinedLoss
 from .huber import HuberLoss
 from .kcrps import AlmostFairKernelCRPS
@@ -26,6 +27,7 @@ from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
+    "AggregateLossWrapper",
     "AlmostFairKernelCRPS",
     "CombinedLoss",
     "FourierCorrelationLoss",

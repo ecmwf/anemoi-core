@@ -23,3 +23,20 @@ diagnostics:
   plot:
     callbacks: []
   callbacks: []
+
+training:
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.CombinedLoss
+        loss_weights: [1.0, 1.0]
+        losses:
+          - _target_: anemoi.training.losses.MSELoss
+            scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+            ignore_nans: False
+          - _target_: anemoi.training.losses.AggregateLossWrapper
+            aggregation_types: [mean, diff]
+            loss_fn:
+              _target_: anemoi.training.losses.MSELoss
+            scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+            ignore_nans: False
