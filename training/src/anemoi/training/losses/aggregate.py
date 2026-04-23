@@ -89,10 +89,10 @@ class AggregateLossWrapper(BaseLoss):
                 pred_result = agg_fn(pred, dim=1, keepdim=True)
                 target_result = agg_fn(target, dim=1, keepdim=True)
                 if agg_op in {"max", "min"}:
-                    pred_agg = pred_result.values   # (bs, 1, ens, latlon, nvar)
+                    pred_agg = pred_result.values  # (bs, 1, ens, latlon, nvar)
                     target_agg = target_result.values  # (bs, 1, latlon, nvar)
                 else:
-                    pred_agg = pred_result   # (bs, 1, ens, latlon, nvar)
+                    pred_agg = pred_result  # (bs, 1, ens, latlon, nvar)
                     target_agg = target_result  # (bs, 1, latlon, nvar)
             else:
                 msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
