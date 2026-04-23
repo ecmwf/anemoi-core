@@ -175,10 +175,12 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
-        self.x_in_matching_channel_indices = self.x_in_matching_channel_indices.to(x_in_interp_to_hres.device)
         residuals_target = self.model.model.compute_residuals(
             y,
-            x_in_interp_to_hres[..., self.x_in_matching_channel_indices],
+            # `compute_residuals()` already aligns against output.full internally.
+            # Passing a channel-reduced tensor here breaks corrected forcings-only
+            # HRES setups because output.full is then applied a second time.
+            x_in_interp_to_hres,
         )
 
         # Y = Y[:, :, :, ..., self.data_indices.data.output.full] #(see if necessary)
@@ -227,7 +229,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             use_reentrant=False,
         )
 
-        y_preds = [x_in_interp_to_hres + y_pred, y_pred]
+        y_preds = [x_in_interp_to_hres[..., self.data_indices.data.output.full] + y_pred, y_pred]
 
         return loss, metrics_next, y_preds
 
