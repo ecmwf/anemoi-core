@@ -14,13 +14,10 @@ LOGGER = logging.getLogger(__name__)
 class AggregateLossWrapper(BaseLoss):
     """Wraps a base loss and applies it to time-aggregated predictions.
 
-    For each aggregation type in ``aggregation_types``, the wrapper
-    transforms ``pred`` (shape ``(bs, time, ens, latlon, nvar)``) and
-    ``target`` (shape ``(bs, time, latlon, nvar)``) before delegating to
-    the inner ``loss_fn``.  Supported aggregation types:
+    Supported aggregation types:
 
     - ``"diff"``  – temporal differences (``pred[:, 1:] - pred[:, :-1]``)
-    - ``"mean"``, ``"min"``, ``"max"`` – reduction over the time dimension
+    - ``"mean"``, ``"min"``, ``"max"`` – applied over the time window
     """
 
     def __init__(
