@@ -151,6 +151,27 @@ With this configuration only edges whose source is in the cutout region
 will be post-processed, i.e. those edges with source node outside the
 cutout region will be preserved regardless of their length.
 
+*****************
+ RemoveSelfEdges
+*****************
+
+The ``RemoveSelfEdges`` post-processor removes self edges from an edge
+store after the graph has been constructed.
+
+.. code:: yaml
+
+   nodes: ...
+   edges: ...
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.RemoveSelfEdges
+     source_name: hidden
+     target_name: hidden
+
+This processor applies to edge stores where ``source_name`` and
+``target_name`` refer to the same node set. After self edges are
+removed, edge attributes for that edge store are recomputed.
+
 ************************************
  Edge Index Sorting Post-processors
 ************************************

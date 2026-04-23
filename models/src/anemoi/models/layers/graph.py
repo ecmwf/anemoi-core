@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from collections import defaultdict
+
 import einops
 import torch
 from torch import Tensor
@@ -72,10 +74,7 @@ class NamedNodesAttributes(nn.Module):
         """Initialize NamedNodesAttributes."""
         super().__init__()
 
-        for nodes_name in graph_data.node_types:
-            assert (
-                nodes_name in trainable_parameters
-            ), f"Number of trainable parameters for nodes group '{nodes_name}' not provided in config.model.trainable_parameters."
+        trainable_parameters = defaultdict(int, trainable_parameters)
 
         self.define_fixed_attributes(graph_data, trainable_parameters)
 
