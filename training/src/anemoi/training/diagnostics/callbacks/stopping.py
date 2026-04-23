@@ -65,7 +65,6 @@ class TimeLimit(pl.callbacks.Callback):
         _ = pl_module
         self._run_stopping_check(trainer)
 
-    @rank_zero_only
     def _run_stopping_check(self, trainer: pl.Trainer) -> None:
         """Check if the time limit has been reached and stop the training if so.
 
