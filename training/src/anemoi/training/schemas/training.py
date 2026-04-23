@@ -312,10 +312,6 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     "Time Aggregation operations to apply over the time dimension before computing the loss."
     loss_fn: BaseLossSchema
     "Inner loss function applied to each time aggregated output."
-    scalers: list[str] = Field(default_factory=list)
-    "Scalers to include in loss calculation."
-    ignore_nans: bool = False
-    "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
 
 
 class SpectralLossSchema(BaseLossSchema):

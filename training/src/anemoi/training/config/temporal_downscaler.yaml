@@ -35,8 +35,8 @@ training:
             scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
             ignore_nans: False
           - _target_: anemoi.training.losses.TimeAggregateLossWrapper
-            time_aggregation_types: [mean, diff]
+            time_aggregation_types: [mean, max, min, diff]
             loss_fn:
               _target_: anemoi.training.losses.MSELoss
-            scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-            ignore_nans: False
+              scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+              ignore_nans: False

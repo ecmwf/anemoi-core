@@ -45,8 +45,7 @@ training:
     datasets:
       data:
         _target_: anemoi.training.losses.combined.CombinedLoss
-        loss_weights: [1.0, 0.5]
-        scalers: []
+        loss_weights: [1.0, 1.0]
         losses:
           - _target_: anemoi.training.losses.MultiscaleLossWrapper
             loss_matrices_path: ${system.input.loss_matrices_path}
@@ -60,8 +59,7 @@ training:
               no_autocast: True
               alpha: 0.95
           - _target_: anemoi.training.losses.TimeAggregateLossWrapper
-            time_aggregation_types: [mean, diff]
-            scalers: []
+            time_aggregation_types: [mean, max, min, diff]
             loss_fn:
               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
               scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
