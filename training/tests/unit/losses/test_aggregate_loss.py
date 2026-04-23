@@ -13,6 +13,7 @@ import torch
 from anemoi.training.losses.aggregate import AggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
 from anemoi.training.utils.enums import TensorDim
 
 # ---------------------------------------------------------------------------
@@ -34,8 +35,17 @@ def _make_loss() -> FunctionalLoss:
     return loss
 
 
+def _make_crps_loss() -> AlmostFairKernelCRPS:
+    """Return an AlmostFairKernelCRPS loss with a unit grid scaler (4 grid points)."""
+    loss = AlmostFairKernelCRPS(no_autocast=False)
+    loss.add_scaler(TensorDim.GRID, torch.ones(4), name="unit_grid")
+    return loss
+
+
 # Shapes used throughout: (bs=1, time=3, ens=1, latlon=4, nvar=2)
 BS, TIME, ENS, LATLON, NVAR = 1, 3, 1, 4, 2
+# CRPS requires ens > 1
+ENS_CRPS = 3
 
 
 @pytest.fixture
@@ -164,13 +174,77 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
     target = torch.rand(BS, TIME, LATLON, NVAR)
 
     agg_fn = getattr(torch, agg_op)
-    pred_agg = agg_fn(pred, dim=1)
-    target_agg = agg_fn(target, dim=1)
+    pred_result = agg_fn(pred, dim=1, keepdim=True)
+    target_result = agg_fn(target, dim=1, keepdim=True)
     if agg_op in {"min", "max"}:
-        pred_agg = pred_agg[0]
-        target_agg = target_agg[0]
+        pred_agg = pred_result.values
+        target_agg = target_result.values
+    else:
+        pred_agg = pred_result
+        target_agg = target_result
 
     expected = inner(pred_agg, target_agg)
+    result = AggregateLossWrapper([agg_op], inner)(pred, target)
+
+    assert torch.allclose(result, expected, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# CRPS tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
+def test_crps_returns_scalar_tensor(agg_op: str) -> None:
+    """AggregateLossWrapper with AlmostFairKernelCRPS should return a scalar for each agg type."""
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    wrapper = AggregateLossWrapper([agg_op], _make_crps_loss())
+    result = wrapper(pred, target)
+    assert isinstance(result, torch.Tensor)
+    assert result.numel() == 1
+
+
+def test_crps_multiple_agg_ops_return_scalar() -> None:
+    """Multiple aggregation types should accumulate into a single scalar."""
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    wrapper = AggregateLossWrapper(["mean", "diff"], _make_crps_loss())
+    result = wrapper(pred, target)
+    assert result.numel() == 1
+
+
+def test_crps_loss_accumulates_across_agg_ops() -> None:
+    """Combined CRPS wrapper loss equals sum of individual wrapper losses."""
+    inner = _make_crps_loss()
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+
+    loss_mean = AggregateLossWrapper(["mean"], inner)(pred, target)
+    loss_diff = AggregateLossWrapper(["diff"], inner)(pred, target)
+    loss_both = AggregateLossWrapper(["mean", "diff"], inner)(pred, target)
+
+    assert torch.allclose(loss_both, loss_mean + loss_diff, atol=1e-6)
+
+
+@pytest.mark.parametrize("agg_op", ["mean", "min", "max"])
+def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
+    """CRPS wrapper with time-reduction passes keepdim=True aggregated tensors to inner loss."""
+    inner = _make_crps_loss()
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+
+    agg_fn = getattr(torch, agg_op)
+    pred_result = agg_fn(pred, dim=1, keepdim=True)
+    target_result = agg_fn(target, dim=1, keepdim=True)
+    if agg_op in {"min", "max"}:
+        pred_agg = pred_result.values
+        target_agg = target_result.values
+    else:
+        pred_agg = pred_result
+        target_agg = target_result
+
+    expected = inner(pred_agg, target_agg, squash_mode="avg")
     result = AggregateLossWrapper([agg_op], inner)(pred, target)
 
     assert torch.allclose(result, expected, atol=1e-6)

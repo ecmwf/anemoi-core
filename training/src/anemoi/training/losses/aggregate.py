@@ -87,11 +87,14 @@ class AggregateLossWrapper(BaseLoss):
                 target_agg = target[:, 1:, ...] - target[:, :-1, ...]  # (bs, time-1, latlon, nvar)
             elif agg_op in {"mean", "min", "max"}:
                 agg_fn = getattr(torch, agg_op)
-                pred_agg = agg_fn(pred, dim=1)  # (bs, ens, latlon, nvar)
-                target_agg = agg_fn(target, dim=1)  # (bs, latlon, nvar)
+                pred_result = agg_fn(pred, dim=1, keepdim=True)
+                target_result = agg_fn(target, dim=1, keepdim=True)
                 if agg_op in {"max", "min"}:
-                    pred_agg = pred_agg[0]  # discard indices
-                    target_agg = target_agg[0]
+                    pred_agg = pred_result.values   # (bs, 1, ens, latlon, nvar)
+                    target_agg = target_result.values  # (bs, 1, latlon, nvar)
+                else:
+                    pred_agg = pred_result   # (bs, 1, ens, latlon, nvar)
+                    target_agg = target_result  # (bs, 1, latlon, nvar)
             else:
                 msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
                 raise ValueError(msg)
