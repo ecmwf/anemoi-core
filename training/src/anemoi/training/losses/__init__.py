@@ -27,7 +27,6 @@ from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
-    "TimeAggregateLossWrapper",
     "AlmostFairKernelCRPS",
     "CombinedLoss",
     "FourierCorrelationLoss",
@@ -43,6 +42,7 @@ __all__ = [
     "RMSELoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
+    "TimeAggregateLossWrapper",
     "WeightedMSELoss",
     "get_loss_function",
 ]

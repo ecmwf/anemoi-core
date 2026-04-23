@@ -267,7 +267,7 @@ def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None
 
 
 def test_ignore_nans_flag() -> None:
-    wrapper =  TimeAggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
+    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
     assert wrapper.avg_function is torch.nanmean
     assert wrapper.sum_function is torch.nansum
 
