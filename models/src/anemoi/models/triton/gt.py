@@ -19,6 +19,8 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
+from anemoi.models.triton.utils import torch_dtype_to_triton
+
 
 @triton.jit
 def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
@@ -407,16 +409,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         N_dst, H, C = q.shape
         out = torch.empty_like(q)
         m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
-
-        def torch_dtype_to_triton(dtype):
-            if dtype == torch.float16:
-                return tl.float16
-            elif dtype == torch.bfloat16:
-                return tl.bfloat16
-            elif dtype == torch.float32:
-                return tl.float32
-            else:
-                raise ValueError(f"Unsupported dtype: {dtype}")
 
         out_dtype = torch_dtype_to_triton(q.dtype)
         ctx.out_dtype = out_dtype
