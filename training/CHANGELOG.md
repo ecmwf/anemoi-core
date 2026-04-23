@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.12.1](https://github.com/ecmwf/anemoi-core/compare/training-0.12.0...training-0.12.1) (2026-04-23)
+
+
+### Bug Fixes
+
+* Apply spatial mask to coordinates when using focus_area with boolean mask ([#1062](https://github.com/ecmwf/anemoi-core/issues/1062)) ([4ccf5a7](https://github.com/ecmwf/anemoi-core/commit/4ccf5a7cf81339e00b51830538ba05a0f66938d6))
+* Fix anemoi TimeLimit callback ([#1064](https://github.com/ecmwf/anemoi-core/issues/1064)) ([09fd87f](https://github.com/ecmwf/anemoi-core/commit/09fd87f9be6bce73b2e160d480fcf0316dcfae47))
+* Improve handling of axis limits buffer for plotting callbacks ([#1063](https://github.com/ecmwf/anemoi-core/issues/1063)) ([1f052ec](https://github.com/ecmwf/anemoi-core/commit/1f052ecb98db3e3f4e4d37c4bb7ef56ecfb01394))
+
 ## [0.12.0](https://github.com/ecmwf/anemoi-core/compare/training-0.11.0...training-0.12.0) (2026-04-21)
 
 
