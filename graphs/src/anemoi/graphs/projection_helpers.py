@@ -33,7 +33,7 @@ def get_graph_node_names(
     else:
         nodes = getattr(graph_or_config, "nodes", {})
 
-    return set(nodes.keys())
+    return set(nodes.keys()) if nodes else set()
 
 
 def uses_fused_dataset_graph(graph_or_config: HeteroData | DictConfig | Mapping, dataset_names: list[str]) -> bool:
