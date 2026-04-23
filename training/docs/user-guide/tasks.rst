@@ -82,10 +82,8 @@ understand how well a model can reconstruct the past from a given state.
 
 The temporal layout is:
 
-* **Inputs:** :math:`t = 0` and :math:`t = +\Delta t` (two consecutive
-  frames).
-* **Output:** :math:`t = -\Delta t` (the step immediately before the
-  input window).
+* **Inputs:** :math:`t = 0` and :math:`t = +\Delta t` (two consecutive states).
+* **Output:** :math:`t = -\Delta t` (the step immediately before the input states).
 
 
  **Step 1** — Implement the task class
