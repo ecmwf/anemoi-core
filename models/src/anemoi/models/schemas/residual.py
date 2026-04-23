@@ -39,6 +39,8 @@ class TruncatedConnectionSchema(BaseModel):
     """
 
     target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
     truncation_config: dict | None = Field(
         None,
         description="Truncation config. For on-the-fly mode provide 'grid' (or 'node_builder'). "
