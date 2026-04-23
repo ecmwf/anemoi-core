@@ -254,7 +254,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
     combined = "anemoi.training.losses.combined.CombinedLoss"
-    aggregate = "anemoi.training.losses.AggregateLossWrapper"
+    aggregate = "anemoi.training.losses.TimeAggregateLossWrapper"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
@@ -307,12 +307,12 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
-class AggregateLossWrapperSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.AggregateLossWrapper"] = Field(..., alias="_target_")
-    aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
-    "Aggregation operations to apply over the time dimension before computing the loss."
+class TimeAggregateLossWrapperSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
+    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
+    "Time Aggregation operations to apply over the time dimension before computing the loss."
     loss_fn: BaseLossSchema
-    "Inner loss function applied to each aggregated output."
+    "Inner loss function applied to each time aggregated output."
     scalers: list[str] = Field(default_factory=list)
     "Scalers to include in loss calculation."
     ignore_nans: bool = False
