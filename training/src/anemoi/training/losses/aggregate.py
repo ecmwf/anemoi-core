@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
 
-if TYPE_CHECKING:
-    pass
 
 LOGGER = logging.getLogger(__name__)
 

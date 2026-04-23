@@ -15,10 +15,10 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class MAELossFn(FunctionalLoss):
     """Minimal MAE-style functional loss for testing."""
@@ -52,6 +52,7 @@ def target() -> torch.Tensor:
 # Construction
 # ---------------------------------------------------------------------------
 
+
 def test_is_base_loss() -> None:
     wrapper = AggregateLossWrapper(["mean"], _make_loss())
     assert isinstance(wrapper, BaseLoss)
@@ -67,6 +68,7 @@ def test_stores_loss_fn_and_agg_types() -> None:
 # ---------------------------------------------------------------------------
 # Output shape / type
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
 def test_returns_scalar_tensor(agg_op: str, pred: torch.Tensor, target: torch.Tensor) -> None:
@@ -86,6 +88,7 @@ def test_multiple_agg_ops_return_scalar(pred: torch.Tensor, target: torch.Tensor
 # Empty aggregation list
 # ---------------------------------------------------------------------------
 
+
 def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor) -> None:
     wrapper = AggregateLossWrapper([], _make_loss())
     result = wrapper(pred, target)
@@ -95,6 +98,7 @@ def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor
 # ---------------------------------------------------------------------------
 # Correctness: perfect predictions yield zero loss
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
 def test_zero_loss_for_perfect_predictions(agg_op: str) -> None:
@@ -109,6 +113,7 @@ def test_zero_loss_for_perfect_predictions(agg_op: str) -> None:
 # ---------------------------------------------------------------------------
 # Correctness: accumulation across multiple aggregation types
 # ---------------------------------------------------------------------------
+
 
 def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tensor) -> None:
     """Combined wrapper loss equals sum of individual wrapper losses."""
@@ -128,6 +133,7 @@ def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tenso
 # ---------------------------------------------------------------------------
 # Correctness: "diff" aggregation uses temporal differences
 # ---------------------------------------------------------------------------
+
 
 def test_diff_aggregation_computes_temporal_differences() -> None:
     """The diff wrapper should apply loss on (pred[:,1:]-pred[:,:-1]) vs (target[:,1:]-target[:,:-1])."""
@@ -149,6 +155,7 @@ def test_diff_aggregation_computes_temporal_differences() -> None:
 # ---------------------------------------------------------------------------
 # Correctness: "mean"/"min"/"max" aggregation reduces over time dim
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max"])
 def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
@@ -173,6 +180,7 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
 # Unknown aggregation type raises ValueError
 # ---------------------------------------------------------------------------
 
+
 def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None:
     wrapper = AggregateLossWrapper(["sum"], _make_loss())
     with pytest.raises(ValueError, match="Unknown aggregation type"):
@@ -182,6 +190,7 @@ def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None
 # ---------------------------------------------------------------------------
 # ignore_nans flag is forwarded to BaseLoss
 # ---------------------------------------------------------------------------
+
 
 def test_ignore_nans_flag() -> None:
     wrapper = AggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
