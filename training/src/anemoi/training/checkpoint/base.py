@@ -77,7 +77,7 @@ class CheckpointContext:
         optimizer state, training metadata, etc.
     model : nn.Module, optional
         PyTorch model being modified by the pipeline. Can be either
-        AnemoiModelInterface (pure PyTorch) or extracted from GraphForecaster
+        AnemoiModelInterface (pure PyTorch) or extracted from Task (Lightning).
     optimizer : Optimizer, optional
         Optional optimizer to restore state to (for warm starts)
     scheduler : Any, optional
@@ -90,7 +90,7 @@ class CheckpointContext:
     checkpoint_format : str, optional
         Format of the checkpoint: 'lightning', 'pytorch', or 'state_dict'
     pl_module : pl.LightningModule, optional
-        Lightning module (GraphForecaster) if loading from Lightning checkpoint.
+        Lightning module (Task) if loading from Lightning checkpoint.
         This preserves the full Lightning context for training resumption
 
     Examples

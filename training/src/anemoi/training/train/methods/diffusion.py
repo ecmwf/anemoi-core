@@ -19,26 +19,27 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.utils.index_space import IndexSpace
 
-from .base import BaseGraphModule
+from .base import BaseTrainingModule
 
 if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from training.src.anemoi.training.tasks.base import BaseTask
+
 
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseDiffusionForecaster(BaseGraphModule):
-    """Base class for diffusion forecasters."""
-
-    task_type = "forecaster"
+class BaseDiffusionTraining(BaseTrainingModule):
+    """Base class for diffusion training."""
 
     def __init__(
         self,
         *,
         config: BaseSchema,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -49,6 +50,7 @@ class BaseDiffusionForecaster(BaseGraphModule):
 
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -58,28 +60,6 @@ class BaseDiffusionForecaster(BaseGraphModule):
         )
 
         self.rho = config.model.model.diffusion.rho
-
-        from anemoi.training.diagnostics.callbacks.plot_adapter import DiffusionPlotAdapter
-
-        self._plot_adapter = DiffusionPlotAdapter(self)
-
-    def get_input(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Get input tensor shape for diffusion model."""
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            msg = (
-                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
-                f", {dataset_batch.shape[1]} !>= {self.n_step_input + self.n_step_output}"
-            )
-            assert dataset_batch.shape[1] >= self.n_step_input + self.n_step_output, msg
-            x[dataset_name] = dataset_batch[
-                :,
-                0 : self.n_step_input,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]  # (bs, n_step_input, latlon, nvar)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
 
     def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Project full targets into data-output variable space."""
@@ -146,20 +126,26 @@ class BaseDiffusionForecaster(BaseGraphModule):
         Parameters
         ----------
         y_pred : torch.Tensor
-            Predicted values
+            Predicted values.
         y : torch.Tensor
-            Target values
-        grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+            Target values.
+        dataset_name : str
+            Dataset name for multi-dataset scenarios.
         weights : torch.Tensor
-            Noise weights for diffusion loss computation
+            Noise weights for diffusion loss computation.
+        grid_shard_slice : slice | None
+            Grid shard slice for distributed training.
+        pred_layout : IndexSpace | str | None
+            Layout of the prediction tensor.
+        target_layout : IndexSpace | str | None
+            Layout of the target tensor.
         **_kwargs
-            Additional arguments
+            Additional arguments.
 
         Returns
         -------
         torch.Tensor
-            Computed loss with noise weighting applied
+            Computed loss with noise weighting applied.
         """
         assert weights is not None, f"{self.__class__.__name__} must be provided for diffusion loss computation."
 
@@ -224,29 +210,15 @@ class BaseDiffusionForecaster(BaseGraphModule):
         return sigma, weight
 
 
-class GraphDiffusionForecaster(BaseDiffusionForecaster):
-    """Graph neural network forecaster for diffusion."""
-
-    def _get_diffusion_targets(
-        self,
-        batch: dict[str, torch.Tensor],
-        *,
-        start: int | None = None,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Get reduced (model-output) and full targets for diffusion tasks."""
-        if start is None:
-            start = self.n_step_input
-        target_full = super().get_target(batch, start=start)
-        target_data_output = self.get_data_output_target(target_full)
-        target_model = self.reduce_data_output_target_to_model_output(target_data_output)
-        return target_model, target_full
+class DiffusionTraining(BaseDiffusionTraining):
+    """Graph neural network for diffusion."""
 
     def _step(
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
-        """Step for the forecaster.
+        """Step for the diffusion training.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
@@ -255,16 +227,20 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+            Whether in validation mode and to calculate validation metrics, by default False.
+            If False, metrics will be empty.
 
         Returns
         -------
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
-            Loss value, metrics, and predictions (per step)
+            Loss value, metrics, and predictions (per step).
         """
-        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        y, target = self._get_diffusion_targets(batch)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        target = self.task.get_targets(batch)
+        target_data_output = self.get_data_output_target(target)  # (bs, n_step_output, ens, latlon, nvar)
+        y = self.reduce_data_output_target_to_model_output(target_data_output)  # (bs, n_step_output, ens, latlon, nvar)
 
         # get noise level and associated loss weights
         shapes = {k: y_.shape for k, y_ in y.items()}
@@ -278,15 +254,16 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         )
 
         y_noised = self._noise_target(y, sigma)
+
         # prediction, fwd_with_preconditioning
-        y_pred = self(x, y_noised, sigma)  # shape is (bs, ens, latlon, nvar)
-        # Use checkpoint for compute_loss_metrics
+        y_pred = self(x, y_noised, sigma)  # shape is (bs, time, ens, latlon, nvar)
+
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             y_pred,
             target,
-            validation_mode=validation_mode,
             weights=noise_weights,
+            validation_mode=validation_mode,
             pred_layout=IndexSpace.MODEL_OUTPUT,
             target_layout=IndexSpace.DATA_FULL,
             use_reentrant=False,
@@ -295,13 +272,14 @@ class GraphDiffusionForecaster(BaseDiffusionForecaster):
         return loss, metrics, [y_pred]
 
 
-class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
-    """Graph neural network forecaster for diffusion tendency prediction."""
+class DiffusionTendencyTraining(BaseDiffusionTraining):
+    """Graph neural network for diffusion tendency prediction."""
 
     def __init__(
         self,
         *,
         config: BaseSchema,
+        task: BaseTask,
         graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
@@ -311,6 +289,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
     ) -> None:
         super().__init__(
             config=config,
+            task=task,
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -511,7 +490,7 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
-        """Step for the tendency-based diffusion forecaster.
+        """Step for the tendency-based diffusion training.
 
         Will run pre_processors on batch, but not post_processors on predictions.
 
@@ -520,19 +499,19 @@ class GraphDiffusionTendForecaster(BaseDiffusionForecaster):
         batch : dict[str, torch.Tensor]
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
-            Whether in validation mode, and to calculate validation metrics, by default False
-            If False, metrics will be empty
+            Whether in validation mode and to calculate validation metrics, by default False.
+            If False, metrics will be empty.
 
         Returns
         -------
         tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]
-            Loss value, metrics, and predictions (per step)
+            Loss value, metrics, and predictions (per step).
         """
-        # batch is already normalized in BaseGraphModule._normalize_batch
+        # batch is already normalized in BaseTrainingModule._normalize_batch
         # x: data.input.full (normalized), state_target: data.full (normalized slice view)
-        x = self.get_input(batch)  # (bs, n_step_input, ens, latlon, nvar)
-        state_target = self.get_target(batch)
-        y_data_output = self.get_data_output_target(state_target)
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)  # (bs, n_step_input, ens, latlon, nvar)
+        state_target = self.task.get_targets(batch)
+        y_data_output = self.get_data_output_target(state_target)  # (bs, n_step_output, ens, latlon, nvar)
 
         pre_processors_tendencies = getattr(self.model, "pre_processors_tendencies", None)
         if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:

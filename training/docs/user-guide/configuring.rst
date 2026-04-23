@@ -25,7 +25,8 @@ settings at the top as follows:
    - system: example
    - graph: multi_scale
    - model: gnn
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 These are group configs for each section. The options after the defaults
@@ -103,41 +104,6 @@ Use:
 Do not use the previous ``dataset``/``name`` nesting. Configuration
 validation now enforces the new layout.
 
-*********************************
- Multistep Input and Output
-*********************************
-
-Anemoi uses ``multistep_input`` and ``multistep_output`` to control how many time
-steps the model injests as input and predicts in a single forward pass.
-
--  ``multistep_input``: number of past timesteps provided as model input. When set to 1, only `t_{0}` is used.
--  ``multistep_output``: number of future timesteps predicted per forward pass.
-
-Set ``multistep_output`` greater than 1 to enable multi-output prediction. This
-reduces the number of forward passes needed to cover a rollout horizon.
-
-Example:
-
-.. code:: yaml
-
-   training:
-      multistep_input: 3
-      multistep_output: 2
-      rollout:
-         start: 1
-         max: 4
-
-Rollout behavior:
-
--  When time indices are inferred, the dataloader uses
-   ``multistep_input + rollout * multistep_output`` to determine how many timesteps
-   to load.
--  If ``multistep_output`` is greater than ``multistep_input``, only the most recent
-   ``multistep_input`` outputs are fed into the next rollout step.
-
-Notes:
-
--  Autoencoders require ``multistep_input == multistep_output``.
 
 Example Config File
 ===================
@@ -167,7 +133,8 @@ match the dataset you provide.
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
    config_validation: True
@@ -286,7 +253,8 @@ correctly indented (in this case the `diagnostics.log` field):
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -338,7 +306,8 @@ typos that might still need to be fixed manually:
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -399,7 +368,8 @@ let's say we have a config with a union of schemas like the following:
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 

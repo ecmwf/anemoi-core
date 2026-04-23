@@ -145,7 +145,7 @@ class MultiscaleLossWrapper(BaseLoss):
             y_pred_ens_interp, y_interp, channel_shard_sizes
         """
         batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
-        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) g (c t)")
+        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) t g c")
 
         # grid-sharded -> channel-sharded: split along channels (dim_split=-1), concat along grid (dim_concat=-2)
         channel_shard_sizes = get_shard_sizes(y_pred_ens_interp, -1, group)
@@ -159,7 +159,7 @@ class MultiscaleLossWrapper(BaseLoss):
         )
         y_pred_ens_interp = einops.rearrange(
             y_pred_ens_interp,
-            "(b e) g (c t) -> b t e g c",
+            "(b e) t g c -> b t e g c",
             b=batch_size,
             e=ensemble_size,
             t=out_times,

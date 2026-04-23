@@ -1,8 +1,6 @@
 format: zarr
 # Time frequency requested from dataset
 frequency: 6h
-# Time step of model (must be multiple of frequency)
-timestep: 6h
 
 datasets:
   data: # user-defined name for the dataset
