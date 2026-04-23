@@ -22,7 +22,6 @@ _AGGREGATE_LOSS_CFG = {
         "_target_": "anemoi.training.losses.MSELoss",
         "scalers": ["node_weights"],
     },
-    "scalers": [],
 }
 
 _MSE_CFG = {

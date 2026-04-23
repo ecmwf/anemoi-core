@@ -336,11 +336,17 @@ class CombinedLossSchema(BaseLossSchema):
     @classmethod
     def add_empty_scalers(cls, losses: Any) -> Any:
         """Add empty scalers to loss functions, as scalers can be set at top level."""
+        from omegaconf import DictConfig
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
+            if "TimeAggregateLossWrapper" in loss.get("_target_", ""):
+                continue  # TimeAggregateLossWrapperSchema has no scalers field
             if "scalers" not in loss:
-                with open_dict(loss):
+                if isinstance(loss, DictConfig):
+                    with open_dict(loss):
+                        loss["scalers"] = []
+                else:
                     loss["scalers"] = []
         return losses
 
