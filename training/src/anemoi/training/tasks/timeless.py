@@ -21,7 +21,9 @@ class BaseTimelessTask(BaseSingleStepTask):
     """
 
     def __init__(self, **_kwargs) -> None:
-        super().__init__(offsets=BaseTaskOffsets(input_offsets=[datetime.timedelta(0)], output_offsets=[datetime.timedelta(0)]))
+        super().__init__(
+            offsets=BaseTaskOffsets(input_offsets=[datetime.timedelta(0)], output_offsets=[datetime.timedelta(0)]),
+        )
 
         self._plot_adapter = AutoencoderPlotAdapter(self)
 

@@ -322,5 +322,3 @@ class FlexibleForecaster(BaseForecaster):
             rollout=rollout,
             validation_rollout=validation_rollout,
         )
-
-
