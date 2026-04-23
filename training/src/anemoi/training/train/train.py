@@ -220,6 +220,8 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
+        self._log_checkpoint_role_debug()
+
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
@@ -280,6 +282,77 @@ class AnemoiTrainer(ABC):
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
 
         return model
+
+    def _current_variable_types(self, dataset_name: str) -> dict[str, list[str]]:
+        input_data_indices = self.data_indices[dataset_name].data.input.todict()
+        input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
+        return {
+            "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
+            "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
+            "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
+            "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
+        }
+
+    def _log_checkpoint_role_debug(self) -> None:
+        """Log checkpoint-vs-current variable roles to catch silent semantic mismatches."""
+        ckpt_path = self.last_checkpoint
+        if ckpt_path is None:
+            return
+
+        try:
+            checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        except Exception as exc:
+            LOGGER.warning("Checkpoint role debug: unable to inspect %s (%s)", ckpt_path, exc)
+            return
+
+        if not isinstance(checkpoint, dict):
+            LOGGER.info("Checkpoint role debug: checkpoint %s is not a dict; skipping role inspection.", ckpt_path)
+            return
+
+        hyper_parameters = checkpoint.get("hyper_parameters", {})
+        metadata_inference = hyper_parameters.get("metadata_inference", {}) if isinstance(hyper_parameters, dict) else {}
+
+        for dataset_name in self.data_indices:
+            current_roles = self._current_variable_types(dataset_name)
+            ckpt_dataset_meta = metadata_inference.get(dataset_name, {}) if isinstance(metadata_inference, dict) else {}
+            ckpt_roles = ckpt_dataset_meta.get("variable_types", {}) if isinstance(ckpt_dataset_meta, dict) else {}
+            ckpt_indices = ckpt_dataset_meta.get("data_indices", {}) if isinstance(ckpt_dataset_meta, dict) else {}
+
+            LOGGER.info("Checkpoint role debug [%s]: current variable types=%s", dataset_name, current_roles)
+            if ckpt_roles:
+                LOGGER.info("Checkpoint role debug [%s]: checkpoint variable types=%s", dataset_name, ckpt_roles)
+            else:
+                LOGGER.warning(
+                    "Checkpoint role debug [%s]: checkpoint metadata has no variable_types entry.", dataset_name
+                )
+
+            current_input_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
+            current_output_names = list(self.data_indices[dataset_name].model.output.name_to_index.keys())
+            LOGGER.info(
+                "Checkpoint role debug [%s]: current model.input=%s model.output=%s",
+                dataset_name,
+                current_input_names,
+                current_output_names,
+            )
+
+            if isinstance(ckpt_indices, dict):
+                ckpt_input_names = list(ckpt_indices.get("input", {}).keys()) if isinstance(ckpt_indices.get("input"), dict) else []
+                ckpt_output_names = (
+                    list(ckpt_indices.get("output", {}).keys()) if isinstance(ckpt_indices.get("output"), dict) else []
+                )
+                if ckpt_input_names or ckpt_output_names:
+                    LOGGER.info(
+                        "Checkpoint role debug [%s]: checkpoint model.input=%s model.output=%s",
+                        dataset_name,
+                        ckpt_input_names,
+                        ckpt_output_names,
+                    )
+
+            if ckpt_roles and ckpt_roles != current_roles:
+                LOGGER.warning(
+                    "Checkpoint role debug [%s]: variable role mismatch between checkpoint and current config.",
+                    dataset_name,
+                )
 
     @cached_property
     def run_id(self) -> str:
