@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ class BaseAnemoiReader:
 
     def get_sample(
         self,
-        time_indices: slice | int | list[int],
+        time_indices: TimeIndices,
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Get a sample from the dataset."""
@@ -245,7 +246,10 @@ class TrajectoryDataset(BaseAnemoiReader):
     @property
     def trajectory_ids(self) -> list[str]:
         trajectory_length_seconds = self.trajectory_length * frequency_to_seconds(self.frequency)
-        return (self.dates - self.trajectory_start) // np.timedelta64(trajectory_length_seconds, "s")
+        return (self.dates - np.datetime64(self.trajectory_start, "s")) // np.timedelta64(
+            trajectory_length_seconds,
+            "s",
+        )
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
@@ -254,7 +258,7 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def create_dataset(dataset_config: dict) -> BaseAnemoiReader:
+def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})

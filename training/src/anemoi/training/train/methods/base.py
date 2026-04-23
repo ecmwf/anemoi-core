@@ -51,11 +51,13 @@ if TYPE_CHECKING:
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.tasks.base import BaseTask
+    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseGraphModule(pl.LightningModule, ABC):
+class BaseTrainingModule(pl.LightningModule, ABC):
     """Abstract base class for Anemoi GNN forecasters using PyTorch Lightning.
 
     This class encapsulates the shared functionality for distributed training,
@@ -139,7 +141,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self,
         *,
         config: BaseSchema,
-        graph_data: HeteroData,
+        task: BaseTask,
+        graph_data: dict[str, HeteroData],
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -165,6 +168,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         """
         super().__init__()
+        self.task = task
 
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
@@ -183,18 +187,16 @@ class BaseGraphModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        if not hasattr(self.__class__, "task_type"):
-            msg = """Subclasses of BaseGraphModule must define a `task_type` class attribute,
-                indicating the type of task (e.g., 'forecaster', 'time-interpolator')."""
-            raise AttributeError(msg)
-
-        metadata["metadata_inference"]["task"] = self.task_type
+        self.n_step_input = self.task.num_input_timesteps
+        self.n_step_output = self.task.num_output_timesteps
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
+            n_step_input=self.n_step_input,
+            n_step_output=self.n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
@@ -237,6 +239,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
+                task=self.task,
                 graph_data=graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
@@ -277,8 +280,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
-        self.n_step_input = config.training.multistep_input
-        self.n_step_output = config.training.multistep_output  # defaults to 1 via pydantic
+
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.effective_lr = (
             config.system.hardware.num_nodes
@@ -331,13 +333,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
-        # Concrete tasks set _plot_adapter in their __init__ (BasePlotAdapter is abstract).
-        self._plot_adapter: Any = None
-
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
-        return self._plot_adapter
+        return self.task._plot_adapter
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -429,6 +428,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
                 del state_dict[key]
 
         model_state_dict = self.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
         for key, value in model_state_dict.items():
             full_key = f"model.{key}"
             if full_key.startswith(processor_prefixes):
@@ -572,6 +572,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute the loss function.
@@ -599,6 +601,10 @@ class BaseGraphModule(pl.LightningModule, ABC):
             "grid_shard_slice": grid_shard_slice,
             "group": self.model_comm_group,
         }
+        if pred_layout is not None:
+            loss_kwargs["pred_layout"] = pred_layout
+        if target_layout is not None:
+            loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
@@ -613,6 +619,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
+        rollout_step: int | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -625,13 +634,23 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        rollout_step : int | None
+            Current rollout step index, used to produce per-step metric key suffixes.
 
         Returns
         -------
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name)
+        return self.calculate_val_metrics(
+            y_pred,
+            y,
+            step=rollout_step,
+            grid_shard_slice=grid_shard_slice,
+            dataset_name=dataset_name,
+            pred_layout=pred_layout,
+            target_layout=target_layout,
+        )
 
     def compute_dataset_loss_metrics(
         self,
@@ -896,6 +915,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
+        pred_layout: IndexSpace | str | None = None,
+        target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -926,22 +947,17 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():
-            if not isinstance(metric, BaseLoss):
-                # If not a loss, we cannot feature scale, so call normally
-                metrics[f"{metric_name}_metric/{dataset_name}{suffix}"] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                    grid_shard_slice=grid_shard_slice,
-                    model_comm_group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_shapes=self.grid_shard_shapes[dataset_name],
-                )
-                continue
+            # Validation now compares the model output tensor with the full target tensor.
+            # Those can contain different variables, so the metric needs to know how to
+            # line them up before computing the score. Other metrics do not have this information.
+            assert isinstance(
+                metric,
+                BaseLoss,
+            ), f"Validation metric {metric_name!r} must inherit BaseLoss, got {type(metric)}"
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
+                if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
                         " in the post processed space."
@@ -949,21 +965,21 @@ class BaseGraphModule(pl.LightningModule, ABC):
                     raise ValueError(exception_msg)
 
                 metric_kwargs = {
+                    "scaler_indices": (..., indices),
                     "grid_shard_slice": grid_shard_slice,
                     "group": self.model_comm_group,
                 }
+                if pred_layout is not None:
+                    metric_kwargs["pred_layout"] = pred_layout
+                if target_layout is not None:
+                    metric_kwargs["target_layout"] = target_layout
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
                         grid_shard_shapes=self.grid_shard_shapes[dataset_name],
                     )
 
-                metrics[metric_step_name] = metric(
-                    y_pred_postprocessed,
-                    y_postprocessed,
-                    scaler_indices=(..., indices),
-                    **metric_kwargs,
-                )
+                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
 
         return metrics
 
@@ -986,6 +1002,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
             batch_size=batch_size,
             sync_dist=True,
         )
+
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
 
         return train_loss
 
@@ -1077,7 +1095,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         super().lr_scheduler_step(scheduler, metric)
 
     def on_train_epoch_end(self) -> None:
-        pass
+        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
 
     def configure_optimizers(
         self,
