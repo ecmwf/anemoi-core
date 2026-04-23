@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossConfigSchema
 
-
 _TIME_AGG_CFG = {
     "time_aggregation_types": ["mean", "diff"],
     "weight": 0.5,
