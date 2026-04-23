@@ -342,11 +342,6 @@ class CombinedLossSchema(BaseLossSchema):
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
 
-    class Config(BaseModel.Config):
-        """Allow extra fields from Hydra config merging (e.g. leftover fields from a replaced loss type)."""
-
-        extra = "ignore"
-
     @field_validator("losses", mode="before")
     @classmethod
     def add_empty_scalers(cls, losses: Any) -> Any:
