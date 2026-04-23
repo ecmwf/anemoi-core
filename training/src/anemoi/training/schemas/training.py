@@ -329,7 +329,15 @@ class SpectralLossSchema(BaseLossSchema):
 class CombinedLossSchema(BaseLossSchema):
     scalers: list[str] = Field(default_factory=list)  # type: ignore[assignment]
     "Scalers to include in loss calculation. Defaults to empty (scalers applied per inner loss)."
-    losses: list[HuberLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema | SpectralLossSchema | TimeAggregateLossWrapperSchema | MultiScaleLossSchema | BaseLossSchema] = Field(min_length=1)
+    losses: list[
+        HuberLossSchema
+        | AlmostFairKernelCRPSSchema
+        | KernelCRPSSchema
+        | SpectralLossSchema
+        | TimeAggregateLossWrapperSchema
+        | MultiScaleLossSchema
+        | BaseLossSchema
+    ] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
