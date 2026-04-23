@@ -20,6 +20,7 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
@@ -32,6 +33,7 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
@@ -273,6 +275,23 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 self.loss[dataset_name],
                 data_indices[dataset_name],
             )
+
+        # Build optional time-aggregate loss
+        self.time_aggregate_loss = torch.nn.ModuleDict()
+        self.time_aggregate_loss_weight: dict[str, float] = {}
+        if config.training.time_aggregate_loss is not None:
+            ta_cfg = config.training.time_aggregate_loss
+            for dataset_name in self.target_dataset_names:
+                inner_loss = get_loss_function(
+                    DictConfig(ta_cfg.loss_fn),
+                    self.scalers[dataset_name],
+                    data_indices[dataset_name],
+                )
+                self.time_aggregate_loss[dataset_name] = TimeAggregateLossWrapper(
+                    time_aggregation_types=list(ta_cfg.time_aggregation_types),
+                    loss_fn=inner_loss,
+                )
+                self.time_aggregate_loss_weight[dataset_name] = float(ta_cfg.weight)
 
         if config.training.loss_gradient_scaling:
             # Multi-dataset: register hook for each loss
@@ -611,7 +630,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 grid_shard_shapes=self.grid_shard_shapes[dataset_name],
             )
 
-        return loss(y_pred, y, **loss_kwargs)
+        total_loss = loss(y_pred, y, **loss_kwargs)
+
+        # Add optional time-aggregate loss
+        if dataset_name in self.time_aggregate_loss:
+            ta_loss = self.time_aggregate_loss[dataset_name](y_pred, y, **loss_kwargs)
+            total_loss = total_loss + self.time_aggregate_loss_weight[dataset_name] * ta_loss
+
+        return total_loss
 
     def _compute_metrics(
         self,

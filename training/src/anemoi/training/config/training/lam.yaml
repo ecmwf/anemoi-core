@@ -52,7 +52,11 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-
+# Optional time-aggregate loss added alongside the main training loss.
+# When set, the wrapper computes time-aggregated predictions (e.g. diff, mean)
+# and evaluates a loss on them, weighted by `weight`. 
+# Only valid if the number of time steps is greater than 1.
+time_aggregate_loss: null
 # loss function for the model
 training_loss:
   datasets:

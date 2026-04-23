@@ -27,16 +27,19 @@ diagnostics:
 training:
   training_loss:
     datasets:
-      data:
-        _target_: anemoi.training.losses.combined.CombinedLoss
-        loss_weights: [1.0, 1.0]
-        losses:
-          - _target_: anemoi.training.losses.MSELoss
-            scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-            ignore_nans: False
-          - _target_: anemoi.training.losses.TimeAggregateLossWrapper
-            time_aggregation_types: [mean, max, min, diff]
-            loss_fn:
-              _target_: anemoi.training.losses.MSELoss
-              scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-              ignore_nans: False
+      data: # user-defined key in data
+        # loss class to initialise
+        _target_: anemoi.training.losses.MSELoss
+        # Scalers to include in loss calculation
+        # A selection of available scalers are listed in training/scalers.
+        # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+        # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+        ignore_nans: False
+  time_aggregate_loss:
+    time_aggregation_types: [mean, max, min, diff]
+    weight: 1.0
+    loss_fn:
+      _target_: anemoi.training.losses.MSELoss
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+      ignore_nans: False
