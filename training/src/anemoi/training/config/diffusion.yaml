@@ -5,6 +5,7 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: graphtransformer_diffusion
+- task: forecaster
 - training: diffusion
 - _self_
 

@@ -215,6 +215,7 @@ def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_te
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
+@skip_if_offline
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
     BaseSchema(**cfg)
@@ -312,21 +313,21 @@ def test_restart_from_existing_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_interpolator(
-    interpolator_config: tuple[DictConfig, str],
+def test_training_cycle_temporal_downscaler(
+    temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    """Full training-cycle smoke-test for the temporal interpolation task."""
-    cfg, url = interpolator_config
+    """Full training-cycle smoke-test for the temporal downscaler task."""
+    cfg, url = temporal_downscaler_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
-    """Schema-level validation for the temporal interpolation config."""
-    cfg, _ = interpolator_config
+def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple[DictConfig, str]) -> None:
+    """Schema-level validation for the temporal downscaler config."""
+    cfg, _ = temporal_downscaler_config
     BaseSchema(**cfg)
 
 
@@ -389,6 +390,19 @@ def test_training_cycle_multidatasets_diffusion(
     cfg, urls = multidatasets_diffusion_config
     for url in urls:
         get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = temporal_downscaler_ensemble_config
+    get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)

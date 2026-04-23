@@ -1,0 +1,15 @@
+_target_: anemoi.training.tasks.Forecaster
+multistep_input: 2
+multistep_output: 1
+timestep: "6H"
+
+# Rollout configuration for autoregressive forecasting
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  maximum: 1
+  # number of rollout steps to use for validation
+
+validation_rollout: 1

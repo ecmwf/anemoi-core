@@ -26,7 +26,7 @@ NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigra
 
 default_config = """
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.tasks.GraphEnsForecaster
   multistep_input : 1
 
 diagnostics:
@@ -100,10 +100,12 @@ def test_rollout_eval_ens_handles_dict_batch():
     pl_module.device = torch.device("cpu")
     pl_module.n_step_input = 1
     pl_module.n_step_output = 1
-    pl_module._rollout_step.return_value = [
-        (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None, None),
-        (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None, None),
-    ]
+    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
+    pl_module._step.return_value = (
+        torch.tensor(0.125),
+        {"metric1": torch.tensor(0.25)},
+        None,
+    )
 
     trainer = MagicMock()
     trainer.precision = "16-mixed"
@@ -132,10 +134,12 @@ def test_rollout_eval_handles_dict_batch():
     pl_module.device = torch.device("cpu")
     pl_module.n_step_input = 1
     pl_module.n_step_output = 1
-    pl_module._rollout_step.return_value = [
-        (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None),
-        (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None),
-    ]
+    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
+    pl_module._step.return_value = (
+        torch.tensor(0.125),
+        {"metric1": torch.tensor(0.25)},
+        None,
+    )
 
     trainer = MagicMock()
     trainer.precision = "16-mixed"  # no autocast
@@ -216,7 +220,7 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
 # Progress bar callback tests
 progress_bar_config = """
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.tasks.GraphEnsForecaster
 
 diagnostics:
   callbacks: []

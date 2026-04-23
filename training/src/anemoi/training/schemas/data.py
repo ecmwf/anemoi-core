@@ -58,8 +58,6 @@ class DataSchema(PydanticBaseModel):
     "Format of the data."
     frequency: str = Field(example=None)
     "Time frequency requested from the dataset."
-    timestep: str = Field(example=None)
-    "Time step of model (must be multiple of frequency)."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
     num_features: int | None
