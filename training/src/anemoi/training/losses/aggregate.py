@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
-from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
+
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -15,8 +18,8 @@ class AggregateLossWrapper(BaseLoss):
 
     Supported aggregation types:
 
-    - ``"diff"``  – temporal differences (``pred[:, 1:] - pred[:, :-1]``)
-    - ``"mean"``, ``"min"``, ``"max"`` – applied over the time window
+    - ``"diff"``  - temporal differences (``pred[:, 1:] - pred[:, :-1]``)
+    - ``"mean"``, ``"min"``, ``"max"`` - applied over the time window
     """
 
     def __init__(

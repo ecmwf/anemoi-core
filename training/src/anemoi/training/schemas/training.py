@@ -254,6 +254,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
     combined = "anemoi.training.losses.combined.CombinedLoss"
+    aggregate = "anemoi.training.losses.AggregateLossWrapper"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
@@ -306,6 +307,18 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class AggregateLossWrapperSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.AggregateLossWrapper"] = Field(..., alias="_target_")
+    aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
+    "Aggregation operations to apply over the time dimension before computing the loss."
+    loss_fn: BaseLossSchema
+    "Inner loss function applied to each aggregated output."
+    scalers: list[str] = Field(default_factory=list)
+    "Scalers to include in loss calculation."
+    ignore_nans: bool = False
+    "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
+
+
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
@@ -319,7 +332,7 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema | SpectralLossSchema | AggregateLossWrapperSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -349,6 +362,7 @@ class CombinedLossSchema(BaseLossSchema):
 LossSchemas = (
     BaseLossSchema
     | HuberLossSchema
+    | AggregateLossWrapperSchema
     | CombinedLossSchema
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema
