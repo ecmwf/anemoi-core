@@ -301,11 +301,6 @@ class MultiScaleLossSchema(BaseModel):
         return v
 
 
-class HuberLossSchema(BaseLossSchema):
-    delta: float = 1.0
-    "Threshold for Huber loss."
-
-
 class TimeAggregateLossConfigSchema(BaseModel):
     """Config-level schema for the time-aggregate loss.
 
@@ -319,8 +314,13 @@ class TimeAggregateLossConfigSchema(BaseModel):
     "Time aggregation operations to apply over the time dimension before computing the loss."
     weight: NonNegativeFloat = 1.0
     "Weight of the time-aggregate loss relative to the main training loss."
-    loss_fn: AlmostFairKernelCRPSSchema | KernelCRPSSchema | HuberLossSchema | BaseLossSchema
+    loss_fn: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
     "Inner loss function applied to each time-aggregated output."
+
+
+class HuberLossSchema(BaseLossSchema):
+    delta: float = 1.0
+    "Threshold for Huber loss."
 
 
 class SpectralLossSchema(BaseLossSchema):

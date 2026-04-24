@@ -12,8 +12,8 @@ import torch
 
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
+from anemoi.training.losses.mae import MAELoss
 from anemoi.training.utils.enums import TensorDim
 
 # ---------------------------------------------------------------------------
@@ -21,16 +21,9 @@ from anemoi.training.utils.enums import TensorDim
 # ---------------------------------------------------------------------------
 
 
-class MAELossFn(FunctionalLoss):
-    """Minimal MAE-style functional loss for testing."""
-
-    def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return torch.abs(pred - target)
-
-
-def _make_loss() -> FunctionalLoss:
+def _make_loss() -> MAELoss:
     """Return an MAE loss with a unit grid scaler (4 grid points)."""
-    loss = MAELossFn()
+    loss = MAELoss()
     loss.add_scaler(TensorDim.GRID, torch.ones(4), name="unit_grid")
     return loss
 

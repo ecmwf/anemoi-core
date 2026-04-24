@@ -33,7 +33,6 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
-from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import grad_scaler
@@ -280,6 +279,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.time_aggregate_loss = torch.nn.ModuleDict()
         self.time_aggregate_loss_weight: dict[str, float] = {}
         if config.training.time_aggregate_loss is not None:
+            from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
+
             ta_cfg = config.training.time_aggregate_loss
             for dataset_name in self.target_dataset_names:
                 inner_loss = get_loss_function(
@@ -634,7 +635,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Add optional time-aggregate loss
         if dataset_name in self.time_aggregate_loss:
-            ta_loss = self.time_aggregate_loss[dataset_name](y_pred, y, **loss_kwargs)
+            ta_kwargs = {
+                "grid_shard_slice": grid_shard_slice,
+                "group": self.model_comm_group,
+            }
+            ta_loss = self.time_aggregate_loss[dataset_name](y_pred, y, **ta_kwargs)
             total_loss = total_loss + self.time_aggregate_loss_weight[dataset_name] * ta_loss
 
         return total_loss
