@@ -12,22 +12,10 @@ from __future__ import annotations
 import datetime
 import logging
 
+from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _parse_offset(s: str) -> datetime.timedelta:
-    """Parse a duration string into a ``timedelta``, with optional leading ``-``."""
-    s = s.strip()
-    if s.startswith("-"):
-        return -frequency_to_timedelta(s[1:])
-    return frequency_to_timedelta(s)
-
-
-def _to_timedeltas(values: list[datetime.timedelta | str]) -> list[datetime.timedelta]:
-    """Coerce a list of values to ``timedelta``, parsing strings via ``_parse_offset``."""
-    return [v if isinstance(v, datetime.timedelta) else _parse_offset(v) for v in values]
 
 
 class BaseTaskOffsets:
@@ -46,8 +34,8 @@ class BaseTaskOffsets:
         input_offsets: list[datetime.timedelta | str],
         output_offsets: list[datetime.timedelta | str],
     ) -> None:
-        self.input = sorted(_to_timedeltas(input_offsets))
-        self.output = sorted(_to_timedeltas(output_offsets))
+        self.input = sorted(frequency_to_timedelta(v) for v in input_offsets)
+        self.output = sorted(frequency_to_timedelta(v) for v in output_offsets)
 
     @property
     def all(self) -> list[datetime.timedelta]:
@@ -75,15 +63,34 @@ class ForecastOffsets(BaseTaskOffsets):
         step_shift: datetime.timedelta | str | None = None,
     ) -> None:
         super().__init__(input_offsets, output_offsets)
+        self._validate_offsets()
         if isinstance(step_shift, str):
             step_shift = frequency_to_timedelta(step_shift)
         self.step_shift = self._validate_shift(step_shift)
 
+    def _validate_offsets(self) -> None:
+        """Check that offsets are duplicate-free and all output offsets are strictly greater than all input offsets."""
+        if len(self.input) != len(set(self.input)):
+            msg = f"input_offsets contains duplicate values: {[frequency_to_string(v) for v in self.input]}"
+            raise ValueError(msg)
+        if len(self.output) != len(set(self.output)):
+            msg = f"output_offsets contains duplicate values: {[frequency_to_string(v) for v in self.output]}"
+            raise ValueError(msg)
+        if max(self.input) >= min(self.output):
+            msg = (
+                "All output offsets must be strictly greater than all input offsets "
+                f"for a forecasting task. input_offsets={[frequency_to_string(v) for v in self.input]}, "
+                f"output_offsets={[frequency_to_string(v) for v in self.output]}"
+            )
+            raise ValueError(msg)
+
     def _validate_shift(self, step_shift: datetime.timedelta | None) -> datetime.timedelta:
         """Return a validated step-shift timedelta.
 
-        A shift S is valid if it is strictly positive and
-        when the shifted input is included in the union of input and output.
+        A shift S is valid if it is strictly positive,
+        the shifted input is included in the union of input and output offsets,
+        and no pairwise difference of output offsets is a multiple of S
+        (which would cause the same output time step to be forecasted more than once across rollout steps).
         None gets replaced by the maximum valid shift, if it exists.
 
         Parameters
@@ -97,15 +104,23 @@ class ForecastOffsets(BaseTaskOffsets):
         ValueError
             If the explicit shift is invalid, or if no valid shift exists.
         """
-        candidates = {x - i for x in self.all for i in self.input if x > i}
-        valid = sorted(s for s in candidates if all(i + s in self.all for i in self.input))
+        max_input = max(self.input)
+        candidates = [o - max_input for o in self.output]
+        output_diffs = [o2 - o1 for o1 in self.output for o2 in self.output if o2 > o1]
+        valid = [
+            s
+            for s in candidates
+            if all(i + s in self.all for i in self.input[:-1])
+            and all(diff % s != datetime.timedelta(0) for diff in output_diffs)
+        ]
 
         if step_shift is None:
             if not valid:
                 msg = (
                     "No valid autoregressive rollout step_shift exists. "
                     "Input offsets and output offsets are incompatible for a forecasting task. "
-                    f"input_offsets={self.input}, output_offsets={self.output}"
+                    f"input_offsets={[frequency_to_string(v) for v in self.input]}, "
+                    f"output_offsets={[frequency_to_string(v) for v in self.output]}"
                 )
                 raise ValueError(msg)
             LOGGER.info("Inferred step_shift=%s (maximum valid shift).", valid[-1])
@@ -113,10 +128,11 @@ class ForecastOffsets(BaseTaskOffsets):
 
         if step_shift not in valid:
             msg = (
-                f"step_shift={step_shift!r} is not a valid autoregressive rollout shift "
+                f"step_shift={frequency_to_string(step_shift)!r} is not a valid autoregressive rollout shift "
                 "for the chosen input and output offsets."
-                f" (valid shifts are: {valid}). "
-                f"input_offsets={self.input}, output_offsets={self.output}"
+                f" (valid shifts are: {[frequency_to_string(v) for v in valid]}). "
+                f"input_offsets={[frequency_to_string(v) for v in self.input]}, "
+                f"output_offsets={[frequency_to_string(v) for v in self.output]}"
             )
             raise ValueError(msg)
         return step_shift
