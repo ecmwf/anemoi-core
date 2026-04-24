@@ -20,6 +20,7 @@ from anemoi.utils.dates import frequency_to_string
 
 if TYPE_CHECKING:
     import logging
+
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
 
@@ -83,17 +84,13 @@ def normalize_explicit_time_indices_config(
         raw_target = dataset_cfg.get("target", None)
         if raw_input is None or raw_target is None:
             msg = f"Explicit time indices for dataset '{dataset_name}' must define both `input` and `target`."
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
 
         input_indices = np.array(sorted({int(value) for value in raw_input}), dtype=np.int64)
         target_indices = np.array(sorted({int(value) for value in raw_target}), dtype=np.int64)
         if len(input_indices) == 0:
             msg = f"Explicit time indices for dataset '{dataset_name}' require a non-empty `input`."
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
 
         combined_indices = (
             np.concatenate([input_indices, target_indices]).astype(np.int64, copy=False)
@@ -112,62 +109,120 @@ def normalize_explicit_time_indices_config(
     return normalized
 
 
-def parse_dataset_time_indices_config(config: BaseSchema) -> dict[str, dict[str, list[int]]] | None:
-    """Parse optional per-dataset sparse time windows from config."""
+def _get_dataset_time_indices_config(config: BaseSchema) -> object | None:
+    """Get sparse time-index config from the task or legacy training section."""
     cfg = getattr(getattr(config, "task", None), "dataset_time_indices", None)
     if cfg is None:
         cfg = getattr(getattr(config, "training", None), "dataset_time_indices", None)
     if cfg is None:
         return None
+    return cfg.get("datasets", cfg)
 
-    cfg = cfg.get("datasets", cfg)
+
+def _parse_time_index_value(
+    raw_value: object,
+    *,
+    dataset_name: str,
+    field_name: str,
+    timestep_seconds: int,
+    timestep: str,
+) -> int:
+    """Parse one sparse time-index entry."""
+    if isinstance(raw_value, Integral):
+        return int(raw_value)
+
+    try:
+        if isinstance(raw_value, str) and raw_value.strip().lstrip("+-").isdigit():
+            return int(raw_value.strip())
+        offset_seconds = frequency_to_seconds(raw_value)
+    except (AssertionError, TypeError, ValueError) as exc:
+        msg = (
+            f"`training.dataset_time_indices[{dataset_name}].{field_name}` value {raw_value!r} "
+            "must be either an integer step or a duration like '-5m' or '1h'."
+        )
+        raise ValueError(msg) from exc
+
+    if offset_seconds % timestep_seconds != 0:
+        msg = (
+            f"`training.dataset_time_indices[{dataset_name}].{field_name}` value {raw_value!r} "
+            f"is not an exact multiple of timestep {timestep!r}."
+        )
+        raise ValueError(msg)
+    return offset_seconds // timestep_seconds
+
+
+def _parse_time_index_values(
+    raw_values: list[object],
+    *,
+    dataset_name: str,
+    field_name: str,
+    timestep_seconds: int,
+    timestep: str,
+) -> list[int]:
+    """Parse one sparse time-index field for a dataset."""
+    return [
+        _parse_time_index_value(
+            raw_value,
+            dataset_name=dataset_name,
+            field_name=field_name,
+            timestep_seconds=timestep_seconds,
+            timestep=timestep,
+        )
+        for raw_value in raw_values
+    ]
+
+
+def _parse_dataset_time_indices(
+    dataset_name: str,
+    dataset_cfg: object,
+    *,
+    timestep_seconds: int,
+    timestep: str,
+) -> dict[str, list[int]]:
+    """Parse sparse input/target windows for one dataset."""
+    raw_input = dataset_cfg.get("input", None)
+    raw_target = dataset_cfg.get("target", None)
+    if raw_input is None or raw_target is None:
+        msg = f"`training.dataset_time_indices[{dataset_name}]` must define both `input` and `target`."
+        raise ValueError(msg)
+
+    parsed_dataset_cfg = {
+        "input": _parse_time_index_values(
+            raw_input,
+            dataset_name=dataset_name,
+            field_name="input",
+            timestep_seconds=timestep_seconds,
+            timestep=timestep,
+        ),
+        "target": _parse_time_index_values(
+            raw_target,
+            dataset_name=dataset_name,
+            field_name="target",
+            timestep_seconds=timestep_seconds,
+            timestep=timestep,
+        ),
+    }
+    if len(parsed_dataset_cfg["input"]) == 0:
+        msg = f"`training.dataset_time_indices[{dataset_name}]` requires a non-empty `input` list."
+        raise ValueError(msg)
+    return parsed_dataset_cfg
+
+
+def parse_dataset_time_indices_config(config: BaseSchema) -> dict[str, dict[str, list[int]]] | None:
+    """Parse optional per-dataset sparse time windows from config."""
+    cfg = _get_dataset_time_indices_config(config)
+    if cfg is None:
+        return None
+
     timestep_seconds = frequency_to_seconds(config.data.timestep)
     parsed: dict[str, dict[str, list[int]]] = {}
     for dataset_name, dataset_cfg in cfg.items():
-        raw_input = dataset_cfg.get("input", None)
-        raw_target = dataset_cfg.get("target", None)
-        if raw_input is None or raw_target is None:
-            msg = f"`training.dataset_time_indices[{dataset_name}]` must define both `input` and `target`."
-            raise ValueError(msg)
-
-        parsed_dataset_cfg: dict[str, list[int]] = {}
-        for field_name, raw_values in {"input": raw_input, "target": raw_target}.items():
-            parsed_values: list[int] = []
-            for raw_value in raw_values:
-                if isinstance(raw_value, Integral):
-                    parsed_values.append(int(raw_value))
-                    continue
-
-                try:
-                    if isinstance(raw_value, str) and raw_value.strip().lstrip("+-").isdigit():
-                        parsed_values.append(int(raw_value.strip()))
-                        continue
-
-                    offset_seconds = frequency_to_seconds(raw_value)
-                except (AssertionError, TypeError, ValueError) as exc:
-                    msg = (
-                        f"`training.dataset_time_indices[{dataset_name}].{field_name}` value {raw_value!r} "
-                        "must be either an integer step or a duration like '-5m' or '1h'."
-                    )
-                    raise ValueError(msg) from exc
-
-                if offset_seconds % timestep_seconds != 0:
-                    msg = (
-                        f"`training.dataset_time_indices[{dataset_name}].{field_name}` value {raw_value!r} "
-                        f"is not an exact multiple of timestep {config.data.timestep!r}."
-                    )
-                    raise ValueError(msg)
-                parsed_values.append(offset_seconds // timestep_seconds)
-
-            parsed_dataset_cfg[field_name] = parsed_values
-
-        if len(parsed_dataset_cfg["input"]) == 0:
-            msg = f"`training.dataset_time_indices[{dataset_name}]` requires a non-empty `input` list."
-            raise ValueError(
-                msg
-            )
-
-        parsed[str(dataset_name)] = parsed_dataset_cfg
+        parsed[str(dataset_name)] = _parse_dataset_time_indices(
+            str(dataset_name),
+            dataset_cfg,
+            timestep_seconds=timestep_seconds,
+            timestep=config.data.timestep,
+        )
 
     normalized = normalize_explicit_time_indices_config(parsed)
     return {

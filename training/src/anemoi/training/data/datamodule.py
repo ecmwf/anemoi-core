@@ -141,7 +141,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self,
         config: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
         debug_cfg = getattr(self.config.dataloader, "debug", {})

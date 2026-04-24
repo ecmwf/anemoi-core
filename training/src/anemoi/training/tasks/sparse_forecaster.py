@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import torch
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks.forecaster import Forecaster
+
+if TYPE_CHECKING:
+    from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,9 +76,7 @@ class SparseForecaster(Forecaster):
             for dataset_name in dataset_names
         }
         self.dataset_time_maps = {
-            dataset_name: {
-                int(relative_time): batch_idx for batch_idx, relative_time in enumerate(relative_times)
-            }
+            dataset_name: {int(relative_time): batch_idx for batch_idx, relative_time in enumerate(relative_times)}
             for dataset_name, relative_times in self.dataset_relative_time_indices.items()
         }
 
@@ -164,7 +165,10 @@ class SparseForecaster(Forecaster):
         requested_relative_times = self.get_batch_input_indices()
         x = {}
         for dataset_name, dataset_batch in batch.items():
-            input_positions = [self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time) for relative_time in requested_relative_times]
+            input_positions = [
+                self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+                for relative_time in requested_relative_times
+            ]
             input_index = torch.tensor(input_positions, device=dataset_batch.device, dtype=torch.long)
             x_time = dataset_batch.index_select(1, input_index)
             x[dataset_name] = x_time[..., data_indices[dataset_name].data.input.full]
@@ -177,7 +181,10 @@ class SparseForecaster(Forecaster):
         requested_relative_times = self.get_batch_output_indices(rollout_step=kwargs.get("rollout_step", 0))
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            target_positions = [self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time) for relative_time in requested_relative_times]
+            target_positions = [
+                self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+                for relative_time in requested_relative_times
+            ]
             target_index = torch.tensor(target_positions, device=dataset_batch.device, dtype=torch.long)
             y[dataset_name] = dataset_batch.index_select(1, target_index)
         return y

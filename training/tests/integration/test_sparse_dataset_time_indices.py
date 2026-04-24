@@ -7,9 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import Any
+
 import numpy as np
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from pytest_mock import MockFixture
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.tasks import SparseForecaster
@@ -33,8 +36,9 @@ class FakeDatasetReader:
         self.name_to_index = {"forcing_var": 0, "prog_var": 1}
         self.resolution = "test"
 
-    def get_sample(self, *args, **kwargs):
-        raise NotImplementedError("FakeDatasetReader is only used for metadata-oriented integration coverage.")
+    def get_sample(self, *args: Any, **kwargs: Any) -> None:
+        msg = "FakeDatasetReader is only used for metadata-oriented integration coverage."
+        raise NotImplementedError(msg)
 
 
 def build_sparse_forecaster_config() -> DictConfig:
@@ -83,7 +87,7 @@ def build_sparse_forecaster_config() -> DictConfig:
     )
 
 
-def test_sparse_forecaster_metadata_keeps_per_dataset_sparse_windows(mocker) -> None:
+def test_sparse_forecaster_metadata_keeps_per_dataset_sparse_windows(mocker: MockFixture) -> None:
     cfg = build_sparse_forecaster_config()
     fake_readers = {
         "meps_source": FakeDatasetReader(

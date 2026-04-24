@@ -24,6 +24,7 @@ from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
+
 def normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | dict:
     """Normalize dataset payload to the open_dataset dictionary contract."""
     dataset_config = dict(dataset_config) if isinstance(dataset_config, DictConfig) else dataset_config
