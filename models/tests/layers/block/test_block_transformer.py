@@ -157,7 +157,7 @@ class TestTransformerProcessorBlock:
         assert block.attention.projection.out_features == num_channels
 
         x = torch.randn((4, num_channels))
-        output = block.forward(x, [[4, num_channels]], batch_size=1)
+        output = block.forward(x, GraphShardInfo(nodes=[4]), batch_size=1)
         assert output[0].shape == (4, num_channels)
 
     def test_forward_output_with_conditioning(self):
@@ -177,7 +177,7 @@ class TestTransformerProcessorBlock:
 
         x = torch.randn((5, num_channels))
         cond = torch.randn((5, condition_shape))
-        output = block.forward(x, [[5, num_channels]], batch_size=1, cond=cond)
+        output = block.forward(x, GraphShardInfo(nodes=[5]), batch_size=1, cond=cond)
 
         assert output[0].shape == (5, num_channels)
 

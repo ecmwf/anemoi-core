@@ -247,9 +247,11 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         assert mapper.proc.projection.out_features == mapper_init.hidden_dim
 
         batch_size = 1
-        shard_shapes = [list(pair_tensor[0].shape)], [list(pair_tensor[1].shape)]
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        _, x_dst = mapper.forward(pair_tensor, batch_size, shard_shapes, edge_attr, edge_index)
+        _, x_dst = mapper.forward(pair_tensor, batch_size, shard_info, edge_attr, edge_index)
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
 

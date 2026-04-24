@@ -277,15 +277,12 @@ def test_GraphTransformerProcessorBlock_accepts_conditioning():
     edge_index = torch.tensor([[0, 1, 2, 3, 0, 2], [1, 2, 3, 0, 2, 1]])
     edge_attr = torch.randn(num_edges, edge_dim)
 
+    shard_info = GraphShardInfo(nodes=[num_nodes], edges=[num_edges])
     x_out, edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_nodes, in_channels]],
-            [[num_nodes, in_channels]],
-            [[num_edges, edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=num_nodes,
         cond=cond,
@@ -329,15 +326,14 @@ def test_GraphTransformerMapperBlock_accepts_conditioning_on_default_path():
         torch.randn(num_dst_nodes, condition_shape),
     )
 
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes], edges=[edge_index.shape[1]]
+    )
     (x_src_out, x_dst_out), edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_src_nodes, in_channels]],
-            [[num_dst_nodes, in_channels]],
-            [[edge_index.shape[1], edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=(num_src_nodes, num_dst_nodes),
         cond=cond,
@@ -382,15 +378,14 @@ def test_GraphTransformerMapperBlock_accepts_conditioning_with_heads_sharding():
         torch.randn(num_dst_nodes, condition_shape),
     )
 
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes], edges=[edge_index.shape[1]]
+    )
     (x_src_out, x_dst_out), edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_src_nodes, in_channels]],
-            [[num_dst_nodes, in_channels]],
-            [[edge_index.shape[1], edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=(num_src_nodes, num_dst_nodes),
         cond=cond,
@@ -435,15 +430,14 @@ def test_GraphTransformerMapperBlock_src_updates_use_src_conditioning():
         torch.randn(num_dst_nodes, condition_shape),
     )
 
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes], edges=[edge_index.shape[1]]
+    )
     (x_src_out, x_dst_out), edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_src_nodes, in_channels]],
-            [[num_dst_nodes, in_channels]],
-            [[edge_index.shape[1], edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=(num_src_nodes, num_dst_nodes),
         cond=cond,

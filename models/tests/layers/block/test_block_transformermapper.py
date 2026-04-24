@@ -156,7 +156,7 @@ def test_forward_output_with_conditioning():
 
     output, _ = block.forward(
         x,
-        ([[num_src_nodes, num_channels]], [[num_dst_nodes, num_channels]]),
+        BipartiteGraphShardInfo(src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes]),
         batch_size=1,
         cond=cond,
     )
