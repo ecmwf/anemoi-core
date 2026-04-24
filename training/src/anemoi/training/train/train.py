@@ -260,9 +260,16 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
+            ckpt_model_name_to_index = getattr(model, "_ckpt_model_name_to_index", {})
             for dataset_name, data_indices in self.data_indices.items():
+                if dataset_name not in ckpt_model_name_to_index:
+                    LOGGER.info(
+                        "Checkpoint has no variable indices for dataset '%s'; skipping variable order check.",
+                        dataset_name,
+                    )
+                    continue
                 data_indices.compare_variables(
-                    model._ckpt_model_name_to_index[dataset_name],
+                    ckpt_model_name_to_index[dataset_name],
                     data_indices.name_to_index,
                 )
 

@@ -16,10 +16,14 @@ import torch
 from omegaconf import ListConfig
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.train.tasks.rollout import BaseRolloutGraphModule
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from torch.distributed.distributed_c10d import ProcessGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -366,3 +370,235 @@ class GraphForecasterSparse(BaseRolloutGraphModule):
                 x = self._advance_input(x, y_pred_full, batch, rollout_step=rollout_step)
 
             yield loss, metrics_next, y_pred
+
+
+class GraphEnsForecasterSparse(GraphForecasterSparse):
+    """Sparse forecaster task with ensemble loss gathering."""
+
+    task_type = "forecaster"
+
+    def __init__(
+        self,
+        *,
+        config,
+        graph_data,
+        statistics,
+        statistics_tendencies,
+        data_indices,
+        metadata,
+        supporting_arrays,
+    ) -> None:
+        super().__init__(
+            config=config,
+            graph_data=graph_data,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            data_indices=data_indices,
+            metadata=metadata,
+            supporting_arrays=supporting_arrays,
+        )
+
+        self.model_comm_group_size = config.system.hardware.num_gpus_per_model
+        num_gpus_per_model = config.system.hardware.num_gpus_per_model
+        num_gpus_per_ensemble = config.system.hardware.num_gpus_per_ensemble
+
+        assert num_gpus_per_ensemble % num_gpus_per_model == 0, (
+            "Invalid ensemble vs. model size GPU group configuration: "
+            f"{num_gpus_per_ensemble} mod {num_gpus_per_model} != 0."
+        )
+
+        self.lr = (
+            config.system.hardware.num_nodes
+            * config.system.hardware.num_gpus_per_node
+            * config.training.lr.rate
+            / num_gpus_per_ensemble
+        )
+        LOGGER.info("Base (config) learning rate: %e -- Effective learning rate: %e", config.training.lr.rate, self.lr)
+
+        self.nens_per_device = config.training.ensemble_size_per_device
+        self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
+        LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
+
+        self.ens_comm_group = None
+        self.ens_comm_group_id = None
+        self.ens_comm_group_rank = None
+        self.ens_comm_num_groups = None
+        self.ens_comm_group_size = None
+        self.ens_comm_subgroup = None
+        self.ens_comm_subgroup_id = None
+        self.ens_comm_subgroup_rank = None
+        self.ens_comm_subgroup_num_groups = None
+        self.ens_comm_subgroup_size = None
+
+    def set_ens_comm_group(
+        self,
+        ens_comm_group: ProcessGroup,
+        ens_comm_group_id: int,
+        ens_comm_group_rank: int,
+        ens_comm_num_groups: int,
+        ens_comm_group_size: int,
+    ) -> None:
+        self.ens_comm_group = ens_comm_group
+        self.ens_comm_group_id = ens_comm_group_id
+        self.ens_comm_group_rank = ens_comm_group_rank
+        self.ens_comm_num_groups = ens_comm_num_groups
+        self.ens_comm_group_size = ens_comm_group_size
+
+    def set_ens_comm_subgroup(
+        self,
+        ens_comm_subgroup: ProcessGroup,
+        ens_comm_subgroup_id: int,
+        ens_comm_subgroup_rank: int,
+        ens_comm_subgroup_num_groups: int,
+        ens_comm_subgroup_size: int,
+    ) -> None:
+        self.ens_comm_subgroup = ens_comm_subgroup
+        self.ens_comm_subgroup_id = ens_comm_subgroup_id
+        self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
+        self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
+        self.ens_comm_subgroup_size = ens_comm_subgroup_size
+
+    def compute_dataset_loss_metrics(
+        self,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        dataset_name: str | None = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+        y_pred_ens = gather_tensor(
+            y_pred.clone(),
+            dim=TensorDim.ENSEMBLE_DIM,
+            shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
+            mgroup=self.ens_comm_subgroup,
+        )
+        return super().compute_dataset_loss_metrics(
+            y_pred_ens,
+            y,
+            validation_mode=validation_mode,
+            dataset_name=dataset_name,
+            **kwargs,
+        )
+
+    def _build_rollout_input_step(
+        self,
+        *,
+        dataset_name: str,
+        dataset_batch: torch.Tensor,
+        y_pred_full: dict[str, torch.Tensor],
+        relative_time: int,
+        rollout_step: int,
+    ) -> torch.Tensor:
+        batch_position = self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+        x_step = dataset_batch[
+            :,
+            batch_position,
+            ...,
+            self.data_indices[dataset_name].data.input.full,
+        ].clone()
+
+        if self.nens_per_device > 1:
+            x_step = torch.cat([x_step] * self.nens_per_device, dim=1)
+
+        pred_start, pred_end = self._prediction_window_for_step(dataset_name=dataset_name, rollout_step=rollout_step)
+        pred_position = int(relative_time - pred_start)
+        has_prediction = pred_start <= int(relative_time) <= pred_end and dataset_name in y_pred_full
+        if has_prediction:
+            x_step[..., self.data_indices[dataset_name].model.input.prognostic] = y_pred_full[dataset_name][
+                :,
+                pred_position,
+                ...,
+                self.data_indices[dataset_name].model.output.prognostic,
+            ]
+
+        boundary = dataset_batch[:, batch_position]
+        if self.nens_per_device > 1:
+            boundary = torch.cat([boundary] * self.nens_per_device, dim=1)
+
+        x_step = self.output_mask[dataset_name].rollout_boundary(
+            x_step,
+            boundary,
+            self.data_indices[dataset_name],
+            grid_shard_slice=self.grid_shard_slice[dataset_name],
+        )
+
+        forcing = dataset_batch[
+            :,
+            batch_position,
+            ...,
+            self.data_indices[dataset_name].model.input.forcing,
+        ]
+        if self.nens_per_device > 1:
+            forcing = torch.cat([forcing] * self.nens_per_device, dim=1)
+        x_step[..., self.data_indices[dataset_name].model.input.forcing] = forcing
+        return x_step
+
+    def _rollout_step(
+        self,
+        batch: dict,
+        rollout: int | None = None,
+        validation_mode: bool = False,
+    ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
+        """Rollout step for the sparse ensemble forecaster."""
+        rollout_steps = rollout or self.rollout
+
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            input_positions = self._batch_positions(
+                dataset_name=dataset_name,
+                relative_times=self.dataset_input_relative_time_indices[dataset_name],
+            )
+            input_index = torch.tensor(input_positions, device=dataset_batch.device, dtype=torch.long)
+            x_time = dataset_batch.index_select(1, input_index)
+            x[dataset_name] = x_time[..., self.data_indices[dataset_name].data.input.full]
+
+        for dataset_name in self.dataset_names:
+            x[dataset_name] = torch.cat([x[dataset_name]] * self.nens_per_device, dim=2)
+            LOGGER.debug("Shapes: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+            assert (
+                x[dataset_name].shape[1] == len(self.dataset_input_relative_time_indices[dataset_name])
+                and x[dataset_name].shape[2] == self.nens_per_device
+            ), (
+                "Shape mismatch in x! "
+                f"Expected ({len(self.dataset_input_relative_time_indices[dataset_name])}, {self.nens_per_device}), "
+                f"got ({x[dataset_name].shape[1]}, {x[dataset_name].shape[2]})!"
+            )
+
+        for rollout_step in range(rollout_steps):
+            y_pred_full = self(x, fcstep=rollout_step)
+            y_pred = {}
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                if dataset_name not in y_pred_full:
+                    continue
+                if len(self.dataset_target_relative_time_indices[dataset_name]) == 0:
+                    continue
+
+                target_relative_times, pred_positions = self._rollout_targets_for_step(
+                    dataset_name=dataset_name,
+                    rollout_step=rollout_step,
+                )
+                batch_positions = self._batch_positions(
+                    dataset_name=dataset_name,
+                    relative_times=target_relative_times,
+                )
+                pred_index = torch.tensor(pred_positions, device=dataset_batch.device, dtype=torch.long)
+                batch_index = torch.tensor(batch_positions, device=dataset_batch.device, dtype=torch.long)
+                y_time = dataset_batch.index_select(1, batch_index)
+                y[dataset_name] = y_time[:, :, 0, :, :]
+                y_pred[dataset_name] = y_pred_full[dataset_name].index_select(1, pred_index)
+
+            loss, metrics_next, y_pred_ens = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                step=rollout_step,
+                validation_mode=validation_mode,
+                input_context=x,
+                use_reentrant=False,
+            )
+
+            if rollout_step < rollout_steps - 1:
+                x = self._advance_input(x, y_pred_full, batch, rollout_step=rollout_step)
+
+            yield loss, metrics_next, y_pred_ens

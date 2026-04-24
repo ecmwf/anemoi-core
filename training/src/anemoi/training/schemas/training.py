@@ -324,6 +324,8 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     alpha: float = 1.0
     """Factor for linear combination of fair (unbiased, ensemble variance component
     weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
+    alpha_scaler_name: str | None = None
+    "Optional scaler name whose values are used directly as the local alpha map."
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 

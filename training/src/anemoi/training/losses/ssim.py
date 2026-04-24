@@ -73,6 +73,7 @@ class SSIMLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         del kwargs
+        target = self.align_target_to_pred(pred, target)
         if self.ignore_nans:
             nan_mask = torch.isnan(target)
             target = target.masked_fill(nan_mask, 0.0)
@@ -222,6 +223,7 @@ class MaskedLogSSIMLoss(SSIMLoss):
     ) -> torch.Tensor:
         del kwargs
         is_sharded = grid_shard_slice is not None
+        target = self.align_target_to_pred(pred, target)
 
         valid = None
         if self.ignore_nans:

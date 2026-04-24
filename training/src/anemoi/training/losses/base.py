@@ -213,13 +213,27 @@ class BaseLoss(nn.Module, ABC):
 
         return out if group is None else reduce_tensor(out, group)
 
-    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
-        """Yield all leaf loss modules.
+    def align_target_to_pred(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Broadcast deterministic targets across ensemble members when needed."""
+        if pred.ndim == target.ndim + 1:
+            target = target.unsqueeze(TensorDim.ENSEMBLE_DIM)
 
-        For simple losses, yields self. For composite losses (e.g. CombinedLoss),
-        recursively yields the underlying leaf losses.
-        """
-        yield self
+        if pred.ndim != target.ndim:
+            return target
+
+        pred_ens = pred.shape[TensorDim.ENSEMBLE_DIM]
+        target_ens = target.shape[TensorDim.ENSEMBLE_DIM]
+        if pred_ens == target_ens:
+            return target
+        if target_ens == 1:
+            expand_shape = list(target.shape)
+            expand_shape[TensorDim.ENSEMBLE_DIM] = pred_ens
+            return target.expand(*expand_shape)
+
+        raise ValueError(
+            "Prediction and target ensemble dimensions are incompatible: "
+            f"pred={tuple(pred.shape)}, target={tuple(target.shape)}"
+        )
 
     @property
     def name(self) -> str:
@@ -329,6 +343,7 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
+        target = self.align_target_to_pred(pred, target)
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
         squash_mode = kwargs.get("squash_mode", "avg")

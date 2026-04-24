@@ -16,11 +16,14 @@ from typing import Optional
 import einops
 import numpy as np
 import torch
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models import AnemoiModelEncProcDec
 from anemoi.models.preprocessing.qc_flags import QCDecodeBits
@@ -306,6 +309,361 @@ class AnemoiModelEncProcDecUnionDecoderForecaster(AnemoiModelEncProcDec):
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
             edge_shard_shapes=proc_edge_shard_shapes,
+        )
+        x_latent_proc = x_latent_proc + x_latent
+
+        provider_by_dataset = getattr(self, "decoder_provider_by_dataset", {})
+        decode_groups: dict[str, list[str]] = {}
+        for dataset_name in dataset_names:
+            provider_name = str(provider_by_dataset.get(dataset_name, dataset_name))
+            decode_groups.setdefault(provider_name, []).append(dataset_name)
+
+        provider_x_dst_base: dict[str, torch.Tensor] = {}
+        provider_shard_shapes: dict[str, list] = {}
+        provider_dst_sharded: dict[str, bool] = {}
+        for provider_name in decode_groups:
+            if provider_name in x_data_latent_dict:
+                provider_x_dst_base[provider_name] = x_data_latent_dict[provider_name]
+                provider_shard_shapes[provider_name] = shard_shapes_data_dict[provider_name]
+                provider_dst_sharded[provider_name] = in_out_sharded[provider_name]
+                continue
+
+            x_dst_provider = self.node_attributes(provider_name, batch_size=batch_size)
+            if x_dst_provider.device != x_latent_proc.device:
+                x_dst_provider = x_dst_provider.to(x_latent_proc.device)
+            if (
+                x_dst_provider.is_floating_point()
+                and x_latent_proc.is_floating_point()
+                and x_dst_provider.dtype != x_latent_proc.dtype
+            ):
+                x_dst_provider = x_dst_provider.to(dtype=x_latent_proc.dtype)
+
+            provider_x_dst_base[provider_name] = x_dst_provider
+            provider_shard_shapes[provider_name] = get_shard_shapes(x_dst_provider, 0, model_comm_group)
+            provider_dst_sharded[provider_name] = False
+
+        provider_slices_cache: dict[str, dict[str, tuple[int, int]] | None] = {}
+
+        def _get_provider_slices(provider_name: str) -> dict[str, tuple[int, int]] | None:
+            if provider_name in provider_slices_cache:
+                return provider_slices_cache[provider_name]
+
+            if provider_name not in self._graph_data.node_types:
+                provider_slices_cache[provider_name] = None
+                return None
+
+            node_store = self._graph_data[provider_name]
+            slices_value = node_store.get("_slices", None)
+            if slices_value is None:
+                slices_value = getattr(node_store, "_slices", None)
+            if slices_value is None:
+                provider_slices_cache[provider_name] = None
+                return None
+
+            if isinstance(slices_value, str):
+                parsed = ast.literal_eval(slices_value)
+            else:
+                parsed = slices_value
+
+            provider_slices_cache[provider_name] = {
+                str(key): (int(value[0]), int(value[1])) for key, value in dict(parsed).items()
+            }
+            return provider_slices_cache[provider_name]
+
+        y_pred: dict[str, torch.Tensor] = {}
+        for provider_name, provider_targets in decode_groups.items():
+            exemplar_dataset = provider_targets[0]
+            exemplar_output_dim = int(self.output_dim[exemplar_dataset])
+            for dataset_name in provider_targets[1:]:
+                if int(self.output_dim[dataset_name]) != exemplar_output_dim:
+                    raise ValueError(
+                        "Datasets mapped to the same decoder provider must have equal output dimensions: "
+                        f"{exemplar_dataset}={self.output_dim[exemplar_dataset]}, "
+                        f"{dataset_name}={self.output_dim[dataset_name]}"
+                    )
+
+            dec_edge_attr, dec_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[provider_name].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
+
+            x_out_provider = self.decoder[provider_name](
+                (x_latent_proc, provider_x_dst_base[provider_name]),
+                batch_size=batch_size,
+                shard_shapes=(shard_shapes_hidden, provider_shard_shapes[provider_name]),
+                edge_attr=dec_edge_attr,
+                edge_index=dec_edge_index,
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=True,
+                x_dst_is_sharded=provider_dst_sharded[provider_name],
+                keep_x_dst_sharded=provider_dst_sharded[provider_name],
+                edge_shard_shapes=dec_edge_shard_shapes,
+            )
+
+            provider_concat = (
+                einops.rearrange(
+                    x_out_provider,
+                    "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
+                    batch=batch_size,
+                    ensemble=ensemble_size,
+                    time=self.n_step_output,
+                )
+                .to(x[exemplar_dataset].dtype)
+                .clone()
+            )
+
+            provider_slices = _get_provider_slices(provider_name)
+
+            for dataset_name in provider_targets:
+                if provider_name == dataset_name:
+                    concat = provider_concat.clone()
+                else:
+                    if provider_slices is None or dataset_name not in provider_slices:
+                        raise KeyError(
+                            f"Provider '{provider_name}' has no slice for dataset '{dataset_name}'. "
+                            "For union decoding, provider nodes must expose '_slices' with dataset ranges."
+                        )
+
+                    start, end = provider_slices[dataset_name]
+                    concat = provider_concat[..., start:end, :].clone()
+                    if concat.shape[3] != x_skip_dict[dataset_name].shape[3]:
+                        remap_idx = self._get_provider_decode_index(
+                            provider_name=provider_name,
+                            dataset_name=dataset_name,
+                            start=start,
+                            end=end,
+                            device=concat.device,
+                        )
+                        if remap_idx is not None:
+                            concat = torch.index_select(concat, 3, remap_idx)
+
+                if concat.shape[3] != x_skip_dict[dataset_name].shape[3]:
+                    raise ValueError(
+                        f"Decoded grid size for '{dataset_name}' ({concat.shape[3]}) does not match "
+                        f"residual input grid size ({x_skip_dict[dataset_name].shape[3]}). "
+                        f"Provider='{provider_name}'."
+                    )
+
+                concat[..., self._internal_output_idx[dataset_name]] += x_skip_dict[dataset_name][
+                    ..., self._internal_input_idx[dataset_name]
+                ]
+
+                for bounding in self.boundings[dataset_name]:
+                    concat = bounding(concat)
+
+                y_pred[dataset_name] = concat
+
+        return y_pred
+
+
+class AnemoiEnsModelEncProcDecUnionDecoderForecaster(AnemoiModelEncProcDecUnionDecoderForecaster):
+    """Sparse union forecaster with ensemble noise injected into one dataset path."""
+
+    def __init__(
+        self,
+        *,
+        model_config: DotDict,
+        data_indices: dict,
+        statistics: dict,
+        graph_data: HeteroData,
+    ) -> None:
+        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            graph_data=graph_data,
+        )
+
+    def _build_networks(self, model_config: DotDict) -> None:
+        super()._build_networks(model_config)
+        model_cfg = DotDict(model_config).model
+        self.noise_dataset = str(model_cfg.get("noise_dataset", "nordic_radar"))
+        self.noise_injector = instantiate(
+            model_cfg.noise_injector,
+            _recursive_=False,
+            num_channels=self.num_channels,
+        )
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        input_dim = super()._calculate_input_dim(dataset_name)
+        input_dim += 1
+        if self.condition_on_residual:
+            input_dim += self.num_input_channels_prognostic[dataset_name]
+        return input_dim
+
+    def _assemble_input(
+        self,
+        x: torch.Tensor,
+        *,
+        fcstep: int,
+        batch_size: int,
+        grid_shard_shapes: dict | None,
+        model_comm_group=None,
+        dataset_name: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+            n_step_output=self.n_step_output,
+        )
+
+        if grid_shard_shapes is not None:
+            shard_shapes_nodes = get_or_apply_shard_shapes(
+                node_attributes_data,
+                0,
+                shard_shapes_dim=grid_shard_shapes,
+                model_comm_group=model_comm_group,
+            )
+            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+
+        x_data_latent = torch.cat(
+            (
+                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                node_attributes_data,
+                torch.ones(batch_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
+            ),
+            dim=-1,
+        )
+
+        if self.condition_on_residual:
+            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
+            prognostic_idx = self._internal_input_idx.get(dataset_name, None)
+            if prognostic_idx is not None and len(prognostic_idx) > 0:
+                x_skip_cond = x_skip_cond[..., prognostic_idx]
+                x_data_latent = torch.cat(
+                    (
+                        x_data_latent,
+                        einops.rearrange(x_skip_cond, "batch ensemble grid vars -> (batch ensemble grid) vars"),
+                    ),
+                    dim=-1,
+                )
+
+        shard_shapes_data = get_or_apply_shard_shapes(
+            x_data_latent,
+            0,
+            shard_shapes_dim=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+        )
+
+        return x_data_latent, x_skip, shard_shapes_data
+
+    def forward(
+        self,
+        x: dict[str, Tensor],
+        *,
+        fcstep: int = 0,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: dict[str, list] | None = None,
+        **kwargs,
+    ) -> dict[str, Tensor]:
+        """Forward pass with dataset-local noise before hidden processing."""
+        del kwargs
+        dataset_names = list(x.keys())
+
+        if grid_shard_shapes is None:
+            grid_shard_shapes = {dataset_name: None for dataset_name in dataset_names}
+
+        batch_size = self._get_consistent_dim(x, 0)
+        ensemble_size = self._get_consistent_dim(x, 2)
+
+        in_out_sharded = {}
+        for dataset_name, shard_shapes in grid_shard_shapes.items():
+            in_out_sharded[dataset_name] = shard_shapes is not None
+            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+
+        fcstep = min(1, int(fcstep))
+        dataset_latents = {}
+        x_skip_dict = {}
+        x_data_latent_dict = {}
+        shard_shapes_data_dict = {}
+        shard_shapes_hidden_dict = {}
+
+        for dataset_name in dataset_names:
+            x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+            shard_shapes_hidden_dict[dataset_name] = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
+
+            x_in = x[dataset_name]
+            if x_in.is_floating_point() and x_hidden_latent.is_floating_point() and x_in.dtype != x_hidden_latent.dtype:
+                x_in = x_in.to(dtype=x_hidden_latent.dtype)
+            x_aug = self._append_qc_features(x_in, dataset_name=dataset_name)
+
+            x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
+                x_aug,
+                fcstep=fcstep,
+                batch_size=batch_size,
+                grid_shard_shapes=grid_shard_shapes,
+                model_comm_group=model_comm_group,
+                dataset_name=dataset_name,
+            )
+            x_skip_dict[dataset_name] = x_skip
+            shard_shapes_data_dict[dataset_name] = shard_shapes_data
+
+            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
+                dataset_name
+            ].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
+
+            x_data_latent, x_latent = self.encoder[dataset_name](
+                (x_data_latent, x_hidden_latent),
+                batch_size=batch_size,
+                shard_shapes=(shard_shapes_data, shard_shapes_hidden_dict[dataset_name]),
+                edge_attr=encoder_edge_attr,
+                edge_index=encoder_edge_index,
+                model_comm_group=model_comm_group,
+                x_src_is_sharded=in_out_sharded[dataset_name],
+                x_dst_is_sharded=False,
+                keep_x_dst_sharded=True,
+                edge_shard_shapes=enc_edge_shard_shapes,
+            )
+            x_data_latent_dict[dataset_name] = x_data_latent
+            dataset_latents[dataset_name] = x_latent
+
+        if self.noise_dataset not in dataset_latents:
+            raise KeyError(
+                f"Noise dataset '{self.noise_dataset}' is not present in this batch. "
+                f"Available datasets: {dataset_names}"
+            )
+
+        shard_shapes_hidden = shard_shapes_hidden_dict[dataset_names[0]]
+        assert all(
+            shard_shape == shard_shapes_hidden for shard_shape in shard_shapes_hidden_dict.values()
+        ), "All datasets must have the same shard shapes for the hidden graph."
+
+        noisy_latent, latent_noise = self.noise_injector(
+            x=dataset_latents[self.noise_dataset],
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            shard_shapes_ref=shard_shapes_hidden,
+            noise_dtype=dataset_latents[self.noise_dataset].dtype,
+            model_comm_group=model_comm_group,
+        )
+        dataset_latents[self.noise_dataset] = noisy_latent
+        x_latent = sum(dataset_latents.values())
+
+        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+        processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
+
+        x_latent_proc = self.processor(
+            x=x_latent,
+            batch_size=batch_size,
+            shard_shapes=shard_shapes_hidden,
+            edge_attr=processor_edge_attr,
+            edge_index=processor_edge_index,
+            model_comm_group=model_comm_group,
+            edge_shard_shapes=proc_edge_shard_shapes,
+            **processor_kwargs,
         )
         x_latent_proc = x_latent_proc + x_latent
 

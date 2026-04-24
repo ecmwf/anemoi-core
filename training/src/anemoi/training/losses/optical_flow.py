@@ -269,6 +269,7 @@ class OpticalFlowConsistencyLoss(BaseLoss):
     ) -> torch.Tensor:
         if input_context is None:
             raise ValueError("OpticalFlowConsistencyLoss requires input_context to estimate flow")
+        target = self.align_target_to_pred(pred, target)
 
         is_sharded = grid_shard_slice is not None
         with torch.no_grad():
@@ -568,6 +569,7 @@ class SoftWetMaskAdvectiveConsistencyLoss(OpticalFlowConsistencyLoss):
     ) -> torch.Tensor:
         if input_context is None:
             raise ValueError("SoftWetMaskAdvectiveConsistencyLoss requires input_context")
+        target = self.align_target_to_pred(pred, target)
         if pred.shape[-1] != 1 or target.shape[-1] != 1:
             raise ValueError("SoftWetMaskAdvectiveConsistencyLoss expects a single output variable")
 

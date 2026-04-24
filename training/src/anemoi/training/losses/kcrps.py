@@ -112,6 +112,7 @@ class AlmostFairKernelCRPS(BaseLoss):
     def __init__(
         self,
         alpha: float = 1.0,
+        alpha_scaler_name: str | None = None,
         no_autocast: bool = True,
         ignore_nans: bool = False,
         **kwargs,  # noqa: ARG002
@@ -123,6 +124,9 @@ class AlmostFairKernelCRPS(BaseLoss):
         alpha : float
             Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
             and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
+        alpha_scaler_name : str | None
+            Optional scaler name to turn into a per-point alpha map. When provided,
+            the scaler values are used directly as the local alpha values.
         no_autocast : bool, optional
             Deactivate autocast for the kernel CRPS calculation
         ignore_nans : bool, optional
@@ -131,9 +135,10 @@ class AlmostFairKernelCRPS(BaseLoss):
         super().__init__(ignore_nans=ignore_nans)
 
         self.alpha = alpha
+        self.alpha_scaler_name = alpha_scaler_name
         self.no_autocast = no_autocast
 
-    def _kernel_crps(self, preds: torch.Tensor, targets: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
+    def _kernel_crps(self, preds: torch.Tensor, targets: torch.Tensor, alpha: float | torch.Tensor = 1.0) -> torch.Tensor:
         """Kernel (ensemble) CRPS.
 
         Parameters
@@ -142,7 +147,7 @@ class AlmostFairKernelCRPS(BaseLoss):
             Predicted ensemble, shape (batch_size, n_out_steps, n_vars, latlon, ens_size)
         targets : torch.Tensor
             Ground truth, shape (batch_size, n_out_steps, n_vars, latlon)
-        alpha : float
+        alpha : float | torch.Tensor
             Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
             and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
 
@@ -153,7 +158,10 @@ class AlmostFairKernelCRPS(BaseLoss):
         """
         ens_size = preds.shape[-1]
 
+        alpha = torch.as_tensor(alpha, dtype=preds.dtype, device=preds.device)
         epsilon = (1.0 - alpha) / ens_size
+        if epsilon.ndim > 0:
+            epsilon = epsilon[..., None, None]
 
         var = torch.abs(preds.unsqueeze(dim=-1) - preds.unsqueeze(dim=-2))
         diag = torch.eye(ens_size, dtype=torch.bool, device=preds.device)
@@ -194,11 +202,31 @@ class AlmostFairKernelCRPS(BaseLoss):
             # Expand mask for ensemble dimension: (bs, v, latlon) -> (bs, v, latlon, e)
             y_pred = y_pred.masked_fill(nan_mask.unsqueeze(-1), 0.0)
 
+        alpha = self.alpha
+        if self.alpha_scaler_name is not None:
+            keep_scaler = self.alpha_scaler_name
+            if keep_scaler not in self.scaler.tensors:
+                msg = f"Scaler {keep_scaler!r} not found for {self.__class__.__name__}"
+                raise ValueError(msg)
+
+            alpha_map = torch.ones(
+                (y_pred.shape[0], y_pred.shape[1], 1, y_pred.shape[3], y_pred.shape[2]),
+                dtype=y_pred.dtype,
+                device=y_pred.device,
+            )
+            alpha_map = self.scale(
+                alpha_map,
+                scaler_indices,
+                without_scalers=[name for name in self.scaler.tensors if name != keep_scaler],
+                grid_shard_slice=grid_shard_slice,
+            )
+            alpha = einops.rearrange(alpha_map, "bs t 1 latlon v -> bs t v latlon")
+
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
-                kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
+                kcrps_ = self._kernel_crps(y_pred, y_target, alpha=alpha)
         else:
-            kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
+            kcrps_ = self._kernel_crps(y_pred, y_target, alpha=alpha)
 
         kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
         kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)

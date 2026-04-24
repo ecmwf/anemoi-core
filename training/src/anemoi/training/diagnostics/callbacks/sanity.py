@@ -31,6 +31,12 @@ class CheckVariableOrder(pl.callbacks.Callback):
     def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
         """Compare variables between model and data indices."""
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
+            if dataset_name not in model_name_to_index:
+                LOGGER.info(
+                    "Checkpoint has no variable indices for dataset '%s'; skipping sanity variable order check.",
+                    dataset_name,
+                )
+                continue
             data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
