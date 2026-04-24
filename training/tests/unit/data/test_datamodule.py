@@ -10,6 +10,7 @@
 from omegaconf import OmegaConf
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import SparseForecaster
 
 
@@ -58,3 +59,46 @@ def test_datamodule_relative_date_indices_follow_task_config_for_sparse_forecast
     datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
 
     assert datamodule.relative_date_indices() == [0, 1, 2, 3]
+
+
+def test_datamodule_timestep_falls_back_to_task_when_data_timestep_is_missing() -> None:
+    cfg = OmegaConf.create(
+        {
+            "data": {
+                "frequency": "6h",
+                "datasets": {
+                    "data": {"forcing": [], "diagnostic": [], "target": []},
+                },
+            },
+            "task": {
+                "_target_": "anemoi.training.tasks.Forecaster",
+                "multistep_input": 2,
+                "multistep_output": 1,
+                "timestep": "6h",
+                "rollout": {"start": 1, "epoch_increment": 0, "maximum": 1},
+                "validation_rollout": 1,
+            },
+            "dataloader": {
+                "pin_memory": False,
+                "training": {
+                    "datasets": {
+                        "data": {"dataset_config": {"dataset": "source", "frequency": "6h"}, "end": "2020-01-02"},
+                    },
+                },
+                "validation": {"datasets": {}},
+                "test": {"datasets": {}},
+            },
+            "training": {},
+        },
+    )
+
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
+    )
+    datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
+
+    assert datamodule.config_timestep == "6h"
+    assert datamodule._lead_time_for_step(1) == "6h"

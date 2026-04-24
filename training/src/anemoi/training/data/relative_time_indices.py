@@ -109,6 +109,41 @@ def normalize_explicit_time_indices_config(
     return normalized
 
 
+def _config_get(container: object | None, key: str) -> object | None:
+    """Safely read a key from OmegaConf, dict-like, or attribute-based config objects."""
+    if container is None:
+        return None
+
+    getter = getattr(container, "get", None)
+    if callable(getter):
+        return getter(key, None)
+
+    return getattr(container, key, None)
+
+
+def resolve_config_timestep(config: BaseSchema) -> str:
+    """Resolve the effective timestep used by dataloading and sparse time-index parsing.
+
+    Prefer the explicit data-layer timestep when present, but fall back to older
+    config layouts that only define the task timestep or dataset frequency.
+    """
+    data_cfg = _config_get(config, "data")
+    task_cfg = _config_get(config, "task")
+    training_cfg = _config_get(config, "training")
+
+    for candidate in (
+        _config_get(data_cfg, "timestep"),
+        _config_get(task_cfg, "timestep"),
+        _config_get(training_cfg, "timestep"),
+        _config_get(data_cfg, "frequency"),
+    ):
+        if candidate is not None:
+            return str(candidate)
+
+    msg = "Could not determine timestep from config. Expected `data.timestep`, `task.timestep`, or `data.frequency`."
+    raise ValueError(msg)
+
+
 def _get_dataset_time_indices_config(config: BaseSchema) -> object | None:
     """Get sparse time-index config from the task or legacy training section."""
     cfg = getattr(getattr(config, "task", None), "dataset_time_indices", None)
@@ -214,14 +249,15 @@ def parse_dataset_time_indices_config(config: BaseSchema) -> dict[str, dict[str,
     if cfg is None:
         return None
 
-    timestep_seconds = frequency_to_seconds(config.data.timestep)
+    config_timestep = resolve_config_timestep(config)
+    timestep_seconds = frequency_to_seconds(config_timestep)
     parsed: dict[str, dict[str, list[int]]] = {}
     for dataset_name, dataset_cfg in cfg.items():
         parsed[str(dataset_name)] = _parse_dataset_time_indices(
             str(dataset_name),
             dataset_cfg,
             timestep_seconds=timestep_seconds,
-            timestep=config.data.timestep,
+            timestep=config_timestep,
         )
 
     normalized = normalize_explicit_time_indices_config(parsed)

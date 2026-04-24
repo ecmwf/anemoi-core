@@ -24,6 +24,7 @@ from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_model_relative_date_indices
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.data.relative_time_indices import parse_dataset_time_indices_config
+from anemoi.training.data.relative_time_indices import resolve_config_timestep
 from anemoi.training.data.relative_time_indices import resolve_relative_date_indices
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
@@ -114,8 +115,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
+    @cached_property
+    def config_timestep(self) -> str:
+        """Return the effective timestep for dataloading and metadata."""
+        return resolve_config_timestep(self.config)
+
     def _lead_time_for_step(self, step: int) -> str:
-        timestep = frequency_to_timedelta(self.config.data.timestep)
+        timestep = frequency_to_timedelta(self.config_timestep)
         return frequency_to_string(timestep * step)
 
     def relative_date_indices(self, mode: str = "training") -> list:
@@ -157,7 +163,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
-            timestep=self.config.data.timestep,
+            timestep=self.config_timestep,
             multistep_window=getattr(self.config.training, "multistep_window", None),
             explicit_time_indices_by_dataset=dataset_time_indices,
             time_index_mode=time_index_mode,
@@ -235,7 +241,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         timesteps = {
             **_dataset_timing_metadata(self.ds_train, "training"),
-            "timestep": self.config.data.timestep,
+            "timestep": self.config_timestep,
         }
         if len(self.valid_dataloader_config) > 0:
             timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
