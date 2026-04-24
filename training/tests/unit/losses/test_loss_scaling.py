@@ -605,7 +605,7 @@ def test_uniform_scaler_reshape(n_spectral_modes: int) -> None:
 
 @pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
 @pytest.mark.parametrize(
-    "scaler_cls,kwargs",
+    ("scaler_cls", "kwargs"),
     [
         (SpectralDimensionScaler, {}),
         (LinearSpectralDimensionScaler, {"slope": 0.01, "y_intercept": 0.1}),
@@ -613,7 +613,7 @@ def test_uniform_scaler_reshape(n_spectral_modes: int) -> None:
     ],
     ids=["uniform", "linear", "linear_max"],
 )
-def test_scaler_reshape_constant_within_wavenumber(scaler_cls, kwargs, n_spectral_modes: int) -> None:
+def test_scaler_reshape_constant_within_wavenumber(scaler_cls: type, kwargs: dict, n_spectral_modes: int) -> None:
     """All spectral scalers: all orders within a wavenumber row get the same weight."""
     scaler = scaler_cls(n_spectral_modes=n_spectral_modes, **kwargs)
     flat = scaler.get_scaling_values()
@@ -624,7 +624,8 @@ def test_scaler_reshape_constant_within_wavenumber(scaler_cls, kwargs, n_spectra
     for wn in range(n_spectral_modes):
         row = matrix[wn]
         assert torch.allclose(
-            row, row[0].expand_as(row),
+            row,
+            row[0].expand_as(row),
         ), f"{scaler_cls.__name__}: Row {wn} is not constant across orders: {row}"
 
 
