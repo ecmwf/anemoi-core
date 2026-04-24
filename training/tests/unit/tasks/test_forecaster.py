@@ -436,8 +436,15 @@ def test_flexible_forecaster_step_shift_raises_when_gap_not_covered() -> None:
 
 def test_flexible_forecaster_no_valid_shift_raises() -> None:
     """When no valid shift exists, construction raises ValueError."""
-    # I=[0H, 6H], O=[4H]: only candidate S=4H; I_shifted = [4H, 10H], invalid , so no valid shift
+    # I=[0H, 3H], O=[9H]: candidate S=6H fails because 0H+6H=6H not in {0H,3H,9H}
     with pytest.raises(ValueError, match="No valid autoregressive rollout step_shift"):
+        FlexibleForecaster(input_offsets=["0H", "3H"], output_offsets=["9H"])
+
+
+def test_flexible_forecaster_output_not_after_input_raises() -> None:
+    """Construction raises ValueError when not all output offsets are strictly greater than all input offsets."""
+    # I=[0H, 6H], O=[4H]: max(input)=6H >= min(output)=4H
+    with pytest.raises(ValueError, match="All output offsets must be strictly greater than all input offsets"):
         FlexibleForecaster(input_offsets=["0H", "6H"], output_offsets=["4H"])
 
 
