@@ -256,17 +256,18 @@ def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixtu
         keep_batch_sharded=True,
     )
     group = FakeGroup(size=2)
-    shard_shapes = [(1, 2, 1), (1, 2, 1)]
+    grid_shard_sizes = [1, 1]
+    channel_shard_sizes = [1]
     pred = torch.zeros((1, 1, 1, 2, 1))
     target = torch.zeros((1, 1, 2, 1))
 
     prepare = mocker.patch.object(
         multiscale_loss,
         "_prepare_for_smoothing",
-        return_value=(pred, target, shard_shapes, shard_shapes),
+        return_value=(pred, target, channel_shard_sizes),
     )
-    gather = mocker.patch(
-        "anemoi.training.losses.multiscale.gather_channels",
+    a2a = mocker.patch(
+        "anemoi.training.losses.multiscale.all_to_all_transpose",
         side_effect=lambda x, *_args: x,
     )
 
@@ -274,12 +275,12 @@ def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixtu
         pred,
         target,
         group=group,
-        grid_dim=-2,
-        grid_shard_shapes=shard_shapes,
+        grid_shard_sizes=grid_shard_sizes,
     )
 
-    prepare.assert_called_once_with(pred, target, group, -2, shard_shapes)
-    assert gather.call_count == 2
+    prepare.assert_called_once_with(pred, target, group, grid_shard_sizes)
+    # Two all_to_all_transpose calls: one for y_pred_ens_tmp, one for y_tmp
+    assert a2a.call_count == 2
 
 
 def test_multiscale_loss_forwards_extra_kwargs() -> None:

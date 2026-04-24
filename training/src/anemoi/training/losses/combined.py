@@ -180,7 +180,7 @@ class CombinedLoss(BaseLoss):
 
         filtered_kwargs = dict(kwargs)
         filtered_kwargs.pop("grid_dim", None)
-        filtered_kwargs.pop("grid_shard_shapes", None)
+        filtered_kwargs.pop("grid_shard_sizes", None)
         return filtered_kwargs
 
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
