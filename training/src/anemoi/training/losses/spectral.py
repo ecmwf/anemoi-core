@@ -41,7 +41,38 @@ from anemoi.training.utils.enums import TensorDim
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.training.losses.scaler_tensor import ScaleTensor
+
 LOGGER = logging.getLogger(__name__)
+
+
+def _assert_spectral_scalers_compatible(scaler_tensor: ScaleTensor, n_spectral: int) -> None:
+    """Assert that all grid-dimension scalers are spectral-compatible.
+
+    In spectral losses the grid dimension holds spectral modes, not grid
+    points.  Any scaler registered on ``TensorDim.GRID`` must therefore
+    originate from a :class:`SpectralDimensionScaler` (i.e. be sized to the
+    flattened spectral dimension) rather than from a spatial scaler (e.g. area
+    weights sized to the number of grid points).
+
+    Parameters
+    ----------
+    scaler_tensor : ScaleTensor
+        The ``ScaleTensor`` attached to the loss.
+    n_spectral : int
+        Size of the flattened spectral dimension in the loss tensor.
+    """
+    for name, (dims, tensor) in scaler_tensor.tensors.items():
+        if TensorDim.GRID not in dims:
+            continue
+        grid_idx = list(dims).index(TensorDim.GRID)
+        scaler_grid_size = tensor.shape[grid_idx]
+        assert scaler_grid_size == n_spectral or scaler_grid_size == 1, (
+            f"Scaler '{name}' is registered on the grid dimension with size "
+            f"{scaler_grid_size}, but the spectral loss has a flattened spectral "
+            f"dimension of size {n_spectral}. Grid-dimension scalers in "
+            f"spectral losses must be SpectralDimensionScalers with matching size."
+        )
 
 
 def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
@@ -166,10 +197,11 @@ class SpectralL2Loss(SpectralLoss):
             target_spectral = self._to_spectral_flat(target)
             diff = torch.abs(pred_spectral - target_spectral) ** 2
 
+        _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
         result = self.scale(
             diff,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group)
