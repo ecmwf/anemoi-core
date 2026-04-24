@@ -162,7 +162,7 @@ class BaseDiffusionTraining(BaseTrainingModule):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
             )
 
         return loss(y_pred, y, **loss_kwargs)
