@@ -610,3 +610,34 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
     cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
     cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
     return cfg, url
+
+
+@pytest.fixture
+def temporal_downscaler_ensemble_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, str]:
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_temporal_downscaler_ensemble",
+    ):
+        template = compose(config_name="temporal_downscaler_ensemble")
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_temporal_downscaler_ensemble.yaml",
+    )
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+    assert isinstance(cfg, DictConfig)
+
+    return cfg, url_dataset

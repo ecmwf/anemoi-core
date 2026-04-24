@@ -128,7 +128,7 @@ class TestNamedNodesAttributes:
             assert output[:, 2 * TestNamedNodesAttributes.ndim :].requires_grad
 
     def test_forward_no_trainable(self, graph_data):
-        no_trainable_attributes = NamedNodesAttributes({nodes_name: 0 for nodes_name in self.nodes_names}, graph_data)
+        no_trainable_attributes = NamedNodesAttributes({}, graph_data)
         batch_size = 2
 
         for nodes_name in self.nodes_names:
