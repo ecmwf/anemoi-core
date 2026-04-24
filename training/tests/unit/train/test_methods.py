@@ -86,14 +86,14 @@ class DummyModel:
         x: torch.Tensor,
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
-        grid_shard_shapes: Any | None = None,
+        grid_shard_sizes: Any | None = None,
     ) -> torch.Tensor:
         x_input = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
         self.called_with = {
             "x_shape": tuple(x_input.shape),
             "model_comm_group": model_comm_group,
             "grid_shard_slice": grid_shard_slice,
-            "grid_shard_shapes": grid_shard_shapes,
+            "grid_shard_sizes": grid_shard_sizes,
         }
         bs, _, e, g, v = x.shape
         output_vars = self.num_output_variables or v
@@ -105,7 +105,7 @@ class DummyModel:
         x: torch.Tensor | dict[str, torch.Tensor],
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
-        grid_shard_shapes: Any | None = None,
+        grid_shard_sizes: Any | None = None,
         **kwargs: Any,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
         del kwargs
@@ -115,7 +115,7 @@ class DummyModel:
                     t,
                     model_comm_group=model_comm_group,
                     grid_shard_slice=grid_shard_slice,
-                    grid_shard_shapes=grid_shard_shapes,
+                    grid_shard_sizes=grid_shard_sizes,
                 )
                 for name, t in x.items()
             }
@@ -123,7 +123,7 @@ class DummyModel:
             x,
             model_comm_group=model_comm_group,
             grid_shard_slice=grid_shard_slice,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
 
@@ -217,7 +217,7 @@ def _wire_training_module(
     obj.grid_dim = -2
     obj.model_comm_group = None
     obj.model_comm_group_size = 1
-    obj.grid_shard_shapes = {"data": None}
+    obj.grid_shard_sizes = {"data": None}
     obj.grid_shard_slice = {"data": None}
     obj.output_mask = {name: NoOutputMask() for name in data_indices}
     if task is not None:
@@ -243,7 +243,7 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_shapes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -268,7 +268,7 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
 
 
 def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
-    """_compute_loss adds grid_dim and grid_shard_shapes when loss.needs_shard_layout_info."""
+    """_compute_loss adds grid_dim and grid_shard_sizes when loss.needs_shard_layout_info."""
     module = MagicMock(spec=BaseTrainingModule)
     loss = ShardingAwareCaptureLoss()
     group = object()
@@ -278,7 +278,7 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_shapes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -297,7 +297,7 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
         "grid_shard_slice": grid_shard_slice,
         "group": group,
         "grid_dim": -2,
-        "grid_shard_shapes": shard_shapes,
+        "grid_shard_sizes": shard_shapes,
     }
 
 
@@ -307,7 +307,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     """_compute_loss correctly routes shard layout to a CombinedLoss wrapping MultiscaleLossWrapper."""
     module = MagicMock(spec=BaseTrainingModule)
     group = FakeGroup(size=2)
-    grid_shard_shapes = [1, 1]
+    grid_shard_sizes = [1, 1]
     pred = torch.randn(1, 1, 1, 2, 1)
     target = torch.randn(1, 1, 2, 1)
     grid_shard_slice = slice(0, 1)
@@ -317,9 +317,9 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
         weights=[1.0],
         keep_batch_sharded=True,
     )
-    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_shapes, grid_shard_shapes))
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_sizes))
     monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
-    monkeypatch.setattr("anemoi.training.losses.multiscale.gather_channels", lambda x, *_args: x)
+    monkeypatch.setattr("anemoi.training.losses.multiscale.all_to_all_transpose", lambda x, *_args, **_kw: x)
     monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)
 
     combined_loss = CombinedLoss(multiscale_loss)
@@ -328,7 +328,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": grid_shard_shapes}
+    module.grid_shard_sizes = {"data": grid_shard_sizes}
 
     result = BaseTrainingModule._compute_loss(
         module,
@@ -339,7 +339,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     )
 
     assert result.shape == (1,)
-    prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
+    prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
 
 
 # ── BaseDiffusionTraining: _compute_loss ─────────────────────────────────────
@@ -357,7 +357,7 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_shapes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -392,7 +392,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_shapes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -412,7 +412,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
         "grid_shard_slice": grid_shard_slice,
         "group": group,
         "grid_dim": -2,
-        "grid_shard_shapes": shard_shapes,
+        "grid_shard_sizes": shard_shapes,
     }
 
 
@@ -434,7 +434,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_shapes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -475,7 +475,7 @@ def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() ->
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_shapes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_shapes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -496,7 +496,7 @@ def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() ->
         "grid_shard_slice": grid_shard_slice,
         "group": group,
         "grid_dim": -2,
-        "grid_shard_shapes": shard_shapes,
+        "grid_shard_sizes": shard_shapes,
     }
 
 
@@ -1360,7 +1360,7 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     forecaster.ens_comm_subgroup = None
     forecaster.grid_shard_slice = {"data": None}
     forecaster.grid_dim = -2
-    forecaster.grid_shard_shapes = {"data": None}
+    forecaster.grid_shard_sizes = {"data": None}
 
     monkeypatch.setattr(
         "anemoi.training.train.methods.ensemble.gather_tensor",
