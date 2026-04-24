@@ -28,10 +28,10 @@ class BaseTask(ABC):
     input and output time offsets as ``timedelta`` objects. The base class
     provides:
 
-    * An ``_offsets`` property that is the union of input and output offsets,
+    * An ``offsets.all`` property that is the union of input and output offsets,
       used by the datamodule to determine which time steps to load.
     * ``get_inputs`` / ``get_targets`` to split a loaded batch into model
-      inputs and targets based on position within ``_offsets``.
+      inputs and targets based on position within ``offsets.all``.
 
     Attributes
     ----------

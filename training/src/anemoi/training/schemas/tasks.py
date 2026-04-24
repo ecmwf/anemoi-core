@@ -47,7 +47,7 @@ class ForecasterSchema(BaseModel):
 
 
 class FlexibleForecasterSchema(BaseModel):
-    """Configuration for flexible forecasting tasks with explicit offsets."""
+    """Configuration for flexible forecasting tasks with configurable offsets and step shift."""
 
     target_: Literal["anemoi.training.tasks.FlexibleForecaster"] = Field(..., alias="_target_")
     "Task class path for the flexible forecasting task."
@@ -56,7 +56,7 @@ class FlexibleForecasterSchema(BaseModel):
     output_offsets: list[str] = Field(example=["6H"])
     "Duration strings for the output time steps (e.g. ['6H'])."
     step_shift: str | None = Field(default=None, example="6H")
-    "Duration string for the rollout step shift. Defaults to max(output_offsets) if omitted."
+    "Duration string for the autoregressive rollout step shift. Defaults to the maximal valid shift if omitted."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
     validation_rollout: NonNegativeInt = Field(example=1)

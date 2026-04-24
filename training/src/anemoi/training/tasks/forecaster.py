@@ -55,8 +55,7 @@ class BaseForecaster(BaseTask):
     Parameters
     ----------
     offsets : ForecastOffsets
-        Input and output time offsets for this task, including the
-        validated :attr:`~ForecastOffsets.step_shift`.
+        Input and output time offsets for this task, as well as the step shift for rollout advancement.
     rollout : dict | None, optional
         Keyword arguments forwarded to :class:`RolloutConfig`.
     validation_rollout : int, optional
@@ -74,9 +73,6 @@ class BaseForecaster(BaseTask):
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
         self._plot_adapter = ForecasterPlotAdapter(self)
-
-        # Pre-computed slot mappings used by _advance_dataset_input;
-        # see ForecastOffsets.slot_mapping() for the algorithm.
         self._advance_preserve, self._advance_predict = offsets.slot_mapping()
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
@@ -133,9 +129,7 @@ class BaseForecaster(BaseTask):
         Slots whose shifted offset lands in ``output_offsets`` are filled from
         ``y_pred`` (model predictions).  Slots whose shifted offset lands in
         ``input_offsets`` are preserved unchanged from the current input tensor
-        (no model prediction required).  The mapping is pre-computed at
-        construction time in :attr:`_advance_preserve` and
-        :attr:`_advance_predict`.
+        (no model prediction required).  These slot mappings are pre-computed at initialization.
         """
         new_x = x.clone()
 
@@ -219,11 +213,10 @@ class BaseForecaster(BaseTask):
 
 
 class Forecaster(BaseForecaster):
-    """Forecasting task implementation.
+    """Basic Forecasting task implementation.
 
     Derives input and output offsets from ``multistep_input``,
-    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``), then
-    delegates all rollout machinery to :class:`BaseForecaster`.
+    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
     """
 
     name: str = "forecaster"
@@ -266,29 +259,19 @@ class Forecaster(BaseForecaster):
 
 
 class FlexibleForecaster(BaseForecaster):
-    """Forecasting task with fully explicit input/output offsets.
-
-    A counterpart to :class:`Forecaster` that accepts explicit duration
-    strings for input and output offsets instead of deriving them from
-    ``multistep_input`` / ``multistep_output`` / ``timestep``. All rollout
-    machinery is inherited from :class:`BaseForecaster`.
+    """Advanced Forecasting task with fully configurable input/output offsets and step shift.
 
     Parameters
     ----------
     input_offsets : list[str]
         Duration strings for the input time steps, e.g. ``["-6H", "0H"]``.
-        A leading ``-`` denotes a lookback offset.
+        A leading ``-`` denotes a negative offset.
     output_offsets : list[str]
         Duration strings for the output time steps, e.g. ``["6H"]``.
     step_shift : str | None, optional
-        Duration string for the rollout step shift — how far forward each
-        autoregressive step advances the analysis window. Must satisfy
-        ``input_offsets + S ⊆ input_offsets ∪ output_offsets``: every
-        shifted input either lands on an existing model output (filled from
-        ``y_pred``) or on another input offset that is carried over
-        unchanged. If ``None`` (default), the *largest* valid shift is
-        inferred automatically. Raises :exc:`ValueError` if no valid shift
-        exists or if an explicit shift does not satisfy the condition.
+        Duration string for the autoregressive rollout step shift.
+        This shifts the origin with respect to which offsets are defined.
+        None defaults to the maximal valid shift.
     rollout : dict | None, optional
         Rollout configuration forwarded to :class:`RolloutConfig`.
     validation_rollout : int, optional

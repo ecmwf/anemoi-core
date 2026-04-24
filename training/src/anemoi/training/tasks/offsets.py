@@ -58,17 +58,14 @@ class BaseTaskOffsets:
 class ForecastOffsets(BaseTaskOffsets):
     """Task offsets for autoregressive forecasting tasks.
 
-    Extends :class:`BaseTaskOffsets` with a validated :attr:`step_shift`
-    attribute: the step-shift ``S > 0`` satisfying
-    ``input + S ⊆ input ∪ output``.
+    Includes step_shift, and its validation, for rollout advancement.
 
     Parameters
     ----------
     input_offsets, output_offsets :
         Forwarded to :class:`BaseTaskOffsets`.
     step_shift :
-        Explicit shift to validate, or ``None`` to infer the largest
-        valid shift automatically.
+        Shift performed per rollout step.
     """
 
     def __init__(
@@ -85,14 +82,14 @@ class ForecastOffsets(BaseTaskOffsets):
     def _validate_shift(self, step_shift: datetime.timedelta | None) -> datetime.timedelta:
         """Return a validated step-shift timedelta.
 
-        A shift ``S`` is valid when ``input + S ⊆ input ∪ output``: every
-        shifted input step either lands on a model output (filled from
-        ``y_pred``) or back on another input step (preserved unchanged).
+        A shift S is valid if it is strictly positive and
+        when the shifted input is included in the union of input and output.
+        None gets replaced by the maximum valid shift, if it exists.
 
         Parameters
         ----------
         step_shift :
-            Explicit shift to validate, or ``None`` to infer the largest
+            Explicit rollout step shift to validate, or ``None`` to infer the largest
             valid shift automatically.
 
         Raises
@@ -106,9 +103,9 @@ class ForecastOffsets(BaseTaskOffsets):
         if step_shift is None:
             if not valid:
                 msg = (
-                    "No valid autoregressive step_shift exists: need S > 0 such that "
-                    f"input + S \u2286 input \u222a output. "
-                    f"input={self.input}, output={self.output}"
+                    "No valid autoregressive rollout step_shift exists. "
+                    "Input offsets and output offsets are incompatible for a forecasting task. "
+                    f"input_offsets={self.input}, output_offsets={self.output}"
                 )
                 raise ValueError(msg)
             LOGGER.info("Inferred step_shift=%s (maximum valid shift).", valid[-1])
@@ -116,15 +113,16 @@ class ForecastOffsets(BaseTaskOffsets):
 
         if step_shift not in valid:
             msg = (
-                f"step_shift={step_shift!r} is not a valid autoregressive shift "
-                f"(valid: {valid}). "
-                f"input={self.input}, output={self.output}"
+                f"step_shift={step_shift!r} is not a valid autoregressive rollout shift "
+                "for the chosen input and output offsets."
+                f" (valid shifts are: {valid}). "
+                f"input_offsets={self.input}, output_offsets={self.output}"
             )
             raise ValueError(msg)
         return step_shift
 
     def slot_mapping(self) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-        """Pre-compute slot mappings for autoregressive input advancement.
+        """Pre-compute slot mappings for autoregressive input advancement during rollout.
 
         For each position in the next input window (``input + step_shift``),
         determine whether the data comes from a model prediction (output slot)
