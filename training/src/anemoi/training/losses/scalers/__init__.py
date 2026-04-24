@@ -14,6 +14,7 @@ from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
 from .spectral import LinearSpectralDimensionScaler
 from .spectral import SpectralDimensionScaler
+from .spectral import LinearMaxSpectralDimensionScaler
 from .time_step import LeadTimeDecayScaler
 from .time_step import TimeStepScaler
 from .time_step import UniformTimeStepScaler
@@ -32,6 +33,7 @@ __all__ = [
     "GraphNodeAttributeScaler",
     "LeadTimeDecayScaler",
     "LinearSpectralDimensionScaler",
+    "LinearMaxSpectralDimensionScaler",
     "LinearVariableLevelScaler",
     "NaNMaskScaler",
     "NoTendencyScaler",

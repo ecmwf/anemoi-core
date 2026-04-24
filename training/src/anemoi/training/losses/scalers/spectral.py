@@ -137,3 +137,65 @@ class LinearSpectralDimensionScaler(SpectralDimensionScaler):
         )
 
         return self.slope * wavenumbers + self.y_intercept
+
+class LinearMaxSpectralDimensionScaler(SpectralDimensionScaler):
+    """Linearly increasing weights with total wavenumber.
+
+    For SHT output of shape ``(L, M)`` flattened to ``L * M``, with
+    ``L == M == n_spectral_modes``, the weight at flat index *i* is based on
+    the total wavenumber ``L = i // n_spectral_modes``:
+
+        weight[i] = slope * (i // n_spectral_modes) + y_intercept
+
+    This means all orders within the same total wavenumber receive the same
+    weight.  With the default parameters (``slope=1/n_spectral_modes``,
+    ``y_intercept=1/n_spectral_modes``), higher wavenumbers receive higher
+    weights.
+    """
+
+    def __init__(
+        self,
+        n_spectral_modes: int,
+        slope: float | None = None,
+        y_intercept: float | None = None,
+        maximum: float | None = None,
+        norm: str | None = None,
+        **kwargs,
+    ) -> None:
+        """Initialise LinearSpectralDimensionScaler.
+
+        Parameters
+        ----------
+        n_spectral_modes : int
+            Number of total wavenumbers (L dimension).
+        slope : float
+            Slope of the linear function.  Positive values give higher weights
+            to higher wavenumbers.
+        y_intercept : float
+            Constant offset (value at wavenumber 0).
+        maximum : float
+            Maximum weight to apply (weights above this value will be clipped).
+        norm : str, optional
+            Type of normalization to apply.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
+        super().__init__(n_spectral_modes=n_spectral_modes, norm=norm, **kwargs)
+        self.slope = slope if slope is not None else 2.0 / self.n_spectral_modes
+        self.y_intercept = y_intercept if y_intercept is not None else 1.0 / self.n_spectral_modes
+        self.maximum = maximum if maximum is not None else 1.0
+
+    def get_scaling_values(self) -> torch.Tensor:
+        flat_indices = torch.arange(self.n_spectral, dtype=torch.float32)
+        wavenumbers = flat_indices // self.n_spectral_modes
+
+        LOGGER.info(
+            "Spectral Scaling: Applying %s with n_spectral_modes=%d, slope=%s, y_intercept=%s. Maximum weight is %s.",
+            self.__class__.__name__,
+            self.n_spectral_modes,
+            self.slope,
+            self.y_intercept,
+            self.maximum,
+        )
+
+        return torch.minimum(self.slope * wavenumbers + self.y_intercept, torch.tensor(self.maximum))
