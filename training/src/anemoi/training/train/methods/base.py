@@ -281,8 +281,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if config.training.time_aggregate_loss is not None:
             from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 
-            ta_cfg = config.training.time_aggregate_loss
+            ta_datasets = config.training.time_aggregate_loss.datasets
             for dataset_name in self.target_dataset_names:
+                if dataset_name not in ta_datasets:
+                    continue
+                ta_cfg = ta_datasets[dataset_name]
                 inner_loss = get_loss_function(
                     DictConfig(ta_cfg.loss_fn),
                     self.scalers[dataset_name],
@@ -639,6 +642,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 "grid_shard_slice": grid_shard_slice,
                 "group": self.model_comm_group,
             }
+            if pred_layout is not None:
+                ta_kwargs["pred_layout"] = pred_layout
+            if target_layout is not None:
+                ta_kwargs["target_layout"] = target_layout
             ta_loss = self.time_aggregate_loss[dataset_name](y_pred, y, **ta_kwargs)
             total_loss = total_loss + self.time_aggregate_loss_weight[dataset_name] * ta_loss
 

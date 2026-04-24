@@ -450,8 +450,8 @@ class BaseTrainingSchema(BaseModel):
     "Config for stochastic weight averaging."
     training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
-    time_aggregate_loss: TimeAggregateLossConfigSchema | None = None
-    "Optional time-aggregate loss added alongside the main training loss."
+    time_aggregate_loss: DatasetDict[TimeAggregateLossConfigSchema] | None = None
+    "Optional per-dataset time-aggregate loss added alongside the main training loss."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
     scalers: DatasetDict[dict[str, ScalerSchema]]
