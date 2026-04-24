@@ -138,6 +138,7 @@ class LinearSpectralDimensionScaler(SpectralDimensionScaler):
 
         return self.slope * wavenumbers + self.y_intercept
 
+
 class LinearMaxSpectralDimensionScaler(SpectralDimensionScaler):
     """Linearly increasing weights with total wavenumber.
 

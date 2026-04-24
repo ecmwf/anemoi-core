@@ -21,13 +21,14 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.losses.scalers.spectral import LinearMaxSpectralDimensionScaler
+from anemoi.training.losses.scalers.spectral import LinearSpectralDimensionScaler
+from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
-from anemoi.training.losses.scalers.spectral import LinearMaxSpectralDimensionScaler
-from anemoi.training.losses.scalers.spectral import LinearSpectralDimensionScaler
-from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
+
 
 @pytest.fixture
 def fake_data(
@@ -586,6 +587,7 @@ The scaler operates on this flattened representation and can be unflattened
 back to ``(L, M)`` for inspection.
 """
 
+
 @pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
 def test_uniform_scaler_reshape(n_spectral_modes: int) -> None:
     """SpectralDimensionScaler: unflattened rows should all be identical (uniform)."""
@@ -599,6 +601,7 @@ def test_uniform_scaler_reshape(n_spectral_modes: int) -> None:
     # All entries should be 1/n_spectral_modes (uniform weight).
     expected_val = 1.0 / n_spectral_modes
     assert torch.allclose(matrix, torch.full_like(matrix, expected_val))
+
 
 @pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
 @pytest.mark.parametrize(
@@ -620,9 +623,10 @@ def test_scaler_reshape_constant_within_wavenumber(scaler_cls, kwargs, n_spectra
     # Each row should be constant (same value repeated across orders).
     for wn in range(n_spectral_modes):
         row = matrix[wn]
-        assert torch.allclose(row, row[0].expand_as(row)), (
-            f"{scaler_cls.__name__}: Row {wn} is not constant across orders: {row}"
-        )
+        assert torch.allclose(
+            row, row[0].expand_as(row),
+        ), f"{scaler_cls.__name__}: Row {wn} is not constant across orders: {row}"
+
 
 @pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
 def test_linear_scaler_reshape_weight_formula(n_spectral_modes: int) -> None:
@@ -646,6 +650,7 @@ def test_linear_scaler_reshape_weight_formula(n_spectral_modes: int) -> None:
         f"  Got:      {matrix[:, 0]}\n"
         f"  Expected: {expected_per_wn}"
     )
+
 
 @pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
 def test_linear_max_scaler_reshape_weight_formula(n_spectral_modes: int) -> None:
