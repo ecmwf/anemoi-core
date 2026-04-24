@@ -38,7 +38,7 @@ training:
         ignore_nans: False
   time_aggregate_loss:
     datasets:
-      data: # user-defined key in data  
+      data: # user-defined key in data
         time_aggregation_types: [mean, max, min, diff]
         weight: 1.0
         loss_fn:
