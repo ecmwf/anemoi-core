@@ -423,21 +423,21 @@ def test_flexible_forecaster_multiple_valid_shifts_picks_max() -> None:
 
 def test_flexible_forecaster_invalid_step_shift_raises() -> None:
     """An explicit step_shift that does not satisfy shifted input in union of input and output raises ValueError."""
-    with pytest.raises(ValueError, match="not a valid autoregressive shift"):
+    with pytest.raises(ValueError, match="not a valid autoregressive rollout shift"):
         FlexibleForecaster(input_offsets=["0H"], output_offsets=["6H"], step_shift="12H")
 
 
 def test_flexible_forecaster_step_shift_raises_when_gap_not_covered() -> None:
     """step_shift raises when a shifted input falls outside union input and output entirely."""
     # I=[0H, 3H], O=[6H], S=6H: I_shifted = [6H, 9H], invalid
-    with pytest.raises(ValueError, match="not a valid autoregressive shift"):
+    with pytest.raises(ValueError, match="not a valid autoregressive rollout shift"):
         FlexibleForecaster(input_offsets=["0H", "3H"], output_offsets=["6H"], step_shift="6H")
 
 
 def test_flexible_forecaster_no_valid_shift_raises() -> None:
     """When no valid shift exists, construction raises ValueError."""
     # I=[0H, 6H], O=[4H]: only candidate S=4H; I_shifted = [4H, 10H], invalid , so no valid shift
-    with pytest.raises(ValueError, match="No valid autoregressive step_shift"):
+    with pytest.raises(ValueError, match="No valid autoregressive rollout step_shift"):
         FlexibleForecaster(input_offsets=["0H", "6H"], output_offsets=["4H"])
 
 
