@@ -46,6 +46,23 @@ class ForecasterSchema(BaseModel):
     "Number of rollouts to use for validation."
 
 
+class FlexibleForecasterSchema(BaseModel):
+    """Configuration for flexible forecasting tasks with explicit offsets."""
+
+    target_: Literal["anemoi.training.tasks.FlexibleForecaster"] = Field(..., alias="_target_")
+    "Task class path for the flexible forecasting task."
+    input_offsets: list[str] = Field(example=["-6H", "0H"])
+    "Duration strings for the input time steps (e.g. ['-6H', '0H'])."
+    output_offsets: list[str] = Field(example=["6H"])
+    "Duration strings for the output time steps (e.g. ['6H'])."
+    step_shift: str | None = Field(default=None, example="6H")
+    "Duration string for the rollout step shift. Defaults to max(output_offsets) if omitted."
+    rollout: RolloutSchema = Field(...)
+    "Rollout configuration for autoregressive training."
+    validation_rollout: NonNegativeInt = Field(example=1)
+    "Number of rollouts to use for validation."
+
+
 class AutoencoderTaskSchema(BaseModel):
     """Configuration for autoencoding tasks."""
 
@@ -69,6 +86,6 @@ class TemporalDownscalerSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema | FlexibleForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
     Discriminator("target_"),
 ]
