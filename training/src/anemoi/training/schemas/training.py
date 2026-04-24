@@ -314,7 +314,7 @@ class TimeAggregateLossConfigSchema(BaseModel):
     "Time aggregation operations to apply over the time dimension before computing the loss."
     weight: NonNegativeFloat = 1.0
     "Weight of the time-aggregate loss relative to the main training loss."
-    loss_fn: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
+    loss_fn: BaseLossSchema | AlmostFairKernelCRPSSchema | MultiScaleLossSchema
     "Inner loss function applied to each time-aggregated output."
 
 
