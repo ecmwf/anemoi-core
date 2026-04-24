@@ -43,5 +43,5 @@ training:
         weight: 1.0
         loss_fn:
           _target_: anemoi.training.losses.MSELoss
-          scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+          scalers: ['pressure_level', 'general_variable', 'node_weights']
           ignore_nans: False

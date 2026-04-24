@@ -29,7 +29,6 @@ system:
     graph: graph_anemoi_new.pt
     dataset: aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51
     loss_matrices_path: null
-  output:
   hardware:
     accelerator: auto
     num_gpus_per_ensemble: 1
@@ -72,7 +71,7 @@ training:
         weight: 1.0
         loss_fn:
           _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
           ignore_nans: False
           no_autocast: True
           alpha: 0.95
