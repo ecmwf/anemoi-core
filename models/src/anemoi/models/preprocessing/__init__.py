@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import inspect
 import logging
 from typing import Optional
 
+import torch
 from torch import Tensor
 from torch import nn
 
@@ -130,18 +130,9 @@ class BasePreprocessor(nn.Module):
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
-
-        fn = self.inverse_transform if inverse else self.transform
-        if kwargs:
-            signature = inspect.signature(fn)
-            accepts_var_kwargs = any(
-                parameter.kind == inspect.Parameter.VAR_KEYWORD
-                for parameter in signature.parameters.values()
-            )
-            if not accepts_var_kwargs:
-                kwargs = {key: value for key, value in kwargs.items() if key in signature.parameters}
-
-        return fn(x, in_place=in_place, **kwargs)
+        if inverse:
+            return self.inverse_transform(x, in_place=in_place, **kwargs)
+        return self.transform(x, in_place=in_place, **kwargs)
 
     def transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
         """Process the input tensor."""
@@ -211,10 +202,9 @@ class Processors(nn.Module):
         """Run checks on the processed tensor."""
         if not self.inverse:
             # Forward transformation checks:
-            pass
-            # assert not torch.isnan(
-            #     x
-            # ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+            assert not torch.isnan(
+                x
+            ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
 
 
 class StepwiseProcessors(nn.Module):

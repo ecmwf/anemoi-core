@@ -8,11 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from collections.abc import Mapping
-from collections.abc import Sequence
-from functools import partial
 import logging
-from typing import Any
 from typing import Optional
 
 import torch
@@ -79,66 +75,8 @@ class Remapper(BasePreprocessor):
         statistics: Optional[dict] = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
-        self.method_config, self.methods, self.method_parameters = self._parse_method_config(config)
         self._create_remapping_indices(statistics)
         self._validate_indices()
-
-    @staticmethod
-    def _as_list(value: Any) -> list[Any]:
-        if isinstance(value, Sequence) and not isinstance(value, str):
-            return list(value)
-        return [value]
-
-    @classmethod
-    def _parse_method_spec(cls, method: str, spec: Any) -> tuple[list[str], dict[str, Any]]:
-        if isinstance(spec, str):
-            return [spec], {}
-
-        if isinstance(spec, Sequence) and not isinstance(spec, str):
-            return cls._as_list(spec), {}
-
-        if isinstance(spec, Mapping):
-            variables = spec.get("variables", spec.get("variable"))
-            if variables is None:
-                raise ValueError(
-                    f"Remapper method '{method}' must define 'variables' when using a parameterized config.",
-                )
-            parameters = {key: value for key, value in spec.items() if key not in {"variables", "variable"}}
-            return cls._as_list(variables), parameters
-
-        raise TypeError(f"Unsupported remapper config for method '{method}': {type(spec)!r}")
-
-    @classmethod
-    def _parse_method_config(
-        cls,
-        config: Any,
-    ) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, Any]]]:
-        special_keys = {"default", "remap", "normalizer"}
-        method_config: dict[str, dict[str, str]] = {}
-        methods: dict[str, str] = {}
-        method_parameters: dict[str, dict[str, Any]] = {}
-
-        for method, spec in config.items():
-            if method in special_keys or spec is None or spec == "none":
-                continue
-
-            variables, parameters = cls._parse_method_spec(method, spec)
-            method_config[method] = {variable: f"{method}_{variable}" for variable in variables}
-            for variable in variables:
-                methods[variable] = method
-                method_parameters[variable] = dict(parameters)
-
-        return method_config, methods, method_parameters
-
-    @staticmethod
-    def _build_mapper(method_name: str, mapper, parameters: dict[str, Any]):
-        if not parameters:
-            return mapper
-
-        try:
-            return partial(mapper, **parameters)
-        except TypeError as exc:
-            raise ValueError(f"Invalid parameters for remapper method '{method_name}': {parameters}") from exc
 
     def _validate_indices(self):
         assert (
@@ -189,13 +127,8 @@ class Remapper(BasePreprocessor):
         for name in name_to_index_training_input:
             method = self.methods.get(name, self.default)
             if method in self.supported_methods:
-                parameters = self.method_parameters.get(name, {})
-                self.remappers.append(
-                    self._build_mapper(method, self.supported_methods[method][0], parameters),
-                )
-                self.backmappers.append(
-                    self._build_mapper(method, self.supported_methods[method][1], parameters),
-                )
+                self.remappers.append(self.supported_methods[method][0])
+                self.backmappers.append(self.supported_methods[method][1])
                 self.index_training_input.append(name_to_index_training_input[name])
                 if name in name_to_index_training_output:
                     self.index_training_out.append(name_to_index_training_output[name])

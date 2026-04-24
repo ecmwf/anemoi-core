@@ -64,10 +64,8 @@ class RolloutEval(Callback):
         batch_tensor = batch
         if isinstance(batch, dict):
             batch_tensor = next(iter(batch.values()))
-        loss = torch.zeros(1, dtype=batch_tensor.dtype, device=pl_module.device, requires_grad=False)
-        metrics = {}
 
-        assert batch_tensor.shape[1] >= self.rollout * pl_module.n_step_output + pl_module.n_step_input, (
+        assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
             f"Set `task.validation_rollout` to at least {self.max_rollout}"
         )
@@ -75,22 +73,14 @@ class RolloutEval(Callback):
         # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,
         # because `_step(..., validation_mode=True)` uses the task setting to determine step count.
         with torch.no_grad():
-            for loss_next, metrics_next, _ in pl_module._rollout_step(
-                batch,
-                rollout=self.rollout,
-                validation_mode=True,
-            ):
-                loss += loss_next
-                metrics.update(metrics_next)
-
-            # scale loss
-            loss *= 1.0 / self.rollout
+            loss, metrics, _ = pl_module._step(batch, validation_mode=True)
             self._log(pl_module, loss, metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
 
         loss_scales = loss
         loss = loss_scales.sum()
+        loss_name = getattr(pl_module.loss, "name", pl_module.loss.__class__.__name__.lower())
         pl_module.log(
             f"val_r{self.max_rollout}_{loss_name}",
             loss,
@@ -104,7 +94,7 @@ class RolloutEval(Callback):
         if loss_scales.numel() > 1:
             for scale in range(loss_scales.numel()):
                 pl_module.log(
-                    f"val_r{self.rollout}_{getattr(pl_module.loss, 'name', pl_module.loss.__class__.__name__.lower())}",
+                    f"val_r{self.max_rollout}_{loss_name}",
                     loss_scales[scale],
                     on_epoch=True,
                     on_step=True,
@@ -120,7 +110,7 @@ class RolloutEval(Callback):
                 log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
 
                 pl_module.log(
-                    f"val_r{self.rollout}_" + mname + "_scale_" + str(scale),
+                    f"val_r{self.max_rollout}_" + mname + "_scale_" + str(scale),
                     log_val,
                     on_epoch=True,
                     on_step=False,
@@ -182,9 +172,10 @@ class RolloutEvalEns(RolloutEval):
             requires_grad=False,
         )
         batch_shape = next(iter(batch.values())).shape
-        assert (
-            batch_shape[1] >= self.rollout + pl_module.n_step_input
-        ), f"Batch length ({batch_shape[1]}) not sufficient for requested rollout length!"
+        assert batch_shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
+            "Batch length not sufficient for requested validation rollout length! "
+            f"Set `task.validation_rollout` to at least {self.max_rollout}"
+        )
 
         metrics = {}
         # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,

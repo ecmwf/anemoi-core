@@ -18,18 +18,6 @@ deterministic: False
 # miscellaneous
 precision: 16-mixed
 
-# multistep input
-# Number of timesteps to be loaded as model input
-# k = 1: single step scheme, uses only [X(t-1)] to predict X(t).
-# k = 1, is also necessary for autoencoder training as X(t) is used to predict X^(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-multistep_input: 2
-
-# multistep output
-# 1 = single step output scheme, single model forward predicts X(t)
-# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-multistep_output: 1
-
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * K
 accum_grad_batches: 1
@@ -47,55 +35,9 @@ swa:
   enabled: False
   lr: 1.e-4
 
-# =====================================================================
-# Optimizer configuration
-# =====================================================================
-optimizer:
-  # ---------------------------------------------------------------
-  # Choose optimizer type (_target_ approach)
-  # ---------------------------------------------------------------
-  # Default optimizer: AdamW
-  _target_: torch.optim.AdamW
-
-  # ---------------------------------------------------------------
-  # Common optimizer parameters
-  # ---------------------------------------------------------------
-  # Learning rate is defined elsewhere
-  #kwargs:
-  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
-
-  # ---------------------------------------------------------------
-  # Optional: configuration for AdEMAMix (custom optimizer)
-  # Uncomment the lines below to enable it
-  # ---------------------------------------------------------------
-  # _target_: anemoi.training.optimizers.AdEMAMix.AdEMAMix  # Custom optimizer
-  # betas: [0.9, 0.95, 0.9999]  # β₁, β₂, β₃
-  # alpha: 8.0                   # Mixing factor controlling EMA fusion
-  # beta3_warmup: 260000         # Warm-up steps for β₃ (in iterations)
-  # alpha_warmup: 260000         # Warm-up steps for α (in iterations)
-  # weight_decay: 0.01
-
-  # Optional: configuration for ZeroRedundancyOptimizer
-  # _target_: torch.distributed.optim.ZeroRedundancyOptimizer
-  # optimizer_class:
-  #   _target_: torch.optim.AdamW
-  #   _partial_: true
-  # betas: [0.9, 0.95]
 
 # select model
-model_task: anemoi.training.train.tasks.GraphInterpolator
-
-# Instead of inferred using multistep and timeincrement, specify time indices explicitly
-explicit_times:
-  input: [0, 6]
-  target: [1, 2, 3, 4, 5]
-
-target_forcing:
-  datasets:
-    data: # user-defined key in data #forcing parameters for the target time to include as input
-      data: #of which come from the dataset
-        - "insolation"
-      time_fraction: True
+training_method: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:
@@ -109,9 +51,6 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-
-# apply training loss in postprocessed physical space instead of model space
-training_loss_postprocessed: False
 
 # loss function for the model
 training_loss:

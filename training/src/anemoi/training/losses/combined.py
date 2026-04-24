@@ -136,18 +136,25 @@ class CombinedLoss(BaseLoss):
         if loss_weights is None:
             loss_weights = (1.0,) * len(losses)
 
-        data_indices = kwargs.pop("data_indices", None)
-        scalers = kwargs.pop("scalers", {})
-
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
-                if "scalers" not in loss:
-                    loss.update({"scalers": ["*"]})
-                self.losses.append(get_loss_function(loss, scalers=scalers, data_indices=data_indices, **dict(kwargs)))
-                self._loss_scaler_specification[i] = loss.pop("scalers", ["*"])
+                loss_config = dict(loss)
+                scaler_spec = loss_config.pop("scalers", ["*"])
+                self._loss_scaler_specification[i] = scaler_spec
+                # Only propagate scaler declarations when explicitly provided.
+                if available_scalers:
+                    loss_config["scalers"] = scaler_spec
+                self.losses.append(
+                    get_loss_function(
+                        DictConfig(loss_config),
+                        scalers=available_scalers,
+                        data_indices=data_indices,
+                        **dict(kwargs),
+                    ),
+                )
             elif isinstance(loss, type):
                 self._loss_scaler_specification[i] = ["*"]
                 self.losses.append(loss(**kwargs))
@@ -213,68 +220,6 @@ class CombinedLoss(BaseLoss):
                 loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
         return loss
 
-    @staticmethod
-    def _unwrap_loss_name(loss_fn: BaseLoss) -> str:
-        current = loss_fn
-        while current.__class__.__name__ == "FilteringLossWrapper" and hasattr(current, "loss"):
-            current = current.loss
-        return getattr(current, "name", current.__class__.__name__.lower())
-
-    def _component_name(self, loss_fn: BaseLoss, seen_names: dict[str, int]) -> str:
-        base_name = self._unwrap_loss_name(loss_fn)
-        seen_names[base_name] = seen_names.get(base_name, 0) + 1
-        if seen_names[base_name] == 1:
-            return base_name
-        return f"{base_name}_{seen_names[base_name]}"
-
-    def _raw_component_value(
-        self,
-        loss_fn: BaseLoss,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor | None:
-        raw_kwargs = dict(kwargs)
-        existing_without_scalers = raw_kwargs.pop("without_scalers", None) or []
-        scaler_names = list(getattr(getattr(loss_fn, "scaler", None), "tensors", {}).keys())
-        without_scalers = list(existing_without_scalers) + scaler_names
-        if without_scalers:
-            raw_kwargs["without_scalers"] = without_scalers
-        try:
-            return loss_fn(pred, target, **raw_kwargs)
-        except TypeError:
-            return None
-
-    def component_names(self) -> list[str]:
-        seen_names: dict[str, int] = {}
-        return [self._component_name(loss_fn, seen_names) for loss_fn in self.losses]
-
-    def component_weights(self) -> dict[str, float]:
-        return {
-            component_name: float(self.loss_weights[i])
-            for i, component_name in enumerate(self.component_names())
-        }
-
-    def component_metrics(
-        self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        metrics: dict[str, torch.Tensor] = {}
-        component_names = self.component_names()
-
-        for i, (loss_fn, component_name) in enumerate(zip(self.losses, component_names, strict=False)):
-            scaled = loss_fn(pred, target, **kwargs)
-            metrics[f"loss_component_{component_name}_scaled"] = scaled
-            metrics[f"loss_component_{component_name}_weighted"] = self.loss_weights[i] * scaled
-
-            raw = self._raw_component_value(loss_fn, pred, target, **kwargs)
-            if raw is not None:
-                metrics[f"loss_component_{component_name}_raw"] = raw
-
-        return metrics
-
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
         for i, spec in self._loss_scaler_specification.items():
@@ -285,11 +230,7 @@ class CombinedLoss(BaseLoss):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         for i, spec in self._loss_scaler_specification.items():
             if "*" in spec or name in spec:
-                scaler_obj = getattr(self.losses[i], "scaler", None)
-                if scaler_obj is None:
-                    loss_name = getattr(self.losses[i], "name", type(self.losses[i]).__name__)
-                    raise ValueError("CombinedLoss: loss[%d] (%s) has no scaler; cannot update %s." % (i, loss_name, name))
-                if name not in scaler_obj:
-                    loss_name = getattr(self.losses[i], "name", type(self.losses[i]).__name__)
-                    raise ValueError("CombinedLoss: loss[%d] (%s) missing scaler %s. Available: %s" % (i, loss_name, name, list(scaler_obj.tensors.keys())))
-                scaler_obj.update_scaler(name, scaler=scaler, override=override)
+                self.losses[i].update_scaler(name=name, scaler=scaler, override=override)
+
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return any(loss.has_scaler_for_dim(dim=dim) for loss in self.losses)

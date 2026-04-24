@@ -46,6 +46,25 @@ class ForecasterSchema(BaseModel):
     "Number of rollouts to use for validation."
 
 
+class SparseForecasterSchema(BaseModel):
+    """Configuration for sparse forecasting tasks."""
+
+    target_: Literal["anemoi.training.tasks.SparseForecaster"] = Field(..., alias="_target_")
+    "Task class path for the sparse forecasting task."
+    multistep_input: PositiveInt = Field(example=2)
+    "Number of input timesteps provided to the model."
+    multistep_output: PositiveInt = Field(example=1)
+    "Number of output timesteps the model should predict."
+    timestep: str = Field(example="5m")
+    "Timestep string (e.g. '5m') defining the sparse model-relative window."
+    rollout: RolloutSchema = Field(...)
+    "Rollout configuration for autoregressive training."
+    validation_rollout: NonNegativeInt = Field(example=1)
+    "Number of rollouts to use for validation."
+    rollout_forcing_policy: Literal["last_available", "exact"] = Field(default="last_available")
+    "How sparse rollout fills missing coarse timesteps during autoregressive updates."
+
+
 class AutoencoderTaskSchema(BaseModel):
     """Configuration for autoencoding tasks."""
 
@@ -69,6 +88,6 @@ class TemporalDownscalerSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema | SparseForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
     Discriminator("target_"),
 ]

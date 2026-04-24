@@ -106,15 +106,25 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Load the filtered st-ate_dict into the model
     model.load_state_dict(state_dict, strict=False)
-    # Needed for data indices check
-    checkpoint_data_indices = checkpoint["hyper_parameters"]["data_indices"]
-    if isinstance(checkpoint_data_indices, dict):
+
+    ## Needed for data indices check
+    data_indices = checkpoint["hyper_parameters"]["data_indices"]
+
+    if isinstance(data_indices, dict):
+        # New format: data_indices is always a dict in new code (even for single-dataset)
+        LOGGER.info("Loading checkpoint with datasets: %s", list(data_indices.keys()))
         model._ckpt_model_name_to_index = {
-            dataset_name: data_indices.name_to_index
-            for dataset_name, data_indices in checkpoint_data_indices.items()
+            dataset_name: indices.name_to_index for dataset_name, indices in data_indices.items()
         }
     else:
-        model._ckpt_model_name_to_index = {"data": checkpoint_data_indices.name_to_index}
+        # Old format: data_indices is a single IndexCollection object (not dict)
+        msg = (
+            f"Checkpoint at '{ckpt_path}' was created with an older version of anemoi-core "
+            "that does not support multi-dataset training. This checkpoint is incompatible "
+            "with transfer learning in the current version."
+        )
+        raise TypeError(msg)
+
     return model
 
 

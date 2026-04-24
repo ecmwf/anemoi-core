@@ -22,7 +22,6 @@ from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlo
 from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample
-from anemoi.training.diagnostics.callbacks.plot import PlotValidationMetrics
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
@@ -934,36 +933,3 @@ def test_plots_plot_predicted_multilevel_flat_sample_returns_figure():
     assert hasattr(fig, "savefig")
     fig.clear()
     plt.close(fig)
-
-
-def test_plot_validation_metrics_tracks_selected_metrics(monkeypatch):
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
-    callback = PlotValidationMetrics(
-        config=config,
-        metrics=[
-            "val_data_loss_component_huber_weighted_scale_0",
-            "val_data_loss_component_logspectraldistance_weighted_scale_0",
-        ],
-        dataset_names=["data"],
-    )
-
-    trainer = MagicMock()
-    trainer.current_epoch = 3
-    trainer.logger = None
-    trainer.callback_metrics = {
-        "val_data_loss_component_huber_weighted_scale_0": torch.tensor(0.5),
-        "val_data_loss_component_logspectraldistance_weighted_scale_0": torch.tensor(0.25),
-    }
-
-    output_calls = []
-
-    def fake_output(logger, fig, epoch, tag="gnn", exp_log_tag="val_pred_sample"):
-        output_calls.append((logger, epoch, tag, exp_log_tag, fig is not None))
-
-    monkeypatch.setattr(callback, "_output_figure", fake_output)
-
-    callback._plot(trainer, MagicMock(), ["data"], epoch=trainer.current_epoch)
-
-    assert callback.history["val_data_loss_component_huber_weighted_scale_0"] == [(3, 0.5)]
-    assert callback.history["val_data_loss_component_logspectraldistance_weighted_scale_0"] == [(3, 0.25)]
-    assert output_calls == [(None, 3, "validation_metrics", "validation_metrics", True)]

@@ -168,6 +168,7 @@ class PointWiseMLPProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
@@ -270,12 +271,14 @@ class TransformerProcessor(BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
+            attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
             window_size=window_size,
@@ -420,6 +423,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -443,6 +447,11 @@ class GraphTransformerProcessor(BaseProcessor):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to num_channels. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         cpu_offload : bool, optional
@@ -471,6 +480,7 @@ class GraphTransformerProcessor(BaseProcessor):
             in_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
             out_channels=num_channels,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,

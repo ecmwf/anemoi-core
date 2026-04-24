@@ -20,7 +20,7 @@ from omegaconf import OmegaConf
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.filtering import FilteringLossWrapper
+from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -147,28 +147,35 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    if "CombinedLoss" in loss_config.get("_target_", ""):
-        if data_indices is not None:
-            loss_config.update(
-                {"data_indices": data_indices},
-            )
-            data_indices = None  # for combined loss we want the individual losses to handle data indices
-        loss_config.update(
-            {"scalers": scalers},
-        )
-        scalers_to_include = []
-        scalers = {}  # for combined loss we want the individual losses to handle scalers
-    loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
+    available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
+    factory_context = LossFactoryContext(
+        available_scalers=available_scalers,
+        data_indices=data_indices,
+    )
+    constructor_kwargs, takes_scalers, takes_data_indices = _extract_constructor_context(
+        loss_config,
+        context=factory_context,
+    )
+
+    loss_function = instantiate(loss_config, **constructor_kwargs, **kwargs, _recursive_=False)
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
+
+    if takes_scalers:
+        scalers_to_include = []
+        scalers = {}
+    if takes_data_indices:
+        data_indices = None
+
     if data_indices is not None:
-        loss_function = FilteringLossWrapper(
+        loss_function = LossVariableMapper(
             loss=loss_function,
             predicted_variables=predicted_variables,
             target_variables=target_variables,
-        ).set_data_indices(data_indices)
+            data_indices=data_indices,
+        )
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 

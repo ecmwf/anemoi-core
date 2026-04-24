@@ -36,18 +36,6 @@ class GraphDescriptor:
 
         return total_size
 
-    @staticmethod
-    def _attribute_dimension(value: torch.Tensor) -> int:
-        """Return per-node/per-edge feature dimension for any tensor rank.
-
-        - [N]      -> 1
-        - [N, D]   -> D
-        - [N, ...] -> product of trailing dimensions
-        """
-        if value.ndim <= 1:
-            return 1
-        return int(math.prod(value.shape[1:]))
-
     def get_node_summary(self) -> list[list]:
         """Summary of the nodes in the graph.
 
@@ -68,14 +56,13 @@ class GraphDescriptor:
         for name, nodes in self.graph.node_items():
             attributes = nodes.node_attrs()
             attributes.remove("x")
-            tensor_attributes = [attr for attr in attributes if isinstance(nodes[attr], torch.Tensor)]
 
             node_summary.append(
                 [
                     name,
                     nodes.num_nodes,
                     ", ".join(attributes),
-                    sum(self._attribute_dimension(nodes[attr]) for attr in tensor_attributes),
+                    sum(nodes[attr].shape[1] for attr in attributes if isinstance(nodes[attr], torch.Tensor)),
                     nodes.x[:, 0].min().item() / 2 / math.pi * 360,
                     nodes.x[:, 0].max().item() / 2 / math.pi * 360,
                     nodes.x[:, 1].min().item() / 2 / math.pi * 360,
@@ -105,7 +92,6 @@ class GraphDescriptor:
         for (src_name, _, dst_name), edges in self.graph.edge_items():
             attributes = edges.edge_attrs()
             attributes.remove("edge_index")
-            tensor_attributes = [attr for attr in attributes if isinstance(edges[attr], torch.Tensor)]
 
             # Compute edge counts per target node
             target_edge_counts = torch.bincount(edges.edge_index[1], minlength=self.graph[dst_name].num_nodes)
@@ -123,8 +109,8 @@ class GraphDescriptor:
                     self.graph[dst_name].num_nodes - len(torch.unique(edges.edge_index[1])),
                     min_edges_per_target,
                     max_edges_per_target,
-                    sum(self._attribute_dimension(edges[attr]) for attr in tensor_attributes),
-                    ", ".join([f"{attr}({self._attribute_dimension(edges[attr])}D)" for attr in tensor_attributes]),
+                    sum(edges[attr].shape[1] for attr in attributes),
+                    ", ".join([f"{attr}({edges[attr].shape[1]}D)" for attr in attributes]),
                 ]
             )
         return edge_summary
@@ -135,8 +121,6 @@ class GraphDescriptor:
             node_attr_names = node_store.node_attrs()
             node_attr_names.remove("x")  # Remove the coordinates from statistics table
             for node_attr_name in node_attr_names:
-                if not isinstance(node_store[node_attr_name], torch.Tensor):
-                    continue
                 node_attributes.append(
                     [
                         "Node",
@@ -157,8 +141,6 @@ class GraphDescriptor:
             edge_attr_names = edge_store.edge_attrs()
             edge_attr_names.remove("edge_index")  # Remove the edge index from statistics table
             for edge_attr_name in edge_attr_names:
-                if not isinstance(edge_store[edge_attr_name], torch.Tensor):
-                    continue
                 edge_attributes.append(
                     [
                         "Edge",

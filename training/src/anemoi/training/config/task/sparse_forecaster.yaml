@@ -1,0 +1,12 @@
+_target_: anemoi.training.tasks.SparseForecaster
+multistep_input: 1
+multistep_output: 1
+timestep: "5m"
+
+rollout:
+  start: 1
+  epoch_increment: 0
+  maximum: 1
+
+validation_rollout: 1
+rollout_forcing_policy: last_available

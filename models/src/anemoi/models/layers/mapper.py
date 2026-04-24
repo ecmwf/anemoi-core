@@ -147,6 +147,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -175,6 +176,11 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool, optional
@@ -249,43 +255,34 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         # gather/scatter if x_src is sharded, always reduce gradients in bwds
         x_src = sync_tensor(x_src, 0, shapes_x_src, model_comm_group, gather_in_fwd=x_src_is_sharded)
 
-        # Ensure nodes_src always exists (used for cond mapping below)
-        nodes_src: Optional[Tensor] = None
+        if edge_shard_shapes is not None:
+            # Edges are 1-hop sorted and sharded by graph provider
+            shapes_edge_attr = edge_shard_shapes[0]
+            shapes_edge_idx = edge_shard_shapes[1]
+        else:
+            # Edges not pre-sharded, do 1-hop sorting and sharding here
+            src_size = sum(shape[0] for shape in shapes_src)
+            dst_size = sum(shape[0] for shape in shapes_dst)
+            edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx) = shard_edges_1hop(
+                edge_attr, edge_index, src_size, dst_size, model_comm_group
+            )
 
-        if edge_index is not None:
-            if edge_shard_shapes is not None:
-                # Edges are 1-hop sorted and sharded by graph provider
-                shapes_edge_attr = edge_shard_shapes[0]
-                shapes_edge_idx = edge_shard_shapes[1]
-            else:
-                # Edges not pre-sharded, do 1-hop sorting and sharding here
-                src_size = sum(shape[0] for shape in shapes_src)
-                dst_size = sum(shape[0] for shape in shapes_dst)
-                edge_attr, edge_index, (shapes_edge_attr, shapes_edge_idx) = shard_edges_1hop(
-                    edge_attr, edge_index, src_size, dst_size, model_comm_group
-                )
+        # Relabel destination indices from global to local
+        if model_comm_group is not None and model_comm_group.size() > 1:
+            rank = model_comm_group.rank()
+            dst_offset = sum(shapes_dst[i][0] for i in range(rank))
+            edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
+            edge_index[1] -= dst_offset
 
-            # Relabel destination indices from global to local
-            if model_comm_group is not None and model_comm_group.size() > 1:
-                rank = model_comm_group.rank()
-                dst_offset = sum(shapes_dst[i][0] for i in range(rank))
-                edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
-                edge_index[1] -= dst_offset
-
-            # x_src is synced/full, x_dst is sharded, edges are sharded (incoming to x_dst)
-            size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
-            x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
+        # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
+        size_src_full_dst_shard = (x_src.shape[0], x_dst.shape[0])
+        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, size_src_full_dst_shard)
 
         if cond is not None:  # sync cond_src to match x_src:
             cond_src, cond_dst = cond
             shapes_cond_src = change_channels_in_shape(shapes_src, cond_src.shape[-1])
             cond_src_full = sync_tensor(cond_src, 0, shapes_cond_src, model_comm_group, gather_in_fwd=True)
-
-            # If edges exist we may have dropped/reindexed src nodes; otherwise keep full cond_src.
-            if nodes_src is not None:
-                cond = (cond_src_full[nodes_src], cond_dst)
-            else:
-                cond = (cond_src_full, cond_dst)
+            cond = (cond_src_full[nodes_src], cond_dst)
 
         if not x_dst_is_sharded:
             x_dst = shard_tensor(x_dst, 0, shapes_dst, model_comm_group)
@@ -366,39 +363,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_shard_shapes: Optional[tuple] = None,
         **kwargs,
     ) -> PairTensor:
-        # Special-case: graphs with no edges (e.g. NoOpGraph / dataset without decoder graph).
-        # Still apply sharding + embeddings consistently, but skip message passing.
-        if edge_index is None:
-            x_src, x_dst, shapes_src, shapes_dst = self.pre_process(
-                x=x,
-                shard_shapes=shard_shapes,
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=x_src_is_sharded,
-                x_dst_is_sharded=x_dst_is_sharded,
-            )
-
-            x_dst_out = x_dst  # no message passing without edges
-
-            x_dst_out = self.post_process(
-                x_dst=x_dst_out,
-                shapes_dst=shapes_dst,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=keep_x_dst_sharded,
-            )
-
-            # Forward mapper post_process is identity: gather here if requested.
-            if (not keep_x_dst_sharded) and (model_comm_group is not None) and (model_comm_group.size() > 1):
-                global_n_dst = sum(s[0] for s in shapes_dst)
-                if x_dst_out.shape[0] != global_n_dst:
-                    x_dst_out = gather_tensor(
-                        x_dst_out,
-                        0,
-                        change_channels_in_shape(shapes_dst, x_dst_out.shape[-1]),
-                        model_comm_group,
-                    )
-
-            return x_dst_out
-
         x_src, x_dst, edge_attr, edge_index, shapes_src, shapes_dst, cond = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
@@ -540,10 +504,12 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         in_channels_src: int,
         in_channels_dst: int,
         hidden_dim: int,
+        out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -562,6 +528,8 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Input channels of the destination node
         hidden_dim : int
             Hidden dimension
+        out_channels_dst : int, optional
+            Must remain ``None`` for forward graph-transformer mappers.
         num_chunks : int
             Number of chunks to split into
         num_heads: int
@@ -570,6 +538,11 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         cpu_offload : bool
@@ -595,10 +568,12 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
+            attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
@@ -663,6 +638,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
@@ -692,6 +668,11 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to the hidden dimension. This allows reducing the
+            number of channels used for the attention computation without
+            changing the width of the surrounding MLPs.
         qk_norm : bool, optional
             Whether to use query and key normalization, default False
         initialise_data_extractor_zero : bool, default False:
@@ -719,10 +700,12 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             edge_dim=edge_dim,
+            attn_channels=attn_channels,
             layer_kernels=layer_kernels,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
+            **kwargs,
         )
 
         self.node_data_extractor = nn.Sequential(

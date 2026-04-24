@@ -146,8 +146,8 @@ def global_config(
         get_tmp_path,
     )
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
@@ -207,8 +207,8 @@ def multidatasets_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     return cfg, [url_dataset, url_dataset_b]
 
@@ -243,13 +243,10 @@ def lam_config_with_graph(
     cfg, urls = lam_config
     cfg.graph = existing_graph_config
 
-    dataset_name = "data"  # default dataset name
-    url_graph = "anemoi-integration-tests/training/graphs/lam-graph.pt"
-    tmp_path_graph = Path(get_test_data(url_graph))
-    dataset_graph_filename = tmp_path_graph.name.replace(".pt", f"_{dataset_name}.pt")
-    tmp_path_graph.rename(tmp_path_graph.parent / dataset_graph_filename)
-    cfg.system.input.graph = tmp_path_graph
-    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in lam training cycle test
+    url_graph = "anemoi-integration-tests/training/graphs/lam-graph-2026-02-19.pt"
+    cfg.system.input.graph = Path(get_test_data(url_graph))
+    cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in the lam training cycle test
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in the lam training cycle test
     return cfg, urls
 
 
@@ -296,8 +293,8 @@ def ensemble_config(
     cfg = handle_truncation_matrices(cfg, get_test_data)
     assert isinstance(cfg, DictConfig)
 
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
     return cfg, url_dataset
 
 
@@ -316,6 +313,8 @@ def hierarchical_config(
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
+
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, [url_dataset]
@@ -353,6 +352,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
     return cfg, url_dataset
 
 
@@ -369,6 +369,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
         "graphtransformer",
         "stretched",
         "ensemble_crps",
+        "diffusiontend",
     ],
 )
 def benchmark_config(
@@ -427,36 +428,22 @@ def migrator() -> Migrator:
     return Migrator()
 
 
-@pytest.fixture(
-    params=[
-        ["model=gnn"],
-        ["model=graphtransformer"],
-    ],
-    ids=["gnn", "graphtransformer"],
-)
+@pytest.fixture
 def global_config_with_checkpoint(
     migrator: Migrator,
-    request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
+    global_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
-    # Reuse the same overrides that global_config gets
-    overrides = request.param
 
-    cfg, dataset_url, model_architecture = build_global_config(
-        overrides,
-        testing_modifications_with_temp_dir,
-        get_tmp_path,
-    )
-    # rest of your logic...
+    cfg, dataset_url, model_architecture = global_config
+
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-01-23.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-03-06.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-01-23.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-03-06.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
@@ -472,12 +459,13 @@ def global_config_with_checkpoint(
     cfg.training.max_epochs = 3
 
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
+    cfg.diagnostics.callbacks = []  # remove RolloutEval callback as it is tested in global training cycle test
 
     return cfg, dataset_url
 
 
 @pytest.fixture
-def interpolator_config(
+def temporal_downscaler_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, str]:
@@ -508,42 +496,11 @@ def interpolator_config(
     return cfg, url_dataset
 
 
-def multi_output_interpolator_config(
-    testing_modifications_with_temp_dir: DictConfig,
-    get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, str]:
-    """Compose a runnable configuration for the temporal-interpolation model with multiple output steps.
-
-    It is based on `interpolator_multiout.yaml` and only patches paths pointing to the
-    sample dataset that the tests download locally.
-    """
-    # No model override here - the template already sets the dedicated
-    # interpolator model + GraphMultiOutInterpolator Lightning task.
-    with initialize(
-        version_base=None,
-        config_path="../../src/anemoi/training/config",
-        job_name="test_interpolator_multiout",
-    ):
-        template = compose(config_name="interpolator_multiout")
-
-    use_case_modifications = OmegaConf.load(
-        Path.cwd() / "training/tests/integration/config/test_interpolator_multiout.yaml",
-    )
-    assert isinstance(use_case_modifications, DictConfig)
-
-    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
-    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.resolve(cfg)
-    assert isinstance(cfg, DictConfig)
-    return cfg, url_dataset
-
-
 @pytest.fixture
 def imerg_target_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
-) -> tuple[DictConfig, list[str]]:
+) -> tuple[DictConfig, str]:
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_filtering"):
         template = compose(config_name="config")
 
@@ -597,14 +554,14 @@ def diffusion_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionForecaster",
+                "training.training_method=anemoi.training.train.methods.DiffusionTraining",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.model_task=anemoi.training.train.tasks.GraphDiffusionTendForecaster",
+                "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
             ],
             id="diffusiontend",
         ),
@@ -632,11 +589,11 @@ def multidatasets_diffusion_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     if is_tendency:
-        cfg.training.multistep_input = 3
-        cfg.training.multistep_output = 2
+        cfg.task.multistep_input = 3
+        cfg.task.multistep_output = 2
     else:
-        cfg.training.multistep_input = 2
-        cfg.training.multistep_output = 1
+        cfg.task.multistep_input = 2
+        cfg.task.multistep_output = 1
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
@@ -653,3 +610,34 @@ def mlflow_dry_run_config(gnn_config: tuple[DictConfig, str], mlflow_server: str
     cfg["diagnostics"]["log"]["mlflow"]["tracking_uri"] = mlflow_server
     cfg["diagnostics"]["log"]["mlflow"]["offline"] = False
     return cfg, url
+
+
+@pytest.fixture
+def temporal_downscaler_ensemble_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+    get_test_data: GetTestData,
+) -> tuple[DictConfig, str]:
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_temporal_downscaler_ensemble",
+    ):
+        template = compose(config_name="temporal_downscaler_ensemble")
+
+    use_case_modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/test_temporal_downscaler_ensemble.yaml",
+    )
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+
+    cfg = handle_truncation_matrices(cfg, get_test_data)
+    assert isinstance(cfg, DictConfig)
+
+    return cfg, url_dataset

@@ -16,20 +16,14 @@ from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
-from .optical_flow import OpticalFlowConsistencyLoss
 from .rmse import RMSELoss
-from .rolling_accumulation import RollingAccumulationHuberLoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
-from .ssim import SSIMLoss
-from .ssim import MaskedLogSSIMLoss
+from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
-from .wet_area_loss import WeightedSoftWetAreaLoss
-from .optical_flow import OpticalFlowConsistencyLoss
-from .optical_flow import SoftWetMaskAdvectiveConsistencyLoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
@@ -40,18 +34,13 @@ __all__ = [
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
+    "LossVariableMapper",
     "MAELoss",
-    "MaskedLogSSIMLoss",
     "MSELoss",
     "MultiscaleLossWrapper",
-    "OpticalFlowConsistencyLoss",
-    "SoftWetMaskAdvectiveConsistencyLoss",
     "RMSELoss",
-    "RollingAccumulationHuberLoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
-    "SSIMLoss",
     "WeightedMSELoss",
-    "WeightedSoftWetAreaLoss",
     "get_loss_function",
 ]

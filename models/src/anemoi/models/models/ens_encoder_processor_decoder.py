@@ -36,6 +36,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
+        n_step_input: int,
+        n_step_output: int,
     ) -> None:
         self.condition_on_residual = DotDict(model_config).model.condition_on_residual
         super().__init__(
@@ -43,6 +45,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
         )
 
     def _build_networks(self, model_config):
@@ -183,12 +187,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ensemble_size = self._get_consistent_dim(x, 2)
 
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = {}
+        in_out_sharded = self._resolve_in_out_sharded(
+            dataset_names=dataset_names,
+            grid_shard_shapes=grid_shard_shapes,
+        )
         for dataset_name in dataset_names:
-            if grid_shard_shapes is None:
-                in_out_sharded[dataset_name] = False
-            else:
-                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         fcstep = min(1, fcstep)
@@ -198,7 +201,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_data_latent_dict = {}
         shard_shapes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
@@ -279,7 +282,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_ens_size,
                 shard_shapes=(shard_shapes_hidden, shard_shapes_data_dict[dataset_name]),
                 edge_attr=decoder_edge_attr,

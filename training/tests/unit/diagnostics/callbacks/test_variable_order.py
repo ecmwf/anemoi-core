@@ -245,7 +245,7 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     dataset_name = "test_dataset"
-    model.config = types.SimpleNamespace(
+    module.config = types.SimpleNamespace(
         training=types.SimpleNamespace(
             update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
         ),
@@ -263,4 +263,4 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
     module.on_load_checkpoint(mock_checkpoint)
 
     # Assert
-    assert model._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
+    assert module._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}

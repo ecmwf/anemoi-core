@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
+import einops
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -15,7 +15,6 @@ from omegaconf import DictConfig
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
-from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
@@ -371,7 +370,6 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
             "scalers": ["*", "!test"],
         }
     )
-    # TODO(@all): not all spectral loss functions need x_dim/y_dim as args
     loss = get_loss_function(
         DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
@@ -381,8 +379,6 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
 
 
 def test_logfft2dist_loss() -> None:
-    import einops
-
     """Test that LogFFT2Distance can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
@@ -412,14 +408,12 @@ def test_logfft2dist_loss() -> None:
     assert loss_total.numel() == 1, "Expected a single aggregated loss value"
 
     # wrong grid size should fail (FFT2D reshape/assert)
-    wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
 
 
 def test_fcl_loss() -> None:
-    import einops
-
     """Test that FourierCorrelationLoss can be instantiated and validates input shape."""
     loss = get_loss_function(
         DictConfig(
@@ -435,7 +429,7 @@ def test_fcl_loss() -> None:
     assert hasattr(loss.transform, "x_dim")
     assert hasattr(loss.transform, "y_dim")
 
-    right = (torch.ones((6, 1, 710 * 640, 2)), torch.zeros((6, 1, 710 * 640, 2)))
+    right = (torch.ones((6, 1, 1, 710 * 640, 2)), torch.zeros((6, 1, 1, 710 * 640, 2)))
 
     loss_value = loss(*right, squash=False)
     assert isinstance(loss_value, torch.Tensor)
@@ -445,9 +439,17 @@ def test_fcl_loss() -> None:
     assert isinstance(loss_total, torch.Tensor)
     assert loss_total.numel() == 1, "Expected a single aggregated loss value"
 
-    wrong = (torch.ones((6, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 710 * 640 + 1, 2)))
+    wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(einops.EinopsError):
         _ = loss(*wrong, squash=True)
+
+
+def test_iter_leaf_losses_flat() -> None:
+    """Test that iter_leaf_losses on a simple loss yields itself."""
+    loss = MSELoss()
+    leaves = list(loss.iter_leaf_losses())
+    assert len(leaves) == 1
+    assert leaves[0] is loss
 
 
 def test_octahedral_sht_loss() -> None:
@@ -593,27 +595,3 @@ def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
     out_total = loss_ignore(pred, target, squash=True)
     assert out_total.numel() == 1, "octahedral_sht: scalar CRPS expected"
     assert torch.isfinite(out_total).all(), "Expected finite scalar loss when ignore_nans=True"
-
-
-def test_combined_loss_component_metrics_report_raw_scaled_and_weighted(
-    functionalloss: type[FunctionalLoss],
-    loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-) -> None:
-    pred, target, _ = loss_inputs
-
-    first = functionalloss()
-    first.add_scaler(TensorDim.GRID, torch.tensor([2.0, 1.0, 1.0, 1.0]), name="grid")
-    second = functionalloss()
-    second.add_scaler(TensorDim.GRID, torch.tensor([3.0, 1.0, 1.0, 1.0]), name="grid")
-
-    combined = CombinedLoss(first, second, loss_weights=(0.5, 2.0))
-
-    metrics = combined.component_metrics(pred, target)
-
-    assert torch.allclose(metrics["loss_component_returndifference_raw"], torch.tensor([1.0]))
-    assert torch.allclose(metrics["loss_component_returndifference_scaled"], torch.tensor([2.0]))
-    assert torch.allclose(metrics["loss_component_returndifference_weighted"], torch.tensor([1.0]))
-
-    assert torch.allclose(metrics["loss_component_returndifference_2_raw"], torch.tensor([1.0]))
-    assert torch.allclose(metrics["loss_component_returndifference_2_scaled"], torch.tensor([3.0]))
-    assert torch.allclose(metrics["loss_component_returndifference_2_weighted"], torch.tensor([6.0]))

@@ -81,40 +81,14 @@ class SWA(BaseModel):
 class OptimizationSchema(BaseModel):
     """Optimizer and LR scheduler configuration."""
 
-    start: NonNegativeInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(example=1)
-    "Maximum number of rollouts."
-    reset_epoch: NonNegativeInt | None = Field(default=None, example=14)
-    "Absolute trainer epoch to treat as rollout epoch 0 when resuming."
-
-
-class LR(BaseModel):
-    """Learning rate configuration.
-
-    Changes in per-gpu batch_size should come with a rescaling of the local_lr,
-    in order to keep a constant global_lr global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model.
-    """
-
-    rate: NonNegativeFloat = Field(example=0.625e-4)  # TODO(Helen): Could be computed by pydantic
-    "Initial learning rate. Is adjusteed according to the hardware configuration"
-    iterations: NonNegativeInt = Field(example=300000)
-    "Number of iterations."
-    min: NonNegativeFloat = Field(example=3e-7)
-    "Minimum learning rate."
-    warmup: NonNegativeInt = Field(example=1000)
-    "Number of warm up iteration. Default to 1000."
-
-
-class OptimizerSchema(PydanticBaseModel):
-    """Choosing the PydanticBaseModel to allow extra inputs."""
-
-    model_config = ConfigDict(extra="allow")
-
-    target_: str = Field(..., alias="_target_")
-    """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
+    lr: NonNegativeFloat = Field(example=0.625e-4)
+    "Base learning rate per GPU. Scaled by hardware config at runtime."
+    optimizer: OptimizerSchema
+    """Hydra instantiation config for the optimizer."""
+    lr_scheduler: LRSchedulerSchema | None = None
+    """Hydra instantiation config for the LR scheduler. If None, no scheduler is used."""
+    pl_lr_scheduler: PLSchedulerSchema = Field(default_factory=PLSchedulerSchema)
+    """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
 
 
 class ExplicitTimes(BaseModel):
@@ -170,20 +144,7 @@ class NaNMaskScalerSchema(BaseModel):
     "Flag to include processors for tendencies when building the loss mask."
 
 
-class QCFlagsLossScalerSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.scalers.QCFlagsLossScaler"] = Field(..., alias="_target_")
-    qc_var_name: str = Field(default="qc_flags")
-    bit_weights: dict[int, float] | None = Field(default=None)
-    bit_names: dict[int, str] | None = Field(default=None)
-    invalid_bit_indices: list[int] | None = Field(default=None)
-    invalid_weight: float = Field(default=0.0)
-    default_weight: float = Field(default=1.0)
-    min_weight: float = Field(default=0.0)
-    max_weight: float = Field(default=1.0)
-    source_attribute: str = Field(default="last_qc_flags")
-
-
-class TendencyScalerTargets(str, Enum):
+class TendencyScalerTargets(StrEnum):
     stdev = "anemoi.training.losses.scalers.StdevTendencyScaler"
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
 
@@ -235,8 +196,6 @@ class TimeStepScalerSchema(BaseModel):
 
 class UniformTimeStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
-    multistep_output: PositiveInt = Field(example=5)
-    "Number of output time steps."
 
 
 class LeadTimeDecayScalerSchema(BaseModel):
@@ -277,7 +236,6 @@ ScalerSchema = (
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
     | NaNMaskScalerSchema
-    | QCFlagsLossScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
     | UniformTimeStepScalerSchema
@@ -301,7 +259,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
     spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
-    optical_flow = "anemoi.training.losses.optical_flow.OpticalFlowConsistencyLoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -324,8 +281,6 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     alpha: float = 1.0
     """Factor for linear combination of fair (unbiased, ensemble variance component
     weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
-    alpha_scaler_name: str | None = None
-    "Optional scaler name whose values are used directly as the local alpha map."
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
@@ -363,17 +318,8 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
-class OpticalFlowConsistencyLossSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.optical_flow.OpticalFlowConsistencyLoss"] = Field(..., alias="_target_")
-    x_dim: int
-    y_dim: int
-
-    class Config(BaseModel.Config):
-        extra = "allow"
-
-
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema | OpticalFlowConsistencyLossSchema] = Field(min_length=1)
+    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -407,7 +353,6 @@ LossSchemas = (
     | AlmostFairKernelCRPSSchema
     | KernelCRPSSchema
     | SpectralLossSchema
-    | OpticalFlowConsistencyLossSchema
     | MultiScaleLossSchema
 )
 
@@ -425,10 +370,6 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
     "Number of GPUs per reader group. Defaults to number of GPUs."
-    static_graph: bool | None = Field(default=None, example=True)
-    "Override DDP static graph mode. Defaults to the trainer heuristic when unset."
-    find_unused_parameters: bool | None = Field(default=None, example=False)
-    "Enable DDP unused-parameter detection when some branches do not contribute to loss on every step."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -455,7 +396,7 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
+    "This flag picks a task to train for, examples: forecaster, autoencoder, temporal_downscaler.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -473,15 +414,8 @@ class BaseTrainingSchema(BaseModel):
     " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
-    multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model.
-    E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
-    multistep_output: PositiveInt = Field(example=1, default=1)
-    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
-    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)].
-    During rollout, if multistep_output > multistep_input, only the latest multistep_input outputs
-    are fed into the next step."""
+    preferred_blas_backend: str | None = Field(default=None)
+    "Optionally override PyTorch's default BLAS backend."
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
@@ -495,8 +429,6 @@ class BaseTrainingSchema(BaseModel):
     "Config for stochastic weight averaging."
     training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
-    training_loss_postprocessed: bool = False
-    "Apply the training loss after postprocessing outputs back to physical space."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
     scalers: DatasetDict[dict[str, ScalerSchema]]
@@ -542,36 +474,7 @@ class DiffusionTendencyTrainingSchema(BaseTrainingSchema):
     "Training objective."
 
 
-class InterpolationSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-    target_forcing: DatasetDict[TargetForcing]
-    "Forcing parameters for target output times."
-
-
-class AutoencoderSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
-    "Training objective."
-
-
-class InterpolationMultiSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-    target_forcing: None
-    "Forcing parameters not applied for multi-outputs."
-
-
 TrainingSchema = Annotated[
-    ForecasterSchema
-    | ForecasterEnsSchema
-    | InterpolationSchema
-    | InterpolationMultiSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema
-    | AutoencoderSchema,
-    Discriminator("model_task"),
+    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendencyTrainingSchema,
+    Discriminator("training_method"),
 ]

@@ -8,20 +8,30 @@
 # nor does it submit to any jurisdiction.
 
 
+from __future__ import annotations
+
 import logging
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.data.grid_indices import BaseGridIndices
-from anemoi.training.data.multidataset import MultiDataset
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.relative_time_indices import compute_model_relative_date_indices
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.relative_time_indices import parse_dataset_time_indices_config
+from anemoi.training.data.relative_time_indices import resolve_relative_date_indices
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
+
+if TYPE_CHECKING:
+    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.tasks.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,8 +78,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        n_step_output = self.config.training.multistep_output
-        lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
+        lead_times = [frequency_to_string(offset) for offset in self.task.get_output_offsets()]
 
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.datasets.items():
@@ -92,13 +101,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return supporting arrays from all training datasets."""
-        supporting_arrays = self.ds_train.supporting_arrays
-        for dataset_name, grid_indices in self.grid_indices.items():
-            if dataset_name in supporting_arrays:
-                supporting_arrays[dataset_name] = supporting_arrays[dataset_name] | grid_indices.supporting_arrays
-            else:
-                supporting_arrays[dataset_name] = grid_indices.supporting_arrays
-        return supporting_arrays
+        return self.ds_train.supporting_arrays
 
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
@@ -115,98 +118,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         timestep = frequency_to_timedelta(self.config.data.timestep)
         return frequency_to_string(timestep * step)
 
-    def _dataset_time_indices_config(self) -> dict[str, dict[str, list[int]]] | None:
-        cfg = getattr(self.config.training, "dataset_time_indices", None)
-        if cfg is None:
-            return None
-
-        if hasattr(cfg, "get"):
-            cfg = cfg.get("datasets", cfg)
-
-        if not hasattr(cfg, "items"):
-            msg = "`training.dataset_time_indices` must be a mapping, optionally under key `datasets`."
-            raise ValueError(msg)
-
-        parsed: dict[str, dict[str, list[int]]] = {}
-        for dataset_name, dataset_cfg in cfg.items():
-            if not hasattr(dataset_cfg, "get"):
-                raise ValueError(
-                    f"`training.dataset_time_indices[{dataset_name}]` must define `input` and `target` lists."
-                )
-
-            raw_input = dataset_cfg.get("input", None)
-            raw_target = dataset_cfg.get("target", None)
-            if raw_input is None or raw_target is None:
-                raise ValueError(
-                    f"`training.dataset_time_indices[{dataset_name}]` must define both `input` and `target`."
-                )
-
-            input_indices = [int(value) for value in raw_input]
-            target_indices = [int(value) for value in raw_target]
-            if len(input_indices) == 0:
-                raise ValueError(
-                    f"`training.dataset_time_indices[{dataset_name}]` requires a non-empty `input` list."
-                )
-
-            parsed[str(dataset_name)] = {"input": input_indices, "target": target_indices}
-
-        return parsed if len(parsed) > 0 else None
-
-    def _default_relative_date_indices(self, val_rollout: int = 1) -> list[int]:
-        if hasattr(self.config.training, "explicit_times"):
-            input_times = [int(v) for v in self.config.training.explicit_times.input]
-            if len(input_times) == 0:
-                raise ValueError("`training.explicit_times.input` cannot be empty.")
-
-            target_offsets = [int(v) for v in self.config.training.explicit_times.target]
-            anchor = max(input_times)
-            target_times = [anchor + offset for offset in target_offsets]
-            return sorted(set(input_times + target_times))
-
-        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
-
-        rollout_max = getattr(rollout_cfg, "max", None)
-        rollout_start = getattr(rollout_cfg, "start", 1)
-        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
-
-        rollout_value = rollout_start
-        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
-            rollout_value = rollout_max
-        else:
-            LOGGER.warning("Falling back rollout to: %s", rollout_value)
-
-        rollout = max(rollout_value, val_rollout)
-        n_step_input = self.config.training.multistep_input
-        n_step_output = self.config.training.multistep_output
-        time_range = n_step_input + rollout * n_step_output
-        return list(range(time_range))
-
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
+    def relative_date_indices(self, mode: str = "training") -> list:
         """Determine a list of relative time indices to load for each batch."""
-        relative_indices = set(self._default_relative_date_indices(val_rollout))
-        dataset_time_indices = self._dataset_time_indices_config()
-        if dataset_time_indices is None:
-            return sorted(relative_indices)
-
-        for dataset_cfg in dataset_time_indices.values():
-            relative_indices.update(int(value) for value in dataset_cfg["input"])
-            relative_indices.update(int(value) for value in dataset_cfg["target"])
-
-        return sorted(relative_indices)
-
-    @cached_property
-    def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
-        """Initialize grid indices for spatial sharding for each dataset."""
-        grid_indices_dict = {}
-
-        # Each dataset can have its own grid indices configuration
-        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
-        for dataset_name, grid_config in grid_indices_config.items():
-            grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
-            grid_indices.setup(self.graph_data)
-            grid_indices_dict[dataset_name] = grid_indices
-
-        return grid_indices_dict
+        return resolve_relative_date_indices(self.config, task=self.task, mode=mode, logger=LOGGER)
 
     @cached_property
     def ds_train(self) -> MultiDataset:
@@ -233,12 +147,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         debug_cfg = getattr(self.config.dataloader, "debug", {})
         time_index_mode = getattr(debug_cfg, "time_index_mode", "dense")
         time_index_anchor_dataset = getattr(debug_cfg, "time_index_anchor_dataset", None)
+        dataset_time_indices = parse_dataset_time_indices_config(self.config)
+        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        model_relative_date_indices = compute_model_relative_date_indices(self.task, mode=label)
+        relative_date_indices: list | dict[str, list[int]]
+        if model_relative_date_indices is not None:
+            relative_date_indices = model_relative_date_indices
+        else:
+            relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
         return MultiDataset(
-            data_readers=datasets,
-            relative_date_indices=self.relative_date_indices(val_rollout),
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
             timestep=self.config.data.timestep,
             multistep_window=getattr(self.config.training, "multistep_window", None),
-            explicit_time_indices_by_dataset=self._dataset_time_indices_config(),
+            explicit_time_indices_by_dataset=dataset_time_indices,
             time_index_mode=time_index_mode,
             time_index_anchor_dataset=time_index_anchor_dataset,
             shuffle=shuffle,
@@ -283,34 +205,42 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
+        def _dataset_timing_metadata(dataset: MultiDataset, label: str) -> dict[str, list[int] | dict[str, list[int]]]:
+            return {
+                f"relative_date_indices_{label}": [int(v) for v in dataset.model_relative_date_indices.tolist()],
+                f"relative_date_input_indices_{label}_by_dataset": {
+                    name: [int(v) for v in dataset.input_model_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_input_indices_{label}_native_by_dataset": {
+                    name: [int(v) for v in dataset.input_data_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_indices_{label}_by_dataset": {
+                    name: [int(v) for v in dataset.model_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_indices_{label}_native_by_dataset": {
+                    name: [int(v) for v in dataset.data_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_target_indices_{label}_by_dataset": {
+                    name: [int(v) for v in dataset.target_model_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_target_indices_{label}_native_by_dataset": {
+                    name: [int(v) for v in dataset.target_data_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+            }
+
         timesteps = {
-            "relative_date_indices_training": [int(v) for v in self.relative_date_indices()],
-            "relative_date_input_indices_training_by_dataset": {
-                name: [int(v) for v in self.ds_train.input_model_relative_date_indices_by_dataset[name].tolist()]
-                for name in self.dataset_names
-            },
-            "relative_date_input_indices_training_native_by_dataset": {
-                name: [int(v) for v in self.ds_train.input_data_relative_date_indices_by_dataset[name].tolist()]
-                for name in self.dataset_names
-            },
-            "relative_date_indices_training_by_dataset": {
-                name: [int(v) for v in self.ds_train.model_relative_date_indices_by_dataset[name].tolist()]
-                for name in self.dataset_names
-            },
-            "relative_date_indices_training_native_by_dataset": {
-                name: [int(v) for v in self.ds_train.data_relative_date_indices_by_dataset[name].tolist()]
-                for name in self.dataset_names
-            },
-            "relative_date_target_indices_training_by_dataset": {
-                name: [int(v) for v in self.ds_train.target_model_relative_date_indices_by_dataset[name].tolist()]
-                for name in self.dataset_names
-            },
-            "relative_date_target_indices_training_native_by_dataset": {
-                name: [int(v) for v in self.ds_train.target_data_relative_date_indices_by_dataset[name].tolist()]
-                for name in self.dataset_names
-            },
+            **_dataset_timing_metadata(self.ds_train, "training"),
             "timestep": self.config.data.timestep,
         }
+        if len(self.valid_dataloader_config) > 0:
+            timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
+
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
             metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps

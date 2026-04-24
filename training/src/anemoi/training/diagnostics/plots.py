@@ -28,8 +28,8 @@ from scipy.interpolate import griddata
 from torch import Tensor
 
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.training.diagnostics.maps import EquirectangularProjection
 from anemoi.training.diagnostics.maps import map_features
+from anemoi.training.diagnostics.projections import Projection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -491,7 +491,7 @@ def plot_predicted_multilevel_flat_sample(
     datashader: bool = False,
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
-    dpi: int = 100,
+    projection_kind: str = "equirectangular",
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -530,8 +530,19 @@ def plot_predicted_multilevel_flat_sample(
     """
     n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
 
+    # Datashader does not support Cartopy transform; use equirectangular (regular axes)
+    plot_kind = "equirectangular" if datashader else projection_kind
+    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
+
     figsize = (n_plots_y * 4, n_plots_x * 3)
-    fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, dpi=dpi, layout=LAYOUT)
+    subplot_kw = {"projection": proj} if proj is not None else {}
+    fig, axs = plt.subplots(
+        n_plots_x,
+        n_plots_y,
+        figsize=figsize,
+        layout=LAYOUT,
+        subplot_kw=subplot_kw,
+    )
 
     if colormaps is None:
         colormaps = {}
@@ -814,10 +825,10 @@ def single_plot(
 
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
-        # Use a higher datashader raster size to reduce visible blur on wide multi-panel plots.
-        lower_limit = 50
-        upper_limit = 1000
-        n_pixels = max(min(int(np.floor(data.shape[0] * 0.006)), upper_limit), lower_limit)
+        # Adjust binning to match the resolution of the data
+        lower_limit = 25
+        upper_limit = 500
+        n_pixels = max(min(int(np.floor(data.shape[0] * 0.004)), upper_limit), lower_limit)
         psc = dsshow(
             df,
             dsh.Point("x", "y"),
@@ -830,15 +841,16 @@ def single_plot(
             ax=ax,
         )
 
+    ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
+    dy, dx = ymax - ymin, xmax - xmin
+    ybuffer, xbuffer = dy * 0.05, dx * 0.05
     if transform is not None:
-        ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
+        ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=transform)
     else:
-        xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-        ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-        ax.set_xlim((xmin - 0.1, xmax + 0.1))
-        ax.set_ylim((ymin - 0.1, ymax + 0.1))
+        ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
+        ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
 
-    # Add map features
+    # Add map features (always equirectangular coastlines/borders)
     map_features.plot(ax)
 
     if title is not None:

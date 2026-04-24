@@ -9,7 +9,6 @@
 
 from .base_scaler import TensorDim
 from .loss_weights_mask import NaNMaskScaler
-from .qc_flags import QCFlagsLossScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
@@ -32,7 +31,6 @@ __all__ = [
     "LeadTimeDecayScaler",
     "LinearVariableLevelScaler",
     "NaNMaskScaler",
-    "QCFlagsLossScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
     "PolynomialVariableLevelScaler",

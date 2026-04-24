@@ -119,7 +119,7 @@ Some loss functions operate in spectral space rather than directly in grid-point
 This is useful when the error characteristics are better expressed by scale (wavenumber)
 than by location, or when the loss should emphasise/regularise specific ranges of scales.
 
-In Anemoi, spectral losses follow the same API as other losses (scalars/node weights, reduction,
+In Anemoi, spectral losses follow the same API as other losses (scalers/node weights, reduction,
 etc.), but they additionally require a *spectral transform* configuration.
 
 Spectral transforms
@@ -133,9 +133,9 @@ Supported transforms include:
   known ``x_dim`` and ``y_dim``.
 * ``DCT2D``: 2D Discrete Cosine Transform for regular 2D fields. This transform requires
   the optional dependency ``torch-dct``.
-* ``EcTransOctahedralSHT``: Spherical Harmonic Transform (SHT) on the *octahedral reduced
-  Gaussian grid* using ecTrans assets (via precomputed ``npz`` assets, or generated with
-  ``ectrans4py`` if available).
+* ``ReducedSHT``: Spherical harmonic transform (SHT) on ECMWF's traditional reduced Gaussian grid. This can handle the
+  native grid of ERA5 such as N320.
+* ``OctahedralSHT``: Spherical harmonic transform (SHT) on the octahedral reduced Gaussian grid.
 
 .. note::
 
@@ -171,25 +171,22 @@ Use this for limited-area or other regular 2D fields that can be reshaped to
          x_dim: 256
          y_dim: 128
 
-Example configuration (octahedral SHT via ecTrans assets)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Example configuration (reduced Gaussian grid SHT)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Use this for global models on the octahedral reduced grid:
+Use this for global models on the reduced Gaussian grid (only N320 supported so far):
 
 .. code-block:: yaml
 
    training_loss:
      datasets:
        your_dataset_name:
-         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
-         transform: ectrans_octahedral_sht
-         truncation: 127
-         # Path to precomputed Legendre polynomials / weights.
-         # If the file does not exist, assets can optionally be generated when `ectrans4py`
-         # is installed and the path is writable.
-         filepath: /path/to/ectrans_assets_T127.npz
-         # Optional: control transform dtype
-         dtype: float32
+         _target_: anemoi.training.losses.SpectralCRPSLoss
+         transform: reduced_sht
+         grid: n320
+
+Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
+This truncation parameter defines how many wave numbers are included in the spectral representation.
 
 Combining spectral and grid-point losses
 ----------------------------------------

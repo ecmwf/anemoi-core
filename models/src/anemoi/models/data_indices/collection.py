@@ -164,16 +164,6 @@ class IndexCollection:
 
         # Find common keys
         common_keys = keys1 & keys2
-        ordered_common_in_model = [
-            key
-            for key, _ in sorted(ckpt_name_to_index.items(), key=operator.itemgetter(1))
-            if key in common_keys
-        ]
-        ordered_common_in_data = [
-            key
-            for key, _ in sorted(data_name_to_index.items(), key=operator.itemgetter(1))
-            if key in common_keys
-        ]
 
         # Compare values for common keys
         different_values = {
@@ -191,20 +181,6 @@ class IndexCollection:
             LOGGER.warning("Variables only in model: %s", only_in_model)
         if only_in_data:
             LOGGER.warning("Variables only in data: %s", only_in_data)
-
-        if (
-            common_keys
-            and ordered_common_in_model == ordered_common_in_data
-            and (
-                (not only_in_model and len(common_keys) == len(keys1))
-                or (not only_in_data and len(common_keys) == len(keys2))
-            )
-        ):
-            LOGGER.warning(
-                "Variables were added or removed, but the common variable order is preserved. Continuing with training.",
-            )
-            return
-
         if set(only_in_model.values()) == set(only_in_data.values()):
             # This checks if the order is the same, but the naming is different. This is not be treated as an error.
             LOGGER.warning(

@@ -8,15 +8,35 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
+
 import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
 
+LOGGER = logging.getLogger(__name__)
+
 
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
     r"""Helper routine which returns the Legendre-Gauss nodes and weights
     on the interval [a, b].
+
+    Parameters
+    ----------
+    n : int
+        Number of latitudes at weight to compute weights and latitudes.
+    a : float, optional
+        Left endpoint of the interval. Default is -1.0.
+    b : float, optional
+        Right endpoint of the interval. Default is 1.0.
+
+    Returns
+    -------
+    xlg : np.ndarray
+        Legendre-Gauss nodes (latitudes) on the interval [a, b].
+    wlg : np.ndarray
+        Legendre-Gauss weights on the interval [a, b].
     """
 
     xlg, wlg = np.polynomial.legendre.leggauss(n)
@@ -33,9 +53,23 @@ def legpoly(
     inverse: bool = False,
 ) -> np.ndarray:
     r"""Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
-    The resulting tensor has shape (mmax, lmax, len(x)).
+    The resulting tensor has shape (mmax + 1, lmax + 1, len(x)).
 
-    Note: this is derived from the version in torch-harmonics.
+    Parameters
+    ----------
+    mmax : int
+        Maximum zonal wavenumber. mmax + 1 is used to size the Legendre polynomials array.
+    lmax : int
+        Maximum total wavenumber. lmax + 1 is used to size the Legendre polynomials array.
+    x : np.ndarray
+        Points at which to evaluate the Legendre polynomials. Should be in the range [-1, 1].
+    inverse : bool, optional
+        Whether to invert the normalisation factor or not. Should be set to True for the inverse Legendre transform and
+        False for the forward Legendre transform. Default is False.
+
+    Notes
+    -----
+    This is derived from the version in torch-harmonics.
 
     Method of computation follows
     [1] Schaeffer, N.; Efficient spherical harmonic transforms aimed at pseudospectral numerical simulations, G3:
@@ -47,40 +81,83 @@ def legpoly(
 
     # Compute the tensor P^m_n:
     nmax = max(mmax, lmax)
-    vdm = np.zeros((nmax, nmax, len(x)), dtype=np.float64)
+    vdm = np.zeros((nmax + 1, nmax + 1, len(x)), dtype=np.float64)
 
     norm_factor = np.sqrt(4 * np.pi)
     norm_factor = 1.0 / norm_factor if inverse else norm_factor
     vdm[0, 0, :] = norm_factor / np.sqrt(4 * np.pi)
 
     # Fill the diagonal and the lower diagonal
-    for n in range(1, nmax):
+    for n in range(1, nmax + 1):
         vdm[n - 1, n, :] = np.sqrt(2 * n + 1) * x * vdm[n - 1, n - 1, :]
         vdm[n, n, :] = np.sqrt((2 * n + 1) * (1 + x) * (1 - x) / 2 / n) * vdm[n - 1, n - 1, :]
 
     # Fill the remaining values on the upper triangle and multiply b
-    for n in range(2, nmax):
+    for n in range(2, nmax + 1):
         for m in range(0, n - 1):
             vdm[m, n, :] = (
                 x * np.sqrt((2 * n - 1) / (n - m) * (2 * n + 1) / (n + m)) * vdm[m, n - 1, :]
                 - np.sqrt((n + m - 1) / (n - m) * (2 * n + 1) / (2 * n - 3) * (n - m - 1) / (n + m)) * vdm[m, n - 2, :]
             )
 
-    vdm = vdm[:mmax, :lmax]
+    vdm = vdm[: mmax + 1, : lmax + 1]
 
     return vdm
 
 
 class SphericalHarmonicTransform(Module):
+    r"""Generic class for performing direct (AKA forward) transforms from a global gridded tensor to a space with a
+    spherical harmonic basis.
 
-    def __init__(self, nlat: int, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+    Attributes
+    ----------
+    lons_per_lat : list[int]
+        Number of longitudinal points on each latitude ring, from pole to pole.
+    nlat : int
+        Number of latitudes in the grid, from pole to pole.
+    truncation : int
+        Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
+    n_grid_points : int
+        Total number of grid points in the global grid.
+    slon : list[int]
+        Starting index of each latitude ring in the flattened grid dimension.
+    rlon : list[int]
+        Number of zeros to add to the end of each rFFT output, so that each zonal wavenumber Legendre transform has the
+        same shape.
+
+    Methods
+    -------
+    rfft_rings_reduced(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+    rfft_rings_regular(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a regular grid.
+    forward(x: Tensor) -> Tensor
+        Performs direct SHT transform (Fourier transform followed by Legendre transform).
+
+    Notes
+    -----
+    Inspired by the SHT in Nvidia's torch-harmonics.
+    """
+
+    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+        r"""Initializes SphericalHarmonicTransform.
+
+        Parameters
+        ----------
+        lons_per_lat : list[int]
+            Number of longitudinal points on each latitude ring, from pole to pole.
+        truncation : int
+            Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
+        """
 
         super().__init__()
 
-        self.lmax = lmax or nlat
-        self.mmax = mmax or nlat
-        self.nlat = nlat
         self.lons_per_lat = lons_per_lat
+        self.nlat = len(self.lons_per_lat)
+        self.truncation = truncation
+        assert (
+            0 < self.truncation <= self.nlat
+        ), f"Truncation {self.truncation} must be between 1 and number of latitudes {self.nlat}"
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Set offsets to start of each latitude in flattened grid dimension
@@ -90,14 +167,19 @@ class SphericalHarmonicTransform(Module):
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
         # Use more efficient batched rfft for regular grids
-        self.rfft_rings = self.rfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.rfft_rings_regular
+        if len(set(self.lons_per_lat)) > 1:
+            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
+            self.rfft_rings = self.rfft_rings_reduced
+        else:
+            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
+            self.rfft_rings = self.rfft_rings_regular
 
         # Compute Gaussian latitudes and quadrature weights
-        theta, weight = legendre_gauss_weights(nlat)
+        theta, weight = legendre_gauss_weights(self.nlat)
         theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
-        pct = legpoly(self.mmax, self.lmax, np.cos(theta))
+        pct = legpoly(self.truncation, self.truncation, np.cos(theta))
         pct = torch.from_numpy(pct)
 
         # Premultiple associated Legendre polynomials by quadrature weights
@@ -126,7 +208,7 @@ class SphericalHarmonicTransform(Module):
             self.nlat,
             max(self.lons_per_lat) // 2 + 1,
             device=x.device,
-            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128
+            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128,
         )
 
         # Do a real-to-complex FFT on each latitude
@@ -168,8 +250,8 @@ class SphericalHarmonicTransform(Module):
         x = 2.0 * torch.pi * self.rfft_rings(x)
         x = torch.view_as_real(x)
 
-        rl = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 0], self.weight.to(x.dtype))
-        im = torch.einsum("...km, mlk -> ...lm", x[..., : self.mmax, 1], self.weight.to(x.dtype))
+        rl = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 0], self.weight.to(x.dtype))
+        im = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 1], self.weight.to(x.dtype))
 
         x = torch.stack((rl, im), -1)
         x = torch.view_as_complex(x)
@@ -178,27 +260,68 @@ class SphericalHarmonicTransform(Module):
 
 
 class InverseSphericalHarmonicTransform(Module):
+    r"""Generic class for performing inverse (AKA backward) transforms from a spectral representation to a global gridded
+    tensor.
 
-    def __init__(self, nlat: int, lons_per_lat: list[int], lmax: int | None = None, mmax: int | None = None) -> None:
+    Attributes
+    ----------
+    truncation : int
+        Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
+    nlat : int
+        Number of latitudes in the grid, from pole to pole.
+    lons_per_lat : list[int]
+        Number of longitudinal points on each latitude ring, from pole to pole.
+    n_grid_points : int
+        Total number of grid points in the global grid.
+
+    Methods
+    -------
+    irfft_rings_reduced(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+    irfft_rings_regular(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
+    forward(x: Tensor) -> Tensor
+        Performs inverse SHT transform (inverse Legendre transform followed by inverse Fourier transform).
+
+    Notes
+    -----
+    Inspired by the SHT in Nvidia's torch-harmonics.
+    """
+
+    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+        r"""Initializes InverseSphericalHarmonicTransform.
+
+        Parameters
+        ----------
+        lons_per_lat : list[int]
+            Number of longitudinal points on each latitude ring, from pole to pole.
+        truncation : int
+            Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
+        """
 
         super().__init__()
 
-        self.lmax = lmax or nlat
-        self.mmax = mmax or nlat
+        nlat = len(lons_per_lat)
 
+        self.truncation = truncation
         self.nlat = nlat
         self.lons_per_lat = lons_per_lat
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Use more efficient batched rfft for regular grids
-        self.irfft_rings = self.irfft_rings_reduced if len(set(self.lons_per_lat)) > 1 else self.irfft_rings_regular
+        if len(set(self.lons_per_lat)) > 1:
+            LOGGER.info("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
+            self.irfft_rings = self.irfft_rings_reduced
+        else:
+            LOGGER.info("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
+            self.irfft_rings = self.irfft_rings_regular
 
         # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
         theta, _ = legendre_gauss_weights(nlat)
         theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
-        pct = legpoly(self.mmax, self.lmax, np.cos(theta), inverse=True)
+        pct = legpoly(self.truncation, self.truncation, np.cos(theta), inverse=True)
         pct = torch.from_numpy(pct)
 
         self.register_buffer("pct", pct, persistent=False)

@@ -47,7 +47,11 @@ class MultiscaleLossWrapper(BaseLoss):
         weights : list[float]
             Per-scale loss weights
         keep_batch_sharded : bool
-            Whether to keep the batch sharded during loss computation
+            Whether the task should keep the batch grid-sharded during loss
+            computation. When enabled, the task passes shard-layout metadata to
+            this wrapper and multiscale smoothing follows the sharded path.
+            If disabled, the loss is evaluated on replicated full-grid tensors
+            on each model rank.
         loss_matrices_path : Path | str | None
             Path to the directory containing smoothing matrices
         loss_matrices : list[Path | str] | None
@@ -155,12 +159,12 @@ class MultiscaleLossWrapper(BaseLoss):
                 Target shard shapes for later gathering
         """
         batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
-        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) g (c t)")
+        y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) t g c")
         shard_shapes = apply_shard_shapes(y_pred_ens_interp, grid_dim, grid_shard_shapes)
         y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, group)
         y_pred_ens_interp = einops.rearrange(
             y_pred_ens_interp,
-            "(b e) g (c t) -> b t e g c",
+            "(b e) t g c -> b t e g c",
             b=batch_size,
             e=ensemble_size,
             t=out_times,

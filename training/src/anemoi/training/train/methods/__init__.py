@@ -7,22 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .autoencoder import GraphAutoEncoder
-from .diffusionforecaster import GraphDiffusionForecaster
-from .diffusionforecaster import GraphDiffusionTendForecaster
-from .ensforecaster import GraphEnsForecaster
-from .forecaster import GraphForecaster
-from .interpolator import GraphInterpolator
-from .interpolator import GraphMultiOutInterpolator
-from .nowcaster import GraphNowcaster
+from .diffusion import DiffusionTendencyTraining
+from .diffusion import DiffusionTraining
+from .ensemble import EnsembleTraining
+from .single import SingleTraining
 
 __all__ = [
-    "GraphAutoEncoder",
-    "GraphDiffusionForecaster",
-    "GraphDiffusionTendForecaster",
-    "GraphEnsForecaster",
-    "GraphForecaster",
-    "GraphInterpolator",
-    "GraphMultiOutInterpolator",
-    "GraphNowcaster",
+    "DiffusionTendencyTraining",
+    "DiffusionTraining",
+    "EnsembleTraining",
+    "SingleTraining",
 ]

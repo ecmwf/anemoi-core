@@ -44,6 +44,7 @@ class MapperConfig:
     num_chunks: int = 2
     num_heads: int = 16
     mlp_hidden_ratio: int = 7
+    attn_channels: int | None = None
     qk_norm: bool = True
     cpu_offload: bool = False
     layer_kernels: field(default_factory=DotDict) = None

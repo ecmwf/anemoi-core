@@ -16,13 +16,12 @@ import torch.fft
 import torch.nn.functional as F
 
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
 
 class SpectralTransform(torch.nn.Module):
-    """Base class for spectral transforms."""
+    """Abstract base class for spectral transforms."""
 
     @abc.abstractmethod
     def forward(
@@ -142,9 +141,7 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = torch.index_select(
-            data, TensorDim.GRID, torch.arange(*self.nodes_slice.indices(data.size(TensorDim.GRID)), device=data.device)
-        )
+        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
         var = data.shape[-1]
         try:
@@ -218,18 +215,25 @@ class RegularSHT(SpectralTransform):
     def __init__(
         self,
         nlat: int,
-        nlon: int,
+        truncation: int | None = None,
         **kwargs,
     ) -> None:
+        """SHT on a regular lon-lat grid.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes in the regular grid.
+        truncation : int | None
+            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        """
         super().__init__()
         self.nlat = nlat
-        self.nlon = nlon
-        self.lons_per_lat = [nlon] * nlat
+        self.nlon = 2 * self.nlat
+        self.lons_per_lat = [self.nlon] * self.nlat
         self._sht = SphericalHarmonicTransform(
-            nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
         )
-        self.y_freq = self._sht.lmax
-        self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
@@ -247,17 +251,35 @@ class ReducedSHT(SpectralTransform):
     def __init__(
         self,
         grid: str,
+        truncation: int | None = None,
         **kwargs,
     ) -> None:
+        """SHT on a reduced Gaussian grid.
+
+        Parameters
+        ----------
+        grid : str
+            Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
+        truncation : int | None
+            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        """
         super().__init__()
 
-        if grid != "n320":
+        if grid not in ["n320", "N320"]:
             raise ValueError("Only the N320 reduced Gaussian grid SHT is supported.")
         else:
-            self.nlat = 640
+            self.nlat = 2 * int(grid[1:])  # N320 has 640 latitudes from pole to pole
 
         # Fetch regular grid data
-        from anemoi.transform.grids.named import lookup
+        try:
+            from anemoi.transform.grids.named import lookup
+        except ImportError:
+            raise ImportError(
+                "anemoi.transform is required for ReducedSHT transform. Install optional dependencies: pip install anemoi-models[spectra]"
+            )
+
+        # To generate a grid
+        # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
 
         lats = lookup(grid)["latitudes"]
 
@@ -268,10 +290,8 @@ class ReducedSHT(SpectralTransform):
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
-            nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
         )
-        self.y_freq = self._sht.lmax
-        self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape
@@ -289,17 +309,25 @@ class OctahedralSHT(SpectralTransform):
     def __init__(
         self,
         nlat: int,
+        truncation: int | None = None,
         **kwargs,
     ) -> None:
+        """SHT on an octahedral reduced grid.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+        truncation : int | None
+            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            nlat=self.nlat, lons_per_lat=self.lons_per_lat, lmax=self.nlat // 2, mmax=self.nlat // 2
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
         )
-        self.y_freq = self._sht.lmax
-        self.x_freq = self._sht.mmax
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         b, t, e, p, v = data.shape

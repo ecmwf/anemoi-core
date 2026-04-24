@@ -204,7 +204,8 @@ class BaseTask(ABC):
 
         dataset_names = md_dict["metadata_inference"]["dataset_names"]
         for dataset_name in dataset_names:
-            md_dict["metadata_inference"][dataset_name]["timesteps"] = timesteps
+            existing_timesteps = md_dict["metadata_inference"][dataset_name].get("timesteps", {})
+            md_dict["metadata_inference"][dataset_name]["timesteps"] = timesteps | existing_timesteps
 
 
 class BaseSingleStepTask(BaseTask):

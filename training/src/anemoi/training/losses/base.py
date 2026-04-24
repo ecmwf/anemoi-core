@@ -72,7 +72,6 @@ class BaseLoss(nn.Module, ABC):
 
         self.add_module("scaler", ScaleTensor())
 
-        self.ignore_nans = ignore_nans
         self.avg_function = torch.nanmean if ignore_nans else torch.mean
         self.sum_function = torch.nansum if ignore_nans else torch.sum
 
@@ -132,7 +131,7 @@ class BaseLoss(nn.Module, ABC):
                 "Scaler tensor must be at least applied to the GRID dimension. "
                 "Please add a scaler here, use `UniformWeights` for simple uniform scaling.",
             )
-            LOGGER.warning(error_msg)
+            raise RuntimeError(error_msg)
 
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:
@@ -171,6 +170,8 @@ class BaseLoss(nn.Module, ABC):
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
+        group : ProcessGroup | None, optional
+            Distributed group to reduce over, by default None
 
         Returns
         -------
@@ -213,27 +214,13 @@ class BaseLoss(nn.Module, ABC):
 
         return out if group is None else reduce_tensor(out, group)
 
-    def align_target_to_pred(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Broadcast deterministic targets across ensemble members when needed."""
-        if pred.ndim == target.ndim + 1:
-            target = target.unsqueeze(TensorDim.ENSEMBLE_DIM)
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Yield all leaf loss modules.
 
-        if pred.ndim != target.ndim:
-            return target
-
-        pred_ens = pred.shape[TensorDim.ENSEMBLE_DIM]
-        target_ens = target.shape[TensorDim.ENSEMBLE_DIM]
-        if pred_ens == target_ens:
-            return target
-        if target_ens == 1:
-            expand_shape = list(target.shape)
-            expand_shape[TensorDim.ENSEMBLE_DIM] = pred_ens
-            return target.expand(*expand_shape)
-
-        raise ValueError(
-            "Prediction and target ensemble dimensions are incompatible: "
-            f"pred={tuple(pred.shape)}, target={tuple(target.shape)}"
-        )
+        For simple losses, yields self. For composite losses (e.g. CombinedLoss),
+        recursively yields the underlying leaf losses.
+        """
+        yield self
 
     @property
     def name(self) -> str:
@@ -278,6 +265,10 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
+        squash_mode : str, optional
+            Reduction mode for the variable dimension, by default ``"avg"``
+        **kwargs
+            Additional keyword arguments
 
         Returns
         -------
@@ -315,7 +306,8 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,
+        squash_mode: str = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -336,6 +328,10 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
+        squash_mode : str, optional
+            Reduction mode for the variable dimension, by default ``"avg"``
+        **kwargs
+            Additional keyword arguments
 
         Returns
         -------
@@ -343,8 +339,6 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
-        target = self.align_target_to_pred(pred, target)
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-        squash_mode = kwargs.get("squash_mode", "avg")
         return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

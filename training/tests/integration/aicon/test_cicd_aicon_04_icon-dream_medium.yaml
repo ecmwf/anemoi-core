@@ -226,8 +226,6 @@ training:
   load_weights_only: False
   deterministic: false
   precision: 16-mixed
-  multistep_input: 2
-  multistep_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
@@ -419,14 +417,15 @@ dataloader:
   validation:
     datasets:
       data:
-        dataset:
-          join:
-          - ${system.input.dataset}
-          - ${system.input.forcing_dataset}
+        dataset_config:
+          dataset:
+            join:
+            - ${system.input.dataset}
+            - ${system.input.forcing_dataset}
+          frequency: ${data.frequency}
+          drop: []
         start: "2022-01-04T06:00:00"
         end: "2022-01-06T06:00:00"
-        frequency: ${data.frequency}
-        drop: []
   test:
     datasets:
       data:

@@ -55,7 +55,27 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class NativeDatasetSchema(PydanticBaseModel):
+class DatasetConfigSchema(PydanticBaseModel):
+    """Dictionary-style dataset config passed directly to open_dataset."""
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+    dataset: str | Path | dict | list[dict]
+    "Dataset source identifier."
+    frequency: Frequency | None = Field(default=None)
+    "Optional frequency requested from open_dataset."
+    drop: list[str] | None = Field(default=None)
+    "Optional list of variables to drop from the dataset."
+    select: list[str] | None = Field(default=None)
+    "Optional list of variables to select from the dataset."
+    statistics: str | Path | None = Field(default=None)
+    "Optional path to custom statistics file."
+
+    # Note this should be extended in the future to have a full schema for the keys
+    # supported by open_dataset and be moved to anemoi-datasets.
+
+
+class NativeDatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
     dataset_config: str | DatasetConfigSchema | Path | list[dict] | None = None
@@ -111,9 +131,6 @@ class DataLoaderSchema(PydanticBaseModel):
     "Validation DatasetSchema."
     test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Test DatasetSchema."
-    validation_rollout: NonNegativeInt = Field(example=1)
-    "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
-    # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])

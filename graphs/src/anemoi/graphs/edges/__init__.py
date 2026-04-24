@@ -16,14 +16,12 @@ from .builders.icon import ICONTopologicalProcessorEdges
 from .builders.knn import KNNEdges
 from .builders.knn import ReversedKNNEdges
 from .builders.multi_scale import MultiScaleEdges
-from .builders.triangulation import TriangulationEdges
 
 __all__ = [
     "KNNEdges",
     "CutOffEdges",
     "HEALPixMultiScaleEdges",
     "MultiScaleEdges",
-    "TriangulationEdges",
     "ReversedCutOffEdges",
     "ReversedKNNEdges",
     "ICONTopologicalProcessorEdges",

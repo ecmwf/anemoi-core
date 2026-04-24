@@ -21,8 +21,12 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.training.data.dataset import create_dataset
-from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.training.data.data_reader import RelativeTimeReader
+from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.data_reader import dates_to_unix_ns
+from anemoi.training.data.relative_time_indices import normalize_explicit_time_indices_config
+from anemoi.training.data import usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -35,10 +39,12 @@ class MultiDataset(IterableDataset):
     def __init__(
         self,
         data_readers: dict,
-        grid_indices: dict,
-        relative_date_indices: list,
+        relative_date_indices: list | dict[str, list[int]],
+        grid_indices: dict | None = None,
         timestep: str = "6h",
         multistep_window: str | datetime.timedelta | None = None,
+        dataset_num_inputs: dict[str, int] | None = None,
+        dataset_input_selection: dict[str, str] | None = None,
         explicit_time_indices_by_dataset: dict[str, dict[str, list[int]]] | None = None,
         time_index_mode: str = "dense",
         time_index_anchor_dataset: str | None = None,
@@ -60,12 +66,34 @@ class MultiDataset(IterableDataset):
         label : str, optional
             label for the dataset, by default "multi"
         """
-        self.data_readers = data_readers
+        self.data_readers = {
+            name: data_reader if hasattr(data_reader, "get_sample") else create_dataset(data_reader)
+            for name, data_reader in data_readers.items()
+        }
+        # Backward-compatible alias used throughout the training stack.
+        self.datasets = self.data_readers
+        self.grid_indices = grid_indices or {}
         self.label = label
         self.shuffle = shuffle
         self.timestep = timestep
-        self.dataset_names = list(data_readers.keys())
-        self.model_relative_date_indices = np.array(sorted({int(idx) for idx in relative_date_indices}), dtype=np.int64)
+        self.dataset_names = list(self.data_readers.keys())
+        self.dataset_num_inputs = {str(name): int(value) for name, value in (dataset_num_inputs or {}).items()}
+        self.dataset_input_selection = {
+            str(name): str(value).strip().lower() for name, value in (dataset_input_selection or {}).items()
+        }
+        self.relative_date_indices_are_native = hasattr(relative_date_indices, "items")
+        if self.relative_date_indices_are_native:
+            self.relative_date_indices_by_dataset = {
+                str(name): np.array(sorted({int(idx) for idx in indices}), dtype=np.int64)
+                for name, indices in relative_date_indices.items()
+            }
+            self.model_relative_date_indices = np.array(
+                sorted({int(idx) for indices in self.relative_date_indices_by_dataset.values() for idx in indices}),
+                dtype=np.int64,
+            )
+        else:
+            self.relative_date_indices_by_dataset = None
+            self.model_relative_date_indices = np.array(sorted({int(idx) for idx in relative_date_indices}), dtype=np.int64)
         if len(self.model_relative_date_indices) == 0:
             raise ValueError("`relative_date_indices` cannot be empty.")
 
@@ -84,18 +112,20 @@ class MultiDataset(IterableDataset):
             )
         self.time_index_mode = parsed_time_index_mode
         self.time_index_anchor_dataset = str(time_index_anchor_dataset) if time_index_anchor_dataset else None
-        self.explicit_time_indices_by_dataset = self._normalize_explicit_time_indices_config(
+        self.explicit_time_indices_by_dataset = normalize_explicit_time_indices_config(
             explicit_time_indices_by_dataset,
         )
+        if self.multistep_window is None:
+            self.multistep_window_seconds = None
+        elif isinstance(self.multistep_window, datetime.timedelta):
+            self.multistep_window_seconds = int(self.multistep_window.total_seconds())
+        else:
+            self.multistep_window_seconds = frequency_to_seconds(self.multistep_window)
         debug = debug or {}
         self.timing_data_enabled = bool(getattr(debug, "timing_data_enabled", False))
         self.timing_data_every = max(1, int(getattr(debug, "timing_data_every", 50)))
         self.timing_rank0_only = bool(getattr(debug, "timing_rank0_only", True))
         self._timing_sample_counter = 0
-
-        # Create each dataset
-        self.datasets = {name: create_dataset(data_reader) for name, data_reader in data_readers.items()}
-        self._dates_ns_by_dataset, self._date_to_native_index_by_dataset = self._build_dataset_date_index_maps()
 
         # Build per-dataset model/native relative indices.
         # Model relative indices are in units of `timestep`.
@@ -104,15 +134,27 @@ class MultiDataset(IterableDataset):
         self.target_model_relative_date_indices_by_dataset: dict[str, np.ndarray] = {}
         self.model_relative_date_indices_by_dataset = self._build_model_relative_indices_by_dataset()
         self.input_data_relative_date_indices_by_dataset = {
-            name: self._to_native_relative_indices(name, model_relative_indices)
+            name: (
+                model_relative_indices.astype(np.int64, copy=False)
+                if self.relative_date_indices_are_native
+                else self._to_native_relative_indices(name, model_relative_indices)
+            )
             for name, model_relative_indices in self.input_model_relative_date_indices_by_dataset.items()
         }
         self.target_data_relative_date_indices_by_dataset = {
-            name: self._to_native_relative_indices(name, model_relative_indices)
+            name: (
+                model_relative_indices.astype(np.int64, copy=False)
+                if self.relative_date_indices_are_native
+                else self._to_native_relative_indices(name, model_relative_indices)
+            )
             for name, model_relative_indices in self.target_model_relative_date_indices_by_dataset.items()
         }
         self.data_relative_date_indices_by_dataset = {
-            name: self._to_native_relative_indices(name, model_relative_indices)
+            name: (
+                model_relative_indices.astype(np.int64, copy=False)
+                if self.relative_date_indices_are_native
+                else self._to_native_relative_indices(name, model_relative_indices)
+            )
             for name, model_relative_indices in self.model_relative_date_indices_by_dataset.items()
         }
 
@@ -122,16 +164,18 @@ class MultiDataset(IterableDataset):
         else:
             self.data_relative_date_indices = np.array([], dtype=np.int64)
 
+        self._lazy_init_model_and_reader_group_info()
+        self._anchor_dataset_name = self._resolve_time_index_anchor_dataset() if self._resolved_time_index_mode() == "sparse" else None
+        self.sample_readers = self._build_sample_readers()
+        self.compute_valid_date_indices()
         LOGGER.info(
-            "MultiDataset initialized with %d datasets (%s), %d valid indices each",
+            "MultiDataset initialized with %d datasets (%s)",
             len(self.datasets),
             ", ".join(self.dataset_names),
-            len(self.valid_date_indices),
         )
-        self._lazy_init_model_and_reader_group_info()
-        self._sparse_missing_log_counts: dict[str, int] = {}
 
-        # lazy init model and reader group info, will be set by the DDPGroupStrategy:
+    def _lazy_init_model_and_reader_group_info(self) -> None:
+        """Lazy initialize model and reader group info."""
         self.model_comm_group_rank = 0
         self.model_comm_num_groups = 1
         self.model_comm_group_id = 0
@@ -139,56 +183,21 @@ class MultiDataset(IterableDataset):
 
         self.reader_group_rank = 0
         self.reader_group_size = 1
+        self.shard_shapes = None
 
-        self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
+        self.sample_comm_num_groups = 1
         self.sample_comm_group_id = 0
 
         self.ens_comm_group_rank = 0
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
-        # additional state vars (lazy init)
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all data readers."""
         return {name: getattr(dataset, attr_name) for name, dataset in self.data_readers.items()}
-
-    @staticmethod
-    def _normalize_explicit_time_indices_config(
-        explicit_time_indices_by_dataset: dict[str, dict[str, list[int]]] | None,
-    ) -> dict[str, dict[str, np.ndarray]]:
-        normalized: dict[str, dict[str, np.ndarray]] = {}
-        for dataset_name, dataset_cfg in (explicit_time_indices_by_dataset or {}).items():
-            if not hasattr(dataset_cfg, "get"):
-                raise ValueError(
-                    f"Explicit time indices for dataset '{dataset_name}' must define `input` and `target`."
-                )
-
-            raw_input = dataset_cfg.get("input", None)
-            raw_target = dataset_cfg.get("target", None)
-            if raw_input is None or raw_target is None:
-                raise ValueError(
-                    f"Explicit time indices for dataset '{dataset_name}' must define both `input` and `target`."
-                )
-
-            input_indices = np.array(sorted({int(value) for value in raw_input}), dtype=np.int64)
-            target_indices = np.array(sorted({int(value) for value in raw_target}), dtype=np.int64)
-            if len(input_indices) == 0:
-                raise ValueError(
-                    f"Explicit time indices for dataset '{dataset_name}' require a non-empty `input`."
-                )
-            if np.any(input_indices < 0) or np.any(target_indices < 0):
-                raise ValueError(
-                    f"Explicit time indices for dataset '{dataset_name}' must be non-negative."
-                )
-
-            normalized[str(dataset_name)] = {
-                "input": input_indices,
-                "target": target_indices,
-            }
-        return normalized
 
     @cached_property
     def statistics(self) -> dict[str, dict]:
@@ -208,7 +217,11 @@ class MultiDataset(IterableDataset):
     @cached_property
     def supporting_arrays(self) -> dict[str, dict]:
         """Return combined supporting arrays from all datasets."""
-        return self._collect("supporting_arrays")
+        supporting_arrays = self._collect("supporting_arrays")
+        for dataset_name, grid_indices in self.grid_indices.items():
+            dataset_arrays = supporting_arrays.get(dataset_name, {})
+            supporting_arrays[dataset_name] = dataset_arrays | grid_indices.supporting_arrays
+        return supporting_arrays
 
     @cached_property
     def variables(self) -> dict[str, list[str]]:
@@ -270,6 +283,9 @@ class MultiDataset(IterableDataset):
 
     @cached_property
     def valid_date_indices(self) -> np.ndarray:
+        return self.compute_valid_date_indices()
+
+    def compute_valid_date_indices(self) -> np.ndarray:
         """Return valid date indices.
 
         A date t is valid if we can sample the elements t + i
@@ -280,7 +296,7 @@ class MultiDataset(IterableDataset):
         valid_date_indices_by_dataset: dict[str, np.ndarray] = {}
         for name, ds in self.datasets.items():
             relative_indices = self.data_relative_date_indices_by_dataset[name]
-            valid_date_indices = get_usable_indices(
+            valid_date_indices = usable_indices.get_usable_indices(
                 ds.missing,
                 len(ds.dates),
                 relative_indices,
@@ -289,7 +305,7 @@ class MultiDataset(IterableDataset):
             valid_date_indices_by_dataset[name] = valid_date_indices
 
             if len(valid_date_indices) == 0:
-                msg = f"No valid date indices found for dataset '{name}': \n{ds}"
+                msg = f"No valid date indices found for data reader '{name}': {ds}"
                 raise ValueError(msg)
 
             LOGGER.info("Dataset '%s' has %d valid indices", name, len(valid_date_indices))
@@ -361,6 +377,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        shard_shapes: dict[str, list[int]] | None = None,
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -378,6 +395,8 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        shard_shapes : dict[str, list[int]] | None
+            Optional shard shapes passed from the distributed strategy.
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -388,6 +407,8 @@ class MultiDataset(IterableDataset):
 
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
+        if shard_shapes is not None:
+            self.shard_shapes = shard_shapes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
@@ -403,6 +424,23 @@ class MultiDataset(IterableDataset):
             self.sample_comm_group_id,
             self.sample_comm_num_groups,
         )
+
+    def _build_sample_readers(self) -> dict[str, RelativeTimeReader]:
+        mode = self._resolved_time_index_mode()
+        anchor_dataset_name = getattr(self, "_anchor_dataset_name", None)
+        anchor_dates_ns = dates_to_unix_ns(self.datasets[anchor_dataset_name].dates) if anchor_dataset_name else None
+
+        sample_readers = {}
+        for name, dataset in self.datasets.items():
+            use_sparse_alignment = mode == "sparse" and anchor_dataset_name is not None and name != anchor_dataset_name
+            sample_readers[name] = RelativeTimeReader(
+                dataset,
+                native_relative_indices=self.data_relative_date_indices_by_dataset[name],
+                model_relative_indices=self.model_relative_date_indices_by_dataset[name] if use_sparse_alignment else None,
+                timestep_seconds=self.timestep_seconds if use_sparse_alignment else None,
+                anchor_dates_ns=anchor_dates_ns if use_sparse_alignment else None,
+            )
+        return sample_readers
 
     def set_ens_comm_group_info(
         self,
@@ -472,7 +510,7 @@ class MultiDataset(IterableDataset):
         torch.manual_seed(base_seed)
         random.seed(base_seed)
         self.rng = np.random.default_rng(seed=base_seed)
-        sanity_rnd = self.rng.random(1)
+        sanity_rnd = self.rng.random(1)[0]
         LOGGER.info(
             ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
             worker_id,
@@ -493,17 +531,15 @@ class MultiDataset(IterableDataset):
             per_dataset_time_indices = {}
 
         x = {}
-        for name, dataset in self.datasets.items():
-            shard_start, shard_end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+        for name, dataset in self.sample_readers.items():
+            grid_shard_indices = slice(None)
+            if self.shard_shapes is not None and self.shard_shapes.get(name) is not None:
+                shard_start, shard_end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+                grid_shard_indices = slice(shard_start, shard_end)
             time_indices = self._resolve_dataset_time_indices(name, index)
             if log_timing:
                 t_ds = time.perf_counter()
-            x[name] = self._get_dataset_sample(
-                dataset_name=name,
-                dataset=dataset,
-                time_indices=time_indices,
-                grid_shard_indices=slice(shard_start, shard_end),
-            )
+            x[name] = dataset.get_sample(index, grid_shard_indices)
             if log_timing:
                 per_dataset_ms[name] = (time.perf_counter() - t_ds) * 1e3
                 per_dataset_time_indices[name] = self._format_time_indices_for_log(time_indices)
@@ -527,121 +563,6 @@ class MultiDataset(IterableDataset):
             )
 
         return x
-
-    def _get_dataset_sample(
-        self,
-        *,
-        dataset_name: str,
-        dataset,
-        time_indices: slice | int | list[int],
-        grid_shard_indices: slice,
-    ) -> torch.Tensor:
-        mode = self._resolved_time_index_mode()
-        anchor_dataset_name = getattr(self, "_anchor_dataset_name", None)
-        use_sparse_aux = mode == "sparse" and anchor_dataset_name is not None and dataset_name != anchor_dataset_name
-        if not use_sparse_aux:
-            return dataset.get_sample(time_indices, grid_shard_indices)
-        return self._get_sparse_dataset_sample(
-            dataset_name=dataset_name,
-            dataset=dataset,
-            time_indices=time_indices,
-            grid_shard_indices=grid_shard_indices,
-        )
-
-    def _get_sparse_dataset_sample(
-        self,
-        *,
-        dataset_name: str,
-        dataset,
-        time_indices: slice | int | list[int],
-        grid_shard_indices: slice,
-    ) -> torch.Tensor:
-        requested_indices = self._expand_time_indices(time_indices)
-        valid_positions = [
-            pos
-            for pos, native_index in enumerate(requested_indices)
-            if self._is_available_native_index(dataset, native_index)
-        ]
-        if len(valid_positions) == len(requested_indices):
-            return dataset.get_sample(time_indices, grid_shard_indices)
-
-        valid_indices = [requested_indices[pos] for pos in valid_positions]
-        loaded = None
-        if len(valid_indices) > 0:
-            loaded = dataset.get_sample(valid_indices, grid_shard_indices)
-            loaded = self._ensure_time_axis(loaded)
-
-        if loaded is None:
-            probe_idx = self._first_available_native_index(dataset)
-            if probe_idx is None:
-                raise ValueError(f"Dataset '{dataset_name}' has no available native indices for sparse loading.")
-            probe = dataset.get_sample([probe_idx], grid_shard_indices)
-            probe = self._ensure_time_axis(probe)
-            output = torch.full(
-                (len(requested_indices),) + tuple(probe.shape[1:]),
-                torch.nan,
-                dtype=torch.float32,
-                device=probe.device,
-            )
-        else:
-            dtype = loaded.dtype if loaded.is_floating_point() else torch.float32
-            output = torch.full(
-                (len(requested_indices),) + tuple(loaded.shape[1:]),
-                torch.nan,
-                dtype=dtype,
-                device=loaded.device,
-            )
-            if not loaded.is_floating_point():
-                loaded = loaded.float()
-
-        if len(valid_positions) > 0:
-            output[valid_positions] = loaded
-
-        missing_count = len(requested_indices) - len(valid_positions)
-        logged = self._sparse_missing_log_counts.get(dataset_name, 0)
-        if logged < 5 and missing_count > 0:
-            first_requested = requested_indices[0] if len(requested_indices) > 0 else -1
-            LOGGER.info(
-                "Sparse sample fill for dataset '%s': %d/%d requested native times unavailable at index=%d.",
-                dataset_name,
-                missing_count,
-                len(requested_indices),
-                first_requested,
-            )
-            self._sparse_missing_log_counts[dataset_name] = logged + 1
-
-        return output
-
-    @staticmethod
-    def _expand_time_indices(time_indices: slice | int | list[int]) -> list[int]:
-        if isinstance(time_indices, int):
-            return [int(time_indices)]
-        if isinstance(time_indices, slice):
-            start = 0 if time_indices.start is None else int(time_indices.start)
-            stop = int(time_indices.stop)
-            step = 1 if time_indices.step is None else int(time_indices.step)
-            return list(range(start, stop, step))
-        return [int(v) for v in time_indices]
-
-    @staticmethod
-    def _is_available_native_index(dataset, native_index: int) -> bool:
-        return 0 <= native_index < len(dataset.dates) and native_index not in dataset.missing
-
-    @staticmethod
-    def _first_available_native_index(dataset) -> int | None:
-        if len(dataset.dates) == 0:
-            return None
-        missing = dataset.missing
-        for idx in range(len(dataset.dates)):
-            if idx not in missing:
-                return idx
-        return None
-
-    @staticmethod
-    def _ensure_time_axis(sample: torch.Tensor) -> torch.Tensor:
-        if sample.ndim == 3:
-            return sample.unsqueeze(0)
-        return sample
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
@@ -700,14 +621,22 @@ class MultiDataset(IterableDataset):
 
         for name, ds in self.datasets.items():
             dataset_frequency_seconds = frequency_to_seconds(ds.frequency)
+            requested_model_indices = (
+                self.relative_date_indices_by_dataset.get(name, self.model_relative_date_indices)
+                if self.relative_date_indices_by_dataset is not None
+                else self.model_relative_date_indices
+            )
             explicit_cfg = self.explicit_time_indices_by_dataset.get(name)
-            if explicit_cfg is not None:
+            if self.relative_date_indices_are_native:
+                model_indices = requested_model_indices.astype(np.int64, copy=False)
+                input_model_indices = model_indices
+                target_model_indices = np.array([], dtype=np.int64)
+            elif explicit_cfg is not None:
                 input_model_indices = explicit_cfg["input"].astype(np.int64, copy=False)
                 target_model_indices = explicit_cfg["target"].astype(np.int64, copy=False)
-                model_indices = self._merge_input_and_required_indices(
-                    input_model_indices=input_model_indices,
-                    required_model_indices=target_model_indices,
-                )
+                model_indices = np.unique(
+                    np.concatenate([input_model_indices, target_model_indices]).astype(np.int64, copy=False),
+                ).astype(np.int64, copy=False)
                 rel_seconds = model_indices * self.timestep_seconds
                 if np.any(rel_seconds % dataset_frequency_seconds != 0):
                     raise ValueError(
@@ -715,19 +644,21 @@ class MultiDataset(IterableDataset):
                         f"timestamps for dataset frequency {ds.frequency}."
                     )
             else:
-                exact_mask = model_relative_seconds % dataset_frequency_seconds == 0
-                model_indices = self.model_relative_date_indices[exact_mask]
-                input_model_indices = model_indices.astype(np.int64, copy=False)
-                input_set = set(int(v) for v in input_model_indices.tolist())
-                target_model_indices = np.array(
-                    [int(v) for v in model_indices.tolist() if int(v) not in input_set],
-                    dtype=np.int64,
+                requested_seconds = requested_model_indices * self.timestep_seconds
+                exact_mask = requested_seconds % dataset_frequency_seconds == 0
+                model_indices = requested_model_indices[exact_mask]
+                model_indices = self._augment_windowed_model_indices(
+                    dataset_name=name,
+                    model_indices=model_indices.astype(np.int64, copy=False),
+                    dataset_frequency_seconds=dataset_frequency_seconds,
                 )
+                input_model_indices = model_indices.astype(np.int64, copy=False)
+                target_model_indices = np.array([], dtype=np.int64)
 
             if len(model_indices) == 0:
                 msg = (
                     f"Dataset '{name}' has no exact native timestamps for requested model-relative "
-                    f"indices {self.model_relative_date_indices.tolist()} with timestep {self.timestep}."
+                    f"indices {requested_model_indices.tolist()} with timestep {self.timestep}."
                 )
                 raise ValueError(msg)
 
@@ -747,21 +678,19 @@ class MultiDataset(IterableDataset):
                 f"`explicit_time_indices_by_dataset` provided for unknown datasets: {unknown_explicit_dataset_keys}. "
                 f"Known datasets: {self.dataset_names}"
             )
+        if self.relative_date_indices_by_dataset is not None:
+            unknown_relative_dataset_keys = sorted(
+                set(self.relative_date_indices_by_dataset).difference(set(self.dataset_names)),
+            )
+            if unknown_relative_dataset_keys:
+                raise ValueError(
+                    f"`relative_date_indices` provided for unknown datasets: {unknown_relative_dataset_keys}. "
+                    f"Known datasets: {self.dataset_names}"
+                )
 
         self.input_model_relative_date_indices_by_dataset = input_model_indices_by_dataset
         self.target_model_relative_date_indices_by_dataset = target_model_indices_by_dataset
         return dataset_model_indices
-
-    @staticmethod
-    def _merge_input_and_required_indices(
-        *,
-        input_model_indices: np.ndarray,
-        required_model_indices: np.ndarray,
-    ) -> np.ndarray:
-        """Merge and sort unique indices to keep deterministic time ordering."""
-        return np.unique(
-            np.concatenate([input_model_indices, required_model_indices]).astype(np.int64, copy=False),
-        ).astype(np.int64, copy=False)
 
     def _to_native_relative_indices(self, dataset_name: str, model_relative_indices: np.ndarray) -> np.ndarray:
         dataset_frequency_seconds = frequency_to_seconds(self.datasets[dataset_name].frequency)
@@ -771,115 +700,68 @@ class MultiDataset(IterableDataset):
             raise ValueError(msg)
         return (rel_seconds // dataset_frequency_seconds).astype(np.int64, copy=False)
 
-    def _resolve_dataset_time_indices(self, dataset_name: str, index: int) -> slice | int | list[int]:
-        mode = self._resolved_time_index_mode()
-        anchor_dataset_name = getattr(self, "_anchor_dataset_name", None)
-        if mode == "sparse" and anchor_dataset_name is not None and dataset_name != anchor_dataset_name:
-            sparse_time_indices = self._resolve_sparse_dataset_time_indices(dataset_name=dataset_name, index=index)
-            if sparse_time_indices is not None:
-                return sparse_time_indices
-
-        native_relative_indices = self.data_relative_date_indices_by_dataset[dataset_name]
-        absolute_indices = index + native_relative_indices
-        if len(absolute_indices) == 1:
-            return int(absolute_indices[0])
-
-        diffs = np.diff(absolute_indices)
-        if len(diffs) > 0 and np.all(diffs == diffs[0]):
-            step = int(diffs[0])
-            start = int(absolute_indices[0])
-            stop = int(absolute_indices[-1] + step)
-            return slice(start, stop, step)
-
-        return absolute_indices.tolist()
-
-    def _build_dataset_date_index_maps(self) -> tuple[dict[str, np.ndarray | None], dict[str, dict[int, int] | None]]:
-        dates_ns_by_dataset: dict[str, np.ndarray | None] = {}
-        date_to_native_index_by_dataset: dict[str, dict[int, int] | None] = {}
-        for dataset_name, dataset in self.datasets.items():
-            dates_ns = self._dates_to_unix_ns(dataset.dates)
-            if dates_ns is None:
-                dates_ns_by_dataset[dataset_name] = None
-                date_to_native_index_by_dataset[dataset_name] = None
-                continue
-            dates_ns = np.asarray(dates_ns, dtype=np.int64)
-            dates_ns_by_dataset[dataset_name] = dates_ns
-            date_to_native_index_by_dataset[dataset_name] = {int(date_ns): idx for idx, date_ns in enumerate(dates_ns)}
-        return dates_ns_by_dataset, date_to_native_index_by_dataset
-
-    @staticmethod
-    def _dates_to_unix_ns(dates) -> np.ndarray | None:
-        dates_array = np.asarray(dates)
-        if np.issubdtype(dates_array.dtype, np.datetime64):
-            return dates_array.astype("datetime64[ns]").astype(np.int64, copy=False)
-
-        try:
-            return np.array([np.datetime64(date_value, "ns").astype(np.int64) for date_value in dates], dtype=np.int64)
-        except (TypeError, ValueError):
-            return None
-
-    def _resolve_sparse_dataset_time_indices(self, *, dataset_name: str, index: int) -> list[int] | int | None:
-        anchor_dataset_name = getattr(self, "_anchor_dataset_name", None)
-        if anchor_dataset_name is None:
-            return None
-
-        anchor_dates_ns = self._dates_ns_by_dataset.get(anchor_dataset_name)
-        dataset_dates_ns = self._dates_ns_by_dataset.get(dataset_name)
-        dataset_date_map = self._date_to_native_index_by_dataset.get(dataset_name)
-        if anchor_dates_ns is None or dataset_dates_ns is None or dataset_date_map is None:
-            return None
-
-        if not (0 <= index < len(anchor_dates_ns)):
-            return [-1] * len(self.model_relative_date_indices_by_dataset[dataset_name])
-
-        anchor_date_ns = int(anchor_dates_ns[index])
-        model_relative_indices = self.model_relative_date_indices_by_dataset[dataset_name]
-        offsets_ns = model_relative_indices.astype(np.int64, copy=False) * self.timestep_seconds * 1_000_000_000
-        requested_dates_ns = anchor_date_ns + offsets_ns
-
-        resolved_native_indices = []
-        for date_ns in requested_dates_ns:
-            native_index = dataset_date_map.get(int(date_ns))
-            if native_index is None:
-                native_index = self._nearest_native_index(
-                    dataset_name=dataset_name,
-                    dataset_dates_ns=dataset_dates_ns,
-                    target_date_ns=int(date_ns),
-                )
-            resolved_native_indices.append(-1 if native_index is None else int(native_index))
-
-        if len(resolved_native_indices) == 1:
-            return int(resolved_native_indices[0])
-        return resolved_native_indices
-
-    def _nearest_native_index(
+    def _augment_windowed_model_indices(
         self,
         *,
         dataset_name: str,
-        dataset_dates_ns: np.ndarray,
-        target_date_ns: int,
-    ) -> int | None:
-        if len(dataset_dates_ns) == 0:
-            return None
+        model_indices: np.ndarray,
+        dataset_frequency_seconds: int,
+    ) -> np.ndarray:
+        num_inputs = self.dataset_num_inputs.get(dataset_name)
+        if num_inputs is None:
+            return model_indices
+        if self.multistep_window_seconds is None:
+            raise ValueError("`dataset_num_inputs` requires `multistep_window` to be set.")
+        if self.multistep_window_seconds % dataset_frequency_seconds != 0:
+            raise ValueError(
+                f"`multistep_window` must be divisible by dataset frequency for '{dataset_name}'.",
+            )
 
-        insertion_index = int(np.searchsorted(dataset_dates_ns, target_date_ns, side="left"))
-        candidate_indices = []
-        if insertion_index < len(dataset_dates_ns):
-            candidate_indices.append(insertion_index)
-        if insertion_index > 0:
-            candidate_indices.append(insertion_index - 1)
-        if not candidate_indices:
-            return None
+        native_window_steps = self.multistep_window_seconds // dataset_frequency_seconds
+        if native_window_steps <= 0:
+            return model_indices
 
-        nearest_index = min(candidate_indices, key=lambda idx: abs(int(dataset_dates_ns[idx]) - target_date_ns))
-        tolerance_ns = self._nearest_time_tolerance_ns(dataset_name)
-        if abs(int(dataset_dates_ns[nearest_index]) - target_date_ns) > tolerance_ns:
-            return None
-        return nearest_index
+        selection_mode = self.dataset_input_selection.get(dataset_name, "uniform")
+        model_steps_per_native_step, remainder = divmod(dataset_frequency_seconds, self.timestep_seconds)
+        if remainder != 0:
+            raise ValueError(
+                f"Dataset '{dataset_name}' frequency {self.datasets[dataset_name].frequency} is not a multiple "
+                f"of timestep {self.timestep}.",
+            )
 
-    def _nearest_time_tolerance_ns(self, dataset_name: str) -> int:
-        dataset_frequency_seconds = frequency_to_seconds(self.datasets[dataset_name].frequency)
-        return max(1, (dataset_frequency_seconds * 1_000_000_000) // 2)
+        if selection_mode == "all":
+            selected_native_indices = np.arange(0, native_window_steps + 1, dtype=np.int64)
+        elif selection_mode == "last":
+            selected_native_indices = np.arange(
+                max(0, native_window_steps - num_inputs),
+                native_window_steps + 1,
+                dtype=np.int64,
+            )
+        elif selection_mode == "uniform":
+            if native_window_steps % num_inputs != 0:
+                raise ValueError(
+                    "`dataset_num_inputs` must divide `multistep_window // dataset_frequency` for uniform selection.",
+                )
+            stride = native_window_steps // num_inputs
+            selected_native_indices = np.arange(0, native_window_steps + 1, stride, dtype=np.int64)
+        elif selection_mode == "future":
+            start_native_index = int(model_indices.max(initial=0) // model_steps_per_native_step)
+            selected_native_indices = np.arange(start_native_index, start_native_index + num_inputs, dtype=np.int64)
+        else:
+            raise ValueError(
+                f"Unsupported dataset_input_selection '{selection_mode}' for dataset '{dataset_name}'.",
+            )
+
+        selected_model_indices = (selected_native_indices * model_steps_per_native_step).astype(np.int64, copy=False)
+        return np.unique(
+            np.concatenate([model_indices.astype(np.int64, copy=False), selected_model_indices]),
+        ).astype(np.int64, copy=False)
+
+    def _resolve_dataset_time_indices(self, dataset_name: str, index: int) -> slice | int | list[int]:
+        reader = self.sample_readers[dataset_name]
+        if reader.uses_sparse_alignment:
+            return reader.resolve_sparse_time_indices(index)
+        return reader.resolve_dense_time_indices(index)
 
     @staticmethod
     def _format_time_indices_for_log(time_indices: slice | int | list[int]) -> str:

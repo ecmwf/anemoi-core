@@ -119,7 +119,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     dataset_name = "data"
     assert_metadatakeys(
         trainer.metadata,
-        ("config", "data", "timestep"),
+        ("metadata_inference", dataset_name, "timesteps", "timestep"),
         ("config", "graph", "nodes", "data", "node_builder", "max_level"),
         ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
         ("config", "training", "precision"),
