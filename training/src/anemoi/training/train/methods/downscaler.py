@@ -82,18 +82,18 @@ class GraphDiffusionDownscaler(BaseTrainingModule):
             reader_group_size=reader_group_size,
         )
         self.lres_grid_indices.setup(graph_data)
-        self.grid_shard_shapes_in_lres = self.lres_grid_indices.shard_shapes
+        self.grid_shard_sizes_in_lres = self.lres_grid_indices.shard_shapes
 
         self.hres_grid_indices = instantiate(
             self.config.model_dump(by_alias=True).dataloader.hres_grid_indices,
             reader_group_size=reader_group_size,
         )
         self.hres_grid_indices.setup(graph_data)
-        self.grid_shard_shapes_in_hres = self.hres_grid_indices.shard_shapes
+        self.grid_shard_sizes_in_hres = self.hres_grid_indices.shard_shapes
 
-        self.lres_grid_shard_shapes = None
+        self.lres_grid_shard_sizes = None
         self.lres_grid_shard_slice = None
-        self.hres_grid_shard_shapes = None
+        self.hres_grid_shard_sizes = None
         self.hres_grid_shard_slice = None
 
         fields_direct_prediction = getattr(config.data, "direct_prediction", None)
@@ -112,7 +112,7 @@ class GraphDiffusionDownscaler(BaseTrainingModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.hres_grid_shard_shapes,
+            grid_shard_sizes=self.hres_grid_shard_sizes,
         )
 
     def _compute_loss(
@@ -171,7 +171,7 @@ class GraphDiffusionDownscaler(BaseTrainingModule):
 
         x_in_interp_to_hres = self.model.model.apply_interpolate_to_high_res(
             x_in[:, 0, ...],
-            grid_shard_shapes=self.lres_grid_shard_shapes,
+            grid_shard_sizes=self.lres_grid_shard_sizes,
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
 
@@ -415,16 +415,16 @@ class GraphDiffusionDownscaler(BaseTrainingModule):
         """
 
         if self.keep_batch_sharded and self.model_comm_group_size > 1:
-            self.lres_grid_shard_shapes = self.lres_grid_indices.shard_shapes
-            self.hres_grid_shard_shapes = self.hres_grid_indices.shard_shapes
-            self.grid_shard_shapes = self.grid_indices.shard_shapes
+            self.lres_grid_shard_sizes = self.lres_grid_indices.shard_shapes
+            self.hres_grid_shard_sizes = self.hres_grid_indices.shard_shapes
+            self.grid_shard_sizes = self.grid_indices.shard_shapes
             self.lres_grid_shard_slice = self.lres_grid_indices.get_shard_slice(self.reader_group_rank)
             self.hres_grid_shard_slice = self.hres_grid_indices.get_shard_slice(self.reader_group_rank)
             self.grid_shard_slice = self.grid_indices.get_shard_slice(self.reader_group_rank)
         else:
             batch = self.allgather_batch(batch)
-            self.lres_grid_shard_shapes, self.lres_grid_shard_slice = None, None
-            self.hres_grid_shard_shapes, self.hres_grid_shard_slice = None, None
+            self.lres_grid_shard_sizes, self.lres_grid_shard_slice = None, None
+            self.hres_grid_shard_sizes, self.hres_grid_shard_slice = None, None
         return batch
 
     def on_fit_start(self):
