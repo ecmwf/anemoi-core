@@ -41,7 +41,8 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
--  Choose the model task and model type from :ref:`Models <Models>`.
+-  Choose the task (see :doc:`tasks`), training method
+   (see :doc:`training-methods`), and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
 
@@ -80,6 +81,34 @@ To set up experiment tracking:
    command line interface.
 #. Start the experiment tracking server and monitor your training runs
    in real-time.
+
+****************************
+ Reproducibility and Seeding
+****************************
+
+Anemoi Training seeds the random number generators used during training
+to control stochastic parts of a run. This helps repeat experiments, but
+it does not guarantee exact reproducibility across hardware, software
+versions, or distributed executions because floating-point numerics and
+parallel reductions can still differ slightly.
+
+-  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
+   a run.
+-  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
+   ``SLURM_JOB_ID`` when running inside a SLURM job.
+-  If neither value is available, Anemoi Training falls back to ``42``.
+
+When restarting from a checkpoint, avoid reusing the same manual base
+seed. Checkpoints restore model and optimizer state, but not the
+random-number streams used during training and data loading, so the same
+seed can replay the same sequence of random choices after restart. This
+is usually not a concern when the seed comes from ``SLURM_JOB_ID``,
+because a new SLURM job normally gets a new job ID.
+
+Seeds below ``1000`` are multiplied by ``1000`` before use, so a
+fallback seed of ``42`` appears in logs as an effective seed of
+``42000``. This normalized base seed is logged during training and
+stored in checkpoint metadata.
 
 Step 5: Execute Training
 ========================
@@ -135,8 +164,9 @@ inputs.
 ``Prognostic`` variables are the variables like temperature or humidity
 that we want to predict and appear as both inputs and outputs.
 
-The user can specify the routing of the data by setting the
-``config.data.forcings`` and ``config.data.diagnostics``. These are
+The user can specify the routing of the data for each dataset separately
+by setting the ``config.data.datasets.your_dataset_name.forcings`` and
+``config.data.datasets.your_dataset_name.diagnostics``. These are
 named strings, as Anemoi datasets enables us to address variables by
 name. Any variable in the dataset which is not listed as either forcing
 or diagnostic (or dropped, see :ref:`Dataloader <Dataloader>` below),
@@ -145,11 +175,13 @@ will be classed as a prognostic variable.
 .. code:: yaml
 
    data:
-      forcings:
-         - solar_insolation
-         - land_sea_mask
-      diagnostics:
-         - total_precipitation
+      datasets:
+         your_dataset_name:
+            forcings:
+               - solar_insolation
+               - land_sea_mask
+            diagnostics:
+               - total_precipitation
 
 **************
  Data Modules
@@ -172,8 +204,12 @@ requirements.
  Dataloader
 ************
 
-The dataloader file contains information on how many workers are used,
-and the batch size. ``num_workers`` relates to model parallelisation.
+Anemoi uses the Dataloader class from `PyTorch`_ to load the input batches for the upcoming training steps. The data is asynchronously prefetched from a filesystem and stored in CPU memory until a batch is required by the GPU.
+
+.. _PyTorch: https://docs.pytorch.org/docs/stable/data.html#single-and-multi-process-data-loading
+
+The dataloader config exposes configuration options of the underlying pytorch dataloaders. By default, ``num_workers`` dataloading processes are created for every GPU. Each worker will prefetch a maximum of ``prefetch_factor`` batches.
+
 
 .. code:: yaml
 
@@ -191,18 +227,27 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       validation: null
       test: 20
 
-The grid points being modelled are also defined. In many cases this will
-be the full grid. For limited area modelling, you may want to define a
-set of target indices which mask/remove some grid points, leaving only
-the area being modelled.
+   prefetch_factor:
+      training: 2
+      validation: 2
+      test: 2
 
-.. code:: yaml
+   multiprocessing_context: None
 
-   # set a custom mask for grid points.
-   # Useful for LAM (dropping unconnected nodes from forcing dataset)
-   grid_indices:
-      _target_: anemoi.training.data.grid_indices.FullGrid
-      nodes_name: ${graph.data}
+
+Determining the optimal number of workers depends on your system and training setup. More dataloader processes can increase your filesystem bandwidth, at the cost of higher CPU memory usage. Higher source resolutions and larger batch sizes increase the memory required per worker. When the available CPU memory is not sufficient for the requested number of workers, your training run will crash. One can use the `anemoi dataloader benchmark`_ to quickly test different setups and determine the optimal configuration for your training setup.
+
+.. _anemoi dataloader benchmark: https://github.com/ecmwf/anemoi-core/pull/818
+
+The config entry ``limit_batches`` is an option to limit the number of batches loaded by the dataloader. This can be useful for testing and debugging purposes, allowing you to run a shorter training loop without processing the entire dataset.
+
+The config entry ``multiprocessing_context`` allows you to specify the multiprocessing context for the dataloader workers.
+The default is ``None``, which uses the default context for your system. Typically, there is no need to change this, but in some cases, such as when using certain libraries or running on specific platforms, you may need to set it to ``fork`` or ``spawn`` to avoid issues with multiprocessing.
+
+.. note::
+
+   When training directly from S3, it is required to use the ``spawn`` multiprocessing context to avoid issues with the underlying library used to access S3.
+
 
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
@@ -213,12 +258,16 @@ version of the model. Best practice is to separate the data in time,
 ensuring the validation and test data are suitably independent from the
 training data.
 
-We define the start and end time of each section of the data. This can
-be given as a full date, or just the year, or year and month, in these
-cases the first of the month/first of the year is used.
+For each dataset `your_dataset_name`, we define the start and end
+time of each section of the data.
+This can be given as a full date, or just the year, or year and month,
+in these cases the first of the month/first of the year is used.
 
-The dataset used, and the frequency can be set spearately for the
-different parts of the dataset, for example, if test data is stored in a
+We also define the dataset reader options under ``dataset_config``.
+This includes the dataset source (``dataset``) and optional keys such as
+``frequency``, ``drop``, ``select`` and ``statistics``. These can be set
+separately for the different training/validation/test parts of the
+dataset `your_dataset_name`, for example, if test data is stored in a
 different file.
 
 By default, every variable within the dataset is used. If this is not
@@ -231,6 +280,10 @@ variables, the items listed in drop/select may vary.
 
 .. literalinclude:: yaml/dataloader.yaml
    :language: yaml
+
+
+
+
 
 ***************
  Normalisation
@@ -262,7 +315,7 @@ and the proportional distance from this point is retained,
 
 The user can specify the normalisation strategy by choosing a default
 method, and additionally specifying specific cases for certain variables
-within ``config.data.normaliser``:
+within ``config.data.datasets.your_dataset_name.normaliser``:
 
 .. code:: yaml
 
@@ -296,27 +349,26 @@ cause the model to predict only NaNs. For fields which contain missing
 values, we provide options to replace these values via an "imputer".
 During training NaN values are replaced with the specified value for the
 field. The default imputer is "none", which means no imputation is
-performed. The user can specify the imputer by setting
-``processors.imputer`` under the ``data/zarr.yaml`` file. It is comon to
-impute with the mean value, ensuring that the variable value over NaNs
-becomes zero after mean-std normalisation. Another option is to impute
-with a given constant.
+performed. The user can specify the imputer for each dataset by setting
+``datasets.your_dataset_name.processors.imputer`` under the
+``data/zarr.yaml`` file. It is common to impute with the mean value,
+ensuring that the variable value over NaNs becomes zero after mean-std
+normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 
-   imputer:
-      default: "none"
-      mean:
-         - 2t
+   datasets:
+      your_dataset_name:
+         imputer:
+            default: "none"
+            mean:
+               - 2t
 
-   processors:
-   imputer:
-      _target_: anemoi.models.preprocessing.imputer.InputImputer
-      _convert_: all
-      config: ${data.imputer}
+         processors:
+            imputer:
+               _target_: anemoi.models.preprocessing.imputer.InputImputer
+               config: ${data.datasets.your_dataset_name.imputer}
 
 ****************
  Loss Functions
@@ -328,11 +380,13 @@ tasks and easily allows for custom loss functions to be added.
 .. code:: yaml
 
    training_loss:
-      _target_: anemoi.training.losses.mse.WeightedMSELoss
-      # class kwargs
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            # class kwargs
 
 The choice of loss function depends on the model task and the desired
-properties of the forecast.
+properties of the forecast and is configured for each dataset separately.
 
 For ensemble training, the following loss functions are available:
 
@@ -340,6 +394,8 @@ For ensemble training, the following loss functions are available:
    density estimation
 -  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
    the number of ensemble members used.
+
+.. _loss-function-scaling:
 
 ***********************
  Loss function scaling
@@ -363,48 +419,42 @@ level has a weighting less than 0.2), defined in class
 
 .. code:: yaml
 
-   general_variable:
-      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
-      weights:
-         default: 1
-         t: 6
-         z: 12
-         10u: 0.1
-         10v: 0.1
-         2d: 0.5
-         tp: 0.025
-         cp: 0.0025
+   datasets:
+      your_dataset_name:
+         general_variable:
+            _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+            weights:
+               default: 1
+               t: 6
+               z: 12
+               10u: 0.1
+               10v: 0.1
+               2d: 0.5
+               tp: 0.025
+               cp: 0.0025
 
 .. code:: yaml
-
-   pressure_level:
-      # Variable level scaler to be used
-      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
-      group: pl
-      y_intercept: 0.2
-      slope: 0.001
+   datasets:
+      your_dataset_name:
+         pressure_level:
+            # Variable level scaler to be used
+            _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+            group: pl
+            y_intercept: 0.2
+            slope: 0.001
 
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. The configuration option
-``config.training.node_loss_weights`` is used to specify the node
-attribute used as weights in the loss function. By default
+``config.training.datasets.your_dataset_name.node_weights`` is used to
+specify the node attribute used as weights in the loss function. By default
 anemoi-training uses area weighting, where each node is weighted
 according to the size of the geographical area it represents.
 
 It is also possible to rescale the weight of a subset of nodes after
-they are loaded from the graph. For instance, for a stretched grid setup
-we can rescale the weight of nodes in the limited area such that their
-sum equals 0.25 of the sum of all node weights with the following config
-setup
+they are loaded from the graph using the class
+`anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler`.
 
-.. code:: yaml
-
-   node_loss_weights:
-      _target_: anemoi.training.losses.nodeweights.ReweightedGraphNodeAttribute
-      target_nodes: data
-      scaled_attribute: cutout
-      weight_frac_of_total: 0.25
 
 ***************
  Learning rate
@@ -501,18 +551,8 @@ finished training. It's also possible to restart the model training from
 a specific checkpoint. This can either be a checkpoint from the same run
 or a checkpoint from a different run that you have run in the past or
 that you using for transfer learning. To do this, set
-``config.hardware.files.warm_start`` to be the checkpoint filename they
-want to restart from and ``config.hardware.paths.warm_start`` to be the
-path to the checkpoint. See the example below.
-
-.. code:: yaml
-
-   # This is a sample YAML block
-   hardware:
-      files:
-         warm_start: checkpoint_epoch_10.ckpt
-      paths:
-         warm_start: /path/to/checkpoint/folder/
+``config.system.input.warm_start`` to be the path to the checkpoint they
+want to restart from.
 
 The above can be adapted depending on the use case and taking advantage
 of hydra, you can also reuse ``config.training.run_id`` or
@@ -539,10 +579,10 @@ flag to True in the configuration file.
       transfer_learning: True
 
 When this flag is active and a checkpoint path is specified in
-config.hardware.files.warm_start or self.last_checkpoint, the system
-loads the pre-trained weights using the `transfer_learning_loading`
-function. This approach ensures only compatible weights are loaded and
-mismatched layers are handled appropriately.
+config.system.input.warm_start or self.last_checkpoint, the system loads
+the pre-trained weights using the `transfer_learning_loading` function.
+This approach ensures only compatible weights are loaded and mismatched
+layers are handled appropriately.
 
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
@@ -579,3 +619,19 @@ frozen and only the encoder and decoder will be trained:
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
+
+****************************
+ Precision and BLAS Backend
+****************************
+
+Anemoi supports Lightning's native mixed precision training as well as the option to select a preferred BLAS backend
+to be used by PyTorch. For example:
+
+.. code:: yaml
+
+   training:
+      precision: bf16-mixed
+      preferred_blas_backend: "cublas"
+
+Note that both entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
+default selection of PyTorch.

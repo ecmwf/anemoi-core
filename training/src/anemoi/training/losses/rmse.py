@@ -32,6 +32,7 @@ class RMSELoss(MSELoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
     ) -> torch.Tensor:
         """Calculates the RMSE loss.
 
@@ -66,5 +67,6 @@ class RMSELoss(MSELoss):
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
             group=group,
+            squash_mode=squash_mode,
         )
         return torch.sqrt(mse)

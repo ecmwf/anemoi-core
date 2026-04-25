@@ -11,9 +11,7 @@
 import datetime
 from pathlib import Path
 from typing import Any
-from typing import Literal
 
-from omegaconf import DictConfig
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -22,6 +20,7 @@ from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
+from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -56,19 +55,51 @@ class Frequency(RootModel):
         return int(self.as_timedelta.total_seconds())
 
 
-class DatasetSchema(PydanticBaseModel):
+class DatasetConfigSchema(PydanticBaseModel):
+    """Dictionary-style dataset config passed directly to open_dataset."""
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+    dataset: str | Path | dict | list[dict]
+    "Dataset source identifier."
+    frequency: Frequency | None = Field(default=None)
+    "Optional frequency requested from open_dataset."
+    drop: list[str] | None = Field(default=None)
+    "Optional list of variables to drop from the dataset."
+    select: list[str] | None = Field(default=None)
+    "Optional list of variables to select from the dataset."
+    statistics: str | Path | None = Field(default=None)
+    "Optional path to custom statistics file."
+
+    # Note this should be extended in the future to have a full schema for the keys
+    # supported by open_dataset and be moved to anemoi-datasets.
+
+
+class NativeDatasetSchema(BaseModel):
     """Dataset configuration schema."""
 
-    dataset: str | dict | Path | list[dict] | None = None
-    "Dataset, see anemoi-datasets"
+    dataset_config: str | DatasetConfigSchema | Path | list[dict] | None = None
+    "Dataset definition passed to open_dataset."
     start: str | int | None = Field(default=None)
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
-    frequency: Frequency
-    "Temporal resolution, frequency must be >= to dataset frequency."
-    drop: list | None = Field(default=None)
-    "List of variables to drop from dataset"
+
+
+class TrajectorySchema(PydanticBaseModel):
+    """Trajectory configuration schema."""
+
+    start: datetime.datetime = Field(example="2020-02-05T12:00:00")
+    "Starting datetime for the trajectory."
+    length: PositiveInt = Field(example=12)
+    "Length of the trajectory in number of time steps."
+
+
+class TrajectoryDatasetSchema(NativeDatasetSchema):
+    """Dataset configuration schema."""
+
+    trajectory: TrajectorySchema | None = Field(default=None)
+    "Trajectory configuration."
 
 
 class LoaderSet(BaseModel):
@@ -78,28 +109,6 @@ class LoaderSet(BaseModel):
     "Value for validation dataset"
     test: NonNegativeInt | None = Field(example=None)
     "Value for test dataset"
-
-
-class FullGridIndicesSchema(BaseModel):
-    target_: Literal["anemoi.training.data.grid_indices.FullGrid"] = Field(
-        "anemoi.training.data.grid_indices.FullGrid",
-        alias="_target_",
-    )
-    "Grid indices for full grid class implementation from anemoi.training.data.grid_indices."
-    nodes_name: str = Field(examples=["data"])
-    "Name of the grid nodes."
-
-
-class MaskedGridIndicesSchema(BaseModel):
-    target_: Literal["anemoi.training.data.grid_indices.MaskedGrid"] = Field(
-        "anemoi.training.data.grid_indices.MaskedGrid",
-        alias="_target_",
-    )
-    "Grid indices for masked grid class implementation from anemoi.training.data.grid_indices."
-    nodes_name: str = Field(examples=["data"])
-    "Name of the grid nodes."
-    node_attribute_name: str = Field(examples=["indices_connected_nodes"])
-    "Name of the nodes graph attribute used for masking."
 
 
 class DataLoaderSchema(PydanticBaseModel):
@@ -116,16 +125,13 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetSchema | DictConfig
+    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Training DatasetSchema."
-    validation: DatasetSchema | DictConfig
+    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Validation DatasetSchema."
-    test: DatasetSchema | DictConfig
+    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Test DatasetSchema."
-    validation_rollout: PositiveInt = Field(example=1)
-    "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
-    # TODO(Helen): Check that this equal or greater than the number of rollouts expected by callbacks ???
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
-    grid_indices: FullGridIndicesSchema | MaskedGridIndicesSchema
-    "Grid indice schema."
+    multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
+    "Multiprocessing context to use for workers. If None, the default context will be used"

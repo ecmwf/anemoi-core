@@ -22,24 +22,26 @@ settings at the top as follows:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: gnn
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 These are group configs for each section. The options after the defaults
 are then used to override the configs, by assigning new features and
 keywords.
 
-You can also find these defaults in other configs, like the
-``hardware``, which implements:
+You can also find these defaults in other configs, like the ``system``,
+which implements:
 
 .. code:: yaml
 
    defaults:
-   - paths: example
-   - files: example
+   - hardware: example
+   - input: example
+   - output: example
 
 *****************************
  YAML-based config overrides
@@ -70,11 +72,38 @@ You can also change the GPU count to whatever you have available:
 
 .. code:: yaml
 
-   hardware:
-       num_gpus_per_node: 1
+   system:
+      hardware:
+         num_gpus_per_node: 1
 
 This matches the interface of the underlying defaults in Anemoi
 training.
+
+***********************************
+ Dataloader Breaking Change
+***********************************
+
+Starting from the current configuration schema, dataloader dataset reader
+settings must be provided under ``dataset_config``.
+
+Use:
+
+.. code:: yaml
+
+   dataloader:
+      training:
+         datasets:
+            your_dataset_name:
+               dataset_config:
+                  dataset: ${system.input.dataset}
+                  frequency: ${data.frequency}
+                  drop: []
+               start: 1985
+               end: 2020
+
+Do not use the previous ``dataset``/``name`` nesting. Configuration
+validation now enforces the new layout.
+
 
 Example Config File
 ===================
@@ -101,22 +130,23 @@ match the dataset you provide.
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
+   config_validation: True
    data:
       resolution: n320
 
-   hardware:
-      num_gpus_per_node: 1
-      paths:
-         output: /home/username/anemoi/training/output
-         data: /home/username/anemoi/datasets
-         graph: /home/username/anemoi/training/graphs
-      files:
+   system:
+      hardware:
+         num_gpus_per_node: 1
+      output:
+         root: /home/username/anemoi/training/output
+      input:
          dataset: datset-n320-2019-2021-6h.zarr
          graph: first_graph_n320.pt
 
@@ -220,10 +250,11 @@ correctly indented (in this case the `diagnostics.log` field):
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -272,10 +303,11 @@ typos that might still need to be fixed manually:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -333,10 +365,11 @@ let's say we have a config with a union of schemas like the following:
    - data: zarr
    - dataloader: native_grid
    - diagnostics: evaluation
-   - hardware: example
+   - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 

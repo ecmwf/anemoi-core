@@ -15,7 +15,44 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.utils import get_memory_format
+
+
+def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
+    """Wrapper function for all_to_all across NCCL, MPI and Gloo backends.
+    There is no all_to_all primitive for the Gloo backend. In that case each
+    process broadcasts its tensor asynchronously.
+
+    Retuns nothing but modifies output_list in-place
+
+    """
+    comm_size = dist.get_world_size(group=group)
+
+    if dist.get_backend(group) == "gloo":
+
+        # Need to check torch version here bc the syntax for dist.send/recv changed in torch v2.6
+        torch_version = torch.__version__.split(".")
+        torch_major_version = int(torch_version[0])
+        torch_minor_version = int(torch_version[1])
+        if torch_major_version <= 2 and torch_minor_version < 6:
+            raise NotImplementedError("Gloo all_to_all not implemented for torch < v2.6")
+
+        reqs = []
+        rank = dist.get_rank(group=group)
+        # Here we implement the linear shift algorithm from Hofmann and Ruenger, 2013
+        for i in range(0, comm_size):
+            j = (i - rank + comm_size) % comm_size
+            if j != rank:
+                # exchange data with rank j
+                reqs.append(dist.isend(input_list[j], group_dst=j, group=group))
+                reqs.append(dist.irecv(output_list[j], group_src=j, group=group))
+            else:
+                output_list[rank] = input_list[rank]
+        for req in reqs:
+            req.wait()
+    else:
+        dist.all_to_all(output_list, input_list, group=group)
 
 
 def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
@@ -34,7 +71,10 @@ def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] =
     # get input format
     input_format = get_memory_format(input_)
 
-    input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-3)]  # do we need contiguous?
+    num_heads = input_.shape[-3]
+    assert num_heads >= comm_size, f"Number of heads ({num_heads}) must be >= number of GPUs ({comm_size})"
+    head_split_sizes = get_balanced_partition_sizes(num_heads, comm_size)
+    input_list = [x.contiguous() for x in torch.split(input_, head_split_sizes, dim=-3)]
 
     input_shape = [x.shape for x in input_list]  # (b h n c)
     heads_per_rank = [x.shape[-3] for x in input_list]
@@ -52,13 +92,13 @@ def _headsalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] =
         for rank in range(comm_size)
     ]
 
-    dist.all_to_all(output_list, input_list, group=group)
+    _alltoallwrapper(output_list, input_list, group=group)
 
     # Note: torch.cat already creates a contiguous tensor.
     return torch.cat(output_list, dim=-2).contiguous(memory_format=input_format)
 
 
-def _seqalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = None) -> Tensor:
+def _seqalltoall(input_: Tensor, shapes: list, num_heads: int, group: Optional[ProcessGroup] = None) -> Tensor:
     """Apply all_to_all along the sequence dimension.
 
     Split input along dimension dim_split and join after all_to_all along dimesion
@@ -74,12 +114,25 @@ def _seqalltoall(input_: Tensor, shapes: list, group: Optional[ProcessGroup] = N
     # get input format
     input_format = get_memory_format(input_)
 
-    # SL TODO: repair for non sym shapes
-    input_list = [x.contiguous() for x in torch.tensor_split(input_, comm_size, dim=-2)]  # do we need contiguous?
+    seq_per_rank = [x[0] for x in shapes]
+    input_list = [x.contiguous() for x in torch.split(input_, seq_per_rank, dim=-2)]
 
-    output_list = [torch.empty_like(input_list[comm_rank]) for _ in range(comm_size)]
+    input_shape = [x.shape for x in input_list]
+    heads_per_rank = get_balanced_partition_sizes(num_heads, comm_size)
+    channels_per_rank = [x.shape[-1] for x in input_list]
 
-    dist.all_to_all(output_list, input_list, group=group)
+    output_list = [
+        torch.empty(
+            (*input_shape[rank][:-3], heads_per_rank[rank], seq_per_rank[comm_rank], channels_per_rank[rank]),
+            dtype=input_.dtype,
+            layout=input_.layout,
+            device=input_.device,
+            memory_format=input_format,
+        )
+        for rank in range(comm_size)
+    ]
+
+    _alltoallwrapper(output_list, input_list, group=group)
 
     # Note: torch.cat already creates a contiguous tensor.
     return torch.cat(output_list, dim=-3).contiguous(memory_format=input_format)
@@ -109,7 +162,7 @@ def shard_heads(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
     return _SplitHeadsParallelSection.apply(input_, shapes, mgroup)
 
 
-def shard_sequence(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
+def shard_sequence(input_: Tensor, shapes: list, num_heads: int, mgroup: ProcessGroup) -> Tensor:
     """Shards sequence.
 
     Gathers e.g query, key or value tensor along head dimension via all to all communication
@@ -122,6 +175,8 @@ def shard_sequence(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor
         Input
     shapes: list
         shapes of shards
+    num_heads: int
+        Total number of heads (before splitting across ranks)
     mgroup : ProcessGroup
         model communication group
 
@@ -130,7 +185,7 @@ def shard_sequence(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor
     Tensor
         Sharded sequence
     """
-    return _SplitSequenceParallelSection.apply(input_, shapes, mgroup)
+    return _SplitSequenceParallelSection.apply(input_, shapes, num_heads, mgroup)
 
 
 class _SplitHeadsParallelSection(torch.autograd.Function):
@@ -140,6 +195,7 @@ class _SplitHeadsParallelSection(torch.autograd.Function):
     def forward(ctx, input_, shapes_, mgroup_):
         ctx.shapes = shapes_
         ctx.comm_group = mgroup_
+        ctx.num_heads = input_.shape[-3]  # Store total heads before splitting
         if mgroup_:
             return _headsalltoall(input_, shapes_, group=mgroup_)
         return input_
@@ -148,7 +204,7 @@ class _SplitHeadsParallelSection(torch.autograd.Function):
     def backward(ctx, grad_output):
         if ctx.comm_group:
             return (
-                _seqalltoall(grad_output, ctx.shapes, group=ctx.comm_group),
+                _seqalltoall(grad_output, ctx.shapes, ctx.num_heads, group=ctx.comm_group),
                 None,
                 None,
             )
@@ -159,11 +215,12 @@ class _SplitSequenceParallelSection(torch.autograd.Function):
     """Split sequence for parallel section."""
 
     @staticmethod
-    def forward(ctx, input_, shapes_, mgroup_):
+    def forward(ctx, input_, shapes_, num_heads_, mgroup_):
         ctx.shapes = shapes_
         ctx.comm_group = mgroup_
+        ctx.num_heads = num_heads_
         if mgroup_:
-            return _seqalltoall(input_, shapes_, group=mgroup_)
+            return _seqalltoall(input_, shapes_, num_heads_, group=mgroup_)
         return input_
 
     @staticmethod
@@ -173,5 +230,6 @@ class _SplitSequenceParallelSection(torch.autograd.Function):
                 _headsalltoall(grad_output, ctx.shapes, group=ctx.comm_group),
                 None,
                 None,
+                None,
             )
-        return grad_output, None, None
+        return grad_output, None, None, None

@@ -9,7 +9,6 @@
 
 
 import logging
-import warnings
 from abc import ABC
 from typing import Optional
 
@@ -25,6 +24,8 @@ LOGGER = logging.getLogger(__name__)
 
 class BaseImputer(BasePreprocessor, ABC):
     """Base class for Imputers."""
+
+    supports_skip_imputation = True
 
     def __init__(
         self,
@@ -130,7 +131,7 @@ class BaseImputer(BasePreprocessor, ABC):
             Tensor with NaN locations of shape (batch, time, ..., grid)
         """
         idx = [slice(None), slice(None)] + [0] * (x.ndim - 4) + [slice(None), slice(None)]
-        return torch.isnan(x[idx])
+        return torch.isnan(x[tuple(idx)])
 
     def _expand_subset_mask(self, x: torch.Tensor, idx_src: int, nan_locations: torch.Tensor) -> torch.Tensor:
         """Expand the subset of the nan location mask to the correct shape.
@@ -183,10 +184,18 @@ class BaseImputer(BasePreprocessor, ABC):
                 x[..., idx_dst][nan_locations[..., idx_src]] = value
         return x
 
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
+        if skip_imputation:
+            return x
 
         # recalculate NaN locations every forward pass and save for backward pass
         nan_locations = self.get_nans(x)
@@ -236,10 +245,18 @@ class BaseImputer(BasePreprocessor, ABC):
         # Replace values
         return self.fill_with_value(x, index, nan_locations, index)
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        skip_imputation: bool = False,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Impute missing values in the input tensor."""
         if not in_place:
             x = x.clone()
+        if skip_imputation:
+            return x
 
         # Replace original nans with nan again
         if x.shape[-1] == self.num_training_output_vars:
@@ -399,124 +416,3 @@ class CopyImputer(BaseImputer):
                     ..., self.data_indices.data.input.name_to_index[value]
                 ][nan_locations[..., idx_src]]
         return x
-
-
-class DynamicMixin:
-    """Mixin to add dynamic imputation behavior.
-    To be used when NaN maps change at different timesteps.
-    """
-
-    def get_nans(self, x: torch.Tensor) -> torch.Tensor:
-        """Override to calculate NaN locations dynamically."""
-        return torch.isnan(x)
-
-    def fill_with_value(self, x, index, nan_locations):
-        # Replace values
-        for idx, value in zip(index, self.replacement):
-            if idx is not None:
-                x[..., idx][nan_locations[..., idx]] = value
-        return x
-
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
-        if not in_place:
-            x = x.clone()
-
-        # Initilialize mask every time
-        nan_locations = self.get_nans(x)
-
-        self.loss_mask_training = torch.ones(
-            (x.shape[-2], len(self.data_indices.model.output.name_to_index)), device=x.device
-        )
-
-        # Choose correct index based on number of variables
-        if x.shape[-1] == self.num_training_input_vars:
-            index = self.index_training_input
-        elif x.shape[-1] == self.num_inference_input_vars:
-            index = self.index_inference_input
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
-            )
-
-        return self.fill_with_value(x, index, nan_locations)
-
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
-        return x
-
-
-class DynamicInputImputer(DynamicMixin, InputImputer):
-    "Imputes missing values using the statistics supplied and a dynamic NaN map."
-
-    def __init__(
-        self,
-        config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
-    ) -> None:
-        InputImputer.__init__(self, config, data_indices, statistics)
-        warnings.warn(
-            "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
-                      The model will be trained to predict imputed values. This might deteriorate performances."
-        )
-
-
-class DynamicConstantImputer(DynamicMixin, ConstantImputer):
-    "Imputes missing values using the constant value and a dynamic NaN map."
-
-    def __init__(
-        self,
-        config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
-    ) -> None:
-        ConstantImputer.__init__(self, config, data_indices, statistics)
-        warnings.warn(
-            "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
-                      The model will be trained to predict imputed values. This might deteriorate performances."
-        )
-
-
-class DynamicCopyImputer(DynamicMixin, CopyImputer):
-    """Dynamic Copy imputation behavior."""
-
-    def __init__(
-        self,
-        config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
-    ) -> None:
-        CopyImputer.__init__(self, config, data_indices, statistics)
-        warnings.warn(
-            "You are using a dynamic Imputer: NaN values will not be present in the model predictions. \
-                      The model will be trained to predict imputed values. This might deteriorate performances."
-        )
-
-    def fill_with_value(self, x, index, nan_locations):
-
-        if x.shape[-1] == self.num_training_input_vars:
-            indices = self.data_indices.data.input.name_to_index
-        elif x.shape[-1] == self.num_inference_input_vars:
-            indices = self.data_indices.model.input.name_to_index
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_input_vars}) or inference shape ({self.num_inference_input_vars})",
-            )
-
-        # Replace values
-        for idx, value in zip(index, self.replacement):
-            if idx is not None:
-                assert not torch.isnan(x[..., indices[value]][nan_locations[..., idx]]).any(), f"NaNs found in {value}."
-                x[..., idx][nan_locations[..., idx]] = x[..., indices[value]][nan_locations[..., idx]]
-        return x
-
-    def transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
-        return DynamicMixin.transform(self, x, in_place)
-
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
-        """Impute missing values in the input tensor."""
-        return DynamicMixin.inverse_transform(self, x, in_place)

@@ -12,7 +12,7 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
-from torch_geometric.data import HeteroData
+from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
 
@@ -41,10 +41,10 @@ class BaseMask:
 class Boolean1DMask(torch.nn.Module, BaseMask):
     """1D Boolean mask."""
 
-    def __init__(self, graph_data: HeteroData, nodes_name: str, attribute_name: str) -> None:
+    def __init__(self, nodes: NodeStorage, attribute_name: str) -> None:
         super().__init__()
 
-        mask = graph_data[nodes_name][attribute_name].bool().squeeze()
+        mask = nodes[attribute_name].bool().squeeze()
         self.register_buffer("mask", mask)
 
     @property
@@ -101,10 +101,10 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
         mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
 
         if isinstance(fill_value, torch.Tensor):
-            indices = (~mask).nonzero(as_tuple=True)[0]
+            indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
-        mask = self.broadcast_like(x, dim, grid_shard_slice)
+        mask = self.broadcast_like(x, dim, grid_shard_slice).cpu()
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(

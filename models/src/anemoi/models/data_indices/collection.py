@@ -27,43 +27,47 @@ LOGGER = logging.getLogger(__name__)
 class IndexCollection:
     """Collection of data and model indices."""
 
-    def __init__(self, config, name_to_index) -> None:
-        self.config = OmegaConf.to_container(config, resolve=True)
+    @staticmethod
+    def _contiguous_span(indices: list[int]) -> tuple[bool, int, int]:
+        """Return whether indices form a contiguous run and, if so, its start and length."""
+        if not indices:
+            return True, 0, 0
+        start = indices[0]
+        for offset, index in enumerate(indices):
+            if index != start + offset:
+                return False, 0, 0
+        return True, start, len(indices)
 
+    def __init__(self, data_config, name_to_index) -> None:
+        self.config = OmegaConf.to_container(data_config, resolve=True)
+        self.name_to_index = dict(sorted(name_to_index.items(), key=operator.itemgetter(1)))
         self.forcing = (
             []
-            if config.data.forcing is None
-            else OmegaConf.to_container(config.data.forcing, resolve=True)
+            if data_config.get("forcing", None) is None
+            else OmegaConf.to_container(data_config.forcing, resolve=True)
         )
         self.diagnostic = (
             []
-            if config.data.diagnostic is None
-            else OmegaConf.to_container(config.data.diagnostic, resolve=True)
+            if data_config.get("diagnostic", None) is None
+            else OmegaConf.to_container(data_config.diagnostic, resolve=True)
         )
+        self.target = (
+            [] if data_config.get("target", None) is None else OmegaConf.to_container(data_config.target, resolve=True)
+        )
+        defined_variables = set.union(set(self.forcing), set(self.diagnostic), set(self.target))
+        self.prognostic = [v for v in self.name_to_index.keys() if v not in defined_variables]
 
         assert set(self.diagnostic).isdisjoint(self.forcing), (
             f"Diagnostic and forcing variables overlap: {set(self.diagnostic).intersection(self.forcing)}. ",
             "Please drop them at a dataset-level to exclude them from the training data.",
         )
-        self.name_to_index_input_lres = dict(
-            sorted(name_to_index[0].items(), key=lambda x: x[1])
+        assert set(self.diagnostic).isdisjoint(self.target), (
+            f"Diagnostic and target variables overlap: {set(self.diagnostic).intersection(self.target)}. ",
+            "Please drop them at a dataset-level to exclude them from the training data.",
         )
-
-        self.name_to_index_input_hres = dict(
-            sorted(name_to_index[1].items(), key=lambda x: x[1])
-        )
-
-        self.name_to_index_output = dict(
-            sorted(name_to_index[2].items(), key=lambda x: x[1])
-        )
-
-        name_to_index_model_input_lres = {
+        name_to_index_model_input = {
             name: i
-            for i, name in enumerate(
-                key
-                for key in self.name_to_index_input_lres.keys()
-                if key not in self.diagnostic
-            )
+            for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
         }
 
         name_to_index_model_input_hres = {
@@ -78,24 +82,44 @@ class IndexCollection:
         name_to_index_model_output = {
             name: i
             for i, name in enumerate(
-                key
-                for key in self.name_to_index_output.keys()
-                if key not in self.forcing
+                key for key in self.name_to_index if key in self.prognostic or key in self.diagnostic
             )
         }
-
         self.data = DataIndex(
-            self.diagnostic,
-            self.forcing,
-            [self.name_to_index_input_lres, self.name_to_index_input_hres],
-            self.name_to_index_output,
+            diagnostic=self.diagnostic, forcing=self.forcing, target=self.target, name_to_index=self.name_to_index
         )
         self.model = ModelIndex(
-            self.diagnostic,
-            self.forcing,
-            [name_to_index_model_input_lres, name_to_index_model_input_hres],
-            name_to_index_model_output,
+            diagnostic=self.diagnostic,
+            forcing=self.forcing,
+            target=self.target,
+            name_to_index_model_input=name_to_index_model_input,
+            name_to_index_model_output=name_to_index_model_output,
         )
+        self.data_full_ordered_names = [
+            name for name, _ in sorted(self.name_to_index.items(), key=operator.itemgetter(1))
+        ]
+        self.data_full_name_to_position = {name: position for position, name in enumerate(self.data_full_ordered_names)}
+        self.data_output_positions_in_data_full = [
+            self.data_full_name_to_position[name] for name in self.data.output.ordered_names
+        ]
+        self.model_output_positions_in_data_full = [
+            self.data_full_name_to_position[name] for name in self.model.output.ordered_names
+        ]
+        self.model_output_positions_in_data_output = self.data.output.positions_for_names(
+            self.model.output.ordered_names
+        )
+        data_output_size = len(self.data.output.ordered_names)
+        self.model_output_in_data_output_is_identity = len(
+            self.model_output_positions_in_data_output
+        ) == data_output_size and self.model_output_positions_in_data_output == list(range(data_output_size))
+        (
+            self.model_output_in_data_output_is_contiguous,
+            self.model_output_in_data_output_contiguous_start,
+            self.model_output_in_data_output_contiguous_length,
+        ) = self._contiguous_span(self.model_output_positions_in_data_output)
+
+    def __repr__(self) -> str:
+        return f"IndexCollection(data_config={self.config}, name_to_index={self.name_to_index})"
 
     def __eq__(self, other):
         if not isinstance(other, IndexCollection):

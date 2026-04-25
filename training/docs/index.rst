@@ -36,14 +36,24 @@ This package provides the *Anemoi* training functionality.
    user-guide/basic-set-up
    user-guide/hydra-intro
    user-guide/configuring
-   user-guide/kcrps-set-up
-   user-guide/diffusion-set-up
+   user-guide/multi-datasets
    user-guide/training
+   user-guide/tasks
+   user-guide/training-methods
    user-guide/models
    user-guide/tracking
    user-guide/benchmarking
    user-guide/distributed
    user-guide/download-era5-o96
+   user-guide/performance-optimisation
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Checkpoint Pipeline
+
+   checkpoint_integration
+   checkpoint_pipeline_configuration
+   checkpoint_troubleshooting
 
 .. toctree::
    :maxdepth: 1

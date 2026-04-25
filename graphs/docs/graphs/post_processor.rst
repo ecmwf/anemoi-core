@@ -42,8 +42,8 @@ attribute where the masking indices will be stored.
 
    post_processors:
    - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
-      nodes_name: data
-      save_mask_indices_to_attr: indices_connected_nodes # optional
+     nodes_name: data
+     save_mask_indices_to_attr: indices_connected_nodes # optional
 
 The ``RemoveUnconnectedNodes`` post-processor also supports an
 ``ignore`` argument, which is optional but highly convenient in certain
@@ -62,9 +62,9 @@ preserved. For example:
 
    post_processors:
    - _target_: anemoi.graphs.processors.RemoveUnconnectedNodes
-      nodes_name: data
-      ignore: important_nodes
-      save_mask_indices_to_attr: indices_connected_nodes # optional
+     nodes_name: data
+     ignore: important_nodes
+     save_mask_indices_to_attr: indices_connected_nodes # optional
 
 In this configuration, any node with the attribute `important_nodes` set
 will not be pruned, regardless of its connectivity status.
@@ -87,8 +87,8 @@ retained in the graph.
 
    post_processors:
    - _target_: anemoi.graphs.processors.SubsetNodesInArea
-      nodes_name: [data, hidden]
-      area: [40, 10, 20, 30] # (north, west, south, east)
+     nodes_name: [data, hidden]
+     area: [40, 10, 20, 30] # (north, west, south, east)
 
 The area is defined by four values representing the northern, western,
 southern, and eastern boundaries, in that order: `(north, west, south,
@@ -151,6 +151,27 @@ With this configuration only edges whose source is in the cutout region
 will be post-processed, i.e. those edges with source node outside the
 cutout region will be preserved regardless of their length.
 
+*****************
+ RemoveSelfEdges
+*****************
+
+The ``RemoveSelfEdges`` post-processor removes self edges from an edge
+store after the graph has been constructed.
+
+.. code:: yaml
+
+   nodes: ...
+   edges: ...
+
+   post_processors:
+   - _target_: anemoi.graphs.processors.RemoveSelfEdges
+     source_name: hidden
+     target_name: hidden
+
+This processor applies to edge stores where ``source_name`` and
+``target_name`` refer to the same node set. After self edges are
+removed, edge attributes for that edge store are recomputed.
+
 ************************************
  Edge Index Sorting Post-processors
 ************************************
@@ -171,7 +192,7 @@ can be configured to sort in either ascending or descending order:
 
    post_processors:
    - _target_: anemoi.graphs.processors.SortEdgeIndexBySourceNodes
-      descending: True  # optional, defaults to true
+     descending: True  # optional, defaults to true
 
 SortEdgeIndexByTargetNodes
 ==========================
@@ -183,7 +204,7 @@ indices based on the target nodes:
 
    post_processors:
    - _target_: anemoi.graphs.processors.SortEdgeIndexByTargetNodes
-      descending: True  # optional, defaults to true
+     descending: True  # optional, defaults to true
 
 Both processors maintain the consistency of all edge attributes while
 sorting, ensuring that the relationship between edge indices and their

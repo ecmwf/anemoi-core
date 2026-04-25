@@ -38,11 +38,22 @@ class Create(Command):
             help="Show the description of the graph.",
         )
         command_parser.add_argument(
-            "config", type=Path, help="Configuration yaml file path defining the recipe to create the graph."
+            "config",
+            type=Path,
+            help="Configuration yaml file path defining the recipe to create the graph.",
         )
         command_parser.add_argument("save_path", type=Path, help="Path to store the created graph.")
 
     def run(self, args):
+        if args.save_path.exists() and not args.overwrite:
+            LOGGER.warning(
+                "Graph already exists at %s. Skipping creation. Use --overwrite to regenerate.",
+                args.save_path,
+            )
+            if args.description:
+                GraphDescriptor(args.save_path).describe()
+            return
+
         graph_creator = GraphCreator(config=args.config)
         graph_creator.create(save_path=args.save_path, overwrite=args.overwrite)
 

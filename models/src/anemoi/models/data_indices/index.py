@@ -9,7 +9,8 @@
 
 from dataclasses import dataclass
 
-from anemoi.models.data_indices.ds_tensor import InputTensorIndex, OutputTensorIndex
+from anemoi.models.data_indices.tensor import InputTensorIndex
+from anemoi.models.data_indices.tensor import OutputTensorIndex
 
 
 class BaseIndex:
@@ -48,66 +49,68 @@ class BaseIndex:
 class DataIndex(BaseIndex):
     """Indexing for data variables."""
 
-    _diagnostic: list
-    _forcing: list
-    name_to_index_input: dict
-    name_to_index_output: dict
-
-    def __post_init__(self):
-
-        self.input = []
-        for i in range(len(self.name_to_index_input)):
-            if i == 0:
-                diagnostic_i = self._diagnostic
-            else:
-                diagnostic_i = []
-            self.input.append(
-                InputTensorIndex(
-                    includes=self._forcing,
-                    excludes=diagnostic_i,
-                    name_to_index=self.name_to_index_input[i],
-                )
-            )
+    def __init__(self, diagnostic, forcing, name_to_index, target=[]) -> None:
+        self._diagnostic = diagnostic
+        self._forcing = forcing
+        self._target = target
+        self._prognostic = [v for v in name_to_index.keys() if v not in set(forcing + diagnostic + target)]
+        self._name_to_index = name_to_index
+        self.input = InputTensorIndex(
+            includes=forcing + self._prognostic,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
+            name_to_index=name_to_index,
+        )
 
         self.output = OutputTensorIndex(
-            includes=self._diagnostic,
-            excludes=self._forcing,
-            name_to_index=self.name_to_index_output,
+            includes=diagnostic + self._prognostic + target,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
+            name_to_index=name_to_index,
         )
 
-    def __repr__(self):
-        return (
-            f"{self.__class__.__name__}("
-            f"diagnostic={self.input}, "
-            f"forcing={self.output}, "
-            f"name_to_index_input={self.name_to_index_input})"
-        )
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(diagnostic={self.output}, forcing={self.input}, name_to_index={self._name_to_index})"
 
 
 @dataclass
 class ModelIndex(BaseIndex):
     """Indexing for model variables."""
 
-    _diagnostic: list
-    _forcing: list
-    _name_to_index_model_input: list
-    _name_to_index_model_output: dict
-
-    def __post_init__(self):
-        self.input = []
-        for i in range(len(self._name_to_index_model_input)):
-            self.input.append(
-                InputTensorIndex(
-                    includes=self._forcing,
-                    excludes=[],
-                    name_to_index=self._name_to_index_model_input[i],
-                )
-            )
+    def __init__(
+        self,
+        diagnostic,
+        forcing,
+        name_to_index_model_input,
+        name_to_index_model_output,
+        target=[],
+    ) -> None:
+        self._diagnostic = diagnostic
+        self._forcing = forcing
+        self._target = target
+        self._prognostic = [v for v in name_to_index_model_input.keys() if v not in set(forcing + diagnostic + target)]
+        self._name_to_index_model_input = name_to_index_model_input
+        self._name_to_index_model_output = name_to_index_model_output
+        self.input = InputTensorIndex(
+            includes=forcing + self._prognostic,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
+            name_to_index=name_to_index_model_input,
+        )
 
         self.output = OutputTensorIndex(
-            includes=self._diagnostic,
-            excludes=[],
-            name_to_index=self._name_to_index_model_output,
+            includes=diagnostic + self._prognostic,
+            forcing=forcing,
+            target=target,
+            diagnostic=diagnostic,
+            prognostic=self._prognostic,
+            name_to_index=name_to_index_model_output,
         )
 
     def __repr__(self):
