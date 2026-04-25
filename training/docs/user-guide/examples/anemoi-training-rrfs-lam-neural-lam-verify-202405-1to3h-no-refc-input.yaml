@@ -1,0 +1,15 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1to3h
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with refc as diagnostic/output-only.
+# This must match the training checkpoint role split: refc is predicted but not used
+# as an input state variable.
+
+data:
+  datasets:
+    data:
+      diagnostic:
+        - refc
