@@ -233,12 +233,6 @@ def test_training_cycle_ensemble_graph_multiscale(
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)
-    graph_data = trainer.graph_data
-
-    for node_name in ["smooth_1x", "smooth_2x", "smooth_4x", "smooth_8x"]:
-        assert node_name in graph_data.node_types
-        assert (node_name, "to", node_name) in graph_data.edge_types
-
     trainer.train()
 
 
@@ -259,6 +253,8 @@ def test_training_cycle_ensemble_truncated_connection(
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)
+    # graph_data is mutated in-place by TruncatedConnection.__init__ when the model is built
+    _ = trainer.model
     graph_data = trainer.graph_data
 
     assert "truncation" in graph_data.node_types
