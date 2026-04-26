@@ -151,6 +151,7 @@ class PointWiseMLPProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
@@ -193,6 +194,7 @@ class TransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: int,
+        attn_channels: Optional[int] = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
@@ -246,12 +248,14 @@ class TransformerProcessor(BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
+            attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
             window_size=window_size,
@@ -328,6 +332,7 @@ class GNNProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         kwargs_build = {
@@ -390,6 +395,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: int,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -414,6 +420,9 @@ class GraphTransformerProcessor(BaseProcessor):
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to num_channels.
         qk_norm: bool, optional
             Normalize query and key, by default False
         cpu_offload : bool, optional
@@ -436,13 +445,7 @@ class GraphTransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
-        )
-
-        self.shard_strategy = shard_strategy
-
-        assert shard_strategy in ["edges", "heads"], (
-            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
-            f"Supported strategies are 'edges' and 'heads'."
+            **kwargs,
         )
 
         self.shard_strategy = shard_strategy
@@ -457,6 +460,7 @@ class GraphTransformerProcessor(BaseProcessor):
             in_channels=num_channels,
             hidden_dim=(mlp_hidden_ratio * num_channels),
             out_channels=num_channels,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,

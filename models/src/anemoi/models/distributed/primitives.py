@@ -40,7 +40,9 @@ def _split(input_: Tensor, dim_: int, sizes_: ShardSizes, group: Optional[Proces
     # get input format
     input_format = get_memory_format(input_)
 
-    # Bypass the function if we are using only 1 GPU.
+    # Bypass the function if not in a distributed context or using only 1 GPU.
+    if group is None or not dist.is_initialized():
+        return input_
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return input_
@@ -162,7 +164,9 @@ def _gather(
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
-    # Bypass the function if we are using only 1 GPU.
+    # Bypass the function if not in a distributed context or using only 1 GPU.
+    if group is None or not dist.is_initialized():
+        return input_
     if dist.get_world_size(group=group) == 1:
         return input_
 
@@ -199,8 +203,10 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
+    # Bypass the function if not in a distributed context or using only 1 GPU.
+    if group is None or not dist.is_initialized():
+        return input_
     comm_size = dist.get_world_size(group=group)
-    # Bypass the function if we are using only 1 GPU.
     if comm_size == 1:
         return input_
 
@@ -287,6 +293,9 @@ def _alltoall_transpose(
     Tensor
         Result of the all-to-all exchange
     """
+    # Bypass the function if not in a distributed context or using only 1 GPU.
+    if group is None or not dist.is_initialized():
+        return input_
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return input_

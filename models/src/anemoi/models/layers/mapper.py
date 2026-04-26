@@ -429,9 +429,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         }
 
-        if self.shard_strategy == "edges":
+        if self.shard_strategy == "edges" and model_comm_group is not None:
             return self.mapper_forward_with_edge_sharding(**kwargs_forward)
-        else:  # self.shard_strategy == "heads"
+        else:  # self.shard_strategy == "heads" or single-GPU fallback
             return maybe_checkpoint(
                 self.mapper_forward_with_heads_sharding,
                 self.gradient_checkpointing,

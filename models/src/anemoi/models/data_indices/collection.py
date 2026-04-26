@@ -70,15 +70,6 @@ class IndexCollection:
             for i, name in enumerate(key for key in self.name_to_index if key in self.forcing or key in self.prognostic)
         }
 
-        name_to_index_model_input_hres = {
-            name: i
-            for i, name in enumerate(
-                key
-                for key in self.name_to_index_input_hres.keys()
-                if key not in self.diagnostic
-            )
-        }
-
         name_to_index_model_output = {
             name: i
             for i, name in enumerate(

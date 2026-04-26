@@ -35,8 +35,7 @@ class BaseIndex:
 
     def todict(self):
         return {
-            "input_0": self.input[0].todict(),
-            "input_1": self.input[1].todict(),
+            "input": self.input.todict(),
             "output": self.output.todict(),
         }
 

@@ -956,8 +956,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         # "inner" chunking for memory reductions in inference, controlled via env variable:
         num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
-        if self.shard_strategy == "edges":
-            # --- halo exchange path ----
+        if self.shard_strategy == "edges" and model_comm_group is not None:
+            # --- halo exchange path (requires distributed context) ----
             # build and cache HaloInfo on first forward pass
             if self._cached_halo_info is None:
                 LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
