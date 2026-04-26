@@ -454,6 +454,7 @@ def plot_predicted_multilevel_flat_sample(
     time_label: str | None = None,
     input_time_label: str | None = None,
     valid_time_label: str | None = None,
+    loss_label: str | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -494,6 +495,8 @@ def plot_predicted_multilevel_flat_sample(
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, layout=LAYOUT)
+    if loss_label:
+        fig.suptitle(loss_label, fontsize=10)
 
     pc_lat, pc_lon = equirectangular_projection(latlons)
     if colormaps is None:
@@ -597,6 +600,18 @@ def plot_flat_sample(
     -------
     None
     """
+    def _finite_error_stats(values: np.ndarray) -> str:
+        finite_values = np.asarray(values)[np.isfinite(values)]
+        if finite_values.size == 0:
+            return "MAE/RMSE/MSE=n/a"
+        mae = float(np.mean(np.abs(finite_values)))
+        mse = float(np.mean(finite_values**2))
+        rmse = float(np.sqrt(mse))
+        return f"MAE={mae:.3g} RMSE={rmse:.3g} MSE={mse:.3g}"
+
+    def _append_stat(title: str, stat: str) -> str:
+        return f"{title}\n{stat}"
+
     precip_and_related_fields = precip_and_related_fields or []
     if vname in precip_and_related_fields:
         # converting to mm from m
@@ -640,6 +655,8 @@ def plot_flat_sample(
             valid_time_label,  # persist err
         ]
         titles = [f"{title}\n{label}" if label else title for title, label in zip(titles, labels, strict=True)]
+
+    titles[3] = _append_stat(titles[3], _finite_error_stats(data[3]))
     # colormaps
     cmaps = [cmap] * 3 + [error_cmap] * 3
     # normalizations for significant colormaps
@@ -668,6 +685,8 @@ def plot_flat_sample(
         data[0] = input_
         data[4] = pred - input_
         data[5] = truth - input_
+        titles[4] = _append_stat(titles[4], _finite_error_stats(data[4]))
+        titles[5] = _append_stat(titles[5], _finite_error_stats(data[5]))
         norms[0] = norm
         # Use separate robust scales so weak-but-real model increments are not hidden by larger persistence errors.
         norms[4] = _centered_norm_from_values(data[4])

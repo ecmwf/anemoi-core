@@ -1163,6 +1163,47 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             name=focus_area.get("name", None) if focus_area is not None else None,
         )
 
+    def _configured_loss_label(
+        self,
+        pl_module: pl.LightningModule,
+        batch: dict[str, torch.Tensor],
+        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        dataset_name: str,
+        rollout_step: int,
+        out_step: int,
+        variable_indices: list[int],
+    ) -> str | None:
+        """Compute the configured training loss for the plotted lead and variable chunk."""
+        if not hasattr(self, "loss") or dataset_name not in self.loss:
+            return None
+
+        try:
+            y_pred = outputs[1][rollout_step][dataset_name]
+            start = pl_module.n_step_input + rollout_step * pl_module.n_step_output + out_step
+            y_time = batch[dataset_name].narrow(1, start, 1)
+            var_idx = pl_module.data_indices[dataset_name].data.output.full.to(device=batch[dataset_name].device)
+            y_true = y_time.index_select(-1, var_idx)
+
+            if y_pred.ndim >= 2 and y_pred.shape[1] == pl_module.n_step_output:
+                y_pred = y_pred[:, out_step : out_step + 1, ...]
+
+            loss_fn = self.loss[dataset_name].to(device=y_pred.device)
+            loss_all = loss_fn(y_pred, y_true).detach().float().cpu().sum().item()
+            loss_chunk = loss_fn(
+                y_pred,
+                y_true,
+                scaler_indices=(..., variable_indices),
+            ).detach().float().cpu().sum().item()
+            return f"configured training loss: all-vars={loss_all:.6g} chunk={loss_chunk:.6g}"
+        except Exception:
+            LOGGER.exception(
+                "Failed to compute configured training loss label for dataset=%s rollout_step=%s out_step=%s",
+                dataset_name,
+                rollout_step,
+                out_step,
+            )
+            return None
+
     def process(
         self,
         pl_module: pl.LightningModule,
@@ -1332,6 +1373,15 @@ class PlotSample(BasePlotAdditionalMetrics):
                     for rollout_step in range(output_times[0]):
                         init_step = self._get_init_step(rollout_step, output_times[1])
                         for out_step in range(max_out_steps):
+                            loss_label = self._configured_loss_label(
+                                pl_module=pl_module,
+                                batch=batch,
+                                outputs=outputs,
+                                dataset_name=dataset_name,
+                                rollout_step=rollout_step,
+                                out_step=out_step,
+                                variable_indices=list(plot_parameters_dict.keys()),
+                            )
                             truth_idx = rollout_step * pl_module.n_step_output + out_step + 1
                             input_field = data[init_step, ...].squeeze()
                             truth_field = data[truth_idx, ...].squeeze()
@@ -1374,6 +1424,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                                 colormaps=self.colormaps,
                                 input_time_label=input_time_label,
                                 valid_time_label=time_label,
+                                loss_label=loss_label,
                             )
 
                             self._output_figure(
@@ -1396,6 +1447,15 @@ class PlotSample(BasePlotAdditionalMetrics):
                     for rollout_step in range(output_times[0]):
                         interp_step = rollout_step + 1
                         init_step = self._get_init_step(rollout_step, output_times[1])
+                        loss_label = self._configured_loss_label(
+                            pl_module=pl_module,
+                            batch=batch,
+                            outputs=outputs,
+                            dataset_name=dataset_name,
+                            rollout_step=rollout_step,
+                            out_step=0,
+                            variable_indices=list(plot_parameters_dict.keys()),
+                        )
                         input_field = data[init_step, ...].squeeze()
                         truth_field = data[rollout_step + 1, ...].squeeze()
                         pred_field = output_tensor[rollout_step, ...]
@@ -1437,6 +1497,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                             colormaps=self.colormaps,
                             input_time_label=input_time_label,
                             valid_time_label=time_label,
+                            loss_label=loss_label,
                         )
 
                         self._output_figure(
