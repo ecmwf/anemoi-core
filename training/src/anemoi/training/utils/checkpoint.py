@@ -22,12 +22,20 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 
 LOGGER = logging.getLogger(__name__)
+
+
+def __getattr__(name: str):
+    """Module-level __getattr__ for lazy imports to break circular dependencies."""
+    if name == "BaseGraphModule":
+        from anemoi.training.train.methods.base import BaseGraphModule
+        globals()["BaseGraphModule"] = BaseGraphModule
+        return BaseGraphModule
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def load_and_prepare_model(
@@ -49,7 +57,7 @@ def load_and_prepare_model(
         pytorch model, metadata
 
     """
-    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 
     if use_ema:

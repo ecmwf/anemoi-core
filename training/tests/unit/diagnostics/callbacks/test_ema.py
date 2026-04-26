@@ -68,7 +68,7 @@ def test_load_and_prepare_model_uses_ema_weights(monkeypatch):
 
     monkeypatch.setattr(
         "anemoi.training.utils.checkpoint.BaseGraphModule.load_from_checkpoint",
-        lambda _: module,
+        lambda *_args, **_kwargs: module,
     )
     monkeypatch.setattr(
         "anemoi.training.utils.checkpoint.torch.load",

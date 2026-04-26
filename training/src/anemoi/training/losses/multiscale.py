@@ -177,25 +177,34 @@ class MultiscaleLossWrapper(BaseLoss):
             y = self._apply_projector(y, self.smoothing_matrices[i])
         return x, y
 
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Whether the wrapper needs shard-layout metadata from the task."""
+        return self.keep_batch_sharded
+
     def forward(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
         squash: bool = True,
-        grid_shard_slice: tuple | None = None,
-        model_comm_group: ProcessGroup | None = None,
-        model_comm_group_size: int | None = None,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        grid_dim: int | None = None,
         grid_shard_sizes: list[int] | None = None,
-        **_kwargs,
-    ) -> list[torch.Tensor]:
+        **kwargs,
+    ) -> torch.Tensor:
 
         channel_shard_sizes = None
-        if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
+        is_model_sharded = grid_shard_sizes is not None
+        if is_model_sharded and self.keep_batch_sharded:
             # go to full sequence dimension for smoothing
             y_pred_ens_for_smooth, y_for_smooth, channel_shard_sizes = self._prepare_for_smoothing(
                 y_pred_ens,
                 y,
-                model_comm_group,
+                group,
                 grid_shard_sizes,
             )
         else:
@@ -215,7 +224,7 @@ class MultiscaleLossWrapper(BaseLoss):
             # smooth the predictions and the truth for loss computation
             y_pred_ens_tmp, y_tmp = self._smooth_for_loss(y_pred_ens_for_smooth, y_for_smooth, i)
 
-            if model_comm_group_size and model_comm_group_size > 1 and self.keep_batch_sharded:
+            if is_model_sharded and self.keep_batch_sharded:
                 # channel-sharded -> grid-sharded: reverse the all-to-all
                 y_pred_ens_tmp = all_to_all_transpose(
                     y_pred_ens_tmp,
@@ -223,7 +232,7 @@ class MultiscaleLossWrapper(BaseLoss):
                     grid_shard_sizes,
                     -1,
                     channel_shard_sizes,
-                    model_comm_group,
+                    group,
                 )
                 y_tmp = all_to_all_transpose(
                     y_tmp,
@@ -231,7 +240,7 @@ class MultiscaleLossWrapper(BaseLoss):
                     grid_shard_sizes,
                     -1,
                     channel_shard_sizes,
-                    model_comm_group,
+                    group,
                 )
 
             # save for next loss scale
@@ -248,8 +257,11 @@ class MultiscaleLossWrapper(BaseLoss):
                     y_pred_ens_tmp,
                     y_tmp,
                     squash=squash,
+                    scaler_indices=scaler_indices,
+                    without_scalers=without_scalers,
                     grid_shard_slice=grid_shard_slice,
-                    group=model_comm_group,
+                    group=group,
+                    **kwargs,
                 ),
             )
 

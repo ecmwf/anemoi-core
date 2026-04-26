@@ -338,7 +338,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
-        return self._plot_adapter
+        return self.task._plot_adapter
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -573,12 +573,15 @@ class BaseGraphModule(pl.LightningModule, ABC):
         torch.Tensor
             Computed loss
         """
-        return self.loss[dataset_name](
-            y_pred,
-            y,
-            grid_shard_slice=grid_shard_slice,
-            group=self.model_comm_group,
-        )
+        loss = self.loss[dataset_name]
+        kwargs = {
+            "grid_shard_slice": grid_shard_slice,
+            "group": self.model_comm_group,
+        }
+        if getattr(loss, "needs_shard_layout_info", False):
+            kwargs["grid_dim"] = self.grid_dim
+            kwargs["grid_shard_sizes"] = self.grid_shard_sizes[dataset_name]
+        return loss(y_pred, y, **kwargs)
 
     def _compute_metrics(
         self,
@@ -586,6 +589,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
         y: torch.Tensor,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
+        rollout_step: int | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Compute validation metrics.
@@ -598,13 +602,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        dataset_name : str | None
+            Dataset name for multi-dataset scenarios
+        rollout_step : int | None
+            Rollout step index for per-step metric keys
 
         Returns
         -------
         dict[str, torch.Tensor]
             Computed metrics
         """
-        return self.calculate_val_metrics(y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name)
+        return self.calculate_val_metrics(
+            y_pred, y, grid_shard_slice=grid_shard_slice, dataset_name=dataset_name, step=rollout_step,
+        )
 
     def compute_dataset_loss_metrics(
         self,
@@ -910,22 +920,26 @@ class BaseGraphModule(pl.LightningModule, ABC):
 
             for mkey, indices in val_metric_ranges.items():
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
-                if len(metric.scaler.subset_by_dim(TensorDim.VARIABLE.value)):
+                if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
                         "Validation metrics cannot be scaled over the variable dimension"
                         " in the post processed space."
                     )
                     raise ValueError(exception_msg)
 
+                metric_kwargs: dict[str, Any] = {
+                    "scaler_indices": (..., indices),
+                    "grid_shard_slice": grid_shard_slice,
+                    "group": self.model_comm_group,
+                }
+                if getattr(metric, "needs_shard_layout_info", False):
+                    metric_kwargs["grid_dim"] = self.grid_dim
+                    metric_kwargs["grid_shard_sizes"] = self.grid_shard_sizes[dataset_name]
+
                 metrics[metric_step_name] = metric(
                     y_pred_postprocessed,
                     y_postprocessed,
-                    scaler_indices=(..., indices),
-                    grid_shard_slice=grid_shard_slice,
-                    group=self.model_comm_group,
-                    model_comm_group_size=self.model_comm_group_size,
-                    grid_dim=self.grid_dim,
-                    grid_shard_sizes=self.grid_shard_sizes,
+                    **metric_kwargs,
                 )
 
         return metrics
@@ -1077,3 +1091,7 @@ class BaseGraphModule(pl.LightningModule, ABC):
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             # Log hyperparameters
             self.logger.log_hyperparams(hyper_params)
+
+
+# Backward compatibility alias
+BaseTrainingModule = BaseGraphModule
