@@ -1,0 +1,13 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-loss
+  - _self_
+
+# Variant for testing refc as output-only while using refc value/range-based
+# weighting. This intentionally does not include the refc tendency scaler.
+data:
+  datasets:
+    data:
+      # Keep refc as a predicted diagnostic variable, but remove it from the
+      # model input state so the model cannot use refc persistence directly.
+      diagnostic:
+        - refc
