@@ -41,7 +41,8 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
--  Choose the model task and model type from :ref:`Models <Models>`.
+-  Choose the task (see :doc:`tasks`), training method
+   (see :doc:`training-methods`), and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
 
@@ -618,3 +619,19 @@ frozen and only the encoder and decoder will be trained:
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
+
+****************************
+ Precision and BLAS Backend
+****************************
+
+Anemoi supports Lightning's native mixed precision training as well as the option to select a preferred BLAS backend
+to be used by PyTorch. For example:
+
+.. code:: yaml
+
+   training:
+      precision: bf16-mixed
+      preferred_blas_backend: "cublas"
+
+Note that both entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
+default selection of PyTorch.

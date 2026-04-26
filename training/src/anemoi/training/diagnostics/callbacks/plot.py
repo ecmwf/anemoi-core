@@ -42,6 +42,7 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
+from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -753,14 +754,25 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            adapter = pl_module.plot_adapter
-            for rollout_step in range(adapter.loss_plot_times):
-                y_hat = outputs[1][rollout_step][dataset_name]
-                start = adapter.get_loss_plot_batch_start(rollout_step)
-                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
-                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
-                y_true = y_time.index_select(-1, var_idx)
-                loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
+            for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+                y_hat = outputs[1][i][dataset_name]
+                y_true = pl_module.task.get_targets(
+                    batch={dataset_name: batch[dataset_name]},
+                    data_indices=pl_module.data_indices,
+                    **task_kwargs,
+                )[dataset_name]
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](
+                        y_hat,
+                        y_true,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_FULL,
+                        squash=False,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                )
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
                     parameter_names,
@@ -768,12 +780,13 @@ class PlotLoss(BasePerBatchPlotCallback):
                 loss = loss[argsort_indices]
                 fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
+                metric_name = pl_module.task.get_metric_name(**task_kwargs)
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                    exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+                    tag=f"loss_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
                 )
 
     def on_validation_batch_end(
@@ -864,8 +877,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             The name of the dataset to process
         outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
             The outputs from the model. The second element must be a list of dicts
-            (one per outer step). Tasks with a single step (e.g. diffusion, multi-out
-            interpolator) must return [y_pred] so that ``for x in outputs[1]``
+            (one per outer step). Tasks with a single step (e.g. diffusion,
+            temporal downscaling) must return [y_pred] so that ``for x in outputs[1]``
             iterates over steps; if they return the dict directly, iteration would
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
@@ -890,18 +903,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.plot_adapter.get_total_plot_targets()
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
 
-        input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
+        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
+
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
@@ -934,7 +939,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
@@ -953,8 +957,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             Parameters to plot
         accumulation_levels_plot : list[float]
             Accumulation levels to plot
-        output_steps : int
-            Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
         colormaps : dict[str, Colormap] | None, optional
@@ -981,7 +983,6 @@ class PlotSample(BasePlotAdditionalMetrics):
 
         self.precip_and_related_fields = precip_and_related_fields
         self.accumulation_levels_plot = accumulation_levels_plot
-        self.output_steps = output_steps
         self.per_sample = per_sample
         self.colormaps = colormaps
 
@@ -1028,17 +1029,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
                     self.per_sample,
@@ -1079,7 +1070,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -1094,8 +1084,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Sample to plot
         parameters : list[str]
             Parameters to plot
-        output_steps : int
-            Max number of output steps to plot per rollout in forecast mode
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         dataset_names : list[str] | None, optional
@@ -1113,7 +1101,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
-        self.output_steps = output_steps
         self.min_delta = min_delta
 
     @rank_zero_only
@@ -1141,9 +1128,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-        for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
-
             # Build dictionary of indices and parameters to be plotted
             input_data = pl_module.data_indices[dataset_name].data.input.todict()
             index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
@@ -1156,17 +1140,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 fig = plot_power_spectrum(
                     plot_parameters_dict_spectrum,
                     latlons,
@@ -1200,7 +1174,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
@@ -1216,8 +1189,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             Sample to plot
         parameters : list[str]
             Parameters to plot
-        output_steps : int
-            Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
         log_scale : bool, optional
@@ -1240,7 +1211,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
-        self.output_steps = output_steps
         self.precip_and_related_fields = precip_and_related_fields
         self.log_scale = log_scale
 
@@ -1288,17 +1258,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+
                 fig = plot_histogram(
                     plot_parameters_dict_histogram,
                     x,

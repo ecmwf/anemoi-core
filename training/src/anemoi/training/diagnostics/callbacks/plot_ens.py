@@ -94,28 +94,19 @@ class EnsemblePlotMixin:
         if self.latlons is None:
             self.latlons = {}
 
+        if dataset_name not in self.latlons:
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+
         # uniform handling of different ways to specify members
         if members is None:
             members = slice(members)
         elif not isinstance(members, list):
             members = [members]
 
-        if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
+        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
 
-        total_targets = pl_module.plot_adapter.get_total_plot_targets()
-
-        input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
@@ -217,7 +208,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
@@ -234,7 +224,6 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             sample_idx,
             parameters,
             accumulation_levels_plot,
-            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
@@ -281,7 +270,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
+            latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
                 data,
@@ -289,22 +278,13 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             local_rank = pl_module.local_rank
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    y_true, y_pred, tag_suffix = item[0], item[1], item[2]
-                else:
-                    _, y_true, y_pred, tag_suffix = item
+            for _, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 y_true = np.asarray(y_true).squeeze()
                 y_pred = np.asarray(y_pred).squeeze()
                 fig = plot_predicted_ensemble(
                     parameters=plot_parameters_dict,
                     n_plots_per_sample=4,
-                    latlons=self.latlons[dataset_name],
+                    latlons=latlons,
                     clevels=self.accumulation_levels_plot,
                     y_true=y_true,
                     y_pred=y_pred,
@@ -357,7 +337,6 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
         self,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -369,7 +348,6 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
             self,
             sample_idx,
             parameters,
-            output_steps,
             min_delta,
             every_n_batches,
             dataset_names,
@@ -386,7 +364,6 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
@@ -402,7 +379,6 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
             sample_idx,
             parameters,
             accumulation_levels_plot,
-            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
@@ -421,7 +397,6 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
         self,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
@@ -434,7 +409,6 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
             self,
             sample_idx,
             parameters,
-            output_steps,
             precip_and_related_fields,
             log_scale,
             every_n_batches,

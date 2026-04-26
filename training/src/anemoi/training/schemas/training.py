@@ -15,7 +15,6 @@ from typing import Literal
 from typing import Self
 
 from pydantic import AfterValidator
-from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Discriminator
 from pydantic import Field
@@ -28,6 +27,32 @@ from pydantic import model_validator
 from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
+
+
+class GenericSchema(BaseModel):
+    """Generic Hydra instantiation schema with a required _target_ and arbitrary extra fields."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    target_: str = Field(alias="_target_")
+    """Hydra target class or function to instantiate."""
+
+
+class OptimizerSchema(GenericSchema):
+    """Hydra instantiation config for a PyTorch optimizer."""
+
+
+class LRSchedulerSchema(GenericSchema):
+    """Hydra instantiation config for a learning rate scheduler."""
+
+
+class PLSchedulerSchema(BaseModel):
+    """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    interval: str = "step"
+    """Interval at which Lightning calls lr_scheduler_step ('step' or 'epoch'). Defaults to 'step'."""
 
 
 class GradientClip(BaseModel):
@@ -53,41 +78,17 @@ class SWA(BaseModel):
     "Learning rate for SWA."
 
 
-class Rollout(BaseModel):
-    """Rollout configuration."""
+class OptimizationSchema(BaseModel):
+    """Optimizer and LR scheduler configuration."""
 
-    start: NonNegativeInt = Field(example=1)
-    "Number of rollouts to start with."
-    epoch_increment: NonNegativeInt = Field(example=0)
-    "Number of epochs to increment the rollout."
-    max: NonNegativeInt = Field(example=1)
-    "Maximum number of rollouts."
-
-
-class LR(BaseModel):
-    """Learning rate configuration.
-
-    Changes in per-gpu batch_size should come with a rescaling of the local_lr,
-    in order to keep a constant global_lr global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model.
-    """
-
-    rate: NonNegativeFloat = Field(example=0.625e-4)  # TODO(Helen): Could be computed by pydantic
-    "Initial learning rate. Is adjusteed according to the hardware configuration"
-    iterations: NonNegativeInt = Field(example=300000)
-    "Number of iterations."
-    min: NonNegativeFloat = Field(example=3e-7)
-    "Minimum learning rate."
-    warmup: NonNegativeInt = Field(example=1000)
-    "Number of warm up iteration. Default to 1000."
-
-
-class OptimizerSchema(PydanticBaseModel):
-    """Choosing the PydanticBaseModel to allow extra inputs."""
-
-    model_config = ConfigDict(extra="allow")
-
-    target_: str = Field(..., alias="_target_")
-    """Full path to the optimizer class, e.g. `torch.optim.AdamW`."""
+    lr: NonNegativeFloat = Field(example=0.625e-4)
+    "Base learning rate per GPU. Scaled by hardware config at runtime."
+    optimizer: OptimizerSchema
+    """Hydra instantiation config for the optimizer."""
+    lr_scheduler: LRSchedulerSchema | None = None
+    """Hydra instantiation config for the LR scheduler. If None, no scheduler is used."""
+    pl_lr_scheduler: PLSchedulerSchema = Field(default_factory=PLSchedulerSchema)
+    """PyTorch Lightning LRSchedulerConfig wrapper fields (interval, monitor, etc.)."""
 
 
 class ExplicitTimes(BaseModel):
@@ -195,8 +196,6 @@ class TimeStepScalerSchema(BaseModel):
 
 class UniformTimeStepScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.UniformTimeStepScaler"] = Field(..., alias="_target_")
-    multistep_output: PositiveInt = Field(example=5)
-    "Number of output time steps."
 
 
 class LeadTimeDecayScalerSchema(BaseModel):
@@ -269,6 +268,8 @@ class BaseLossSchema(BaseModel):
     "Scalars to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
+    predicted_variables: list[str] | None = None
+    target_variables: list[str] | None = None
 
 
 class KernelCRPSSchema(BaseLossSchema):
@@ -395,7 +396,7 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    "This flag picks a task to train for, examples: forecaster, autoencoder, interpolator.."
+    "This flag picks a task to train for, examples: forecaster, autoencoder, temporal_downscaler.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -413,15 +414,8 @@ class BaseTrainingSchema(BaseModel):
     " reproducibility."
     precision: str = Field(default="16-mixed")
     "Precision"
-    multistep_input: PositiveInt = Field(example=2)
-    """Number of input steps for the model.
-    E.g. 1 = single step scheme, X(t-1) used to predict X(t) and possible later steps,
-    k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to make prediction."""
-    multistep_output: PositiveInt = Field(example=1, default=1)
-    """Number of output steps for the model. E.g. 1 = single step scheme, model predicts X(t),
-    k > 1: multistep scheme, predicts [X(t), X(t+1), ... X(t+k)].
-    During rollout, if multistep_output > multistep_input, only the latest multistep_input outputs
-    are fed into the next step."""
+    preferred_blas_backend: str | None = Field(default=None)
+    "Optionally override PyTorch's default BLAS backend."
     accum_grad_batches: PositiveInt = Field(default=1)
     """Accumulates gradients over k batches before stepping the optimizer.
     K >= 1 (if K == 1 then no accumulation). The effective bacthsize becomes num-device * k."""
@@ -447,10 +441,8 @@ class BaseTrainingSchema(BaseModel):
     "Maximum number of epochs, stops earlier if max_steps is reached first."
     max_steps: PositiveInt = 150000
     "Maximum number of steps, stops earlier if max_epochs is reached first."
-    lr: LR = Field(default_factory=LR)
-    "Learning rate configuration."
-    optimizer: OptimizerSchema = Field(default_factory=OptimizerSchema)
-    "Optimizer configuration."
+    optimization: OptimizationSchema
+    "Optimizer and LR scheduler configuration."
     recompile_limit: PositiveInt = 32
     "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]
@@ -459,53 +451,30 @@ class BaseTrainingSchema(BaseModel):
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
-class ForecasterSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphForecaster",] = Field(..., alias="model_task")
-    "Training objective."
-    rollout: Rollout = Field(default_factory=Rollout)
-    "Rollout configuration."
-
-
-class ForecasterEnsSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphEnsForecaster",] = Field(..., alias="model_task")
+class SingleTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
-class DiffusionForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionForecaster"] = Field(..., alias="model_task")
+class EnsembleTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
     "Training objective."
 
 
-class DiffusionTendForecasterSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphDiffusionTendForecaster"] = Field(
+class DiffusionTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
+    "Training objective."
+
+
+class DiffusionTendencyTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.DiffusionTendencyTraining"] = Field(
         ...,
-        alias="model_task",
+        alias="training_method",
     )
     "Training objective."
 
 
-class AutoencoderSchema(ForecasterSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphAutoEncoder",] = Field(..., alias="model_task")
-    "Training objective."
-
-
-class InterpolationMultiSchema(BaseTrainingSchema):
-    model_task: Literal["anemoi.training.train.tasks.GraphMultiOutInterpolator"] = Field(..., alias="model_task")
-    "Training objective."
-    explicit_times: ExplicitTimes
-    "Time indices for input and output."
-
-    # Needed to allow to override default training configuration
-    # Forced to be None (null)
-    rollout: Literal[None] = None
-
-
 TrainingSchema = Annotated[
-    ForecasterSchema
-    | ForecasterEnsSchema
-    | InterpolationMultiSchema
-    | DiffusionForecasterSchema
-    | DiffusionTendForecasterSchema
-    | AutoencoderSchema,
-    Discriminator("model_task"),
+    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendencyTrainingSchema,
+    Discriminator("training_method"),
 ]

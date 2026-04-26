@@ -412,3 +412,12 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
                 edge_mask = attr_mask[edge_index[i]].cpu()
                 mask = torch.logical_or(mask, ~edge_mask)
         return mask
+
+
+class RemoveSelfEdges(BaseEdgeMaskingProcessor):
+    """Remove self edges from an edge store."""
+
+    def compute_mask(self, graph: HeteroData) -> torch.Tensor:
+        assert self.source_name == self.target_name, "Self-edge removal requires source and target node sets to match."
+        edge_index = graph[self.edges_name].edge_index
+        return edge_index[0] != edge_index[1]

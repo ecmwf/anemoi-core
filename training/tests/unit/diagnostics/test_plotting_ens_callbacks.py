@@ -48,7 +48,7 @@ def test_ensemble_plot_mixin_handle_batch_and_output():
 
     # Mock lightning module: allgather_batch(tensor, grid_indices, grid_dim) -> tensor
     pl_module = MagicMock()
-    pl_module.allgather_batch.side_effect = lambda x, *_args: x
+    pl_module.allgather_batch.side_effect = lambda x, _y: x
     pl_module.grid_indices = {dataset_name: MagicMock()}
     pl_module.grid_dim = -2
 
@@ -83,11 +83,9 @@ def test_ensemble_plot_mixin_process():
 
     # Mock lightning module
     pl_module = MagicMock()
-    pl_module.task_type = "forecaster"
     pl_module.n_step_input = 2
     pl_module.n_step_output = 1
     pl_module.plot_adapter = MagicMock()
-    pl_module.plot_adapter.output_times = 3
     pl_module.plot_adapter.get_total_plot_targets.return_value = 3
     pl_module.plot_adapter.prepare_plot_output_tensor.side_effect = lambda x: x
     pl_module.model.model._graph_name_data = "x"
@@ -164,7 +162,6 @@ def test_ensemble_plot_callbacks_instantiation():
         sample_idx=0,
         parameters=["temperature", "pressure"],
         accumulation_levels_plot=[0.1, 0.5, 0.9],
-        output_steps=1,
     )
     assert plot_ens_sample is not None
 
@@ -172,20 +169,17 @@ def test_ensemble_plot_callbacks_instantiation():
         sample_idx=0,
         parameters=["temperature"],
         accumulation_levels_plot=[0.5],
-        output_steps=1,
     )
     assert plot_sample is not None
 
     plot_spectrum = PlotSpectrum(
         sample_idx=0,
         parameters=["temperature"],
-        output_steps=1,
     )
     assert plot_spectrum is not None
 
     plot_histogram = PlotHistogram(
         sample_idx=0,
         parameters=["temperature"],
-        output_steps=1,
     )
     assert plot_histogram is not None

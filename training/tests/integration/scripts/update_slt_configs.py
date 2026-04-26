@@ -80,8 +80,8 @@ def generate_global_config(hydra_config_path: Path) -> OmegaConf:
     # Similarly, we are adding an additional scaler for the output time steps to test that functionality as well
     # Generally, we want the system-level tests to cover different configurations but not diverge too much from the
     # default settings.
-    cfg.training.multistep_input = 3
-    cfg.training.multistep_output = 2
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
 
     OmegaConf.set_struct(cfg.training.scalers.datasets.data, False)
     cfg.training.scalers.datasets.data["output_steps"] = {
