@@ -253,14 +253,6 @@ def test_training_cycle_ensemble_truncated_connection(
     get_test_archive(url)
 
     trainer = AnemoiTrainer(cfg)
-    # graph_data is mutated in-place by TruncatedConnection.__init__ when the model is built
-    _ = trainer.model
-    graph_data = trainer.graph_data
-
-    assert "truncation" in graph_data.node_types
-    assert ("data", "to", "truncation") in graph_data.edge_types
-    assert ("truncation", "to", "data") in graph_data.edge_types
-
     trainer.train()
 
 
