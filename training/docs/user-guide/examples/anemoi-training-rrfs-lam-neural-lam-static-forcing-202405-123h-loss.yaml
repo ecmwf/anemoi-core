@@ -139,8 +139,8 @@ training:
           _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
           variable: refc
           normalization: min-max
-          thresholds: [5.0, 20.0, 40.0]
-          range_weight_factors: [0.1, 20, 40, 80]
+          thresholds: [0.0, 20.0, 40.0]
+          range_weight_factors: [0.1, 10, 40, 80]
   metrics:
     datasets:
       data:
