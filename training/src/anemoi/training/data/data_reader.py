@@ -60,12 +60,16 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
     """Validate and normalize reader configuration."""
     normalized = dict(dataset_config)
 
-    if "dataset" in normalized:
-        msg = (
-            "Invalid dataloader dataset schema: use 'dataset_config' (outer key) "
-            "and 'dataset' inside it. The legacy outer 'dataset' key is no longer supported."
-        )
-        raise ValueError(msg)
+    # Backward compatibility: ds-branch configs use a top-level "dataset" key
+    # instead of the upstream "dataset_config" wrapper.
+    if "dataset" in normalized and "dataset_config" not in normalized:
+        LOGGER.info("Auto-wrapping legacy 'dataset' key into 'dataset_config' format.")
+        ds_value = normalized.pop("dataset")
+        freq = normalized.pop("frequency", None)
+        dc = {"dataset": ds_value}
+        if freq is not None:
+            dc["frequency"] = freq
+        normalized["dataset_config"] = dc
 
     base_dataset_config = normalized.pop("dataset_config", None)
     if base_dataset_config is None:

@@ -115,12 +115,20 @@ class SchemaCommonMixin:
         return values
 
     def model_post_init(self, _: Any) -> None:
-        expand_paths(self.system)
-        if self.diagnostics.log.mlflow.enabled and (
-            self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
-        ):
-            LOGGER.info("adjusting save_dir path to match output mlflow logs")
-            self.diagnostics.log.mlflow.save_dir = str(self.system.output.logs.mlflow)
+        # Guard for backward compat: ds-branch configs may lack deep system paths
+        if hasattr(self, "system") and hasattr(self.system, "output"):
+            expand_paths(self.system)
+            if (
+                hasattr(self, "diagnostics")
+                and hasattr(self.diagnostics, "log")
+                and hasattr(self.diagnostics.log, "mlflow")
+                and self.diagnostics.log.mlflow.enabled
+                and hasattr(self.system.output, "logs")
+                and hasattr(self.system.output.logs, "mlflow")
+                and self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
+            ):
+                LOGGER.info("adjusting save_dir path to match output mlflow logs")
+                self.diagnostics.log.mlflow.save_dir = str(self.system.output.logs.mlflow)
 
 
 class BaseSchema(SchemaCommonMixin, BaseModel):
