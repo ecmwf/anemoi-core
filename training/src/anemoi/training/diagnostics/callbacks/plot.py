@@ -52,6 +52,17 @@ from anemoi.utils.dates import frequency_to_timedelta
 LOGGER = logging.getLogger(__name__)
 
 
+def _plot_variable_label(var_names: list[str], required_name: str = "refc") -> str:
+    """Build a compact filename label while keeping key variables searchable."""
+    if len(var_names) <= 6:
+        return "vars_" + "-".join(var_names)
+
+    if required_name in var_names and required_name not in (var_names[0], var_names[-1]):
+        return f"vars{len(var_names)}_{var_names[0]}_{required_name}_{var_names[-1]}"
+
+    return f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+
+
 class BasePlotCallback(Callback, ABC):
     """Factory for creating a callback that plots data to Experiment Logging."""
 
@@ -1314,10 +1325,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                     continue
 
                 var_names = [name for _, (name, _) in plot_parameters_dict.items()]
-                if len(var_names) <= 6:
-                    var_label = "vars_" + "-".join(var_names)
-                else:
-                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+                var_label = _plot_variable_label(var_names)
 
                 if output_times[1] == "forecast":
                     max_out_steps = min(pl_module.n_step_output, self.output_steps)
@@ -1636,10 +1644,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                     continue
 
                 var_names = [name for _, (name, _) in plot_parameters_dict_spectrum.items()]
-                if len(var_names) <= 6:
-                    var_label = "vars_" + "-".join(var_names)
-                else:
-                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+                var_label = _plot_variable_label(var_names)
 
                 if output_times[1] == "forecast":
                     max_out_steps = min(pl_module.n_step_output, self.output_steps)
@@ -1794,10 +1799,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                     continue
 
                 var_names = [name for _, (name, _) in plot_parameters_dict_histogram.items()]
-                if len(var_names) <= 6:
-                    var_label = "vars_" + "-".join(var_names)
-                else:
-                    var_label = f"vars{len(var_names)}_{var_names[0]}_{var_names[-1]}"
+                var_label = _plot_variable_label(var_names)
 
                 if output_times[1] == "forecast":
                     max_out_steps = min(pl_module.n_step_output, self.output_steps)
