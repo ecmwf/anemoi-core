@@ -9,30 +9,28 @@
 
 
 import logging
-from collections.abc import Callable
-from collections.abc import Iterable
+from dataclasses import dataclass
+from dataclasses import field
 from datetime import timedelta
-from typing import Any
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
 from anemoi.training.diagnostics.callbacks.checkpoint import AnemoiCheckpoint
 from anemoi.training.diagnostics.callbacks.optimiser import LearningRateMonitor
+from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.diagnostics.callbacks.weight_averaging import _get_weight_averaging_callback
-from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.utils.checkpoint import RegisterMigrations
 
 LOGGER = logging.getLogger(__name__)
 
 
-def nestedget(config: DictConfig, key: str, default: Any) -> Any:
+def nestedget(config: DictConfig, key: str, default: object) -> object:
     """Get a nested key from a DictConfig object.
 
     E.g.
@@ -41,29 +39,54 @@ def nestedget(config: DictConfig, key: str, default: Any) -> Any:
     keys = key.split(".")
     for k in keys:
         config = getattr(config, k, default)
-        if not isinstance(config, BaseModel | dict | DictConfig):
+        if not isinstance(config, dict | DictConfig):
             break
     return config
 
 
-# Callbacks to add according to flags in the config
-# Can be function to check status from config
-CONFIG_ENABLED_CALLBACKS: list[tuple[list[str] | str | Callable[[DictConfig], bool], type[Callback]]] = [
-    (
-        lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
-        or nestedget(config, "diagnostics.log.mlflow.enabled", False),
-        LearningRateMonitor,
-    ),
-]
+@dataclass
+class CallbacksContext:
+    """Context containing configuration for callbacks initialisation.
+
+    Parameters
+    ----------
+    diagnostics : DictConfig
+        Diagnostics configuration (config.diagnostics)
+    checkpoints_output : DictConfig
+        Checkpoint output paths configuration (config.system.output.checkpoints)
+    plots_output : str | None
+        Base directory for plot outputs (config.system.output.plots)
+    wandb_enabled : bool
+        Whether Weights & Biases logging is enabled
+    mlflow_enabled : bool
+        Whether MLflow logging is enabled
+    weight_averaging_config : DictConfig | None
+        Weight averaging configuration (config.training.weight_averaging), or None if not set
+    """
+
+    diagnostics: DictConfig
+    checkpoints_output: DictConfig
+    plots_output: str | None
+    wandb_enabled: bool
+    mlflow_enabled: bool
+    weight_averaging_config: DictConfig | None = field(default=None)
 
 
-def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
-    """Get checkpointing callbacks."""
-    if not config.diagnostics.enable_checkpointing:
+def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: DictConfig) -> list[AnemoiCheckpoint]:
+    """Get checkpointing callbacks.
+
+    Parameters
+    ----------
+    diagnostics_cfg : DictConfig
+        Diagnostics configuration (``config.diagnostics``).
+    checkpoint_paths_cfg : DictConfig
+        Checkpoint paths configuration (``config.system.output.checkpoints``).
+    """
+    if not diagnostics_cfg.enable_checkpointing:
         return []
 
     checkpoint_settings = {
-        "dirpath": config.system.output.checkpoints.root,
+        "dirpath": checkpoint_paths_cfg.root,
         "verbose": False,
         # save weights, optimizer states, LR-schedule states, hyperparameters etc.
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
@@ -76,7 +99,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
 
     ckpt_frequency_save_dict = {}
 
-    for key, frequency_dict in config.diagnostics.checkpoint.items():
+    for key, frequency_dict in diagnostics_cfg.checkpoint.items():
         frequency = frequency_dict.save_frequency
         n_saved = frequency_dict.num_models_saved
         if key == "every_n_minutes" and frequency_dict.save_frequency is not None:
@@ -85,7 +108,7 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
         else:
             target = key
         ckpt_frequency_save_dict[target] = (
-            config.system.output.checkpoints[key],
+            checkpoint_paths_cfg[key],
             frequency,
             n_saved,
         )
@@ -118,28 +141,53 @@ def _get_checkpoint_callback(config: BaseSchema) -> list[AnemoiCheckpoint]:
     return checkpoint_callbacks
 
 
-def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
-    """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS."""
-    callbacks = []
+def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
+    """Check that all plotting dependencies required by the current config are installed."""
+    try:
+        import matplotlib as mpl  # noqa: F401
+    except ImportError as err:
+        msg = (
+            "Plotting callbacks are configured but matplotlib is not installed. "
+            "Install it with: pip install anemoi-training[plotting]"
+        )
+        raise ImportError(msg) from err
 
-    def check_key(config: dict, key: str | Iterable[str] | Callable[[DictConfig], bool]) -> bool:
-        """Check key in config."""
-        if isinstance(key, Callable):
-            return key(config)
-        if isinstance(key, str):
-            return nestedget(config, key, False)
-        if isinstance(key, Iterable):
-            return all(nestedget(config, k, False) for k in key)
-        return nestedget(config, key, False)
+    if diagnostics_cfg.plot.datashader:
+        try:
+            import datashader  # noqa: F401
+        except ImportError as err:
+            msg = (
+                "datashader=True is set but datashader is not installed. "
+                "Install it with: pip install anemoi-training[plotting]"
+            )
+            raise ImportError(msg) from err
 
-    for enable_key, callback_list in CONFIG_ENABLED_CALLBACKS:
-        if check_key(config, enable_key):
-            callbacks.append(callback_list(config))
+    spectrum_targets = {"PlotSpectrum"}
+    has_spectrum = any(
+        any(t in str(getattr(cb, "_target_", "")) for t in spectrum_targets) for cb in diagnostics_cfg.plot.callbacks
+    )
+    if has_spectrum:
+        try:
+            import pyshtools  # noqa: F401
+        except ImportError as err:
+            msg = (
+                "PlotSpectrum is configured but pyshtools is not installed. "
+                "Install it with: pip install anemoi-training[plotting]"
+            )
+            raise ImportError(msg) from err
 
-    return callbacks
+    if diagnostics_cfg.plot.projection_kind == "lambert_conformal":
+        try:
+            import cartopy  # noqa: F401
+        except ImportError as err:
+            msg = (
+                "projection_kind='lambert_conformal' requires cartopy, which is not installed. "
+                "Install it with: pip install anemoi-training[plotting]"
+            )
+            raise ImportError(msg) from err
 
 
-def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
+def _get_progress_bar_callback(diagnostics_cfg: DictConfig) -> list[Callback]:
     """Get progress bar callback.
 
     Instantiated from `config.diagnostics.progress_bar`. If not set, defaults to TQDMProgressBar.
@@ -152,19 +200,19 @@ def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
 
     Parameters
     ----------
-    config : DictConfig
-        Job configuration
+    diagnostics_cfg : DictConfig
+        Diagnostics configuration (``config.diagnostics``).
 
     Returns
     -------
     list[Callback]
         List containing the progress bar callback, or empty list if disabled.
     """
-    if not config.diagnostics.enable_progress_bar:
+    if not diagnostics_cfg.enable_progress_bar:
         LOGGER.info("Progress bar disabled.")
         return []
 
-    progress_bar_cfg = nestedget(config, "diagnostics.progress_bar", None)
+    progress_bar_cfg = getattr(diagnostics_cfg, "progress_bar", None)
     if progress_bar_cfg is not None:
         try:
             progress_bar = instantiate(progress_bar_cfg)
@@ -179,10 +227,10 @@ def _get_progress_bar_callback(config: DictConfig) -> list[Callback]:
     return [progress_bar]
 
 
-def get_callbacks(config: DictConfig) -> list[Callback]:
+def get_callbacks(context: CallbacksContext) -> list[Callback]:
     """Setup callbacks for PyTorch Lightning trainer.
 
-    Set `config.diagnostics.callbacks` to a list of callback configurations
+    Set `context.diagnostics.callbacks` to a list of callback configurations
     in hydra form.
 
     E.g.:
@@ -193,19 +241,23 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
           frequency: 12
     ```
 
-    Set `config.diagnostics.plot.callbacks` to a list of plot callback configurations
-    will only be added if `config.diagnostics.plot.enabled` is set to True.
+    Set `context.diagnostics.plot.callbacks` to a list of plot callback configurations
+    will only be added if `context.diagnostics.plot.enabled` is set to True.
 
-    A callback must take a `DictConfig` in its `__init__` method as the first argument,
-    which will be the complete configuration object.
+    Plotting callbacks automatically receive global plotting settings from `context.diagnostics.plot`
+    (datashader, projection_kind, asynchronous, save_basedir, colormaps, precip_and_related_fields,
+    focus_areas, dataset_names) via the `plotting_settings` parameter.
 
-    Some callbacks are added by default, depending on the configuration.
-    See CONFIG_ENABLED_CALLBACKS for more information.
+    User-configurable callbacks (under ``diagnostics.callbacks``) are instantiated verbatim
+    via ``hydra.utils.instantiate``. They receive only what is in the config tree — use
+    Hydra interpolation (e.g. ``${system.output.plots}``) for config-derived values.
+    Runtime-computed values (resolved paths, loggers) are not available here; if a callback
+    needs them, add a typed field to :class:`CallbacksContext` and a dedicated helper function.
 
     Parameters
     ----------
-    config : DictConfig
-        Job configuration
+    context : CallbacksContext
+        Callbacks context containing diagnostics, output paths, and runtime-extracted settings.
 
     Returns
     -------
@@ -214,31 +266,43 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
 
     """
     trainer_callbacks: list[Callback] = []
+    diagnostics_cfg = context.diagnostics
 
     # Get Checkpoint callback
-    trainer_callbacks.extend(_get_checkpoint_callback(config))
+    trainer_callbacks.extend(_get_checkpoint_callback(diagnostics_cfg, context.checkpoints_output))
 
-    # Base callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.callbacks)
+    # User-configurable callbacks, instantiated from their YAML config.
+    # These receive only what is in the config tree. Use Hydra interpolation
+    # (e.g. ${system.output.plots}) for values defined elsewhere in the config.
+    # If a callback needs a runtime-computed value (resolved path, logger handle, etc.),
+    # add a typed field to CallbacksContext and a dedicated helper function here instead.
+    trainer_callbacks.extend(instantiate(callback) for callback in diagnostics_cfg.callbacks)
 
-    # Plotting callbacks
-    trainer_callbacks.extend(instantiate(callback, config) for callback in config.diagnostics.plot.callbacks)
+    # Plotting callbacks — instantiated with global plotting settings from diagnostics.plot
+    if diagnostics_cfg.plot.callbacks:
+        _check_plotting_dependencies(diagnostics_cfg)
+        plotting_settings = PlottingSettings.from_plot_config(diagnostics_cfg.plot, context.plots_output)
+        for callback_cfg in diagnostics_cfg.plot.callbacks:
+            callback_cfg_dict = dict(callback_cfg)
+            callback_cfg_dict["plotting_settings"] = plotting_settings
+            trainer_callbacks.append(instantiate(callback_cfg_dict))
 
-    # Weight averaging callback (SWA or EMA)
-    trainer_callbacks.extend(_get_weight_averaging_callback(config))
+    # LearningRateMonitor when any experiment logger is active
+    if context.wandb_enabled or context.mlflow_enabled:
+        trainer_callbacks.append(LearningRateMonitor())
 
-    # Extend with config enabled callbacks
-    trainer_callbacks.extend(_get_config_enabled_callbacks(config))
+    # Weight averaging callback (SWA, EMA, etc.)
+    trainer_callbacks.extend(_get_weight_averaging_callback(context.weight_averaging_config))
 
     # Progress bar callback
-    trainer_callbacks.extend(_get_progress_bar_callback(config))
+    trainer_callbacks.extend(_get_progress_bar_callback(diagnostics_cfg))
 
     # Parent UUID callback
     # Check variable order callback
     # Register Migrations callback
     trainer_callbacks.extend(
         (
-            ParentUUIDCallback(config),
+            ParentUUIDCallback(),
             CheckVariableOrder(),
             RegisterMigrations(),
         ),
@@ -247,4 +311,4 @@ def get_callbacks(config: DictConfig) -> list[Callback]:
     return trainer_callbacks
 
 
-__all__ = ["get_callbacks"]
+__all__ = ["CallbacksContext", "get_callbacks", "nestedget"]

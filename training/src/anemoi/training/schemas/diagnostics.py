@@ -270,6 +270,14 @@ class PlotSchema(PydanticBaseModel):
     "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    colormaps: dict | None = None
+    "Variable-specific colormaps keyed by 'default', 'error', or variable name group."
+    precip_and_related_fields: list[str] | None = None
+    "Names of precipitation and related fields that use a special colormap."
+    focus_areas: dict | None = None
+    "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
+    datasets_to_plot: list[str] | None = None
+    "Dataset names to include in plots."
 
 
 class TimeLimitSchema(BaseModel):

@@ -14,7 +14,6 @@ from contextlib import nullcontext
 import pytorch_lightning as pl
 import torch
 from omegaconf import ListConfig
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 
 LOGGER = logging.getLogger(__name__)
@@ -28,13 +27,11 @@ class RolloutEval(Callback):
     distributed synchronization.
     """
 
-    def __init__(self, config: OmegaConf, rollout: list[int] | ListConfig, every_n_batches: int) -> None:
+    def __init__(self, rollout: list[int] | ListConfig, every_n_batches: int) -> None:
         """Initialize RolloutEval callback.
 
         Parameters
         ----------
-        config : dict
-            Dictionary with configuration settings
         rollout : list[int] | ListConfig
             Rollout lengths for evaluation
         every_n_batches : int
@@ -42,7 +39,6 @@ class RolloutEval(Callback):
 
         """
         super().__init__()
-        self.config = config
 
         assert isinstance(rollout, list | ListConfig), f"rollout must be a list of ints, got {type(rollout)}"
         rollout_values = list(rollout)

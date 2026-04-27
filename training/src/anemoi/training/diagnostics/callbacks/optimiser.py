@@ -10,7 +10,6 @@
 
 import logging
 
-from omegaconf import DictConfig
 from pytorch_lightning.callbacks import LearningRateMonitor as pl_LearningRateMonitor
 
 LOGGER = logging.getLogger(__name__)
@@ -21,9 +20,7 @@ class LearningRateMonitor(pl_LearningRateMonitor):
 
     def __init__(
         self,
-        config: DictConfig,
         logging_interval: str = "step",
         log_momentum: bool = False,
     ) -> None:
         super().__init__(logging_interval=logging_interval, log_momentum=log_momentum)
-        self.config = config

@@ -14,7 +14,6 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytorch_lightning as pl
-from omegaconf import DictConfig
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.utils.dates import frequency_to_string
@@ -26,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 class TimeLimit(pl.callbacks.Callback):
     """Callback to stop the training process after a given time limit."""
 
-    def __init__(self, config: DictConfig, limit: int | str, record_file: str | None = None) -> None:
+    def __init__(self, limit: int | str, record_file: str | None = None) -> None:
         """Initialise the TimeLimit callback.
 
         Parameters
@@ -47,7 +46,6 @@ class TimeLimit(pl.callbacks.Callback):
 
         """
         super().__init__()
-        self.config = config
 
         self.limit = frequency_to_timedelta(limit)
         self._record_file = Path(record_file) if record_file is not None else None
@@ -102,7 +100,7 @@ class TimeLimit(pl.callbacks.Callback):
 class EarlyStopping(pl.callbacks.EarlyStopping):
     """Thin wrapper around Pytorch Lightning's EarlyStopping callback."""
 
-    def __init__(self, config: DictConfig, **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         """Early stopping callback.
 
         Set `monitor` to metric to check.
@@ -116,4 +114,3 @@ class EarlyStopping(pl.callbacks.EarlyStopping):
         https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.callbacks.EarlyStopping.html
         """
         super().__init__(**kwargs)
-        self.config = config
