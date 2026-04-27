@@ -271,7 +271,7 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     # Get Checkpoint callback
     trainer_callbacks.extend(_get_checkpoint_callback(diagnostics_cfg, context.checkpoints_output))
 
-    # User-configurable callbacks — instantiated verbatim from their YAML config.
+    # User-configurable callbacks, instantiated from their YAML config.
     # These receive only what is in the config tree. Use Hydra interpolation
     # (e.g. ${system.output.plots}) for values defined elsewhere in the config.
     # If a callback needs a runtime-computed value (resolved path, logger handle, etc.),

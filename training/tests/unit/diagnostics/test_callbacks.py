@@ -60,7 +60,8 @@ def test_no_extra_callbacks_set():
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS  # ParentUUIDCallback, CheckVariableOrder, etc
@@ -69,12 +70,12 @@ def test_no_extra_callbacks_set():
 def test_add_config_enabled_callback():
     # Add logging callback (mlflow enabled triggers LearningRateMonitor)
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.log = {"mlflow": {"enabled": True}}
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=True,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
@@ -89,7 +90,8 @@ def test_add_callback():
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
@@ -112,7 +114,8 @@ def test_add_plotting_callback(monkeypatch):
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1

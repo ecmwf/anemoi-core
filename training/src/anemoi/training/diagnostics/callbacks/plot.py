@@ -27,6 +27,7 @@ import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
@@ -68,10 +69,10 @@ class PlottingSettings(PydanticBaseModel):
             projection_kind=plot_cfg.projection_kind,
             asynchronous=plot_cfg.asynchronous,
             save_basedir=save_basedir,
-            colormaps=plot_cfg.colormaps,
-            precip_and_related_fields=plot_cfg.precip_and_related_fields,
-            focus_areas=plot_cfg.focus_areas,
-            dataset_names=plot_cfg.datasets_to_plot,
+            colormaps=OmegaConf.select(plot_cfg, "colormaps", default=None),
+            precip_and_related_fields=OmegaConf.select(plot_cfg, "precip_and_related_fields", default=None),
+            focus_areas=OmegaConf.select(plot_cfg, "focus_areas", default=None),
+            dataset_names=OmegaConf.select(plot_cfg, "datasets_to_plot", default=None),
         )
 
 
