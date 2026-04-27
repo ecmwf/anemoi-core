@@ -3,6 +3,7 @@ defaults:
   - scalers: global
   - losses: default
   - optimization: default
+  - weight_averaging: null
 
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
@@ -29,13 +30,6 @@ num_sanity_val_steps: 6
 gradient_clip:
   val: 32.
   algorithm: value
-
-# stochastic weight averaging
-# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
-swa:
-  enabled: False
-  lr: 1.e-4
-
 
 # select model
 training_method: anemoi.training.train.methods.SingleTraining
