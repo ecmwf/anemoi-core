@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import RadiusAreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
         super().__init__(resolution, name)
         self.hidden_attributes = self.hidden_attributes | {"area_mask_builder"}
 
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+        self.area_mask_builder = RadiusAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
