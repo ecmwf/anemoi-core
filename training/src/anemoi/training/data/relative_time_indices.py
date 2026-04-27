@@ -8,8 +8,48 @@
 # nor does it submit to any jurisdiction.
 
 
-from anemoi.training.tasks.base import BaseTask
+from __future__ import annotations
+
+from numbers import Integral
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_string
+
+if TYPE_CHECKING:
+    import logging
+
+    from anemoi.training.schemas.base_schema import BaseSchema
+    from anemoi.training.tasks.base import BaseTask
+
+
+def compute_model_relative_date_indices(
+    task: BaseTask,
+    *,
+    mode: str = "training",
+) -> list[int] | None:
+    """Compute model-relative indices from a task's offsets when it exposes a single reference timestep."""
+    timestep = getattr(task, "timestep", None)
+    if timestep is None:
+        return None
+
+    offsets = task.get_offsets(mode=mode)
+    if any(offset % timestep for offset in offsets):
+        msg = (
+            f"Task `{task.__class__.__name__}` defines offsets "
+            f"{[frequency_to_string(offset) for offset in offsets]} that are not exact multiples of "
+            f"{frequency_to_string(timestep)}."
+        )
+        raise ValueError(msg)
+
+    relative_indices = [int(offset // timestep) for offset in offsets]
+    if len(relative_indices) == 0:
+        return []
+
+    anchor_index = max(0, -min(relative_indices))
+    return sorted({index + anchor_index for index in relative_indices})
 
 
 def compute_relative_date_indices(
@@ -32,3 +72,284 @@ def compute_relative_date_indices(
         relative_date_indices[name] = [o // dr.frequency for o in offsets]
 
     return relative_date_indices
+
+
+def normalize_explicit_time_indices_config(
+    explicit_time_indices_by_dataset: dict[str, dict[str, list[int]]] | None,
+) -> dict[str, dict[str, np.ndarray]]:
+    """Normalize per-dataset sparse windows to the legacy positive index convention."""
+    normalized: dict[str, dict[str, np.ndarray]] = {}
+    for dataset_name, dataset_cfg in (explicit_time_indices_by_dataset or {}).items():
+        raw_input = dataset_cfg.get("input", None)
+        raw_target = dataset_cfg.get("target", None)
+        if raw_input is None or raw_target is None:
+            msg = f"Explicit time indices for dataset '{dataset_name}' must define both `input` and `target`."
+            raise ValueError(msg)
+
+        input_indices = np.array(sorted({int(value) for value in raw_input}), dtype=np.int64)
+        target_indices = np.array(sorted({int(value) for value in raw_target}), dtype=np.int64)
+        if len(input_indices) == 0:
+            msg = f"Explicit time indices for dataset '{dataset_name}' require a non-empty `input`."
+            raise ValueError(msg)
+
+        combined_indices = (
+            np.concatenate([input_indices, target_indices]).astype(np.int64, copy=False)
+            if len(target_indices) > 0
+            else input_indices
+        )
+        anchor_index = max(0, -int(combined_indices.min()))
+        if anchor_index > 0:
+            input_indices = input_indices + anchor_index
+            target_indices = target_indices + anchor_index
+
+        normalized[str(dataset_name)] = {
+            "input": input_indices,
+            "target": target_indices,
+        }
+    return normalized
+
+
+def _config_get(container: object | None, key: str) -> object | None:
+    """Safely read a key from OmegaConf, dict-like, or attribute-based config objects."""
+    if container is None:
+        return None
+
+    getter = getattr(container, "get", None)
+    if callable(getter):
+        return getter(key, None)
+
+    return getattr(container, key, None)
+
+
+def resolve_config_timestep(config: BaseSchema) -> str:
+    """Resolve the effective timestep used by dataloading and sparse time-index parsing.
+
+    Prefer the explicit data-layer timestep when present, but fall back to older
+    config layouts that only define the task timestep or dataset frequency.
+    """
+    data_cfg = _config_get(config, "data")
+    task_cfg = _config_get(config, "task")
+    training_cfg = _config_get(config, "training")
+
+    for candidate in (
+        _config_get(data_cfg, "timestep"),
+        _config_get(task_cfg, "timestep"),
+        _config_get(training_cfg, "timestep"),
+        _config_get(data_cfg, "frequency"),
+    ):
+        if candidate is not None:
+            return str(candidate)
+
+    msg = "Could not determine timestep from config. Expected `data.timestep`, `task.timestep`, or `data.frequency`."
+    raise ValueError(msg)
+
+
+def _get_dataset_time_indices_config(config: BaseSchema) -> object | None:
+    """Get sparse time-index config from the task or legacy training section."""
+    cfg = getattr(getattr(config, "task", None), "dataset_time_indices", None)
+    if cfg is None:
+        cfg = getattr(getattr(config, "training", None), "dataset_time_indices", None)
+    if cfg is None:
+        return None
+    return cfg.get("datasets", cfg)
+
+
+def _parse_time_index_value(
+    raw_value: object,
+    *,
+    dataset_name: str,
+    field_name: str,
+    timestep_seconds: int,
+    timestep: str,
+) -> int:
+    """Parse one sparse time-index entry."""
+    if isinstance(raw_value, Integral):
+        return int(raw_value)
+
+    try:
+        if isinstance(raw_value, str) and raw_value.strip().lstrip("+-").isdigit():
+            return int(raw_value.strip())
+        offset_seconds = frequency_to_seconds(raw_value)
+    except (AssertionError, TypeError, ValueError) as exc:
+        msg = (
+            f"`training.dataset_time_indices[{dataset_name}].{field_name}` value {raw_value!r} "
+            "must be either an integer step or a duration like '-5m' or '1h'."
+        )
+        raise ValueError(msg) from exc
+
+    if offset_seconds % timestep_seconds != 0:
+        msg = (
+            f"`training.dataset_time_indices[{dataset_name}].{field_name}` value {raw_value!r} "
+            f"is not an exact multiple of timestep {timestep!r}."
+        )
+        raise ValueError(msg)
+    return offset_seconds // timestep_seconds
+
+
+def _parse_time_index_values(
+    raw_values: list[object],
+    *,
+    dataset_name: str,
+    field_name: str,
+    timestep_seconds: int,
+    timestep: str,
+) -> list[int]:
+    """Parse one sparse time-index field for a dataset."""
+    return [
+        _parse_time_index_value(
+            raw_value,
+            dataset_name=dataset_name,
+            field_name=field_name,
+            timestep_seconds=timestep_seconds,
+            timestep=timestep,
+        )
+        for raw_value in raw_values
+    ]
+
+
+def _parse_dataset_time_indices(
+    dataset_name: str,
+    dataset_cfg: object,
+    *,
+    timestep_seconds: int,
+    timestep: str,
+) -> dict[str, list[int]]:
+    """Parse sparse input/target windows for one dataset."""
+    raw_input = dataset_cfg.get("input", None)
+    raw_target = dataset_cfg.get("target", None)
+    if raw_input is None or raw_target is None:
+        msg = f"`training.dataset_time_indices[{dataset_name}]` must define both `input` and `target`."
+        raise ValueError(msg)
+
+    parsed_dataset_cfg = {
+        "input": _parse_time_index_values(
+            raw_input,
+            dataset_name=dataset_name,
+            field_name="input",
+            timestep_seconds=timestep_seconds,
+            timestep=timestep,
+        ),
+        "target": _parse_time_index_values(
+            raw_target,
+            dataset_name=dataset_name,
+            field_name="target",
+            timestep_seconds=timestep_seconds,
+            timestep=timestep,
+        ),
+    }
+    if len(parsed_dataset_cfg["input"]) == 0:
+        msg = f"`training.dataset_time_indices[{dataset_name}]` requires a non-empty `input` list."
+        raise ValueError(msg)
+    return parsed_dataset_cfg
+
+
+def parse_dataset_time_indices_config(config: BaseSchema) -> dict[str, dict[str, list[int]]] | None:
+    """Parse optional per-dataset sparse time windows from config."""
+    cfg = _get_dataset_time_indices_config(config)
+    if cfg is None:
+        return None
+
+    config_timestep = resolve_config_timestep(config)
+    timestep_seconds = frequency_to_seconds(config_timestep)
+    parsed: dict[str, dict[str, list[int]]] = {}
+    for dataset_name, dataset_cfg in cfg.items():
+        parsed[str(dataset_name)] = _parse_dataset_time_indices(
+            str(dataset_name),
+            dataset_cfg,
+            timestep_seconds=timestep_seconds,
+            timestep=config_timestep,
+        )
+
+    normalized = normalize_explicit_time_indices_config(parsed)
+    return {
+        dataset_name: {
+            "input": dataset_cfg["input"].tolist(),
+            "target": dataset_cfg["target"].tolist(),
+        }
+        for dataset_name, dataset_cfg in normalized.items()
+    } or None
+
+
+def default_relative_date_indices(
+    config: BaseSchema,
+    task: BaseTask | None = None,
+    mode: str = "training",
+    val_rollout: int = 1,
+    logger: logging.Logger | None = None,
+) -> list[int]:
+    """Build the default model-relative window from explicit-times or rollout config."""
+    if task is not None:
+        task_relative_indices = compute_model_relative_date_indices(task, mode=mode)
+        if task_relative_indices is not None:
+            return task_relative_indices
+
+    explicit_times = getattr(getattr(config, "task", None), "explicit_times", None)
+    if explicit_times is None:
+        explicit_times = getattr(getattr(config, "training", None), "explicit_times", None)
+    if explicit_times is not None:
+        input_times = [int(value) for value in explicit_times.input]
+        if len(input_times) == 0:
+            msg = "`task.explicit_times.input` cannot be empty."
+            raise ValueError(msg)
+
+        target_offsets = [int(value) for value in explicit_times.target]
+        anchor = max(input_times)
+        target_times = [anchor + offset for offset in target_offsets]
+        return sorted(set(input_times + target_times))
+
+    task_cfg = getattr(config, "task", None)
+    multistep_input = getattr(task_cfg, "multistep_input", None)
+    multistep_output = getattr(task_cfg, "multistep_output", None)
+    rollout_cfg = getattr(task_cfg, "rollout", None)
+
+    if multistep_input is None or multistep_output is None:
+        training_cfg = getattr(config, "training", None)
+        multistep_input = getattr(training_cfg, "multistep_input", None)
+        multistep_output = getattr(training_cfg, "multistep_output", None)
+        rollout_cfg = getattr(training_cfg, "rollout", rollout_cfg)
+
+    if multistep_input is None or multistep_output is None:
+        msg = "Could not determine `multistep_input`/`multistep_output` from `config.task` or `config.training`."
+        raise ValueError(msg)
+
+    rollout_max = getattr(rollout_cfg, "maximum", getattr(rollout_cfg, "max", None))
+    rollout_start = getattr(rollout_cfg, "start", 1)
+    rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
+
+    rollout_value = rollout_start
+    if rollout_cfg is not None and rollout_epoch_increment > 0 and rollout_max is not None:
+        rollout_value = rollout_max
+    elif logger is not None:
+        logger.warning("Falling back rollout to: %s", rollout_value)
+
+    rollout = max(rollout_value, val_rollout)
+    time_range = multistep_input + rollout * multistep_output
+    return list(range(time_range))
+
+
+def resolve_relative_date_indices(
+    config: BaseSchema,
+    task: BaseTask | None = None,
+    mode: str = "training",
+    val_rollout: int = 1,
+    logger: logging.Logger | None = None,
+) -> list[int]:
+    """Resolve the full model-relative window, including dataset-specific sparse requests."""
+    relative_indices = set(
+        default_relative_date_indices(
+            config,
+            task=task,
+            mode=mode,
+            val_rollout=val_rollout,
+            logger=logger,
+        ),
+    )
+    dataset_time_indices = parse_dataset_time_indices_config(config)
+    if dataset_time_indices is None:
+        return sorted(relative_indices)
+
+    for dataset_cfg in dataset_time_indices.values():
+        relative_indices.update(int(value) for value in dataset_cfg["input"])
+        relative_indices.update(int(value) for value in dataset_cfg["target"])
+
+    return sorted(relative_indices)
