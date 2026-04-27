@@ -67,7 +67,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lognormal_mean = config.model.model.diffusion.log_normal_mean
         self.lognormal_std = config.model.model.diffusion.log_normal_std
         self.training_approach = getattr(config.training, "training_approach", "probabilistic_low_noise")
+        self.deterministic_sigma = getattr(config.training, "deterministic_sigma", 500000.0)
         LOGGER.info("Training approach: %s", self.training_approach)
+        if self.training_approach == "deterministic":
+            LOGGER.info("Deterministic sigma: %s", self.deterministic_sigma)
         self.x_in_matching_channel_indices = match_tensor_channels(
             self.data_indices.data.input[0].name_to_index,
             {
@@ -267,7 +270,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         elif self.training_approach == "deterministic":
             sigma = torch.full(
                 shape,
-                fill_value=500000.0,
+                fill_value=self.deterministic_sigma,
                 device=device,
             )
 

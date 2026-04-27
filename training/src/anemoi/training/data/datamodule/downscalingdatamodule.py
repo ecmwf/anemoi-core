@@ -73,6 +73,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         shuffle: bool = True,
         val_rollout: int = 1,
         label: str = "generic",
+        overfit_on_index: int | None = None,
     ) -> DownscalingDataset:
 
         data_reader = self.add_trajectory_ids(
@@ -85,6 +86,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
             label=label,
             lres_grid_indices=self.lres_grid_indices,
             hres_grid_indices=self.hres_grid_indices,
+            overfit_on_index=overfit_on_index,
         )
         return data
 
@@ -115,6 +117,15 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         return {
             k: v[1] for k, v in self.ds_train.supporting_arrays.items()
         }  # | {k: v[1] for k, v in self.grid_indices.supporting_arrays.items()}
+
+    @cached_property
+    def ds_train(self) -> DownscalingDataset:
+        overfit_idx = getattr(self.config.dataloader, "overfit_on_index", None)
+        return self._get_dataset(
+            open_dataset(self.config.dataloader.training),
+            label="train",
+            overfit_on_index=overfit_idx,
+        )
 
     @cached_property
     def ds_valid(self) -> DownscalingDataset:

@@ -40,6 +40,7 @@ class DownscalingDataset(NativeGridDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
+        overfit_on_index: int | None = None,
     ) -> None:
 
         super().__init__(
@@ -52,6 +53,7 @@ class DownscalingDataset(NativeGridDataset):
         )
         self.lres_grid_indices = lres_grid_indices
         self.hres_grid_indices = hres_grid_indices
+        self.overfit_on_index = overfit_on_index
         LOGGER.info("dataset %s len valid date indices %d", label, len(self.valid_date_indices))
 
     def __iter__(self):
@@ -86,8 +88,11 @@ class DownscalingDataset(NativeGridDataset):
             shuffled_chunk_indices[:10],
         )
 
-        for i in shuffled_chunk_indices:
+        # override the list of indices to a single index for overfitting
+        if self.overfit_on_index is not None:
+            shuffled_chunk_indices = [self.overfit_on_index]
 
+        for i in shuffled_chunk_indices:
             lres_grid_shard_indices = self.lres_grid_indices.get_shard_indices(self.reader_group_rank)
             hres_grid_shard_indices = self.hres_grid_indices.get_shard_indices(self.reader_group_rank)
 
