@@ -24,6 +24,8 @@ from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
@@ -173,7 +175,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
-        # Handle dictionary of graph_data
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
@@ -230,6 +231,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
+            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
+            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
@@ -262,12 +266,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
+                graph_data=graph_data,
+                data_node_name=data_node_name,
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
+                graph_data=graph_data,
+                data_node_name=data_node_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -386,10 +394,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         validation_metrics_configs: dict,
         scalers: dict,
         data_indices: IndexCollection,
+        graph_data: object | None = None,
+        data_node_name: str = DEFAULT_DATASET_NAME,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
-                metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
+                metric_name: get_loss_function(
+                    val_metric_config,
+                    scalers=scalers,
+                    data_indices=data_indices,
+                    graph_data=graph_data,
+                    data_node_name=data_node_name,
+                )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
@@ -419,7 +435,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if update_states:
             processor_prefixes += ("model.pre_processors.", "model.post_processors.")
         if update_tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+            processor_prefixes += (
+                "model.pre_processors_tendencies.",
+                "model.post_processors_tendencies.",
+            )
 
         if not processor_prefixes:
             return

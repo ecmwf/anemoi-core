@@ -28,6 +28,7 @@ from anemoi.training.utils.enums import TensorDim
 class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
+    needs_graph_data: bool = True
     # CombinedLoss builds child losses itself, so it needs the filtered scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(

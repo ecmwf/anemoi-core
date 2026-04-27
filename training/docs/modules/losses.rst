@@ -81,16 +81,28 @@ deterministic:
             _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
             # loss function kwargs here
 
+.. _multiscale-loss-functions:
+
 ***************************
  Multiscale Loss Functions
 ***************************
 
-The `MultiscaleLossWrapper` implements the multiscale loss formulation
-presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
-functions such as the `AlmostFairKernelCRPSLoss` to provide scale-aware
-model training.
+The ``MultiscaleLossWrapper`` wraps any base loss (e.g.
+``AlmostFairKernelCRPS``) and evaluates it at multiple spatial scales
+by progressively smoothing both predictions and targets. Each scale
+loss is computed on the *residual* between successive smoothing levels,
+so coarser scales capture large-scale errors and finer scales capture
+small-scale structure.
 
-The config for the multiscale loss functions is the following:
+The number of weights must equal the number of smoothing levels. A final
+``null`` entry in ``loss_matrices`` (or the implicit full-resolution
+scale appended when using on-the-fly generation) represents the
+unsmoothed field.
+
+All smoothing configuration is provided through the single
+``multiscale_config`` key, which supports two modes:
+
+On-the-fly mode (builds smoothing matrices from the graph at runtime):
 
 .. code:: yaml
 
@@ -98,18 +110,49 @@ The config for the multiscale loss functions is the following:
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            loss_matrices_path: ${system.input.loss_matrices_path}
-            loss_matrices: ["matrix.npz", null]
-            weights:
-               - 1.0
-               - 1.0
-
+            keep_batch_sharded: false
+            weights: [0.5, 0.25, 0.15, 0.1]   # num_scales + 1 entries
+            multiscale_config:
+               num_scales: 3                   # 3 smoothed + 1 full-res appended automatically
+               base_num_nearest_neighbours: 4
+               base_sigma: 0.1
+               scale_factor: 2                 # neighbours and sigma double each level
             per_scale_loss:
                _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
                alpha: 1.0
+
+File-based mode (load precomputed ``.npz`` matrices from disk):
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.MultiscaleLossWrapper
+            keep_batch_sharded: false
+            weights: [0.5, 0.25, 0.15, 0.1]   # must match number of loss_matrices entries
+            multiscale_config:
+               loss_matrices_path: /path/to/truncation-matrices
+               loss_matrices:
+                  - filter_O96_w=gaussian_d=8.0x.npz   # coarsest scale
+                  - filter_O96_w=gaussian_d=4.0x.npz
+                  - filter_O96_w=gaussian_d=2.0x.npz
+                  - null                                # full resolution (no smoothing)
+            per_scale_loss:
+               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               scalers: ['node_weights']
+               ignore_nans: False
+               no_autocast: True
+               alpha: 1.0
+
+.. note::
+
+   The top-level ``loss_matrices_path`` and ``loss_matrices`` kwargs are
+   still accepted for backward compatibility but are deprecated. Move
+   them inside ``multiscale_config``.
 
 ************************
 Spectral loss functions

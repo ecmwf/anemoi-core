@@ -19,6 +19,9 @@ processor, and decoder components (`Lang et al. (2024a)
    :no-undoc-members:
    :show-inheritance:
 
+Residual connections (including graph-based truncation) are configured in
+the model config; see :ref:`residual-connections` for details.
+
 ******************************************
  Ensemble Encoder-Processor-Decoder Model
 ******************************************
@@ -36,6 +39,10 @@ Key features:
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+For the training-side CRPS setup, including loss, truncation, and
+ensemble-specific configuration changes, see
+:doc:`anemoi-training:user-guide/kcrps-set-up`.
 
 **********************************************
  Hierarchical Encoder-Processor-Decoder Model

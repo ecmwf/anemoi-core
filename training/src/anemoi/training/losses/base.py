@@ -41,6 +41,7 @@ class BaseLoss(nn.Module, ABC):
     # extra inputs they need from get_loss_function() here.
     factory_context_keys: ClassVar[frozenset[LossFactoryContextKey | str]] = frozenset()
     scaler: ScaleTensor
+    needs_graph_data: bool = False
 
     def __init__(
         self,

@@ -58,7 +58,14 @@ training_loss:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       _target_: anemoi.training.losses.MultiscaleLossWrapper
-      loss_matrices_path: ${system.input.loss_matrices_path}
+      # Option A — load pre-computed smoothing matrices from files:
+      #   loss_matrices_path: ${system.input.loss_matrices_path}
+      #   loss_matrices: ["o96_smoothing_o96.npz", null]
+      # Option B — build smoothing subgraphs at runtime from config:
+      #   multiscale_config:
+      #     num_scales: 4
+      #     base_num_nearest_neighbours: 16
+      #     base_sigma: 0.01570
       loss_matrices: [null]
       weights: [1.0]
 
@@ -97,7 +104,6 @@ validation_metrics:
       multiscale:
         _target_: anemoi.training.losses.MultiscaleLossWrapper
 
-        loss_matrices_path: ${system.input.loss_matrices_path}
         loss_matrices: [null]
         weights: [1.0]
 

@@ -27,8 +27,19 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 LOGGER = logging.getLogger(__name__)
+
+
+def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs: dict | None = None) -> dict:
+    """Return runtime kwargs for classes that declare ``needs_graph_data``."""
+    if not getattr(target_cls, "needs_graph_data", False):
+        return {}
+    result: dict = {}
+    if graph_data is not None:
+        result["graph_data"] = graph_data
+    if extra_kwargs:
+        result.update(extra_kwargs)
+    return result
 
 
 @dataclass(frozen=True)
@@ -98,6 +109,8 @@ def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
     data_indices: IndexCollection | None = None,
+    graph_data: object | None = None,
+    data_node_name: str | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -115,6 +128,10 @@ def get_loss_function(
         `variable` will be added to the scaler of the loss function.
     data_indices : IndexCollection, optional
         Indices of the training data
+    graph_data : object, optional
+        Graph data passed to loss classes that declare ``needs_graph_data = True``.
+    data_node_name : str, optional
+        Dataset node name passed to loss classes that declare ``needs_graph_data = True``.
     kwargs : Any
         Additional arguments to pass to the loss function
 
@@ -133,13 +150,26 @@ def get_loss_function(
     loss_config = OmegaConf.to_container(config, resolve=True)
     has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
+    target_cls = get_class(loss_config["_target_"])
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+    if "per_scale_loss" in loss_config:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
-        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+        per_scale_loss = get_loss_function(
+            OmegaConf.create(per_scale_loss_config),
+            scalers,
+            data_indices,
+            graph_data=graph_data,
+            data_node_name=data_node_name,
+            **kwargs,
+        )
+        graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else None
+        return instantiate(
+            loss_config,
+            per_scale_loss=per_scale_loss,
+            **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+        )
 
     if scalers is None:
         scalers = {}
@@ -147,6 +177,11 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
+    loss_function = instantiate(
+        loss_config,
+        **_graph_data_kwargs(target_cls, graph_data, kwargs),
+        _recursive_=False,
+    )
     available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
     factory_context = LossFactoryContext(
         available_scalers=available_scalers,

@@ -69,6 +69,51 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     return config_system
 
 
+def _get(obj: Any, key: str) -> Any:
+    """Attribute-or-mapping access that works for both Pydantic models and plain dicts/DictConfigs."""
+    return getattr(obj, key, None) or (obj.get(key) if hasattr(obj, "get") else None)
+
+
+def _validate_multiscale_loss(training: Any) -> None:
+    """Validate multiscale loss matrix source config.
+
+    Runs for both validated (BaseSchema) and unvalidated (UnvalidatedBaseSchema)
+    configs so the check is enforced regardless of the ``config_validation`` flag.
+    """
+    training_loss = _get(training, "training_loss")
+    if training_loss is None:
+        return
+
+    target = str(_get(training_loss, "_target_") or "")
+    if "MultiscaleLossWrapper" not in target:
+        return
+
+    loss_matrices = _get(training_loss, "loss_matrices")
+    multiscale_config = _get(training_loss, "multiscale_config")
+
+    if loss_matrices is not None and multiscale_config is not None:
+        msg = "Specify either loss_matrices or multiscale_config, not both."
+        raise ValueError(msg)
+
+
+def _validate_noise_projection(model: Any) -> None:
+    """Validate that noise_matrix and noise_edges_name are not both specified.
+
+    Runs for both validated (BaseSchema) and unvalidated (UnvalidatedBaseSchema)
+    configs so the check is enforced regardless of the ``config_validation`` flag.
+    Only applies to model configs that carry a ``noise_injector`` field
+    (e.g. ``EnsModelSchema``).
+    """
+    noise_injector = _get(model, "noise_injector")
+    if noise_injector is None:
+        return
+    noise_matrix = _get(noise_injector, "noise_matrix")
+    noise_edges_name = _get(noise_injector, "noise_edges_name")
+    if noise_matrix is not None and noise_edges_name is not None:
+        msg = "Specify either noise_matrix or noise_edges_name, not both."
+        raise ValueError(msg)
+
+
 _DEPRECATED_TARGETS: dict[str, str] = {
     "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
         "This callback has been deprecated and removed, update your config to remove any references to it. "
@@ -116,6 +161,8 @@ class SchemaCommonMixin:
 
     def model_post_init(self, _: Any) -> None:
         expand_paths(self.system)
+        _validate_multiscale_loss(self.training)
+        _validate_noise_projection(self.model)
         if self.diagnostics.log.mlflow.enabled and (
             self.system.output.logs.mlflow != self.diagnostics.log.mlflow.save_dir
         ):
@@ -192,7 +239,7 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Flag to disable validation of the configuration"""
 
 
-def convert_to_omegaconf(config: BaseSchema) -> dict:
+def convert_to_omegaconf(config: BaseSchema) -> DictConfig:
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
 

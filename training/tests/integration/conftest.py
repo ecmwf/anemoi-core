@@ -261,11 +261,12 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
                 tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
         if tmp_path_loss_matrices is not None:
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
+            OmegaConf.set_struct(training_loss_cfg, False)
             training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
 
-            cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
-                Path(tmp_path_loss_matrices).parent,
-            )
+            multiscale_cfg = cfg.training.validation_metrics.datasets[dataset_name].multiscale
+            OmegaConf.set_struct(multiscale_cfg, False)
+            multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
         cfg.training.training_loss.datasets[dataset_name] = training_loss_cfg
     return cfg
 
@@ -291,6 +292,100 @@ def ensemble_config(
     OmegaConf.resolve(cfg)
 
     cfg = handle_truncation_matrices(cfg, get_test_data)
+    assert isinstance(cfg, DictConfig)
+
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
+    return cfg, url_dataset
+
+
+@pytest.fixture
+def ensemble_graph_multiscale_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_ensemble_graph"):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.training.training_loss.datasets.data.loss_matrices = None
+    cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+    OmegaConf.set_struct(cfg.training.training_loss.datasets.data, False)
+    cfg.training.training_loss.datasets.data.multiscale_config = {
+        "num_scales": 4,
+        "base_num_nearest_neighbours": 16,
+        "base_sigma": 0.01570,
+        "scale_factor": 2,
+    }
+
+    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = None
+    cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+    multiscale_cfg = cfg.training.validation_metrics.datasets.data.multiscale
+    OmegaConf.set_struct(multiscale_cfg, False)
+    multiscale_cfg.multiscale_config = {
+        "num_scales": 4,
+        "base_num_nearest_neighbours": 16,
+        "base_sigma": 0.01570,
+        "scale_factor": 2,
+    }
+
+    cfg.diagnostics.plot.callbacks = []
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+
+    cfg.task.multistep_input = 3
+    cfg.task.multistep_output = 2
+    return cfg, url_dataset
+
+
+@pytest.fixture
+def ensemble_truncated_connection_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
+
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_ensemble_truncated_connection",
+    ):
+        template = compose(config_name="ensemble_crps", overrides=overrides)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_ensemble_crps.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.training.training_loss.datasets.data.loss_matrices = [None]
+    cfg.training.training_loss.datasets.data.weights = [1.0]
+
+    cfg.training.validation_metrics.datasets.data.multiscale.loss_matrices = [None]
+    cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0]
+    cfg.diagnostics.plot.callbacks = []
+
+    cfg.model.residual = OmegaConf.create(
+        {
+            "_target_": "anemoi.models.layers.residual.TruncatedConnection",
+            "truncation_config": {
+                "grid": "o32",
+                "num_nearest_neighbours": 3,
+                "sigma": 1.0,
+            },
+        },
+    )
+
+    OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
     cfg.task.multistep_input = 3

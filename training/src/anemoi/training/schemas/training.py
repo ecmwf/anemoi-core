@@ -272,11 +272,13 @@ class BaseLossSchema(BaseModel):
 
 
 class KernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
     fair: bool = True
     "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
 
 
 class AlmostFairKernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
     alpha: float = 1.0
     """Factor for linear combination of fair (unbiased, ensemble variance component
     weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
@@ -284,20 +286,24 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
+class GraphLossMatrixSchema(BaseModel):
+    """One graph-backed smoothing matrix definition for multiscale loss."""
+
+    edges_name: tuple[str, str, str]
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
     weights: list[float]
     keep_batch_sharded: bool
+    multiscale_config: dict | None = None
+    # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
     loss_matrices_path: str | None = None
-    loss_matrices: list[str | None]
-
-    @field_validator("weights")
-    @classmethod
-    def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "loss_matrices" in info.data:
-            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
-        return v
+    loss_matrices: list[str | None] | None = None
 
 
 class HuberLossSchema(BaseLossSchema):

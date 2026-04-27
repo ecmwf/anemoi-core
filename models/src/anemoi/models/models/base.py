@@ -14,11 +14,15 @@ from typing import Optional
 
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
+from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -37,7 +41,7 @@ class BaseGraphModel(nn.Module):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
@@ -48,7 +52,7 @@ class BaseGraphModel(nn.Module):
 
         Parameters
         ----------
-        model_config : DotDict
+        model_config : DictConfig
             Model configuration
         data_indices : dict
             Data indices
@@ -65,8 +69,6 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-
-        model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.num_channels = model_config.model.num_channels
@@ -77,8 +79,7 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
+        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -135,16 +136,25 @@ class BaseGraphModel(nn.Module):
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
         return self.node_attributes.attr_ndims[nodes_name]
 
-    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
+    @staticmethod
+    def _as_hidden_node_names(
+        hidden_nodes_name: str | list[str] | ListConfig,
+    ) -> list[str]:
         if isinstance(hidden_nodes_name, str):
+            return [hidden_nodes_name]
+
+        if isinstance(hidden_nodes_name, (list, ListConfig)):
+            return list(hidden_nodes_name)
+
+        raise TypeError(
+            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
+        )
+
+    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
+        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
             assert (
-                hidden_nodes_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_nodes_name}' not found in graph data node types {self._graph_data.node_types}"
-        elif isinstance(hidden_nodes_name, list):
-            for hidden_name in hidden_nodes_name:
-                self._assert_hidden_nodes_name(hidden_name)
-        else:
-            raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
+                hidden_name in self._graph_data.node_types
+            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.
@@ -227,8 +237,26 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
+        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data)
+            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+            self.residual[dataset_name] = instantiate(
+                residual_config,
+                graph=self._graph_data,
+                data_node_name=data_node_name,
+            )
+
+    def _build_named_node_attributes_graph(self) -> HeteroData:
+        node_attributes_graph = HeteroData()
+        for dataset_name in self.dataset_names:
+            node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
+            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
+
+        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+            node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
+            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
+
+        return node_attributes_graph
 
     @abstractmethod
     def forward(
@@ -322,7 +350,12 @@ class BaseGraphModel(nn.Module):
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
 
             # Perform forward pass
-            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+            y_hat = self.forward(
+                x,
+                model_comm_group=model_comm_group,
+                grid_shard_shapes=grid_shard_shapes,
+                **kwargs,
+            )
 
             # Apply post-processing
             for dataset_name in dataset_names:

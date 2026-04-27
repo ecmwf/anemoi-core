@@ -174,3 +174,27 @@ class GraphCreator:
             self.save(graph, save_path, overwrite)
 
         return graph
+
+
+def load_graph_from_file(graph_filename: Path) -> HeteroData:
+    """Load a serialized graph on the currently active distributed device."""
+    try:
+        from anemoi.graphs.utils import get_distributed_device
+
+        map_location = get_distributed_device()
+    except Exception:
+        map_location = "cpu"
+
+    LOGGER.info("Loading graph data from %s", graph_filename)
+    return torch.load(graph_filename, map_location=map_location, weights_only=False)
+
+
+def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
+    """Ensure the loaded graph contains the required dataset node types."""
+    missing = [n for n in required_dataset_names if n not in graph_data.node_types]
+    if missing:
+        msg = (
+            "Loaded graph is missing dataset node types required by the dataloader. "
+            f"Missing {missing}; available nodes are {graph_data.node_types}."
+        )
+        raise ValueError(msg)
