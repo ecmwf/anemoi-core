@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
 from .huber import HuberLoss
 from .kcrps import AlmostFairKernelCRPS
@@ -41,6 +42,7 @@ __all__ = [
     "RMSELoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
+    "TimeAggregateLossWrapper",
     "WeightedMSELoss",
     "get_loss_function",
 ]

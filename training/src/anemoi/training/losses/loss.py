@@ -28,6 +28,7 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
 NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
+WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -140,6 +141,11 @@ def get_loss_function(
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
         return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+
+    if "_target_" in loss_config and loss_config["_target_"] in WRAPPED_LOSSES:
+        inner_loss_config = loss_config.pop("loss_fn")
+        inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
+        return instantiate(loss_config, loss_fn=inner_loss, **kwargs)
 
     if scalers is None:
         scalers = {}

@@ -300,6 +300,16 @@ class MultiScaleLossSchema(BaseModel):
         return v
 
 
+class TimeAggregateLossWrapperSchema(BaseModel):
+    """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
+
+    target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
+    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
+    "Time aggregation operations to apply over the time dimension before computing the loss."
+    loss_fn: BaseLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    "Inner loss function applied to each time-aggregated output."
+
+
 class HuberLossSchema(BaseLossSchema):
     delta: float = 1.0
     "Threshold for Huber loss."
@@ -318,7 +328,14 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    losses: list[
+        BaseLossSchema
+        | AlmostFairKernelCRPSSchema
+        | KernelCRPSSchema
+        | SpectralLossSchema
+        | TimeAggregateLossWrapperSchema
+        | MultiScaleLossSchema
+    ] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -327,11 +344,19 @@ class CombinedLossSchema(BaseLossSchema):
     @classmethod
     def add_empty_scalers(cls, losses: Any) -> Any:
         """Add empty scalers to loss functions, as scalers can be set at top level."""
+        from omegaconf import DictConfig
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
+            # TimeAggregateLossWrapper and MultiscaleLossWrapper don't have top-level scalers
+            target = loss.get("_target_", "") if isinstance(loss, (dict, DictConfig)) else ""
+            if "TimeAggregateLossWrapper" in target or "MultiscaleLossWrapper" in target:
+                continue
             if "scalers" not in loss:
-                with open_dict(loss):
+                if isinstance(loss, DictConfig):
+                    with open_dict(loss):
+                        loss["scalers"] = []
+                else:
                     loss["scalers"] = []
         return losses
 
@@ -353,6 +378,7 @@ LossSchemas = (
     | KernelCRPSSchema
     | SpectralLossSchema
     | MultiScaleLossSchema
+    | TimeAggregateLossWrapperSchema
 )
 
 
@@ -424,10 +450,10 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
-    weight_averaging: WeightAveragingSchema | None = Field(default=None)
-    "Config for weight averaging (SWA or EMA). Set to null to disable."
     training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
+    weight_averaging: WeightAveragingSchema | None = Field(default=None)
+    "Config for weight averaging (SWA or EMA). Set to null to disable."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
     scalers: DatasetDict[dict[str, ScalerSchema]]

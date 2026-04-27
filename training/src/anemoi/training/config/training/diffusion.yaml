@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - training_loss: single
   - optimization: default
   - weight_averaging: null
 

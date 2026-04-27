@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - training_loss: ensemble
   - optimization: default
   - weight_averaging: null
 
@@ -49,35 +50,6 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-
-
-# loss function for the model
-# To train without multiscale loss, set it to the desired loss directly
-training_loss:
-  datasets:
-    data: # user-defined key in data
-      # loss class to initialise, can be anything subclassing torch.nn.Module
-      _target_: anemoi.training.losses.MultiscaleLossWrapper
-      loss_matrices_path: ${system.input.loss_matrices_path}
-      loss_matrices: [null]
-      weights: [1.0]
-
-      keep_batch_sharded: ${model.keep_batch_sharded}
-
-      per_scale_loss:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-
-        # Scalers to include in loss calculation
-        # A selection of available scalers are listed in training/scalers.
-        # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-        # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-        # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: False
-        no_autocast: True
-        alpha: 0.95
-
-
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated

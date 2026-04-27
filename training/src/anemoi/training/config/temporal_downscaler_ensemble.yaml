@@ -7,6 +7,7 @@ defaults:
 - model: graphtransformer_ens
 - task: temporal_downscaler
 - training: ensemble
+- override training/training_loss: ensemble_combined
 - _self_
 
 config_validation: True
