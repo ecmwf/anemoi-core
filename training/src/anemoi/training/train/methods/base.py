@@ -20,7 +20,6 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
@@ -220,7 +219,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.metrics = torch.nn.ModuleDict()
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.losses)
+        loss_configs = get_multiple_datasets_config(config.training.training_loss)
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
@@ -612,9 +611,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 grid_shard_shapes=self.grid_shard_shapes[dataset_name],
             )
 
-        total_loss = loss(y_pred, y, **loss_kwargs)
-
-        return total_loss
+        return loss(y_pred, y, **loss_kwargs)
 
     def _compute_metrics(
         self,

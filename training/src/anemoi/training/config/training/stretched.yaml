@@ -1,7 +1,7 @@
 ---
 defaults:
   - scalers: stretched
-  - losses: default
+  - training_loss: default
   - optimization: default
   - weight_averaging: null
 

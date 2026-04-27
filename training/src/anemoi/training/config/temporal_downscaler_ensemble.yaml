@@ -7,7 +7,7 @@ defaults:
 - model: graphtransformer_ens
 - task: temporal_downscaler
 - training: ensemble
-- override training/losses: combined
+- override training/training_loss: combined
 - _self_
 
 config_validation: True
@@ -34,7 +34,7 @@ model:
 
 training:
   ensemble_size_per_device: 2
-  losses:
+  training_loss:
     datasets:
       data:
         _target_: anemoi.training.losses.combined.CombinedLoss

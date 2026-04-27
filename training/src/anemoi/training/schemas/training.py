@@ -443,7 +443,7 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
-    losses: DatasetDict[LossSchemas]
+    training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
     weight_averaging: WeightAveragingSchema | None = Field(default=None)
     "Config for weight averaging (SWA or EMA). Set to null to disable."

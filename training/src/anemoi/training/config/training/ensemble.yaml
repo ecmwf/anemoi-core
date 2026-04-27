@@ -1,7 +1,7 @@
 ---
 defaults:
   - scalers: global
-  - losses: default
+  - training_loss: default
   - optimization: default
   - weight_averaging: null
 
@@ -51,7 +51,7 @@ strategy:
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
-losses:
+training_loss:
   datasets:
     data:
       _target_: anemoi.training.losses.MultiscaleLossWrapper
