@@ -13,15 +13,13 @@ import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
-from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.diagnostics.callbacks.plot import PlotSample as _PlotSample
 
 if TYPE_CHECKING:
     from typing import Any
 
-    import pytorch_lightning as pl
-    import torch
+    from matplotlib.figure import Figure
     from omegaconf import DictConfig
 
 
@@ -65,75 +63,30 @@ class PlotEnsSample(_PlotSample):
         )
         self.plot_members = members
 
-    @rank_zero_only
-    def _plot(
+    def _get_process_members(self) -> list | None:
+        """Return configured ensemble members (None = all members)."""
+        return self.plot_members
+
+    def _make_figure(
         self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        dataset_names: list[str],
-        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
-        batch: dict[str, torch.Tensor],
-        batch_idx: int,
-        epoch: int,
-    ) -> None:
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,  # noqa: ARG002
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create an ensemble figure with members, mean, spread and error."""
         from anemoi.training.diagnostics.plots import plot_predicted_ensemble
 
-        logger = trainer.logger
-
-        for dataset_name in dataset_names:
-
-            # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
-            plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
-                for name in self.parameters
-            }
-
-            data, output_tensor = self.process(
-                pl_module,
-                dataset_name,
-                outputs,
-                batch,
-                members=self.plot_members,
-            )
-
-            # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
-
-            local_rank = pl_module.local_rank
-            for _, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
-                y_true = np.asarray(y_true).squeeze()
-                y_pred = np.asarray(y_pred).squeeze()
-                fig = plot_predicted_ensemble(
-                    parameters=plot_parameters_dict,
-                    n_plots_per_sample=4,
-                    latlons=latlons,
-                    clevels=self.accumulation_levels_plot,
-                    y_true=y_true,
-                    y_pred=y_pred,
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                    projection_kind=self.projection_kind,
-                )
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=(
-                        f"pred_val_sample_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                    exp_log_tag=(
-                        f"pred_val_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                )
+        return plot_predicted_ensemble(
+            parameters=plot_parameters_dict,
+            n_plots_per_sample=4,
+            latlons=latlons,
+            clevels=self.accumulation_levels_plot,
+            y_true=np.asarray(y_true).squeeze(),
+            y_pred=np.asarray(y_pred).squeeze(),
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
