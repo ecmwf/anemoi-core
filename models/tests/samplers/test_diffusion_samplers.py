@@ -63,7 +63,7 @@ class RecordingZeroDenoiser:
         model_comm_group=None,
         grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_shapes
+        del model_comm_group, grid_shard_sizes
         self.call_count += 1
         if self.validator is not None:
             self.validator(x, y, sigma)
