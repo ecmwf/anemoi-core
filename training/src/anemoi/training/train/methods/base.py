@@ -20,7 +20,6 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData

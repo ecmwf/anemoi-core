@@ -328,7 +328,14 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema | SpectralLossSchema | TimeAggregateLossWrapperSchema | MultiScaleLossSchema] = Field(min_length=1)
+    losses: list[
+        BaseLossSchema
+        | AlmostFairKernelCRPSSchema
+        | KernelCRPSSchema
+        | SpectralLossSchema
+        | TimeAggregateLossWrapperSchema
+        | MultiScaleLossSchema
+    ] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
