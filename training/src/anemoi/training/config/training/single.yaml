@@ -40,14 +40,10 @@ strategy:
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
 
-# loss functions
-
 # dynamic rescaling of the loss gradient
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-# loss function for the model
-
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
