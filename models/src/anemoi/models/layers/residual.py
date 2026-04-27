@@ -107,21 +107,30 @@ class TruncatedConnection(BaseResidualConnection):
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
 
-    Example
-    -------
+    Examples
+    --------
     >>> # Graph-based path (edge names supplied by ProjectionCreator)
     >>> conn = TruncatedConnection(
     ...     graph=graph,
+    ...     data_nodes="data",
     ...     truncation_down_edges_name=("data", "to", "truncation"),
     ...     truncation_up_edges_name=("truncation", "to", "data"),
     ...     edge_weight_attribute="gauss_weight",
     ... )
+    >>> x = torch.randn(2, 4, 1, 40192, 44)  # (batch, time, ens, nodes, features)
+    >>> out = conn(x)
+    >>> print(out.shape)
+    torch.Size([2, 4, 1, 40192, 44])
 
     >>> # File-based path
     >>> conn = TruncatedConnection(
     ...     truncation_down_file_path="n320_to_o96.npz",
     ...     truncation_up_file_path="o96_to_n320.npz",
     ... )
+    >>> x = torch.randn(2, 4, 1, 40192, 44)
+    >>> out = conn(x)
+    >>> print(out.shape)
+    torch.Size([2, 4, 1, 40192, 44])
     """
 
     def __init__(

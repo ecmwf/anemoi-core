@@ -102,7 +102,6 @@ class MultiscaleLossWrapper(BaseLoss):
         """
         super().__init__(ignore_nans=ignore_nans)
 
-        # Treat [None] (Hydra-coerced null list) as absent, same as None.
         _has_matrices = loss_matrices and any(m is not None for m in loss_matrices)
         if _has_matrices or loss_matrices_path is not None:
             LOGGER.warning(

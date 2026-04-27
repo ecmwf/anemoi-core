@@ -86,4 +86,4 @@ File-based example:
 
    The top-level ``truncation_up_file_path`` and
    ``truncation_down_file_path`` kwargs are still accepted for backward
-   compatibility but are deprecated. Move them inside ``truncation_config``.
+   compatibility, but the recommended approach is to move them inside ``truncation_config``.

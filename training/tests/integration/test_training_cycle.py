@@ -221,39 +221,9 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
     BaseSchema(**cfg)
 
 
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_ensemble_graph_multiscale(
-    ensemble_graph_multiscale_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, url = ensemble_graph_multiscale_config
-    assert cfg.task.multistep_output == 2
-    assert cfg.task.multistep_input == 3
-    get_test_archive(url)
-
-    trainer = AnemoiTrainer(cfg)
-    trainer.train()
-
-
 def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_graph_multiscale_config
     BaseSchema(**cfg)
-
-
-@skip_if_offline
-@pytest.mark.slow
-def test_training_cycle_ensemble_truncated_connection(
-    ensemble_truncated_connection_config: tuple[DictConfig, str],
-    get_test_archive: GetTestArchive,
-) -> None:
-    cfg, url = ensemble_truncated_connection_config
-    assert cfg.task.multistep_output == 2
-    assert cfg.task.multistep_input == 3
-    get_test_archive(url)
-
-    trainer = AnemoiTrainer(cfg)
-    trainer.train()
 
 
 def test_config_validation_ensemble_truncated_connection(

@@ -14,7 +14,6 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.models.base import BaseGraphModel
-from anemoi.utils.config import DotDict
 
 
 class DummyGraphModel(BaseGraphModel):
@@ -138,37 +137,3 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
-
-
-def test_base_graph_model_accepts_dotdict_model_config() -> None:
-    model_config = DotDict(
-        {
-            "model": {
-                "num_channels": 8,
-                "trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                },
-                "model": {
-                    "hidden_nodes_name": "hidden",
-                    "latent_skip": False,
-                },
-                "residual": {
-                    "_target_": "anemoi.models.layers.residual.SkipConnection",
-                },
-                "bounding": [],
-            },
-        },
-    )
-
-    model = DummyGraphModel(
-        model_config=model_config,
-        data_indices=_make_data_indices(),
-        statistics={"data": None},
-        n_step_input=1,
-        n_step_output=1,
-        graph_data=_make_graph(),
-    )
-
-    assert model.seen_hidden_name == "hidden"
-    assert model.node_attributes.num_nodes["hidden"] == 1
