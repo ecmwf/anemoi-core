@@ -16,6 +16,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.tasks.offsets import ForecastOffsets
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
@@ -43,49 +44,36 @@ class RolloutConfig:
             LOGGER.info("Rollout window length has been increased to %d.", self.step)
 
 
-class Forecaster(BaseTask):
-    """Forecasting task implementation.
+class BaseForecaster(BaseTask):
+    """Base class for autoregressive forecasting tasks.
 
-    Builds input and output offsets from ``multistep_input``,
-    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
+    Owns all rollout machinery: curriculum scheduling, step shifting,
+    input advancement, and validation rollout. Subclasses are responsible
+    only for constructing the :class:`~anemoi.training.tasks.offsets.ForecastOffsets`
+    object before calling ``super().__init__``.
 
-    For rollout training the ``offset`` property extends the output
-    offsets up to ``rollout_max`` steps so the datamodule loads enough
-    time steps, while ``steps`` only iterates over the current
-    ``rollout`` value which grows via ``on_train_epoch_end``.
+    Parameters
+    ----------
+    offsets : ForecastOffsets
+        Input and output time offsets for this task, as well as the step shift for rollout advancement.
+    rollout : dict | None, optional
+        Keyword arguments forwarded to :class:`RolloutConfig`.
+    validation_rollout : int, optional
+        Fixed number of rollout steps used during validation (independent
+        of the training curriculum).
     """
-
-    name: str = "forecaster"
 
     def __init__(
         self,
-        multistep_input: int,
-        multistep_output: int,
-        timestep: str,
+        offsets: ForecastOffsets,
         rollout: dict | None = None,
         validation_rollout: int = 1,
-        **kwargs,
     ) -> None:
-
-        self.timestep = frequency_to_timedelta(timestep)
-        self.num_input_steps = multistep_input
-        self.num_output_steps = multistep_output
+        super().__init__(offsets=offsets)
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
-
-        if len(kwargs) > 0:
-            LOGGER.warning(
-                "The following extra parameters were provided to %s but will be ignored: %s",
-                self.__class__.__name__,
-                kwargs,
-            )
-
-        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
-        input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
-        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
-        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
-        super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = ForecasterPlotAdapter(self)
+        self._advance_preserve, self._advance_predict = offsets.slot_mapping()
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
         """Return the current steps configuration based on the rollout step."""
@@ -96,21 +84,17 @@ class Forecaster(BaseTask):
         """Get the metric name for the current step."""
         return f"_rstep{rollout_step}"
 
-    @property
-    def _step_shift(self) -> datetime.timedelta:
-        """Time shift between consecutive rollout steps."""
-        return self.timestep * self.num_output_steps
-
     def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
         """Compute the full list of offsets needed for the current rollout configuration."""
-        all_offsets = set(self._input_offsets)
+        all_offsets = set(self.offsets.input)
         for step in range(rollout_step):
-            shift = self._step_shift * step
-            for o in self._output_offsets:
+            shift = self.offsets.step_shift * step
+            for o in self.offsets.output:
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
+        """Return the full set of time offsets required for the given mode."""
         if mode == "training":
             rollout_step = self.rollout.maximum
         elif mode == "validation":
@@ -122,14 +106,13 @@ class Forecaster(BaseTask):
                 self.__class__.__name__,
             )
             rollout_step = max(self.rollout.maximum, self.validation_rollout)
-
         return self._compute_rollout_offsets(rollout_step)
 
     def get_output_offsets(self, rollout_step: int = 0, mode: str = "training", **_kwargs) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
         rollout_step = rollout_step if mode == "training" else self.validation_rollout
-        shift = self._step_shift * rollout_step
-        return sorted(o + shift for o in self._output_offsets)
+        shift = self.offsets.step_shift * rollout_step
+        return sorted(o + shift for o in self.offsets.output)
 
     def _advance_dataset_input(
         self,
@@ -143,39 +126,42 @@ class Forecaster(BaseTask):
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
 
-        Supports model outputs shaped like ``(B, T, E, G, V)``.
+        Slots whose shifted offset lands in ``output_offsets`` are filled from
+        ``y_pred`` (model predictions).  Slots whose shifted offset lands in
+        ``input_offsets`` are slid in-place to their new positions.
+        The slot mappings are pre-computed at initialization.
         """
-        keep_steps = min(self.num_input_steps, self.num_output_steps)
+        # Carry forward input steps that are still in the window after the shift.
+        # old_slot > new_slot for every pair (step_shift > 0 + ascending sort),
+        # so left-to-right traversal never reads a slot that has already been written.
+        for new_slot, old_slot in self._advance_preserve:
+            x[:, new_slot] = x[:, old_slot]
 
-        x = x.roll(-keep_steps, dims=1)
-
-        # Compute batch indices for the output offsets of this rollout step
+        # Fill steps that the model has just predicted.
         output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
-
-        for i in range(keep_steps):
-            # Get prognostic variables
-            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
+        for new_slot, output_slot in self._advance_predict:
+            x[:, new_slot, ..., data_indices.model.input.prognostic] = y_pred[
                 :,
-                -(i + 1),
+                output_slot,
                 ...,
                 data_indices.model.output.prognostic,
             ]
 
-            batch_time_index = output_batch_indices[-(i + 1)]
+            batch_time_index = output_batch_indices[output_slot]
             true_state = batch[:, batch_time_index]
 
-            if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
-                true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_slot].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, new_slot].shape[1], -1, -1)
 
-            x[:, -(i + 1)] = output_mask.rollout_boundary(
-                x[:, -(i + 1)],
+            x[:, new_slot] = output_mask.rollout_boundary(
+                x[:, new_slot],
                 true_state,
                 data_indices,
                 grid_shard_slice=grid_shard_slice,
             )
 
-            # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
+            # Refresh time-varying forcing from the batch ground truth.
+            x[:, new_slot, ..., data_indices.model.input.forcing] = batch[
                 :,
                 batch_time_index,
                 ...,
@@ -221,6 +207,101 @@ class Forecaster(BaseTask):
         if self.rollout.should_increase(current_epoch):
             self.rollout.increase()
 
+    def _get_timestep_for_metadata(self) -> str | None:
+        """Get the timestep string for metadata."""
+        return None
+
+
+class Forecaster(BaseForecaster):
+    """Basic Forecasting task implementation.
+
+    Derives input and output offsets from ``multistep_input``,
+    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
+    """
+
+    name: str = "forecaster"
+
+    def __init__(
+        self,
+        multistep_input: int,
+        multistep_output: int,
+        timestep: str,
+        rollout: dict | None = None,
+        validation_rollout: int = 1,
+        **kwargs,
+    ) -> None:
+        if kwargs:
+            LOGGER.warning(
+                "The following extra parameters were provided to %s but will be ignored: %s",
+                self.__class__.__name__,
+                kwargs,
+            )
+
+        self.timestep = frequency_to_timedelta(timestep)
+        # Input: e.g. multistep_input=2, timestep=6H  ->  [-6H, 0H]
+        input_offsets = [-i * self.timestep for i in range(multistep_input)]
+        # Output: e.g. multistep_output=1, timestep=6H  ->  [6H]
+        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
+
+        super().__init__(
+            offsets=ForecastOffsets(
+                input_offsets=input_offsets,
+                output_offsets=output_offsets,
+                step_shift=self.timestep * multistep_output,
+            ),
+            rollout=rollout,
+            validation_rollout=validation_rollout,
+        )
+
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
         return frequency_to_string(self.timestep)
+
+
+class FlexibleForecaster(BaseForecaster):
+    """Advanced Forecasting task with fully configurable input/output offsets and step shift.
+
+    Parameters
+    ----------
+    input_offsets : list[str]
+        Duration strings for the input time steps, e.g. ``["-6H", "0H"]``.
+        A leading ``-`` denotes a negative offset.
+    output_offsets : list[str]
+        Duration strings for the output time steps, e.g. ``["6H"]``.
+    step_shift : str | None, optional
+        Duration string for the autoregressive rollout step shift.
+        This shifts the origin with respect to which offsets are defined.
+        None defaults to the maximal valid shift.
+    rollout : dict | None, optional
+        Rollout configuration forwarded to :class:`RolloutConfig`.
+    validation_rollout : int, optional
+        Fixed number of rollout steps used during validation.
+    """
+
+    name: str = "flexible-forecaster"
+
+    def __init__(
+        self,
+        input_offsets: list[str],
+        output_offsets: list[str],
+        step_shift: str | None = None,
+        rollout: dict | None = None,
+        validation_rollout: int = 1,
+        **kwargs,
+    ) -> None:
+        if kwargs:
+            LOGGER.warning(
+                "The following extra parameters were provided to %s but will be ignored: %s",
+                self.__class__.__name__,
+                kwargs,
+            )
+
+        super().__init__(
+            offsets=ForecastOffsets(
+                input_offsets=input_offsets,
+                output_offsets=output_offsets,
+                step_shift=step_shift,
+            ),
+            rollout=rollout,
+            validation_rollout=validation_rollout,
+        )

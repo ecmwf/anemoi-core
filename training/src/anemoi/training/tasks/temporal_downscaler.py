@@ -12,6 +12,7 @@ import logging
 
 from anemoi.training.diagnostics.callbacks.plot_adapter import TemporalDownscalerPlotAdapter
 from anemoi.training.tasks.base import BaseSingleStepTask
+from anemoi.training.tasks.offsets import BaseTaskOffsets
 from anemoi.utils.dates import as_timedelta
 
 LOGGER = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class TemporalDownscaler(BaseSingleStepTask):
         if output_right_boundary:
             output_offsets = [*output_offsets, input_timedelta]
 
-        super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
+        super().__init__(offsets=BaseTaskOffsets(input_offsets=input_offsets, output_offsets=output_offsets))
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
 
     def _get_timestep_for_metadata(self) -> str:
