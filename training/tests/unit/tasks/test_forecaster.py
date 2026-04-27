@@ -487,3 +487,44 @@ def test_flexible_forecaster_advance_input_preserves_and_predicts() -> None:
     assert torch.all(updated[:, 0] == 2.0), f"preserved slot should be 2.0, got {updated[:, 0]}"
     # Slot 1: 6H offset ; predicted (value 3.0)
     assert torch.all(updated[:, 1] == 3.0), f"predicted slot should be 3.0, got {updated[:, 1]}"
+
+
+# ── BaseForecaster: advance_preserve slot ordering invariant ──────────────────
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets"),
+    [
+        (["-6H", "0H"], ["6H"]),  # 2-input, 1-output
+        (["-12H", "-6H", "0H"], ["6H"]),  # 3-input, 1-output
+        (["-18H", "-12H", "-6H", "0H"], ["6H", "12H"]),  # 4-input, 2-output
+        (["-6H", "0H"], ["6H", "12H"]),  # 2-input, 2-output (step_shift=12H)
+        (["0H"], ["6H"]),  # 1-input: no preserve pairs
+    ],
+)
+def test_advance_preserve_slots_safe_for_in_place_writes(
+    input_offsets: list[str],
+    output_offsets: list[str],
+) -> None:
+    """_advance_preserve slot pairs satisfy the invariant required for safe in-place writes.
+
+    For every (new_slot, old_slot) pair:
+    - old_slot > new_slot  (we always read from a slot not yet overwritten)
+    - new_slots are strictly ascending  (no duplicate writes, correct left-to-right order)
+    """
+    task = FlexibleForecaster(input_offsets=input_offsets, output_offsets=output_offsets)
+    preserve = task._advance_preserve
+    new_slots = [new_slot for new_slot, _ in preserve]
+
+    for new_slot, old_slot in preserve:
+        assert old_slot > new_slot, (
+            f"preserve pair ({new_slot}, {old_slot}): old_slot must be > new_slot "
+            f"for safe in-place writes "
+            f"(input_offsets={input_offsets}, output_offsets={output_offsets})"
+        )
+
+    for i in range(len(new_slots) - 1):
+        assert new_slots[i] < new_slots[i + 1], (
+            f"new_slots {new_slots} must be strictly ascending at index {i} "
+            f"(input_offsets={input_offsets}, output_offsets={output_offsets})"
+        )

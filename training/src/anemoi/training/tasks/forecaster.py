@@ -128,19 +128,19 @@ class BaseForecaster(BaseTask):
 
         Slots whose shifted offset lands in ``output_offsets`` are filled from
         ``y_pred`` (model predictions).  Slots whose shifted offset lands in
-        ``input_offsets`` are preserved unchanged from the current input tensor
-        (no model prediction required).  These slot mappings are pre-computed at initialization.
+        ``input_offsets`` are slid in-place to their new positions.
+        The slot mappings are pre-computed at initialization.
         """
-        new_x = x.clone()
-
         # Carry forward input steps that are still in the window after the shift.
+        # old_slot > new_slot for every pair (step_shift > 0 + ascending sort),
+        # so left-to-right traversal never reads a slot that has already been written.
         for new_slot, old_slot in self._advance_preserve:
-            new_x[:, new_slot] = x[:, old_slot]
+            x[:, new_slot] = x[:, old_slot]
 
         # Fill steps that the model has just predicted.
         output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
         for new_slot, output_slot in self._advance_predict:
-            new_x[:, new_slot, ..., data_indices.model.input.prognostic] = y_pred[
+            x[:, new_slot, ..., data_indices.model.input.prognostic] = y_pred[
                 :,
                 output_slot,
                 ...,
@@ -150,24 +150,24 @@ class BaseForecaster(BaseTask):
             batch_time_index = output_batch_indices[output_slot]
             true_state = batch[:, batch_time_index]
 
-            if output_mask is not None and true_state.shape[1] == 1 and new_x[:, new_slot].shape[1] != 1:
-                true_state = true_state.expand(-1, new_x[:, new_slot].shape[1], -1, -1)
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_slot].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, new_slot].shape[1], -1, -1)
 
-            new_x[:, new_slot] = output_mask.rollout_boundary(
-                new_x[:, new_slot],
+            x[:, new_slot] = output_mask.rollout_boundary(
+                x[:, new_slot],
                 true_state,
                 data_indices,
                 grid_shard_slice=grid_shard_slice,
             )
 
             # Refresh time-varying forcing from the batch ground truth.
-            new_x[:, new_slot, ..., data_indices.model.input.forcing] = batch[
+            x[:, new_slot, ..., data_indices.model.input.forcing] = batch[
                 :,
                 batch_time_index,
                 ...,
                 data_indices.data.input.forcing,
             ]
-        return new_x
+        return x
 
     def advance_input(
         self,
