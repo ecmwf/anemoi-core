@@ -16,7 +16,6 @@ import traceback
 from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,8 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
+from omegaconf import DictConfig
+from pydantic import BaseModel as PydanticBaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -47,31 +48,8 @@ from anemoi.training.utils.index_space import IndexSpace
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass
-class PlottingSettings:
-    """Settings for plotting callbacks.
-
-    TODO: Move this to Pydantic schema and inject settings in each callback.
-
-    Parameters
-    ----------
-    datashader : bool
-        Whether to use datashader for plotting
-    projection_kind : str
-        Map projection kind (e.g., "equirectangular")
-    asynchronous : bool
-        Whether to plot asynchronously in background thread
-    save_basedir : str | None
-        Base directory for saving plot files
-    colormaps : dict | None
-        Color mappings for different variables and error types
-    precip_and_related_fields : list[str] | None
-        List of precipitation and related field names
-    focus_areas : dict | None
-        Spatial focus areas for plotting (lat/lon bounding boxes)
-    dataset_names : list[str] | None
-        Dataset names to plot from
-    """
+class PlottingSettings(PydanticBaseModel):
+    """Settings for plotting callbacks, shared across all plot callbacks in a run."""
 
     datashader: bool = True
     projection_kind: str = "equirectangular"
@@ -81,6 +59,20 @@ class PlottingSettings:
     precip_and_related_fields: list[str] | None = None
     focus_areas: dict | None = None
     dataset_names: list[str] | None = None
+
+    @classmethod
+    def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | None) -> "PlottingSettings":
+        """Construct from a validated diagnostics.plot config node."""
+        return cls(
+            datashader=plot_cfg.datashader,
+            projection_kind=plot_cfg.projection_kind,
+            asynchronous=plot_cfg.asynchronous,
+            save_basedir=save_basedir,
+            colormaps=plot_cfg.colormaps,
+            precip_and_related_fields=plot_cfg.precip_and_related_fields,
+            focus_areas=plot_cfg.focus_areas,
+            dataset_names=plot_cfg.datasets_to_plot,
+        )
 
 
 class BasePlotExecutor(ABC):

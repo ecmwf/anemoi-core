@@ -387,7 +387,11 @@ class AnemoiTrainer(ABC):
             diagnostics=self.config.diagnostics,
             checkpoints_output=self.config.system.output.checkpoints,
             plots_output=self.config.system.output.plots,
-            full_config=self.config,
+            swa_enabled=self.config.training.swa.enabled,
+            swa_lr=self.config.training.swa.lr,
+            max_epochs=self.config.training.max_epochs,
+            wandb_enabled=getattr(getattr(self.config.diagnostics.log, "wandb", None), "enabled", False),
+            mlflow_enabled=getattr(getattr(self.config.diagnostics.log, "mlflow", None), "enabled", False),
         )
         return get_callbacks(callbacks_context)
 

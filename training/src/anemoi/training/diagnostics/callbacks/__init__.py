@@ -9,16 +9,12 @@
 
 
 import logging
-from collections.abc import Callable
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
 
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from pydantic import BaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
@@ -45,49 +41,26 @@ class CallbacksContext:
         Checkpoint output paths configuration (config.system.output.checkpoints)
     plots_output : str | None
         Base directory for plot outputs (config.system.output.plots)
-    full_config : DictConfig
-        Full configuration object (used for CONFIG_ENABLED_CALLBACKS)
+    swa_enabled : bool
+        Whether Stochastic Weight Averaging is enabled (config.training.swa.enabled)
+    swa_lr : float
+        Learning rate for SWA (config.training.swa.lr)
+    max_epochs : int | None
+        Maximum number of training epochs (config.training.max_epochs)
+    wandb_enabled : bool
+        Whether Weights & Biases logging is enabled
+    mlflow_enabled : bool
+        Whether MLflow logging is enabled
     """
 
     diagnostics: DictConfig
     checkpoints_output: DictConfig
     plots_output: str | None
-    full_config: DictConfig
-
-
-def nestedget(config: DictConfig, key: str, default: Any) -> Any:
-    """Get a nested key from a DictConfig object.
-
-    E.g.
-    >>> nestedget(config, "diagnostics.log.wandb.enabled", False)
-    """
-    keys = key.split(".")
-    for k in keys:
-        config = getattr(config, k, default)
-        if not isinstance(config, BaseModel | dict | DictConfig):
-            break
-    return config
-
-
-# Callbacks to add according to flags in the config.
-# Each entry: (enable_condition, factory_fn) where factory_fn receives the full config
-# and returns a Callback instance. This allows per-callback config extraction.
-CONFIG_ENABLED_CALLBACKS: list[
-    tuple[list[str] | str | Callable[[DictConfig], bool], Callable[[DictConfig], Callback]]
-] = [
-    (
-        "training.swa.enabled",
-        lambda config: StochasticWeightAveraging(
-            swa_lrs=config.training.swa.lr,
-            max_epochs=config.training.max_epochs,
-        ),
-    ),
-    (
-        lambda config: nestedget(config, "diagnostics.log.wandb.enabled", False)
-        or nestedget(config, "diagnostics.log.mlflow.enabled", False),
-        lambda _config: LearningRateMonitor(),
-    ),
-]
+    swa_enabled: bool
+    swa_lr: float
+    max_epochs: int | None
+    wandb_enabled: bool
+    mlflow_enabled: bool
 
 
 def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: DictConfig) -> list[AnemoiCheckpoint]:
@@ -159,25 +132,6 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
     return checkpoint_callbacks
 
 
-def _get_config_enabled_callbacks(config: DictConfig) -> list[Callback]:
-    """Get callbacks that are enabled in the config as according to CONFIG_ENABLED_CALLBACKS."""
-    callbacks = []
-
-    def check_key(config: dict, key: str | Iterable[str] | Callable[[DictConfig], bool]) -> bool:
-        """Check key in config."""
-        if isinstance(key, Callable):
-            return key(config)
-        if isinstance(key, str):
-            return nestedget(config, key, False)
-        if isinstance(key, Iterable):
-            return all(nestedget(config, k, False) for k in key)
-        return nestedget(config, key, False)
-
-    for enable_key, factory in CONFIG_ENABLED_CALLBACKS:
-        if check_key(config, enable_key):
-            callbacks.append(factory(config))
-
-    return callbacks
 
 
 def _get_progress_bar_callback(diagnostics_cfg: DictConfig) -> list[Callback]:
@@ -241,17 +195,16 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     (datashader, projection_kind, asynchronous, save_basedir, colormaps, precip_and_related_fields,
     focus_areas, dataset_names) via the `plotting_settings` parameter.
 
-    User-configurable callbacks (under `diagnostics.callbacks`) are instantiated as-is from YAML.
-    Callbacks added programmatically (see CONFIG_ENABLED_CALLBACKS and the fixed callbacks at
-    the bottom of this function) receive only the specific values they need.
-
-    Some callbacks are added by default, depending on the configuration.
-    See CONFIG_ENABLED_CALLBACKS for more information.
+    User-configurable callbacks (under ``diagnostics.callbacks``) are instantiated verbatim
+    via ``hydra.utils.instantiate``. They receive only what is in the config tree — use
+    Hydra interpolation (e.g. ``${system.output.plots}``) for config-derived values.
+    Runtime-computed values (resolved paths, loggers) are not available here; if a callback
+    needs them, add a typed field to :class:`CallbacksContext` and a dedicated helper function.
 
     Parameters
     ----------
     context : CallbacksContext
-        Callbacks context containing diagnostics, output paths, and full config
+        Callbacks context containing diagnostics, output paths, and runtime-extracted settings.
 
     Returns
     -------
@@ -269,24 +222,19 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     trainer_callbacks.extend(instantiate(callback) for callback in diagnostics_cfg.callbacks)
 
     # Plotting callbacks — instantiated with global plotting settings from diagnostics.plot
-    plotting_settings = PlottingSettings(
-        datashader=diagnostics_cfg.plot.datashader,
-        projection_kind=diagnostics_cfg.plot.projection_kind,
-        asynchronous=diagnostics_cfg.plot.asynchronous,
-        save_basedir=context.plots_output,
-        colormaps=getattr(diagnostics_cfg.plot, "colormaps", None),
-        precip_and_related_fields=getattr(diagnostics_cfg.plot, "precip_and_related_fields", None),
-        focus_areas=getattr(diagnostics_cfg.plot, "focus_areas", None),
-        dataset_names=getattr(diagnostics_cfg.plot, "datasets_to_plot", None),
-    )
+    plotting_settings = PlottingSettings.from_plot_config(diagnostics_cfg.plot, context.plots_output)
     for callback_cfg in diagnostics_cfg.plot.callbacks:
-        # Merge global plotting settings into callback config
         callback_cfg_dict = dict(callback_cfg)
         callback_cfg_dict["plotting_settings"] = plotting_settings
         trainer_callbacks.append(instantiate(callback_cfg_dict))
 
-    # Extend with config enabled callbacks
-    trainer_callbacks.extend(_get_config_enabled_callbacks(context.full_config))
+    # Config-enabled callbacks
+    if context.swa_enabled:
+        trainer_callbacks.append(
+            StochasticWeightAveraging(swa_lrs=context.swa_lr, max_epochs=context.max_epochs)
+        )
+    if context.wandb_enabled or context.mlflow_enabled:
+        trainer_callbacks.append(LearningRateMonitor())
 
     # Progress bar callback
     trainer_callbacks.extend(_get_progress_bar_callback(diagnostics_cfg))
