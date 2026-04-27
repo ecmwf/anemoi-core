@@ -32,11 +32,23 @@ class BasePlotAdapter(ABC):
     def __init__(self, task: BaseTask) -> None:
         self._task = task
 
+    @property
+    def is_ensemble(self) -> bool:
+        return False
+
     def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return output_tensor
+
+    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:  # noqa: ARG002
+        """Select ensemble members from tensor. No-op for non-ensemble adapters."""
+        return tensor
+
+    def prepare_loss_batch(self, batch: dict) -> dict:
+        """Prepare batch for loss plotting. No-op for non-ensemble adapters."""
+        return batch
 
     @abstractmethod
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
@@ -107,3 +119,49 @@ class AutoencoderPlotAdapter(BasePlotAdapter):
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, sample, recon, "recon"
+
+
+class EnsemblePlotAdapter(BasePlotAdapter):
+    """Wraps any task-specific adapter, adding ensemble member handling.
+
+    This adapter decorates an inner (task-specific) adapter to handle the
+    extra ensemble dimension present in ensemble training outputs.
+    Batch shape convention: (B, T, E, G, V) where E is ensemble members.
+    """
+
+    def __init__(self, inner: BasePlotAdapter) -> None:
+        self._inner = inner
+        self._task = inner._task
+
+    @property
+    def is_ensemble(self) -> bool:
+        return True
+
+    def get_loss_plot_batch_start(self, **kwargs) -> int:
+        return self._inner.get_loss_plot_batch_start(**kwargs)
+
+    def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
+        return self._inner.prepare_plot_output_tensor(output_tensor)
+
+    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:
+        """Slice ensemble members from dim 2 of the output tensor.
+
+        Parameters
+        ----------
+        tensor : Any
+            Tensor with shape (..., members, grid, vars)
+        members : int | list[int] | None
+            Members to select. None returns all members, int/list selects specific members.
+        """
+        if members is None:
+            return tensor
+        if not isinstance(members, list):
+            members = [members]
+        return tensor[:, :, members, ...]
+
+    def prepare_loss_batch(self, batch: dict) -> dict:
+        """Squeeze ensemble dim to member 0 for loss plotting."""
+        return {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
+
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor)

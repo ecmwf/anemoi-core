@@ -480,6 +480,79 @@ def plot_histogram(
     return fig
 
 
+def _setup_figure_and_colormaps(
+    n_plots_x: int,
+    n_plots_y: int,
+    latlons: np.ndarray,
+    datashader: bool,
+    projection_kind: str,
+    colormaps: dict[str, Colormap] | None = None,
+) -> tuple[Figure, np.ndarray, np.ndarray, np.ndarray, object, dict]:
+    """Create a projected figure grid and normalise the colormaps dict.
+
+    Parameters
+    ----------
+    n_plots_x : int
+        Number of rows (one per variable).
+    n_plots_y : int
+        Number of columns (panels per variable).
+    latlons : np.ndarray
+        Lat/lon coordinates array, shape (n_points, 2).
+    datashader : bool
+        If True, force equirectangular projection (datashader limitation).
+    projection_kind : str
+        Projection name when *datashader* is False.
+    colormaps : dict[str, Colormap] | None, optional
+        Colormap configuration dict, by default None.
+
+    Returns
+    -------
+    tuple
+        (fig, axs, pc_lon, pc_lat, transform, colormaps)
+    """
+    plot_kind = "equirectangular" if datashader else projection_kind
+    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
+
+    figsize = (n_plots_y * 4, n_plots_x * 3)
+    subplot_kw = {"projection": proj} if proj is not None else {}
+    fig, axs = plt.subplots(
+        n_plots_x,
+        n_plots_y,
+        figsize=figsize,
+        layout=LAYOUT,
+        subplot_kw=subplot_kw,
+    )
+    colormaps = colormaps if colormaps is not None else {}
+    return fig, axs, pc_lon, pc_lat, transform, colormaps
+
+
+def _resolve_variable_colormaps(
+    colormaps: dict,
+    variable_name: str,
+) -> tuple[Colormap, Colormap]:
+    """Resolve the main and error colormaps for a single variable.
+
+    Parameters
+    ----------
+    colormaps : dict
+        Colormap configuration dict (may be empty).
+    variable_name : str
+        The variable name to look up.
+
+    Returns
+    -------
+    tuple[Colormap, Colormap]
+        (cmap, error_cmap)
+    """
+    cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
+    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+    for key in colormaps:
+        if key not in ["default", "error"] and variable_name in colormaps[key].variables:
+            cmap = colormaps[key].get_cmap()
+            break
+    return cmap, error_cmap
+
+
 def plot_predicted_multilevel_flat_sample(
     parameters: dict[str, int],
     n_plots_per_sample: int,
@@ -528,25 +601,16 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
-    n_plots_x, n_plots_y = len(parameters), n_plots_per_sample
-
-    # Datashader does not support Cartopy transform; use equirectangular (regular axes)
-    plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
-
-    figsize = (n_plots_y * 4, n_plots_x * 3)
-    subplot_kw = {"projection": proj} if proj is not None else {}
-    fig, axs = plt.subplots(
-        n_plots_x,
-        n_plots_y,
-        figsize=figsize,
-        layout=LAYOUT,
-        subplot_kw=subplot_kw,
+    fig, axs, pc_lon, pc_lat, transform, colormaps = _setup_figure_and_colormaps(
+        n_plots_x=len(parameters),
+        n_plots_y=n_plots_per_sample,
+        latlons=latlons,
+        datashader=datashader,
+        projection_kind=projection_kind,
+        colormaps=colormaps,
     )
 
-    if colormaps is None:
-        colormaps = {}
-
+    n_plots_x = len(parameters)
     for plot_idx, (variable_idx, (variable_name, diagnostic_only)) in enumerate[tuple[str, int]](parameters.items()):
         # prognostic: show input; diagnostic: zero input for display
         xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * (0 if diagnostic_only else 1)
@@ -557,13 +621,7 @@ def plot_predicted_multilevel_flat_sample(
         )
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
 
-        # get the colormap for the variable as defined in config file
-        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
-        for key in colormaps:
-            if key not in ["default", "error"] and variable_name in colormaps[key].variables:
-                cmap = colormaps[key].get_cmap()
-                continue
+        cmap, error_cmap = _resolve_variable_colormaps(colormaps, variable_name)
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
         plot_flat_sample(
             fig=fig,
@@ -1094,52 +1152,53 @@ def plot_predicted_ensemble(
     colormaps: dict[str, Colormap] | None = None,
     projection_kind: str = "equirectangular",
 ) -> Figure:
-    """Plots data for one ensemble member.
+    """Plot ensemble mean, spread, and the difference of members to the mean for each variable.
 
-    Args:
-        parameters : Dict[int, str]
-            Dictionary of target variables
-        n_plots_per_sample : int
-            Number of plots per sample
-        latlons : np.ndarray
-            Latitudes and longitudes
-        clevels : float
-            Accumulation levels used for precipitation related plots
-        y_true : np.ndarray
-            True values
-        y_pred : np.ndarray
-            Predicted values
-        datashader : bool, optional
-            Datashader plot, by default True
-        precip_and_related_fields : list, optional
-            List of precipitation-like variables, by default None
-        colormaps : dict[str, Colormap], optional
-            Dictionary of colormaps, by default None
+    Columns: target | pred mean | mean error | ens std | member_1 - mean | ... | member_N - mean.
+
+    Parameters
+    ----------
+    parameters : dict[int, str]
+        Variable index -> (variable_name, diagnostic_only) or plain variable name.
+    n_plots_per_sample : int
+        Number of summary panels (target, pred mean, mean error, ens sd). Typically 4.
+    latlons : np.ndarray
+        Lat/lon coordinates array, shape (n_points, 2).
+    clevels : float
+        Accumulation levels used for precipitation related plots.
+    y_true : np.ndarray
+        True values, shape (grid, vars) or (grid,).
+    y_pred : np.ndarray
+        Predicted values, shape (members, grid, vars) or (grid, vars).
+    datashader : bool, optional
+        Datashader plot, by default True.
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default None.
+    colormaps : dict[str, Colormap], optional
+        Dictionary of colormaps, by default None.
+    projection_kind : str, optional
+        Projection name when *datashader* is False, by default "equirectangular".
 
     Returns
     -------
-        fig:
-            The figure object handle.
+    Figure
+        The figure object handle.
     """
     nens = y_pred.shape[0] if len(y_pred.shape) == 3 else 1
 
     n_plots_per_sample = 4  # target, pred mean, mean error, ens sd
-    n_plots_x, n_plots_y = len(parameters), nens + n_plots_per_sample
+    n_plots_x = len(parameters)
+    n_plots_y = nens + n_plots_per_sample
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
-    # Datashader does not support Cartopy transform; use equirectangular (regular axes)
-    plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
-
-    figsize = (n_plots_y * 4, n_plots_x * 3)
-    subplot_kw = {"projection": proj} if proj is not None else {}
-    fig, axs = plt.subplots(
-        n_plots_x,
-        n_plots_y,
-        figsize=figsize,
-        subplot_kw=subplot_kw,
+    fig, axs, pc_lon, pc_lat, transform, colormaps = _setup_figure_and_colormaps(
+        n_plots_x=n_plots_x,
+        n_plots_y=n_plots_y,
+        latlons=latlons,
+        datashader=datashader,
+        projection_kind=projection_kind,
+        colormaps=colormaps,
     )
-    colormaps = colormaps if colormaps is not None else {}
     precip_and_related_fields = precip_and_related_fields if precip_and_related_fields is not None else []
 
     for plot_idx, (variable_idx, value) in enumerate(parameters.items()):
@@ -1148,13 +1207,7 @@ def plot_predicted_ensemble(
         yt = y_true[..., variable_idx].squeeze()
         _axs = axs[plot_idx, :] if n_plots_x > 1 else axs
 
-        # get the colormap for the variable as defined in config file
-        cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-        error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
-        for key in colormaps:
-            if key not in ["default", "error"] and variable_name in colormaps[key].variables:
-                cmap = colormaps[key].get_cmap()
-                continue
+        cmap, error_cmap = _resolve_variable_colormaps(colormaps, variable_name)
 
         plot_ensemble_sample(
             fig=fig,

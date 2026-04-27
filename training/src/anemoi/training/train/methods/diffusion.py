@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapter
 from anemoi.training.utils.index_space import IndexSpace
 
 from .base import BaseTrainingModule
@@ -60,6 +61,13 @@ class BaseDiffusionTraining(BaseTrainingModule):
         )
 
         self.rho = config.model.model.diffusion.rho
+
+    @property
+    def plot_adapter(self) -> EnsemblePlotAdapter:
+        """Wrap the task's plot adapter with ensemble handling."""
+        if not hasattr(self, "_ensemble_plot_adapter"):
+            self._ensemble_plot_adapter = EnsemblePlotAdapter(self.task._plot_adapter)
+        return self._ensemble_plot_adapter
 
     def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Project full targets into data-output variable space."""

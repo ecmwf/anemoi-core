@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapter
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -132,6 +133,13 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_rank = ens_comm_subgroup_rank
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
+
+    @property
+    def plot_adapter(self) -> EnsemblePlotAdapter:
+        """Wrap the task's plot adapter with ensemble handling."""
+        if not hasattr(self, "_ensemble_plot_adapter"):
+            self._ensemble_plot_adapter = EnsemblePlotAdapter(self.task._plot_adapter)
+        return self._ensemble_plot_adapter
 
     def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""

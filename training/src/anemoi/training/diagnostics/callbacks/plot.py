@@ -26,6 +26,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
+from matplotlib.figure import Figure
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
@@ -715,7 +716,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 trainer,
                 pl_module,
                 output,
-                batch,
+                pl_module.plot_adapter.prepare_loss_batch(batch),
                 batch_idx,
             )
 
@@ -746,6 +747,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
+        members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
@@ -763,6 +765,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
             The batch of data
+        members : int | list[int] | None, optional
+            Ensemble members to select. Only used when the plot adapter is ensemble-aware.
+            None returns all members. Default is 0 (first member).
 
         Returns
         -------
@@ -790,9 +795,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                    self.sample_idx : self.sample_idx + 1
-                ]
+                pl_module.plot_adapter.select_members(
+                    self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                        self.sample_idx : self.sample_idx + 1
+                    ],
+                    members,
+                )
                 for x in outputs[1]
             ),
         )
@@ -892,7 +900,13 @@ class PlotSample(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            data, output_tensor = self.process(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                members=self._get_process_members(),
+            )
 
             local_rank = pl_module.local_rank
 
@@ -905,19 +919,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
             for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
-                fig = plot_predicted_multilevel_flat_sample(
-                    plot_parameters_dict,
-                    self.per_sample,
-                    latlons,
-                    self.accumulation_levels_plot,
-                    x,
-                    y_true,
-                    y_pred,
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                    projection_kind=self.projection_kind,
-                )
+                fig = self._make_figure(plot_parameters_dict, latlons, x, y_true, y_pred)
 
                 self._output_figure(
                     logger,
@@ -931,6 +933,37 @@ class PlotSample(BasePlotAdditionalMetrics):
                         f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
                     ),
                 )
+
+    def _get_process_members(self) -> int | list[int] | None:
+        """Return the ``members`` argument passed to ``process()``.
+
+        Default selects member 0 (deterministic view). Subclasses override
+        to pass a different selection (e.g. all members for ensemble plots).
+        """
+        return 0
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
+        return plot_predicted_multilevel_flat_sample(
+            plot_parameters_dict,
+            self.per_sample,
+            latlons,
+            self.accumulation_levels_plot,
+            x,
+            y_true,
+            y_pred,
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
