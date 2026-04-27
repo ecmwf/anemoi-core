@@ -9,6 +9,7 @@
 
 
 import torch
+import torch.distributed as dist
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -20,6 +21,17 @@ from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+
+
+def _normalize_sizes(sizes, dim):
+    """Accept old-style shapes (list[list[int]]) or new-style sizes (list[int]).
+
+    Old ds-branch code passes get_shard_shapes() which returns list[list[int]] (full per-rank tensor shapes).
+    New API expects list[int] (per-rank sizes along the split dimension only).
+    """
+    if sizes and isinstance(sizes[0], (list, tuple)):
+        return [s[dim % len(s)] for s in sizes]
+    return sizes
 
 
 def ensure_sharded(
@@ -86,6 +98,7 @@ def shard_tensor(
     Tensor
         Sharded tensor.
     """
+    sizes = _normalize_sizes(sizes, dim)
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
@@ -110,6 +123,7 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     Tensor
         Gathered tensor.
     """
+    sizes = _normalize_sizes(sizes, dim)
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
 
@@ -184,6 +198,7 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
     Tensor
         Reduced sharded tensor.
     """
+    sizes = _normalize_sizes(sizes, dim)
     return _ReduceShardParallelSection.apply(input_, dim, sizes, mgroup)
 
 
@@ -487,3 +502,84 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
                 None,
             )
         return grad_output, None, None
+
+
+# ── Backward-compat aliases for ds-branch model code ──────────────────────
+#
+# Old API: shard_channels(x, shapes, group) / gather_channels(x, shapes, group)
+#   where `shapes` is a list of full per-rank tensor shapes from get_shard_shapes().
+#
+# shard_channels ("split channels"): input has full-sequence, full-channels.
+#   Splits along channels (dim=-1), all-to-all, concats along sequence (dim=-2).
+#   Output: each GPU gets its node shard with a subset of channels.
+#
+# gather_channels (inverse): input has node-shard, channel-shard.
+#   Splits along sequence (dim=-2), all-to-all, concats along channels (dim=-1).
+#   Output: each GPU gets full sequence with a subset of channels.
+
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+
+
+def _even_split_sizes(total: int, n: int) -> list[int]:
+    """Compute sizes for even splitting (matches torch.tensor_split behavior)."""
+    return get_balanced_partition_sizes(total, n)
+
+
+class _SplitChannelsParallelSection(torch.autograd.Function):
+    """Backward-compat: split channels -> sequence parallel section."""
+
+    @staticmethod
+    def forward(ctx, input_, shapes_, mgroup_):
+        ctx.shapes = shapes_
+        ctx.comm_group = mgroup_
+        if mgroup_:
+            comm_size = dist.get_world_size(group=mgroup_)
+            split_sizes = _even_split_sizes(input_.shape[-1], comm_size)
+            concat_sizes = [s[-2] for s in shapes_]
+            return _alltoall_transpose(input_, -1, split_sizes, -2, concat_sizes, group=mgroup_)
+        return input_
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.comm_group:
+            comm_size = dist.get_world_size(group=ctx.comm_group)
+            split_sizes = [s[-2] for s in ctx.shapes]
+            concat_sizes = _even_split_sizes(grad_output.shape[-1] * comm_size, comm_size)
+            return _alltoall_transpose(grad_output, -2, split_sizes, -1, concat_sizes, group=ctx.comm_group), None, None
+        return grad_output, None, None
+
+
+class _GatherChannelsParallelSection(torch.autograd.Function):
+    """Backward-compat: gather channels from sequence-parallel section."""
+
+    @staticmethod
+    def forward(ctx, input_, shapes_, mgroup_):
+        ctx.shapes = shapes_
+        ctx.comm_group = mgroup_
+        if mgroup_:
+            comm_size = dist.get_world_size(group=mgroup_)
+            myrank = dist.get_rank(group=mgroup_)
+            split_sizes = _even_split_sizes(input_.shape[-2], comm_size)
+            concat_sizes = _even_split_sizes(shapes_[myrank][-1], comm_size)
+            return _alltoall_transpose(input_, -2, split_sizes, -1, concat_sizes, group=mgroup_)
+        return input_
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.comm_group:
+            comm_size = dist.get_world_size(group=ctx.comm_group)
+            myrank = dist.get_rank(group=ctx.comm_group)
+            concat_sizes = _even_split_sizes(grad_output.shape[-1] * comm_size, comm_size)
+            split_sizes = _even_split_sizes(ctx.shapes[myrank][-1], comm_size)
+            return _alltoall_transpose(grad_output, -1, split_sizes, -2, concat_sizes, group=ctx.comm_group), None, None
+        return grad_output, None, None
+
+
+def shard_channels(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
+    """Backward-compat wrapper: go from sequence-parallel to channel-parallel."""
+    return _SplitChannelsParallelSection.apply(input_, shapes, mgroup)
+
+
+def gather_channels(input_: Tensor, shapes: list, mgroup: ProcessGroup) -> Tensor:
+    """Backward-compat wrapper: go from channel-parallel to sequence-parallel."""
+    return _GatherChannelsParallelSection.apply(input_, shapes, mgroup)
