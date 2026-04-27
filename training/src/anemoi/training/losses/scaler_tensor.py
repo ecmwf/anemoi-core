@@ -336,7 +336,7 @@ class ScaleTensor(nn.Module):
         dimension = self._tensors[name][0]
 
         original_scaler = self._tensors.pop(name)
-        original_scaler_buffer = self._buffers.pop(name, None)
+        original_scaler_buffer = self._buffers.get(name)
 
         if not override:
             self.validate_scaler(dimension, scaler)
