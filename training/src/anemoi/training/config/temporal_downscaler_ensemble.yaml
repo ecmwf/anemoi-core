@@ -7,17 +7,10 @@ defaults:
 - model: graphtransformer_ens
 - task: temporal_downscaler
 - training: ensemble
+- override training/losses: combined
 - _self_
 
 config_validation: True
-
-### This file is for local experimentation.
-##  When you commit your changes, assign the new features and keywords
-##  to the correct defaults.
-# For example to change from default GPU count:
-# system:
-#   hardware:
-#     num_gpus_per_node: 1
 
 diagnostics:
   plot:
@@ -41,37 +34,29 @@ model:
 
 training:
   ensemble_size_per_device: 2
-  training_loss:
+  losses:
     datasets:
-      data: # user-defined key in data
-        # loss class to initialise, can be anything subclassing torch.nn.Module
-        _target_: anemoi.training.losses.MultiscaleLossWrapper
-        loss_matrices_path: ${system.input.loss_matrices_path}
-        loss_matrices: [null]
-        weights: [1.0]
-
-        keep_batch_sharded: ${model.keep_batch_sharded}
-
-        per_scale_loss:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-
-          # Scalers to include in loss calculation
-          # A selection of available scalers are listed in training/scalers.
-          # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-          # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-          # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-          ignore_nans: False
-          no_autocast: True
-          alpha: 0.95
-  time_aggregate_loss:
-    datasets:
-      data: # user-defined key in data
-        time_aggregation_types: [mean, max, min, diff]
-        weight: 1.0
-        loss_fn:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-          ignore_nans: False
-          no_autocast: True
-          alpha: 0.95
+      data:
+        _target_: anemoi.training.losses.combined.CombinedLoss
+        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+        ignore_nans: False
+        losses:
+          - _target_: anemoi.training.losses.MultiscaleLossWrapper
+            loss_matrices_path: ${system.input.loss_matrices_path}
+            loss_matrices: [null]
+            weights: [1.0]
+            keep_batch_sharded: ${model.keep_batch_sharded}
+            per_scale_loss:
+              _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+              scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+              ignore_nans: False
+              no_autocast: True
+              alpha: 0.95
+          - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+            time_aggregation_types: [mean, max, min, diff]
+            loss_fn:
+              _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+              scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+              ignore_nans: False
+              no_autocast: True
+              alpha: 0.95

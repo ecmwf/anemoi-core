@@ -240,7 +240,6 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
 
     module.loss = {"data": loss}
-    module.time_aggregate_loss = {}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
@@ -276,7 +275,6 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
 
     module.loss = {"data": loss}
-    module.time_aggregate_loss = {}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
@@ -327,7 +325,6 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     combined_loss = CombinedLoss(multiscale_loss)
 
     module.loss = {"data": combined_loss}
-    module.time_aggregate_loss = {}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2

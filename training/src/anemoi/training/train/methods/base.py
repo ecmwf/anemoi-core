@@ -220,7 +220,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.metrics = torch.nn.ModuleDict()
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
-        loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        loss_configs = get_multiple_datasets_config(config.training.losses)
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
@@ -274,28 +274,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 self.loss[dataset_name],
                 data_indices[dataset_name],
             )
-
-        # Build optional time-aggregate loss
-        self.time_aggregate_loss = torch.nn.ModuleDict()
-        self.time_aggregate_loss_weight: dict[str, float] = {}
-        if config.training.time_aggregate_loss is not None:
-            from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
-
-            ta_datasets = config.training.time_aggregate_loss.datasets
-            for dataset_name in self.target_dataset_names:
-                if dataset_name not in ta_datasets:
-                    continue
-                ta_cfg = ta_datasets[dataset_name]
-                inner_loss = get_loss_function(
-                    DictConfig(ta_cfg.loss_fn),
-                    self.scalers[dataset_name],
-                    data_indices[dataset_name],
-                )
-                self.time_aggregate_loss[dataset_name] = TimeAggregateLossWrapper(
-                    time_aggregation_types=list(ta_cfg.time_aggregation_types),
-                    loss_fn=inner_loss,
-                )
-                self.time_aggregate_loss_weight[dataset_name] = float(ta_cfg.weight)
 
         if config.training.loss_gradient_scaling:
             # Multi-dataset: register hook for each loss
@@ -635,19 +613,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             )
 
         total_loss = loss(y_pred, y, **loss_kwargs)
-
-        # Add optional time-aggregate loss
-        if dataset_name in self.time_aggregate_loss:
-            ta_kwargs = {
-                "grid_shard_slice": grid_shard_slice,
-                "group": self.model_comm_group,
-            }
-            if pred_layout is not None:
-                ta_kwargs["pred_layout"] = pred_layout
-            if target_layout is not None:
-                ta_kwargs["target_layout"] = target_layout
-            ta_loss = self.time_aggregate_loss[dataset_name](y_pred, y, **ta_kwargs)
-            total_loss = total_loss + self.time_aggregate_loss_weight[dataset_name] * ta_loss
 
         return total_loss
 

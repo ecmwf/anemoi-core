@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - losses: default
   - optimization: default
 
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
@@ -58,18 +59,10 @@ strategy:
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
-# loss function for the model
-training_loss:
+losses:
   datasets:
-    data: # user-defined key in data
-      # loss class to initialise
+    data:
       _target_: anemoi.training.losses.WeightedMSELoss
-      # Scalers to include in loss calculation
-      # A selection of available scalers are listed in training/scalers.
-      # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-      # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-      ignore_nans: False
 
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated

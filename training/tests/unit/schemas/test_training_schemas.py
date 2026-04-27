@@ -11,11 +11,11 @@ import pytest
 from pydantic import ValidationError
 
 from anemoi.training.schemas.training import OptimizerSchema
-from anemoi.training.schemas.training import TimeAggregateLossConfigSchema
+from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 
 _TIME_AGG_CFG = {
+    "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
     "time_aggregation_types": ["mean", "diff"],
-    "weight": 0.5,
     "loss_fn": {
         "_target_": "anemoi.training.losses.MSELoss",
         "scalers": ["node_weights"],
@@ -24,31 +24,23 @@ _TIME_AGG_CFG = {
 
 
 def test_time_aggregate_loss_config_valid() -> None:
-    """TimeAggregateLossConfigSchema accepts a valid config."""
-    schema = TimeAggregateLossConfigSchema(**_TIME_AGG_CFG)
+    """TimeAggregateLossWrapperSchema accepts a valid config."""
+    schema = TimeAggregateLossWrapperSchema(**_TIME_AGG_CFG)
     assert schema.time_aggregation_types == ["mean", "diff"]
-    assert schema.weight == 0.5
-
-
-def test_time_aggregate_loss_config_default_weight() -> None:
-    """Weight defaults to 1.0 when not specified."""
-    cfg = {k: v for k, v in _TIME_AGG_CFG.items() if k != "weight"}
-    schema = TimeAggregateLossConfigSchema(**cfg)
-    assert schema.weight == 1.0
 
 
 def test_time_aggregate_loss_config_invalid_agg_type() -> None:
     """Unknown aggregation type is rejected."""
     cfg = {**_TIME_AGG_CFG, "time_aggregation_types": ["sum"]}
     with pytest.raises(ValidationError):
-        TimeAggregateLossConfigSchema(**cfg)
+        TimeAggregateLossWrapperSchema(**cfg)
 
 
 def test_time_aggregate_loss_config_empty_agg_types() -> None:
     """Empty aggregation list is rejected (min_length=1)."""
     cfg = {**_TIME_AGG_CFG, "time_aggregation_types": []}
     with pytest.raises(ValidationError):
-        TimeAggregateLossConfigSchema(**cfg)
+        TimeAggregateLossWrapperSchema(**cfg)
 
 
 def test_optimizer_schema_allows_extra_keys() -> None:

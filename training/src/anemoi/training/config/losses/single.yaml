@@ -1,0 +1,10 @@
+# @package training.training_loss
+datasets:
+  data:
+    _target_: anemoi.training.losses.MSELoss
+    # Scalers to include in loss calculation
+    # A selection of available scalers are listed in training/scalers.
+    # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
+    # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
+    scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+    ignore_nans: False
