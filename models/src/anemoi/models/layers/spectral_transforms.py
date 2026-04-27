@@ -52,7 +52,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
-        apply_filter: bool = True,
+        apply_filter: bool = False,
         nodes_slice: tuple[int, int | None] | None = None,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
