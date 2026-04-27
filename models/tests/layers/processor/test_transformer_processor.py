@@ -15,6 +15,7 @@ from typing import Optional
 import pytest
 import torch
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
@@ -82,9 +83,9 @@ def test_transformer_processor_forward(transformer_processor, transformer_proces
     gridsize = 100
     batch_size = 1
     x = torch.rand(gridsize, transformer_processor_init.num_channels)
-    shard_shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[gridsize])
 
-    output = transformer_processor.forward(x, batch_size, shard_shapes)
+    output = transformer_processor.forward(x, batch_size, shard_info)
     assert output.shape == x.shape
 
     # Generate dummy target and loss function

@@ -24,11 +24,14 @@ from torch_geometric.typing import Adj
 from torch_geometric.typing import OptPairTensor
 from torch_geometric.typing import Size
 
+from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
-from anemoi.models.distributed.transformer import shard_heads
-from anemoi.models.distributed.transformer import shard_sequence
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
@@ -60,7 +63,7 @@ class BaseBlock(nn.Module, ABC):
         x: OptPairTensor,
         edge_attr: torch.Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: Union[GraphShardInfo, BipartiteGraphShardInfo],
         batch_size: int,
         size: Optional[Size] = None,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -91,7 +94,7 @@ class PointWiseMLPProcessorBlock(BaseBlock):
     def forward(
         self,
         x: Tensor,
-        shapes: list,
+        shard_info: GraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
@@ -148,7 +151,7 @@ class TransformerProcessorBlock(BaseBlock):
     def forward(
         self,
         x: Tensor,
-        shapes: list,
+        shard_info: GraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
@@ -159,7 +162,7 @@ class TransformerProcessorBlock(BaseBlock):
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = x + self.attention(
-            self.layer_norm_attention(x, **cond_kwargs), shapes, batch_size, model_comm_group=model_comm_group
+            self.layer_norm_attention(x, **cond_kwargs), shard_info, batch_size, model_comm_group=model_comm_group
         )
         x = x + self.mlp(
             self.layer_norm_mlp(
@@ -229,7 +232,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
     def forward(
         self,
         x: OptPairTensor,
-        shapes: list,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
@@ -239,7 +242,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
 
         x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
         x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
-        x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
+        x_dst = x_dst + self.attention((x_src, x_dst), shard_info, batch_size, model_comm_group=model_comm_group)
         x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst, **cond_dst_kwargs))
         return (x_src, x_dst), None  # logic expects return of edge_attr
 
@@ -314,7 +317,7 @@ class GraphConvBaseBlock(BaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: Union[GraphShardInfo, BipartiteGraphShardInfo],
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
         **layer_kwargs,
@@ -327,7 +330,7 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: GraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
         **layer_kwargs,
@@ -335,7 +338,7 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         if self.emb_edges is not None:
             edge_attr = self.emb_edges(edge_attr)
 
-        x_in = sync_tensor(x, 0, shapes[1], model_comm_group)
+        x_in = sync_tensor(x, 0, shard_info.nodes, model_comm_group)
 
         if self.num_chunks > 1:
             edge_index_list = torch.tensor_split(edge_index, self.num_chunks, dim=1)
@@ -351,7 +354,7 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         else:
             out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
 
-        out = shard_tensor(out, 0, shapes[1], model_comm_group, gather_in_backward=False)
+        out = shard_tensor(out, 0, shard_info.nodes, model_comm_group, gather_in_backward=False)
 
         nodes_new = self.node_mlp(torch.cat([x, out], dim=1)) + x
 
@@ -406,14 +409,14 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
-        x_src = sync_tensor(x[0], 0, shapes[0], model_comm_group)
-        x_dst = sync_tensor(x[1], 0, shapes[1], model_comm_group)
+        x_src = sync_tensor(x[0], 0, shard_info.src_nodes, model_comm_group)
+        x_dst = sync_tensor(x[1], 0, shard_info.dst_nodes, model_comm_group)
         x_in = (x_src, x_dst)
 
         if self.num_chunks > 1:
@@ -430,7 +433,7 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         else:
             out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
 
-        out = shard_tensor(out, 0, shapes[1], model_comm_group, gather_in_backward=False)
+        out = shard_tensor(out, 0, shard_info.dst_nodes, model_comm_group, gather_in_backward=False)
 
         nodes_new_dst = self.node_mlp(torch.cat([x[1], out], dim=1)) + x[1]
 
@@ -580,17 +583,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         key: Tensor,
         value: Tensor,
         edges: Tensor,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        """Shards qkv and edges along head dimension."""
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, ShardSizes]:
+        """Shards qkv and edges along head dimension using all_to_all_transpose."""
         if model_comm_group is not None:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded across GPUs"
-
-        shape_src_nodes, shape_dst_nodes, shape_edges = shapes
 
         query, key, value, edges = (
             einops.rearrange(
@@ -602,16 +603,19 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             for t in (query, key, value, edges)
         )
-        query = shard_heads(query, shapes=shape_dst_nodes, mgroup=model_comm_group)
-        key = shard_heads(key, shapes=shape_src_nodes, mgroup=model_comm_group)
-        value = shard_heads(value, shapes=shape_src_nodes, mgroup=model_comm_group)
-        edges = shard_heads(edges, shapes=shape_edges, mgroup=model_comm_group)
+
+        head_shard_sizes = get_shard_sizes(query, -3, model_comm_group)
+        # Shard heads: split along heads (dim -3), gather along grid (dim -2)
+        query = all_to_all_transpose(query, -3, head_shard_sizes, -2, shard_info.dst_nodes, model_comm_group)
+        key = all_to_all_transpose(key, -3, head_shard_sizes, -2, shard_info.src_nodes, model_comm_group)
+        value = all_to_all_transpose(value, -3, head_shard_sizes, -2, shard_info.src_nodes, model_comm_group)
+        edges = all_to_all_transpose(edges, -3, head_shard_sizes, -2, shard_info.edges, model_comm_group)
 
         query, key, value, edges = (
             einops.rearrange(t, "batch heads grid vars -> (batch grid) heads vars") for t in (query, key, value, edges)
         )
 
-        return query, key, value, edges
+        return query, key, value, edges, head_shard_sizes
 
     def apply_gt(
         self,
@@ -663,15 +667,17 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
     def shard_output_seq(
         self,
         out: Tensor,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
+        head_shard_sizes: ShardSizes,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
-        """Shards Tensor sequence dimension."""
-        shape_dst_nodes = shapes[1]
-
+        """Shards Tensor sequence dimension using all_to_all_transpose."""
         out = einops.rearrange(out, "(batch grid) heads vars -> batch heads grid vars", batch=batch_size)
-        out = shard_sequence(out, shapes=shape_dst_nodes, num_heads=self.num_heads, mgroup=model_comm_group)
+
+        # Shard sequence: split along grid (dim -2), gather along heads (dim -3)
+        out = all_to_all_transpose(out, -2, shard_info.dst_nodes, -3, head_shard_sizes, model_comm_group)
+
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         return out
@@ -682,7 +688,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -800,7 +806,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -822,9 +828,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
+        head_shard_sizes = None
         if self.shard_strategy == "heads":
-            query, key, value, edges = self.shard_qkve_heads(
-                query, key, value, edges, shapes, batch_size, model_comm_group
+            query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
+                query, key, value, edges, shard_info, batch_size, model_comm_group
             )
         else:
             query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
@@ -836,7 +843,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks=1)
 
         if self.shard_strategy == "heads":
-            out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
+            out = self.shard_output_seq(out, shard_info, head_shard_sizes, batch_size, model_comm_group)
         else:
             out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
 
@@ -921,7 +928,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: GraphShardInfo,
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -937,7 +944,16 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
-        query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
+        # Processor is a self-graph: src_nodes == dst_nodes == nodes
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+
+        query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
+            query, key, value, edges, bipartite_shard_info, batch_size, model_comm_group
+        )
 
         if self.qk_norm:
             query = self.q_norm(query)
@@ -948,7 +964,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
         out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
 
-        out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
+        out = self.shard_output_seq(out, bipartite_shard_info, head_shard_sizes, batch_size, model_comm_group)
 
         # out = self.projection(out + x_r) in chunks:
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)

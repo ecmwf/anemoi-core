@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 from typing import Optional
+from typing import Union
 
 import einops
 import torch
@@ -23,8 +24,11 @@ from torch import where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
-from anemoi.models.distributed.transformer import shard_heads
-from anemoi.models.distributed.transformer import shard_sequence
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -164,7 +168,7 @@ class MultiHeadSelfAttention(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        shapes: list,
+        grid_shard_sizes: Union[ShardSizes, tuple[ShardSizes, ShardSizes]],
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
@@ -183,9 +187,16 @@ class MultiHeadSelfAttention(nn.Module):
             for t in (query, key, value)
         )
 
-        query = shard_heads(query, shapes=shapes, mgroup=model_comm_group)
-        key = shard_heads(key, shapes=shapes, mgroup=model_comm_group)
-        value = shard_heads(value, shapes=shapes, mgroup=model_comm_group)
+        # Shard heads: split along heads (dim -3), gather along sequence/grid (dim -2)
+        q_shard_sizes = grid_shard_sizes[1] if isinstance(grid_shard_sizes, tuple) else grid_shard_sizes
+        kv_shard_sizes = grid_shard_sizes[0] if isinstance(grid_shard_sizes, tuple) else grid_shard_sizes
+        head_shard_sizes = get_shard_sizes(query, -3, model_comm_group)
+
+        query = all_to_all_transpose(query, -3, head_shard_sizes, -2, q_shard_sizes, model_comm_group)
+        key, value = (
+            all_to_all_transpose(t, -3, head_shard_sizes, -2, kv_shard_sizes, model_comm_group) for t in (key, value)
+        )
+
         dropout_p = self.dropout_p if self.training else 0.0
 
         if self.qk_norm:
@@ -204,7 +215,9 @@ class MultiHeadSelfAttention(nn.Module):
             alibi_slopes=self.alibi_slopes,
         )
 
-        out = shard_sequence(out, shapes=shapes, num_heads=self.num_heads, mgroup=model_comm_group)
+        # Shard sequence: split along sequence/grid (dim -2), gather along heads (dim -3)
+        out = all_to_all_transpose(out, -2, q_shard_sizes, -3, head_shard_sizes, model_comm_group)
+
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         out = self.projection(out)
@@ -212,14 +225,18 @@ class MultiHeadSelfAttention(nn.Module):
         return out
 
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        grid_shard_sizes: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
 
         query = self.lin_q(x)
         key = self.lin_k(x)
         value = self.lin_v(x)
 
-        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
+        return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
 
 
 class SDPAAttentionWrapper(nn.Module):
@@ -487,13 +504,19 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         super().__init__(*args, **kwargs)
 
     def forward(
-        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: PairTensor,
+        shard_info: BipartiteGraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         query = self.lin_q(x[1])
         key = self.lin_k(x[0])
         value = self.lin_v(x[0])
 
-        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
+        shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
+
+        return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
 
 
 def get_alibi_slopes(num_heads: int) -> Tensor:

@@ -174,7 +174,7 @@ class EnsembleTraining(BaseTrainingModule):
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=TensorDim.ENSEMBLE_DIM,
-            shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
+            sizes=[y_pred.size(TensorDim.ENSEMBLE_DIM)] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
 
@@ -182,8 +182,6 @@ class EnsembleTraining(BaseTrainingModule):
             y_pred_ens,
             y,
             grid_shard_slice=self.grid_shard_slice[dataset_name],
-            grid_dim=self.grid_dim,
-            grid_shard_shape=self.grid_shard_shapes,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
@@ -218,7 +216,7 @@ class EnsembleTraining(BaseTrainingModule):
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 

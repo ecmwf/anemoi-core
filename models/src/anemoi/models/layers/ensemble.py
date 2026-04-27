@@ -10,10 +10,10 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.distributed.graph import gather_channels
+from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import change_channels_in_shape
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
@@ -37,7 +37,7 @@ class BaseNoiseInjector(nn.Module, ABC):
         batch_size: int,
         ensemble_size: int,
         grid_size: int,
-        shard_shapes_ref: tuple[tuple[int], tuple[int]],
+        grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Optional[Tensor]]:
@@ -53,8 +53,8 @@ class BaseNoiseInjector(nn.Module, ABC):
             Ensemble size
         grid_size : int
             Grid size
-        shard_shapes_ref : tuple[tuple[int], tuple[int]]
-            Shard shapes when sharded
+        grid_shard_sizes : ShardSizes
+            Per-rank partition sizes along the sharded dimension, or None if not sharded
         noise_dtype : torch.dtype, optional
             Data type for noise tensor
         model_comm_group : ProcessGroup, optional
@@ -87,7 +87,7 @@ class NoOpNoiseInjector(BaseNoiseInjector):
         batch_size: int,
         ensemble_size: int,
         grid_size: int,
-        shard_shapes_ref: tuple[tuple[int], tuple[int]],
+        grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, None]:
@@ -150,7 +150,7 @@ class NoiseConditioning(BaseNoiseInjector):
         batch_size: int,
         ensemble_size: int,
         grid_size: int,
-        shard_shapes_ref: tuple[tuple[int], tuple[int]],
+        grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, Tensor]:
@@ -165,11 +165,9 @@ class NoiseConditioning(BaseNoiseInjector):
         noise = torch.randn(size=noise_shape, dtype=noise_dtype, device=x.device) * self.noise_std
         noise.requires_grad = False
 
-        noise_shard_shapes_final = change_channels_in_shape(shard_shapes_ref, self.noise_channels)
-
         if self.noise_graph_provider is not None:
-            noise_shard_shapes = get_shard_shapes(noise, -1, model_comm_group)
-            noise = shard_tensor(noise, -1, noise_shard_shapes, model_comm_group)  # split across channels
+            channel_shard_sizes = get_shard_sizes(noise, -1, model_comm_group)
+            noise = shard_tensor(noise, -1, channel_shard_sizes, model_comm_group)  # split across channels
 
             noise = einops.rearrange(
                 noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
@@ -179,13 +177,13 @@ class NoiseConditioning(BaseNoiseInjector):
             noise = self._sparse_projector(noise, projection_matrix)  # to shape of hidden grid
 
             noise = einops.rearrange(noise, "bse grid vars -> (bse grid) vars")  # shape of x
-            noise = gather_channels(
-                noise, noise_shard_shapes_final, model_comm_group
+            noise = all_to_all_transpose(
+                noise, 0, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
             )  # sharded grid dim, full channels
         else:
             noise = einops.rearrange(noise, "batch ensemble grid vars -> (batch ensemble grid) vars")  # shape of x
-            noise_shard_shapes = get_shard_shapes(noise, 0, model_comm_group)
-            noise = shard_tensor(noise, 0, noise_shard_shapes, model_comm_group)  # sharded grid dim, full channels
+            noise_shard_sizes = get_shard_sizes(noise, 0, model_comm_group)
+            noise = shard_tensor(noise, 0, noise_shard_sizes, model_comm_group)  # sharded grid dim, full channels
 
         noise = checkpoint(self.noise_mlp, noise, use_reentrant=False)
 
@@ -246,7 +244,7 @@ class NoiseInjector(BaseNoiseInjector):
         batch_size: int,
         ensemble_size: int,
         grid_size: int,
-        shard_shapes_ref: tuple[tuple[int], tuple[int]],
+        grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[Tensor, None]:
@@ -262,8 +260,8 @@ class NoiseInjector(BaseNoiseInjector):
             Ensemble size
         grid_size : int
             Grid size
-        shard_shapes_ref : tuple[tuple[int], tuple[int]]
-            Shard shapes when sharded
+        grid_shard_sizes : ShardSizes
+            Per-rank partition sizes along the sharded dimension, or None if not sharded
         noise_dtype : torch.dtype, optional
             Data type for noise tensor
         model_comm_group : ProcessGroup, optional
@@ -279,7 +277,7 @@ class NoiseInjector(BaseNoiseInjector):
             batch_size=batch_size,
             ensemble_size=ensemble_size,
             grid_size=grid_size,
-            shard_shapes_ref=shard_shapes_ref,
+            grid_shard_sizes=grid_shard_sizes,
             noise_dtype=noise_dtype,
             model_comm_group=model_comm_group,
         )
