@@ -35,7 +35,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class CallbacksContext:
-    """Context containing configuration for callbacks initialization.
+    """Context containing configuration for callbacks initialisation.
 
     Parameters
     ----------
