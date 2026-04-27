@@ -38,16 +38,15 @@ class GradientClip(BaseModel):
     "The gradient clipping algorithm to use"
 
 
-class SWA(BaseModel):
-    """Stochastic weight averaging configuration.
+class WeightAveragingSchema(GenericSchema):
+    """Hydra instantiation config for a weight averaging callback (EMA or SWA).
 
-    See https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
+    Example:
+        weight_averaging:
+          _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+          decay: 0.999
+          update_starting_at_step: 1000
     """
-
-    enabled: bool = Field(example=False)
-    "Enable stochastic weight averaging."
-    lr: NonNegativeFloat = Field(example=1.0e-4)
-    "Learning rate for SWA."
 
 
 class Rollout(BaseModel):
@@ -337,8 +336,8 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
-    swa: SWA = Field(default_factory=SWA)
-    "Config for stochastic weight averaging."
+    weight_averaging: WeightAveragingSchema | None = Field(default=None)
+    "Config for weight averaging (SWA or EMA). Set to null to disable."
     training_loss: LossSchemas
     "Training loss configuration."
     loss_gradient_scaling: bool = False
