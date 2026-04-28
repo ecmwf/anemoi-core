@@ -152,14 +152,14 @@ class ForecastOffsets(BaseTaskOffsets):
         predict : list[tuple[int, int]]
             ``(new_slot, output_slot)`` pairs to fill from model predictions.
         """
-        output_index = {o: j for j, o in enumerate(self.output)}
-        input_index = {inp: j for j, inp in enumerate(self.input)}
+        out_offset_to_slot = {out_offset: j for j, out_offset in enumerate(self.output)}
+        in_offset_to_slot = {in_offset: j for j, in_offset in enumerate(self.input)}
         preserve: list[tuple[int, int]] = []
         predict: list[tuple[int, int]] = []
-        for new_slot, i in enumerate(self.input):
-            src = i + self.step_shift
-            if src in output_index:
-                predict.append((new_slot, output_index[src]))
+        for new_slot, in_offset in enumerate(self.input):
+            shifted_offset = in_offset + self.step_shift
+            if shifted_offset in out_offset_to_slot:
+                predict.append((new_slot, out_offset_to_slot[shifted_offset]))
             else:
-                preserve.append((new_slot, input_index[src]))
+                preserve.append((new_slot, in_offset_to_slot[shifted_offset]))
         return preserve, predict
