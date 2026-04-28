@@ -250,21 +250,22 @@ def lam_config_with_graph(
     return cfg, urls
 
 
+def _get_loss_cfgs_with_matrices(training_loss_cfg: DictConfig) -> list[DictConfig]:
+    """Extract loss configs that have loss_matrices, handling both direct and CombinedLoss cases."""
+    if "loss_matrices" in training_loss_cfg:
+        return [training_loss_cfg]
+    if "losses" in training_loss_cfg:
+        return [sub_loss for sub_loss in training_loss_cfg.losses if "loss_matrices" in sub_loss]
+    return []
+
+
 def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
     url_loss_matrices = cfg.system.input.loss_matrices_path
     tmp_path_loss_matrices = None
 
     training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
     for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        # Collect all loss configs that may have loss_matrices (MultiscaleLossWrapper).
-        # They can appear directly or nested inside a CombinedLoss's losses list.
-        loss_cfgs_to_check = []
-        if "loss_matrices" in training_loss_cfg:
-            loss_cfgs_to_check.append(training_loss_cfg)
-        elif "losses" in training_loss_cfg:
-            for sub_loss in training_loss_cfg.losses:
-                if "loss_matrices" in sub_loss:
-                    loss_cfgs_to_check.append(sub_loss)
+        loss_cfgs_to_check = _get_loss_cfgs_with_matrices(training_loss_cfg)
 
         for loss_cfg in loss_cfgs_to_check:
             for file in loss_cfg.loss_matrices:
