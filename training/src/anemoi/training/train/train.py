@@ -166,32 +166,6 @@ class AnemoiTrainer(ABC):
         """Abstract method to be used for AnemoiProfiler."""
         return None
 
-    @cached_property
-    def graph_data(self) -> HeteroData:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-
-            # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        return GraphCreator(config=self.config.graph).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
     def _validate_transfer_learning_datasets(
         self,
         model: pl.LightningModule,
@@ -281,7 +255,7 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "task": self.task,
             "data_indices": self.data_indices,
-            "graph_data": self.graph_data,
+            "graph_config": self.config.graph,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,

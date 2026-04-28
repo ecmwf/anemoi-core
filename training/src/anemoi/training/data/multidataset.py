@@ -61,6 +61,10 @@ class MultiDataset(IterableDataset):
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
 
+        self.static_coord_datasets: tuple[str, ...] = tuple(
+            name for name, reader in data_readers.items() if getattr(reader, "is_static_grid", True)
+        )
+
         self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
@@ -294,8 +298,14 @@ class MultiDataset(IterableDataset):
         )
         return slice(start, end)
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        x = {}
+    def get_sample(self, index: int) -> dict[str, dict]:
+        """Return per-dataset samples for ``index``.
+
+        Each value is a dict ``{"data": tensor, "coords": {"latitudes": ...,
+        "longitudes": ...}}`` so that the dataloader's collate function can
+        build a :class:`anemoi.training.data.batch.Batch`.
+        """
+        x: dict[str, dict[str, torch.Tensor]] = {}
         for name, dataset in self.data_readers.items():
             time_steps = offset_time_indices(index, self.relative_date_indices[name])
             # self.shard_shapes is lazily initalised to None
@@ -306,18 +316,19 @@ class MultiDataset(IterableDataset):
                 grid_indices = slice(start, end)
             else:
                 grid_indices = slice(None)
+
             x[name] = dataset.get_sample(time_steps, grid_indices)
 
         return x
 
-    def __iter__(self) -> dict[str, torch.Tensor]:
-        """Return an iterator that yields dictionaries of synchronized samples.
+    def __iter__(self) -> dict[str, dict[str, torch.Tensor]]:
+        """Return an iterator that yields per-dataset coordinate-rich payloads.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Dictionary mapping dataset names to their tensor samples
-            Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
+        dict[str, dict[str, torch.Tensor]]
+            Mapping ``{name: {"data": tensor, "coords": {...}}}`` for each
+            synchronized sample.
         """
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization

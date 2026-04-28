@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.batch import Batch
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
@@ -136,6 +137,19 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             label=label,
         )
 
+    def _make_collate_fn(self, ds: MultiDataset):
+        """Return a :func:`Batch.collate` partial bound to ``ds``'s static datasets.
+
+        Static-grid datasets have their coordinate tensors shared by
+        reference along the batch dimension (no stacking, no copy).
+        """
+        static = tuple(ds.static_coord_datasets)
+
+        def _collate(samples: list[dict]) -> Batch:
+            return Batch.collate(samples, static_coord_datasets=static)
+
+        return _collate
+
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
@@ -158,6 +172,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=True,
+            collate_fn=self._make_collate_fn(ds),
             **extra,
         )
 

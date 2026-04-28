@@ -16,6 +16,7 @@ from abc import abstractmethod
 from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
+from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
@@ -41,6 +42,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.data.batch import Batch
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -142,7 +144,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         task: BaseTask,
-        graph_data: dict[str, HeteroData],
+        graph_config: dict,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -155,8 +157,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_data : HeteroData
-            Graph objects keyed by dataset name
+        graph_config : dict
+            Configuration for creating graph objects
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
@@ -169,11 +171,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         super().__init__()
         self.task = task
+        self.config = config
 
-        assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
+        #assert isinstance(graph_config, dict), "graph_config must be a dict"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
         # Handle dictionary of graph_data
+        graph_data = self.create_graph(graph_config)
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
@@ -201,7 +205,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             graph_data=graph_data,
             config=config,
         )
-        self.config = config
 
         self.data_indices = data_indices
 
@@ -342,6 +345,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """Get the loss name for multi-dataset cases."""
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
+
+    def create_graph(self, graph_config) -> HeteroData:
+        """Graph data. Always uses dataset paths from dataloader config."""
+        # Determine filename
+        if (graph_filename := self.config.system.input.graph) is not None:
+            graph_filename = Path(graph_filename)
+
+            # Try loading existing
+            if graph_filename.exists() and not graph_config.overwrite:
+                from anemoi.graphs.utils import get_distributed_device
+
+                LOGGER.info("Loading graph data from %s", graph_filename)
+                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+
+            # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
+        else:
+            graph_filename = None
+
+        # Create new graph
+        from anemoi.graphs.create import GraphCreator
+
+        return GraphCreator(config=graph_config).create(save_path=graph_filename, overwrite=graph_config.overwrite)
 
     def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(
@@ -764,14 +789,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return total_loss, metrics_next, y_preds
 
-    def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
+    def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
         Also normalize the batch in-place if needed.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             Batch to transfer
 
         Returns
@@ -779,7 +804,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Batch after transfer
         """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+        assert isinstance(batch, Batch), "batch must be a dict keyed by dataset name"
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
 
@@ -791,7 +816,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return batch
 
-    def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _setup_batch_sharding(self, batch: Batch) -> Batch:
         """Setup batch sharding before every step.
 
         If the batch is sharded, it will be setup with the grid shard shapes and slice.
@@ -807,7 +832,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Batch after setup
         """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+        assert isinstance(batch, Batch), "batch must be a dict keyed by dataset name"
         self.grid_shard_shapes = {}
         self.grid_shard_slice = {}
 
@@ -832,14 +857,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         _dataloader_idx: int = 0,
     ) -> dict[str, torch.Tensor]:
         """Transfer batch to device, handling dictionary batches."""
-        transferred_batch = {}
-        for dataset_name, dataset_batch in batch.items():
-            transferred_batch[dataset_name] = (
-                dataset_batch.to(device, non_blocking=True)
-                if isinstance(dataset_batch, torch.Tensor)
-                else dataset_batch
-            )
-        return transferred_batch
+        return batch.to(device, non_blocking=True)
 
     def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Normalize batch for training and validation before every step.
