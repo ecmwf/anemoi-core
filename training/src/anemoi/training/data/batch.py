@@ -80,7 +80,18 @@ class Batch:
         """Return whether ``dataset_name``'s coordinates are static."""
         return dataset_name in self.static_coord_datasets
 
-    def __getitem__(self, dataset_name: str) -> "DatasetView":
+    def __getitem__(self, dataset_name: str) -> torch.Tensor:
+        """Return the data tensor for ``dataset_name`` (mapping behaviour).
+
+        For the richer per-dataset view that bundles data, coords and the
+        static flag, use :meth:`view`.
+        """
+        if dataset_name not in self.data:
+            msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
+            raise KeyError(msg)
+        return self.data[dataset_name]
+
+    def view(self, dataset_name: str) -> "DatasetView":
         """Return a per-dataset view bundling data, coords and the static flag."""
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
@@ -100,6 +111,18 @@ class Batch:
 
     def __len__(self) -> int:
         return len(self.data)
+
+    def keys(self):  # noqa: D401 - mapping protocol
+        """Return the dataset names (mapping protocol)."""
+        return self.data.keys()
+
+    def values(self):  # noqa: D401 - mapping protocol
+        """Return the data tensors (mapping protocol)."""
+        return self.data.values()
+
+    def items(self):  # noqa: D401 - mapping protocol
+        """Return ``(name, tensor)`` pairs (mapping protocol)."""
+        return self.data.items()
 
     # -------------------------------------------------------- device transfer
 

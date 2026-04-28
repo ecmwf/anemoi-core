@@ -801,10 +801,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        dict[str, torch.Tensor]
+        Batch
             Batch after transfer
         """
-        assert isinstance(batch, Batch), "batch must be a dict keyed by dataset name"
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
 
@@ -824,15 +824,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             Batch to setup
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Batch after setup
+        Batch
+            Batch after setup (the underlying ``batch.data`` dict is mutated
+            in-place; the :class:`Batch` envelope itself is returned
+            unchanged for chaining).
         """
-        assert isinstance(batch, Batch), "batch must be a dict keyed by dataset name"
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
         self.grid_shard_shapes = {}
         self.grid_shard_slice = {}
 
@@ -847,34 +849,35 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             else:
                 self.grid_shard_shapes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
-                batch[dataset_name] = self.allgather_batch(batch[dataset_name], dataset_name)
+                batch.data[dataset_name] = self.allgather_batch(batch.data[dataset_name], dataset_name)
         return batch
 
     def transfer_batch_to_device(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         device: torch.device,
         _dataloader_idx: int = 0,
-    ) -> dict[str, torch.Tensor]:
-        """Transfer batch to device, handling dictionary batches."""
+    ) -> Batch:
+        """Transfer the :class:`Batch` to ``device`` (skipping static coords)."""
         return batch.to(device, non_blocking=True)
 
-    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _normalize_batch(self, batch: Batch) -> Batch:
         """Normalize batch for training and validation before every step.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             Batch to prepare
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Normalized batch
+        Batch
+            Normalized batch (the underlying ``batch.data`` dict is mutated
+            in-place).
         """
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        for dataset_name in batch:
-            batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
+        for dataset_name in batch.data:
+            batch.data[dataset_name] = self.model.pre_processors[dataset_name](batch.data[dataset_name])
         return batch
 
     def _prepare_loss_scalers(self) -> None:
@@ -889,7 +892,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     @abstractmethod
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         pass
@@ -1001,11 +1004,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return metrics
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         del batch_idx
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        # Get batch size (handle dict of tensors)
-        batch_size = next(iter(batch.values())).shape[0]
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
+        # Get batch size from any dataset's data tensor.
+        batch_size = next(iter(batch.data.values())).shape[0]
 
         train_loss, *_ = self._step(batch)
         train_loss = train_loss.sum()
@@ -1025,21 +1028,21 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: Batch, batch_idx: int) -> None:
         """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             Validation batch
         batch_idx : int
             Batch inces
         """
         del batch_idx
-        assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
 
-        # Get batch size (handle dict of tensors)
-        batch_size = next(iter(batch.values())).shape[0]
+        # Get batch size from any dataset's data tensor.
+        batch_size = next(iter(batch.data.values())).shape[0]
 
         with torch.no_grad():
             val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
