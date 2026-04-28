@@ -243,6 +243,7 @@ class TruncatedConnection(BaseResidualConnection):
             x = fn(x, shard_shapes, model_comm_group)
         return x
 
+
 def _ornstein_init_theta(
     theta_init: float,
     theta_buff: float,

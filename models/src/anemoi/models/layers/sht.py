@@ -43,8 +43,7 @@ from torch.nn import Module
 
 
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""
-    Helper routine which returns the Legendre-Gauss nodes and weights
+    r"""Helper routine which returns the Legendre-Gauss nodes and weights
     on the interval [a, b].
     """
 
@@ -56,8 +55,7 @@ def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarra
 
 
 def clenshaw_curtiss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
-    r"""
-    Computation of the Clenshaw-Curtis quadrature nodes and weights.
+    r"""Computation of the Clenshaw-Curtis quadrature nodes and weights.
 
     This implementation follows
     [1] Joerg Waldvogel, Fast Construction of the Fejer and Clenshaw-Curtis Quadrature Rules; BIT Numerical Mathematics, Vol. 43, No. 1, pp. 001-018.
@@ -101,8 +99,7 @@ def legpoly(
     inverse: bool = False,
     csphase: bool = True,
 ) -> np.ndarray:
-    r"""
-    Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
+    r"""Computes the values of (-1)^m c^l_m P^l_m(x) at the positions specified by x.
     The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
     can be turned off optionally.
 
@@ -159,8 +156,7 @@ def precompute_legpoly(
     inverse: bool = False,
     csphase: bool = True,
 ) -> np.ndarray:
-    r"""
-    Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
+    r"""Computes the values of (-1)^m c^l_m P^l_m(\cos \theta) at the positions specified by t (theta).
     The resulting tensor has shape (mmax, lmax, len(x)). The Condon-Shortley Phase (-1)^m
     can be turned off optionally.
 
