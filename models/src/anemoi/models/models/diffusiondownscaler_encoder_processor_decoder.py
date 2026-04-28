@@ -669,7 +669,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        multi_step: int,
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[tuple[torch.Tensor, torch.Tensor], dict]:
@@ -685,7 +685,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Each tensor has shape (batch, timesteps, grid, variables)
         pre_processors : dict[str, nn.Module]
             Dictionary of pre-processing modules per dataset
-        multi_step : int
+        n_step_input : int
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -711,8 +711,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             raise ValueError(f"Expected in_hres to be 5D (batch, time, ensemble, grid, vars), got {x_in_hres.ndim}D")
 
         # Select timesteps
-        x_in_lres = x_in_lres[:, 0:multi_step, ...]
-        x_in_hres = x_in_hres[:, 0:multi_step, ...]
+        x_in_lres = x_in_lres[:, 0:n_step_input, ...]
+        x_in_hres = x_in_hres[:, 0:n_step_input, ...]
 
         # Upsample in_lres from lres -> hres using residual connection
         # Follow training pattern exactly: pass 5D tensor, residual handles ensemble internally
@@ -749,7 +749,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
-        multi_step: int,
+        n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         noise_scheduler_params: Optional[dict] = None,
@@ -768,7 +768,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Dictionary of pre-processing modules per dataset
         post_processors : dict[str, nn.Module]
             Dictionary of post-processing modules per dataset
-        multi_step : int,
+        n_step_input : int,
             Number of input timesteps
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
@@ -836,7 +836,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             before_sampling_data, grid_shard_shapes = self._before_sampling(
                 batch,
                 pre_processors,
-                multi_step,
+                n_step_input,
                 model_comm_group,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
