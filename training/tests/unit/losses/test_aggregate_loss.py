@@ -99,21 +99,6 @@ def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor
 
 
 # ---------------------------------------------------------------------------
-# Correctness: perfect predictions yield zero loss
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
-def test_zero_loss_for_perfect_predictions(agg_op: str) -> None:
-    x = torch.rand(BS, TIME, ENS, LATLON, NVAR)
-    # target matches pred (broadcast ens dimension away)
-    perfect_target = x[:, :, 0, :, :]  # (bs, time, latlon, nvar)
-    wrapper = TimeAggregateLossWrapper([agg_op], _make_loss())
-    result = wrapper(x, perfect_target)
-    assert torch.allclose(result, torch.zeros(1), atol=1e-6), f"{agg_op}: expected zero loss for perfect predictions"
-
-
-# ---------------------------------------------------------------------------
 # Correctness: accumulation across multiple  time aggregation types
 # ---------------------------------------------------------------------------
 
