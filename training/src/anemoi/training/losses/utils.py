@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
@@ -63,6 +64,9 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
 
     if isinstance(loss, MultiscaleLossWrapper):
         return print_variable_scaling(loss.loss, data_indices)
+
+    if isinstance(loss, TimeAggregateLossWrapper):
+        return print_variable_scaling(loss.loss_fn, data_indices)
 
     if isinstance(loss, LossVariableMapper):
         subset_vars = enumerate(loss.predicted_variables)

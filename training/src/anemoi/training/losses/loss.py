@@ -140,12 +140,12 @@ def get_loss_function(
     if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+        return instantiate(loss_config, per_scale_loss=per_scale_loss)
 
     if "_target_" in loss_config and loss_config["_target_"] in WRAPPED_LOSSES:
         inner_loss_config = loss_config.pop("loss_fn")
         inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
-        return instantiate(loss_config, loss_fn=inner_loss, **kwargs)
+        return instantiate(loss_config, loss_fn=inner_loss)
 
     if scalers is None:
         scalers = {}

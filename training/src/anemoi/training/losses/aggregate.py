@@ -74,7 +74,7 @@ class TimeAggregateLossWrapper(BaseLoss):
         assert (
             pred.shape[1] > 1
         ), "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."
-        loss = torch.zeros(1, dtype=pred.dtype, device=pred.device, requires_grad=False)
+        loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         shared_kwargs = dict(
             squash=squash,
