@@ -55,14 +55,14 @@ class PlottingSettings(PydanticBaseModel):
     datashader: bool = True
     projection_kind: str = "equirectangular"
     asynchronous: bool = True
-    save_basedir: str | None = None
+    save_basedir: str | Path | None = None
     colormaps: dict | None = None
     precip_and_related_fields: list[str] | None = None
     focus_areas: dict | None = None
     dataset_names: list[str] | None = None
 
     @classmethod
-    def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | None) -> "PlottingSettings":
+    def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | Path | None) -> "PlottingSettings":
         """Construct from a validated diagnostics.plot config node."""
         return cls(
             datashader=plot_cfg.datashader,
