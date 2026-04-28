@@ -100,12 +100,7 @@ def test_add_callback():
 def test_rollout_eval_instantiated_via_hydra_interpolation():
     """RolloutEval in diagnostics.callbacks is instantiated with values from the Hydra tree.
 
-    This verifies the documented contract: callbacks receive config values via Hydra
-    interpolation (e.g. ${task.validation_rollout}), not via CallbacksContext.
-
-    The full config must be the OmegaConf root so that cross-key interpolations
-    (e.g. ${task.validation_rollout} referenced inside diagnostics.callbacks) resolve
-    correctly when hydra.utils.instantiate processes the callback config node.
+    This verifies that callbacks receive config values via Hydra interpolation.
     """
     config = omegaconf.OmegaConf.create(
         yaml.safe_load(
