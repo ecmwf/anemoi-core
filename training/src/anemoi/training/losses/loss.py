@@ -154,6 +154,8 @@ def get_loss_function(
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
 
+    graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
+
     if "per_scale_loss" in loss_config:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(
@@ -164,10 +166,10 @@ def get_loss_function(
             data_node_name=data_node_name,
             **kwargs,
         )
-        graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else None
         return instantiate(
             loss_config,
             per_scale_loss=per_scale_loss,
+            **kwargs,
             **_graph_data_kwargs(target_cls, graph_data, graph_extra),
         )
 
@@ -177,11 +179,6 @@ def get_loss_function(
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    loss_function = instantiate(
-        loss_config,
-        **_graph_data_kwargs(target_cls, graph_data, kwargs),
-        _recursive_=False,
-    )
     available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
     factory_context = LossFactoryContext(
         available_scalers=available_scalers,
@@ -192,7 +189,13 @@ def get_loss_function(
         context=factory_context,
     )
 
-    loss_function = instantiate(loss_config, **constructor_kwargs, **kwargs, _recursive_=False)
+    loss_function = instantiate(
+        loss_config,
+        **constructor_kwargs,
+        **kwargs,
+        **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+        _recursive_=False,
+    )
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
