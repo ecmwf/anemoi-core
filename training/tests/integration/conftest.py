@@ -256,12 +256,25 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
 
     training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
     for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        for file in training_loss_cfg.loss_matrices:
-            if file is not None:
-                tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+        # Collect all loss configs that may have loss_matrices (MultiscaleLossWrapper).
+        # They can appear directly or nested inside a CombinedLoss's losses list.
+        loss_cfgs_to_check = []
+        if "loss_matrices" in training_loss_cfg:
+            loss_cfgs_to_check.append(training_loss_cfg)
+        elif "losses" in training_loss_cfg:
+            for sub_loss in training_loss_cfg.losses:
+                if "loss_matrices" in sub_loss:
+                    loss_cfgs_to_check.append(sub_loss)
+
+        for loss_cfg in loss_cfgs_to_check:
+            for file in loss_cfg.loss_matrices:
+                if file is not None:
+                    tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+            if tmp_path_loss_matrices is not None:
+                loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
         if tmp_path_loss_matrices is not None:
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-            training_loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
 
             cfg.training.validation_metrics.datasets[dataset_name].multiscale.loss_matrices_path = str(
                 Path(tmp_path_loss_matrices).parent,
