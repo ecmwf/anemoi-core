@@ -16,6 +16,7 @@ from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
@@ -189,7 +190,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        batch: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] = None,
         **kwargs,
@@ -198,8 +199,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         Parameters
         ----------
-        x : dict[str, Tensor]
-            Input data
+        batch : Batch
+            Typed batch envelope. ``batch.data`` carries the per-dataset input
+            tensors; ``batch.coords`` carries the per-dataset coordinate
+            tensors used by dynamic graph providers / node attributes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
         grid_shard_shapes : list, optional
@@ -210,6 +213,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
+        x = batch.data
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -241,12 +245,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_encoded_latents_dict = {}
 
         for dataset_name in dataset_names:
+            dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
                 grid_shard_shapes=grid_shard_shapes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
+                coords=dataset_coords,
             )
             x_skip_dict[dataset_name] = {"data": x_skip}
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
@@ -256,6 +262,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
+                src_coords=dataset_coords,
+                dst_coords=None,
                 model_comm_group=model_comm_group,
             )
 
@@ -415,6 +423,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
+                src_coords=None,
+                dst_coords=batch.node_coords(dataset_name),
                 model_comm_group=model_comm_group,
             )
 

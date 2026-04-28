@@ -419,14 +419,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             },
         )
 
-    def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
+    def forward(self, x: Batch | dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
+
+        Accepts either a :class:`Batch` (preferred) or a legacy
+        ``dict[str, Tensor]`` of per-dataset input tensors. The dict path
+        is a transitional shim until ``_step`` is migrated to construct a
+        :class:`Batch` end-to-end.
         """
+        batch = x if isinstance(x, Batch) else Batch(data=x)
         return self.model(
-            x,
+            batch,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
             **kwargs,

@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.data.batch import Batch
 from anemoi.training.utils.index_space import IndexSpace
 
 from .base import BaseTrainingModule
@@ -98,12 +99,13 @@ class BaseDiffusionTraining(BaseTrainingModule):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch | dict[str, torch.Tensor],
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
+        batch = x if isinstance(x, Batch) else Batch(data=x)
         return self.model.model.fwd_with_preconditioning(
-            x,
+            batch,
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,

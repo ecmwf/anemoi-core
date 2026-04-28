@@ -17,6 +17,7 @@ from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
@@ -99,9 +100,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: dict | None,
         model_comm_group=None,
         dataset_name: str = None,
+        coords: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size, coords=coords)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](
@@ -187,7 +189,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def forward(
         self,
-        x: dict[str, Tensor],
+        batch: Batch,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, list] | None = None,
@@ -197,8 +199,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Parameters
         ----------
-        x : dict[str, Tensor]
-            Input data
+        batch : Batch
+            Typed batch envelope. ``batch.data`` carries the per-dataset input
+            tensors; ``batch.coords`` carries the per-dataset coordinate
+            tensors used by dynamic graph providers / node attributes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
         grid_shard_shapes : list, optional
@@ -209,6 +213,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
+        x = batch.data
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -232,12 +237,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         for dataset_name in dataset_names:
+            dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
                 grid_shard_shapes=grid_shard_shapes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
+                coords=dataset_coords,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
@@ -246,6 +253,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
+                src_coords=dataset_coords,
+                dst_coords=None,
                 model_comm_group=model_comm_group,
             )
 
@@ -294,7 +303,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
                 dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            ].get_edges(
+                batch_size=batch_size,
+                src_coords=None,
+                dst_coords=batch.node_coords(dataset_name),
+                model_comm_group=model_comm_group,
+            )
 
             x_out = self.decoder[dataset_name](
                 (x_latent, x_data_latent_dict[dataset_name]),

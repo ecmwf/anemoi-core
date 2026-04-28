@@ -141,3 +141,57 @@ class TestNamedNodesAttributes:
             latlons = getattr(no_trainable_attributes, f"latlons_{nodes_name}")
             repeated_latlons = einops.repeat(latlons, "n f -> (b n) f", b=batch_size)
             assert torch.allclose(output, repeated_latlons)
+
+    def test_forward_with_coords_matches_static_buffer(self, nodes_attributes, graph_data):
+        """Passing the same coords as registered must reproduce the static-buffer output."""
+        batch_size = 3
+        for nodes_name in self.nodes_names:
+            torch.manual_seed(0)  # trainable params are zero-init, but be safe
+            static_out = nodes_attributes(nodes_name, batch_size)
+
+            # Feed the *raw* coords that were registered at __init__ time.
+            raw_coords = graph_data[nodes_name].x
+            dynamic_out = nodes_attributes(nodes_name, batch_size, coords=raw_coords)
+
+            assert dynamic_out.shape == static_out.shape
+            assert torch.allclose(dynamic_out, static_out)
+
+    def test_forward_with_coords_uses_provided_values(self, nodes_attributes, graph_data):
+        """Different coords must produce a different sin/cos prefix."""
+        batch_size = 2
+        for nodes_name in self.nodes_names:
+            n_nodes = graph_data[nodes_name].num_nodes
+            new_coords = TestNamedNodesAttributes.get_n_random_coords(n_nodes)
+
+            output = nodes_attributes(nodes_name, batch_size, coords=new_coords)
+            expected_prefix = einops.repeat(
+                torch.cat([torch.sin(new_coords), torch.cos(new_coords)], dim=-1),
+                "n f -> (b n) f",
+                b=batch_size,
+            )
+            assert torch.allclose(output[:, : 2 * TestNamedNodesAttributes.ndim], expected_prefix)
+
+            # And it must differ from the static-buffer output (sanity).
+            static_out = nodes_attributes(nodes_name, batch_size)
+            assert not torch.allclose(
+                output[:, : 2 * TestNamedNodesAttributes.ndim],
+                static_out[:, : 2 * TestNamedNodesAttributes.ndim],
+            )
+
+    def test_forward_with_coords_no_trainable(self, graph_data):
+        """coords= path also works when there are no trainable params."""
+        no_trainable_attributes = NamedNodesAttributes({}, graph_data)
+        batch_size = 2
+
+        for nodes_name in self.nodes_names:
+            n_nodes = graph_data[nodes_name].num_nodes
+            new_coords = TestNamedNodesAttributes.get_n_random_coords(n_nodes)
+
+            output = no_trainable_attributes(nodes_name, batch_size, coords=new_coords)
+            expected = einops.repeat(
+                torch.cat([torch.sin(new_coords), torch.cos(new_coords)], dim=-1),
+                "n f -> (b n) f",
+                b=batch_size,
+            )
+            assert torch.allclose(output, expected)
+

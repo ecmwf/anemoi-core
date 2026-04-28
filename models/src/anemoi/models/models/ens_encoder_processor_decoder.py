@@ -17,6 +17,7 @@ from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
@@ -72,9 +73,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_shapes: dict = None,
         model_comm_group=None,
         dataset_name: str = None,
+        coords: torch.Tensor | None = None,
     ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size, coords=coords)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](
@@ -153,7 +155,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        batch: Batch,
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -164,8 +166,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         Parameters
         ----------
-        x : dict[str, torch.Tensor]
-            Input tensor, shape (bs, m, e, n, f)
+        batch : Batch
+            Typed batch envelope. ``batch.data`` carries the per-dataset input
+            tensors (shape ``(bs, m, e, n, f)``); ``batch.coords`` carries the
+            per-dataset coordinate tensors used by dynamic graph providers.
         fcstep : int
             Forecast step
         model_comm_group : ProcessGroup, optional
@@ -180,6 +184,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         torch.Tensor
             Output tensor
         """
+        x = batch.data
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -204,6 +209,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
         for dataset_name in dataset_names:
+            dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
                 fcstep=fcstep,
@@ -211,6 +217,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 grid_shard_shapes=grid_shard_shapes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
+                coords=dataset_coords,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
@@ -219,6 +226,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 dataset_name
             ].get_edges(
                 batch_size=batch_ens_size,
+                src_coords=dataset_coords,
+                dst_coords=None,
                 model_comm_group=model_comm_group,
             )
 
@@ -278,6 +287,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 dataset_name
             ].get_edges(
                 batch_size=batch_ens_size,
+                src_coords=None,
+                dst_coords=batch.node_coords(dataset_name),
                 model_comm_group=model_comm_group,
             )
 

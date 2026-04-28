@@ -21,6 +21,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -145,9 +146,11 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         mlp.add_module("linear2_no_gradscaling", nn.Linear(self.noise_channels, self.noise_cond_dim))
         return mlp
 
-    def _assemble_input(self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
+    def _assemble_input(
+        self, x, y_noised, bse, grid_shard_shapes=None, model_comm_group=None, dataset_name=None, coords=None
+    ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse, coords=coords)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         if grid_shard_shapes is not None:
@@ -299,7 +302,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        batch: Batch,
         y_noised: dict[str, torch.Tensor],
         sigma: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -307,6 +310,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         **kwargs,
     ) -> torch.Tensor:
         # Multi-dataset case
+        x = batch.data
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -335,8 +339,15 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         for dataset_name in dataset_names:
+            dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x[dataset_name], y_noised[dataset_name], bse, grid_shard_shapes, model_comm_group, dataset_name
+                x[dataset_name],
+                y_noised[dataset_name],
+                bse,
+                grid_shard_shapes,
+                model_comm_group,
+                dataset_name,
+                coords=dataset_coords,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
@@ -345,6 +356,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=bse,
+                src_coords=dataset_coords,
+                dst_coords=None,
                 model_comm_group=model_comm_group,
             )
 
@@ -394,6 +407,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=bse,
+                src_coords=None,
+                dst_coords=batch.node_coords(dataset_name),
                 model_comm_group=model_comm_group,
             )
 
@@ -419,7 +434,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
     def fwd_with_preconditioning(
         self,
-        x: dict[str, torch.Tensor],
+        batch: Batch,
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -428,7 +443,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
         pred = self(
-            x,
+            batch,
             {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
             c_noise,
             model_comm_group=model_comm_group,
@@ -742,7 +757,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 )
 
         return sampler_instance.sample(
-            x,
+            Batch(data=x),
             y_init,
             sigmas_ref,
             self.fwd_with_preconditioning,
@@ -814,9 +829,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         grid_shard_shapes: dict | None = None,
         model_comm_group=None,
         dataset_name=None,
+        coords: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[list]]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse, coords=coords)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](x, grid_shard_shapes, model_comm_group, n_step_output=self.n_step_output)[

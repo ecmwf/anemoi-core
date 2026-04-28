@@ -19,6 +19,7 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.training.losses import CombinedLoss
@@ -102,13 +103,15 @@ class DummyModel:
 
     def __call__(
         self,
-        x: torch.Tensor | dict[str, torch.Tensor],
+        x: torch.Tensor | dict[str, torch.Tensor] | Batch,
         model_comm_group: Any | None = None,
         grid_shard_slice: Any | None = None,
         grid_shard_shapes: Any | None = None,
         **kwargs: Any,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
         del kwargs
+        if isinstance(x, Batch):
+            x = x.data
         if isinstance(x, dict):
             return {
                 name: self._forward_tensor(
@@ -138,11 +141,13 @@ class DummyDiffusionModel(DummyModel):
 
     def fwd_with_preconditioning(
         self,
-        x: torch.Tensor | dict[str, torch.Tensor],
+        x: torch.Tensor | dict[str, torch.Tensor] | Batch,
         y_noised: torch.Tensor | dict[str, torch.Tensor],
         sigma: torch.Tensor | dict[str, torch.Tensor],
         **kwargs: Any,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
+        if isinstance(x, Batch):
+            x = x.data
         pred = self(x, **kwargs)
 
         if isinstance(pred, dict):

@@ -16,6 +16,7 @@ import torch
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
@@ -33,9 +34,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             + self.node_attributes.attr_ndims[dataset_name]
         )
 
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
+    def _assemble_input(
+        self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None, coords=None
+    ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size, coords=coords)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -77,9 +80,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             x_out = bounding(x_out)
         return x_out
 
-    def _assemble_forcings(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None):
+    def _assemble_forcings(
+        self, x, batch_size, grid_shard_shapes=None, model_comm_group=None, dataset_name=None, coords=None
+    ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_target = self.node_attributes(dataset_name, batch_size=batch_size)
+        node_attributes_target = self.node_attributes(dataset_name, batch_size=batch_size, coords=coords)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
         if grid_shard_shapes is not None:
             shard_shapes_nodes = get_or_apply_shard_shapes(
@@ -104,7 +109,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: Tensor,
+        batch: Batch,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] | None = None,
@@ -114,8 +119,10 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
         Parameters
         ----------
-        x : dict[str, Tensor]
-            Input data
+        batch : Batch
+            Typed batch envelope. ``batch.data`` carries the per-dataset input
+            tensors; ``batch.coords`` carries the per-dataset coordinate
+            tensors used by dynamic graph providers / node attributes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
         grid_shard_shapes : list, optional
@@ -127,6 +134,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
 
+        x = batch.data
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
@@ -147,8 +155,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
         for dataset_name in dataset_names:
+            dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, shard_shapes_data = self._assemble_input(
-                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
+                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name, coords=dataset_coords
             )
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
@@ -156,6 +165,8 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
+                src_coords=dataset_coords,
+                dst_coords=None,
                 model_comm_group=model_comm_group,
             )
             # Encoder for this dataset
@@ -180,18 +191,24 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
+            dataset_coords = batch.node_coords(dataset_name)
 
             # Do not pass x_data_latent to the decoder
             # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
             # Only pass data and forcing coordinates to the decoder
             x_target_latent, shard_shapes_target = self._assemble_forcings(
-                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name
+                x[dataset_name], batch_size, grid_shard_shapes, model_comm_group, dataset_name, coords=dataset_coords
             )
 
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
                 dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            ].get_edges(
+                batch_size=batch_size,
+                src_coords=None,
+                dst_coords=dataset_coords,
+                model_comm_group=model_comm_group,
+            )
 
             x_out = self.decoder[dataset_name](
                 (x_latent, x_target_latent),

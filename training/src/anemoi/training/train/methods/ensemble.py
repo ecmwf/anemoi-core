@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.data.batch import Batch
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -204,19 +205,26 @@ class EnsembleTraining(BaseTrainingModule):
 
         return loss, metrics_next, y_pred_ens
 
-    def forward(self, x: dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs) -> dict[str, torch.Tensor]:
+    def forward(
+        self, x: Batch | dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs
+    ) -> dict[str, torch.Tensor]:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
+
+        Accepts either a :class:`Batch` (preferred) or a legacy
+        ``dict[str, Tensor]``; the dict path is a transitional shim until
+        ``_step`` is migrated to construct a :class:`Batch` end-to-end.
         """
         if rollout_step is not None:
             kwargs["fcstep"] = rollout_step
         else:
             kwargs["fcstep"] = 0  # TODO(Mario,Simon): set the conditioning on the step optional
 
+        batch = x if isinstance(x, Batch) else Batch(data=x)
         return self.model(
-            x,
+            batch,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.grid_shard_shapes,
             **kwargs,

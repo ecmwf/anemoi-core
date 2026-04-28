@@ -185,3 +185,97 @@ def test_pin_memory_skips_static_coordinates() -> None:
     pinned = batch.pin_memory()
     # Static coords untouched.
     assert pinned.coords["a"] is coords_ref
+
+
+# -------------------------------------------------------------------- with_data
+
+
+def test_with_data_replaces_data_and_shares_envelope() -> None:
+    coords_ref = _make_coords()
+    metadata_ref = {STATIC_COORDS_META_KEY: frozenset({"a"})}
+    batch = Batch(
+        data={"a": torch.zeros(2, 1, 1, 4, 2)},
+        coords={"a": coords_ref},
+        metadata=metadata_ref,
+    )
+
+    new_tensor = torch.ones(2, 1, 1, 4, 2)
+    new_batch = batch.with_data({"a": new_tensor})
+
+    # Data is replaced.
+    assert new_batch.data["a"] is new_tensor
+    assert torch.equal(new_batch.data["a"], torch.ones(2, 1, 1, 4, 2))
+
+    # Coords and metadata are shared by reference (no copy).
+    assert new_batch.coords is batch.coords
+    assert new_batch.coords["a"] is coords_ref
+    assert new_batch.coords["a"]["latitudes"] is coords_ref["latitudes"]
+    assert new_batch.metadata is batch.metadata
+
+    # Static-coord membership preserved through the envelope.
+    assert new_batch.is_static_coords("a")
+
+    # Result is a new instance; receiver is not mutated (frozen dataclass).
+    assert new_batch is not batch
+    assert batch.data["a"].sum().item() == 0.0
+
+
+def test_with_data_rejects_mismatched_keys() -> None:
+    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 4, 2)})
+
+    with pytest.raises(ValueError, match="must match the existing dataset names"):
+        batch.with_data({"a": torch.zeros(2, 1, 1, 4, 2)})
+
+    with pytest.raises(ValueError, match="must match the existing dataset names"):
+        batch.with_data({"a": torch.zeros(2, 1, 1, 4, 2), "c": torch.zeros(2, 1, 1, 4, 2)})
+
+
+def test_with_data_supports_multiple_datasets() -> None:
+    coords_a = _make_coords()
+    coords_b = _make_coords(grid=8)
+    batch = Batch(
+        data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 8, 2)},
+        coords={"a": coords_a, "b": coords_b},
+    )
+
+    new_a = torch.ones(2, 1, 1, 4, 2)
+    new_b = torch.full((2, 1, 1, 8, 2), 2.0)
+    new_batch = batch.with_data({"a": new_a, "b": new_b})
+
+    assert new_batch.data["a"] is new_a
+    assert new_batch.data["b"] is new_b
+    # Per-dataset coord identity preserved.
+    assert new_batch.coords["a"] is coords_a
+    assert new_batch.coords["b"] is coords_b
+
+
+# ---------------------------------------------------------------- node_coords
+
+
+def test_node_coords_returns_stacked_latlon() -> None:
+    coords = _make_coords()
+    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, coords={"a": coords})
+
+    out = batch.node_coords("a")
+
+    assert out is not None
+    assert out.shape == (4, 2)
+    assert torch.equal(out[:, 0], coords["latitudes"])
+    assert torch.equal(out[:, 1], coords["longitudes"])
+
+
+def test_node_coords_returns_none_when_missing() -> None:
+    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2)})
+
+    assert batch.node_coords("a") is None
+
+
+def test_node_coords_returns_none_for_partial_coords() -> None:
+    """If only one of latitudes/longitudes is present we cannot stack — return None."""
+    batch = Batch(
+        data={"a": torch.zeros(2, 1, 1, 4, 2)},
+        coords={"a": {"latitudes": torch.zeros(4)}},
+    )
+
+    assert batch.node_coords("a") is None
+

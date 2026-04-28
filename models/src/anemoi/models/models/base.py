@@ -19,6 +19,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import apply_shard_shapes
@@ -233,18 +234,21 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def forward(
         self,
-        x: Tensor,
+        batch: Batch,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, list] | None = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         """Forward pass of the model.
 
         Parameters
         ----------
-        x : Tensor
-            Input data
+        batch : Batch
+            Typed batch envelope carrying ``data`` (per-dataset input tensors)
+            and ``coords`` (per-dataset coordinate tensors). Concrete model
+            implementations unpack ``batch.data`` and ``batch.coords`` at the
+            top of the method.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
         grid_shard_shapes : list, optional
@@ -252,8 +256,9 @@ class BaseGraphModel(nn.Module):
 
         Returns
         -------
-        Tensor
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+        dict[str, Tensor]
+            Output of the model, with the same shape as the input
+            (sharded if input is sharded)
         """
         pass
 
@@ -321,8 +326,14 @@ class BaseGraphModel(nn.Module):
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
 
+            # Wrap into a Batch (no coords available at inference today; the
+            # static-grid path inside the model uses the node-attribute buffers).
+            forward_batch = Batch(data=x)
+
             # Perform forward pass
-            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+            y_hat = self.forward(
+                forward_batch, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs
+            )
 
             # Apply post-processing
             for dataset_name in dataset_names:
