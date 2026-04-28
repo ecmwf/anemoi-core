@@ -97,6 +97,46 @@ def test_add_callback():
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
+def test_rollout_eval_instantiated_via_hydra_interpolation():
+    """RolloutEval in diagnostics.callbacks is instantiated with values from the Hydra tree.
+
+    This verifies the documented contract: callbacks receive config values via Hydra
+    interpolation (e.g. ${task.validation_rollout}), not via CallbacksContext.
+
+    The full config must be the OmegaConf root so that cross-key interpolations
+    (e.g. ${task.validation_rollout} referenced inside diagnostics.callbacks) resolve
+    correctly when hydra.utils.instantiate processes the callback config node.
+    """
+    config = omegaconf.OmegaConf.create(
+        yaml.safe_load(
+            default_config + """
+task:
+  validation_rollout: 3
+""",
+        ),
+    )
+    config.diagnostics.callbacks.append(
+        {
+            "_target_": "anemoi.training.diagnostics.callbacks.evaluation.RolloutEval",
+            "rollout": ["${task.validation_rollout}"],
+            "every_n_batches": 1,
+        },
+    )
+    # Pass config.diagnostics — it keeps its parent reference to the root config,
+    # so ${task.validation_rollout} resolves correctly during instantiate().
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=False,
+    )
+    callbacks = get_callbacks(context)
+    rollout_evals = [cb for cb in callbacks if isinstance(cb, RolloutEval)]
+    assert len(rollout_evals) == 1
+    assert rollout_evals[0].rollout == [3]
+
+
 def test_add_plotting_callback(monkeypatch):
     # Add plotting callback
     import anemoi.training.diagnostics.callbacks.plot as plot
