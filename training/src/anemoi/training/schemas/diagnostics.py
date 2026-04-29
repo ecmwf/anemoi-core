@@ -109,8 +109,6 @@ class PlotSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
@@ -166,8 +164,6 @@ class PlotEnsSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
