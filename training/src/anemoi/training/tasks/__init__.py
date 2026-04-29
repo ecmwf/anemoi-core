@@ -10,9 +10,11 @@
 from .forecaster import Forecaster
 from .temporal_downscaler import TemporalDownscaler
 from .timeless import Autoencoder
+from .timeless import SpatialDownscaler
 
 __all__ = [
     "Autoencoder",
     "Forecaster",
+    "SpatialDownscaler",
     "TemporalDownscaler",
 ]

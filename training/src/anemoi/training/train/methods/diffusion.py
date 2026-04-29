@@ -368,6 +368,49 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
             self._tendency_pre_processors[dataset_name] = pre_tend
             self._tendency_post_processors[dataset_name] = post_tend
 
+    def _get_reference(
+        self,
+        x: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Extract the reference state used to compute the difference target.
+
+        For tendency prediction this is the last normalized input timestep
+        (prognostic channels only), aligned to output steps.
+
+        Subclasses override this to provide a different reference
+        (e.g. the upsampled lres field for spatial downscaling).
+        """
+        x_ref = self.model.model.apply_reference_state_truncation(
+            x,
+            self.grid_shard_shapes,
+            self.model_comm_group,
+        )
+        return {name: (ref[:, -1] if ref.ndim == 5 else ref) for name, ref in x_ref.items()}
+
+    def _compute_difference_target(
+        self,
+        y: dict[str, torch.Tensor],
+        x_ref: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Compute the normalized difference target from y and the reference.
+
+        For tendency prediction: tendency = normalize(y - x_ref).
+        Subclasses override this for spatial downscaling.
+        """
+        return self._compute_tendency_target(y, x_ref)
+
+    def _reconstruct_from_difference(
+        self,
+        x_ref: dict[str, torch.Tensor],
+        diff_pred: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Reconstruct the full state from the predicted difference and reference.
+
+        For tendency: state = denormalize(diff_pred) + x_ref.
+        Subclasses override this for spatial downscaling.
+        """
+        return self._reconstruct_state(x_ref, diff_pred)
+
     def _compute_tendency_target(
         self,
         y: dict[str, torch.Tensor],
@@ -521,15 +564,10 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
             )
             raise AttributeError(msg)
 
-        x_ref = self.model.model.apply_reference_state_truncation(
-            x,
-            self.grid_shard_shapes,
-            self.model_comm_group,
-        )
-        # x_ref is normalized model.input.prognostic (subset), aligned to output steps
-        x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
+        x = self.task.prepare_inputs(x, self.model, model_comm_group=self.model_comm_group)
+        x_ref = self._get_reference(x)
 
-        tendency_target_data_output = self._compute_tendency_target(y_data_output, x_ref)
+        tendency_target_data_output = self._compute_difference_target(y_data_output, x_ref)
         tendency_target = self.reduce_data_output_target_to_model_output(tendency_target_data_output)
 
         # get noise level and associated loss weights
@@ -550,7 +588,7 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
 
         y_pred = None
         if validation_mode:
-            y_pred = self._reconstruct_state(x_ref, tendency_pred)
+            y_pred = self._reconstruct_from_difference(x_ref, tendency_pred)
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
             tendency_pred,
@@ -565,3 +603,83 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
         )
 
         return loss, metrics, [y_pred]
+
+
+class DiffusionSpatialDownscalerTraining(DiffusionTendencyTraining):
+    """Diffusion training method for spatial downscaling.
+
+    Reuses the full DiffusionTendencyTraining._step pipeline. Two hooks are
+    overridden for spatial-specific behaviour:
+
+    - ``_compute_difference_target``: computes spatial residual y_hres - interp(x_lres)
+      via ``model.compute_residuals``
+    - ``_reconstruct_from_difference``: adds the interpolated lres back to the
+      predicted residual via ``model.add_interp_to_state``
+
+    Input upsampling and dataset routing are owned by the task (``SpatialDownscaler``):
+    - ``task.prepare_inputs`` upsamples in_lres before _step sees x
+    - ``task.source_dataset`` / ``task.target_dataset`` name the datasets
+
+    This training method is fully agnostic about which dataset names are used.
+    """
+
+    def _get_reference(
+        self,
+        x: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Return the upsampled lres as the spatial reference.
+
+        By the time _step calls this, task.prepare_inputs has already
+        upsampled x[source_dataset] via InterpolationConnection, so we
+        just pass it through as the reference for residual computation.
+        """
+        return {self.task.source_dataset: x[self.task.source_dataset]}
+
+    def _compute_difference_target(
+        self,
+        y: dict[str, torch.Tensor],
+        x_ref: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Compute normalized spatial residual: normalize(y_hres - interp(x_lres)).
+
+        Delegates to ``model.compute_residuals``.
+        """
+        target_ds = self.task.target_dataset
+        source_ds = self.task.source_dataset
+        channel_indices = self.model.model.get_matching_channel_indices(target_ds)
+        pre_tend = self._tendency_pre_processors.get(target_ds)
+
+        residual = self.model.model.compute_residuals(
+            y=y[target_ds],
+            x_interp=x_ref[source_ds][..., channel_indices],
+            pre_processors_state=self.model.pre_processors[target_ds],
+            pre_processors_tendencies=pre_tend,
+            target_dataset=target_ds,
+        )
+        return {target_ds: residual}
+
+    def _reconstruct_from_difference(
+        self,
+        x_ref: dict[str, torch.Tensor],
+        diff_pred: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Reconstruct full hres state: denorm(residual_pred) + interp(x_lres)."""
+        target_ds = self.task.target_dataset
+        source_ds = self.task.source_dataset
+
+        post_tend = (
+            dict(self.model.post_processors_tendencies)
+            if hasattr(self.model, "post_processors_tendencies")
+            and self.model.post_processors_tendencies is not None
+            else None
+        )
+
+        out = self.model.model.add_interp_to_state(
+            state_inp=x_ref[source_ds],
+            model_output=diff_pred[target_ds],
+            post_processors_state=self.model.post_processors,
+            post_processors_tendencies=post_tend,
+            target_dataset=target_ds,
+            source_dataset=source_ds,
+        )
+        return {target_ds: out}

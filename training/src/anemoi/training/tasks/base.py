@@ -181,6 +181,34 @@ class BaseTask(ABC):
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
+    def prepare_inputs(
+        self,
+        x: dict[str, torch.Tensor],
+        model: torch.nn.Module,
+        **_kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Prepare model inputs after get_inputs, before the forward pass.
+
+        The default implementation returns x unchanged. Tasks with
+        multi-resolution inputs (e.g. spatial downscaling) override this
+        to perform upsampling or other input assembly that depends on the
+        model architecture.
+
+        Parameters
+        ----------
+        x : dict[str, torch.Tensor]
+            Raw inputs from get_inputs, keyed by dataset name.
+        model : torch.nn.Module
+            The model interface (AnemoiModelInterface), giving access to
+            model components like residual connections.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Prepared inputs ready for the model forward pass.
+        """
+        return x
+
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 

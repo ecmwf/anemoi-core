@@ -75,6 +75,73 @@ class SkipConnection(BaseResidualConnection):
         return self._expand_time(x_skip, n_step_output)
 
 
+class InterpolationConnection(BaseResidualConnection):
+    """Interpolation connection for upsampling from a coarse to a fine grid.
+
+    Applies a single sparse linear projection to transform from one grid
+    resolution to another. Unlike TruncatedConnection (down then up), this
+    is a one-way upsampling operation used in spatial downscaling.
+
+    Parameters
+    ----------
+    interpolation_file_path : str
+        Path to a .npz file containing the sparse projection matrix.
+    step : int, default -1
+        Which timestep to select from the input before interpolation.
+    autocast : bool, default False
+        Whether to use automatic mixed precision.
+    row_normalize : bool, default False
+        Whether to normalize weights per row so each row sums to 1.
+    """
+
+    def __init__(
+        self,
+        interpolation_file_path: str,
+        step: int = -1,
+        autocast: bool = False,
+        row_normalize: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        self.step = step
+        self.provider = ProjectionGraphProvider(
+            graph=None,
+            edges_name=None,
+            file_path=interpolation_file_path,
+            row_normalize=row_normalize,
+        )
+        self.projector = SparseProjector(autocast=autocast)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Apply sparse linear upsampling from lres to hres grid.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (batch, time, grid, features).
+        grid_shard_shapes : ignored
+        model_comm_group : ignored
+        n_step_output : ignored
+
+        Returns
+        -------
+        torch.Tensor
+            Upsampled tensor of shape (batch, time, hres_grid, features).
+        """
+        batch_size = x.shape[0]
+        x = x[:, self.step, ...]  # (batch, grid, features)
+        x = einops.rearrange(x, "batch grid features -> (batch) grid features")
+        x = self.projector(x, self.provider.get_edges(device=x.device))
+        x = einops.rearrange(x, "batch grid features -> batch grid features", batch=batch_size)
+        return x
+
+
 class TruncatedConnection(BaseResidualConnection):
     """Truncated skip connection
 
