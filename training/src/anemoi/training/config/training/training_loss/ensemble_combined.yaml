@@ -16,10 +16,10 @@ datasets:
           no_autocast: True
           alpha: 0.95
       - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
         time_aggregation_types: [mean, max, min, diff]
         loss_fn:
           _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
           ignore_nans: False
           no_autocast: True
           alpha: 0.95

@@ -145,7 +145,16 @@ def get_loss_function(
     if "_target_" in loss_config and loss_config["_target_"] in WRAPPED_LOSSES:
         inner_loss_config = loss_config.pop("loss_fn")
         inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
-        return instantiate(loss_config, loss_fn=inner_loss)
+        wrapper = instantiate(loss_config, loss_fn=inner_loss)
+        # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
+        if scalers_to_include and scalers:
+            resolved = (
+                [s for s in scalers if f"!{s}" not in scalers_to_include]
+                if "*" in scalers_to_include
+                else list(scalers_to_include)
+            )
+            _apply_scalers(wrapper, resolved, scalers, data_indices)
+        return wrapper
 
     if scalers is None:
         scalers = {}

@@ -291,6 +291,23 @@ class MultiScaleLossSchema(BaseModel):
     keep_batch_sharded: bool
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None]
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner per_scale_loss)."
+
+    @field_validator("per_scale_loss", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss; scalers flow through the wrapper."""
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
 
     @field_validator("weights")
     @classmethod
@@ -308,6 +325,23 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     "Time aggregation operations to apply over the time dimension before computing the loss."
     loss_fn: BaseLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
     "Inner loss function applied to each time-aggregated output."
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+
+    @field_validator("loss_fn", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss; scalers flow through the wrapper."""
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -348,10 +382,6 @@ class CombinedLossSchema(BaseLossSchema):
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
-            # TimeAggregateLossWrapper and MultiscaleLossWrapper don't have top-level scalers
-            target = loss.get("_target_", "") if isinstance(loss, (dict, DictConfig)) else ""
-            if "TimeAggregateLossWrapper" in target or "MultiscaleLossWrapper" in target:
-                continue
             if "scalers" not in loss:
                 if isinstance(loss, DictConfig):
                     with open_dict(loss):

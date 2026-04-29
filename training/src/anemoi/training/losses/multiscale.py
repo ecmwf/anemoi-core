@@ -21,11 +21,12 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import BaseLossWrapper
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MultiscaleLossWrapper(BaseLoss):
+class MultiscaleLossWrapper(BaseLossWrapper):
 
     name: str = "MultiscaleLossWrapper"
 
@@ -59,7 +60,7 @@ class MultiscaleLossWrapper(BaseLoss):
         autocast : bool
             Whether to use automatic mixed precision for the projections
         """
-        super().__init__()
+        super().__init__(loss=per_scale_loss)
 
         self.smoothing_matrices = self._load_smoothing_matrices(loss_matrices_path, loss_matrices)
         self.num_scales = len(self.smoothing_matrices)
@@ -67,8 +68,6 @@ class MultiscaleLossWrapper(BaseLoss):
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
         self.weights = weights
-        self.loss = per_scale_loss
-        self.scaler = self.loss.scaler
         self.keep_batch_sharded = keep_batch_sharded
         self.supports_sharding = True
         self.mloss = None
@@ -83,20 +82,6 @@ class MultiscaleLossWrapper(BaseLoss):
         grid-sharded during loss computation.
         """
         return self.keep_batch_sharded
-
-    def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
-        """Update the scaler values for the internal loss.
-
-        Parameters
-        ----------
-        name : str
-            Name of the scaler to update
-        scaler : torch.Tensor
-            New scaler values
-        override : bool, optional
-            Whether to override existing scaler values, by default False
-        """
-        self.loss.update_scaler(name=name, scaler=scaler, override=override)
 
     def _load_smoothing_matrices(
         self,

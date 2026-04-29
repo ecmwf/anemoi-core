@@ -5,15 +5,17 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import BaseLossWrapper
 
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.training.losses.base import BaseLoss
+
 LOGGER = logging.getLogger(__name__)
 
 
-class TimeAggregateLossWrapper(BaseLoss):
+class TimeAggregateLossWrapper(BaseLossWrapper):
     """Wraps a base loss and applies it to time-aggregated predictions.
 
     Supported time aggregation types:
@@ -28,9 +30,8 @@ class TimeAggregateLossWrapper(BaseLoss):
         loss_fn: BaseLoss,
         ignore_nans: bool = False,
     ) -> None:
-        super().__init__(ignore_nans=ignore_nans)
+        super().__init__(loss=loss_fn, ignore_nans=ignore_nans)
         self.time_aggregation_types = time_aggregation_types
-        self.loss_fn = loss_fn
 
     def forward(
         self,
@@ -104,6 +105,6 @@ class TimeAggregateLossWrapper(BaseLoss):
                 msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
                 raise ValueError(msg)
 
-            loss = loss + self.loss_fn(pred_agg, target_agg, **shared_kwargs)
+            loss = loss + self.loss(pred_agg, target_agg, **shared_kwargs)
 
         return loss
