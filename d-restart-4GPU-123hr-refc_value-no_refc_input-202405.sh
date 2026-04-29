@@ -27,7 +27,7 @@ mkdir -p "$TRITON_CACHE_DIR"
 
 # Set this to the run_id produced by d-4GPU-123hr-refc_value-no_refc_input-202405.sh
 # before submitting this restart job.
-RUN_ID=CHANGE_ME_REFC_VALUE_NO_REFC_INPUT_RUN_ID
+RUN_ID=a475a4e9-4f4f-40b1-9652-2798904a727c
 CKPT=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/${RUN_ID}/last.ckpt
 echo "Resuming run_id=${RUN_ID}"
 echo "Checkpoint=${CKPT}"

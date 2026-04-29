@@ -124,12 +124,12 @@ training:
             default: 1
             sphum: 0.6      # q
             temp: 6         # t
-            ugrd: 0.8       # u
-            vgrd: 0.5       # v
+            ugrd: 5       # u
+            vgrd: 5       # v
             height: 12      # z
             pres_0g: 10     # sp
             # RRFS-specific fields not present in Anemoi defaults; keep at default unless tuned:
-            refc: 40 
+            refc: 80 
             clmr: 1
             icmr: 1
             rwmr: 1
