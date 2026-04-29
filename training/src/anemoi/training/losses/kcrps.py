@@ -80,7 +80,7 @@ class KernelCRPS(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,  # noqa: ARG002
+        squash_mode: str = "sum",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
@@ -92,7 +92,7 @@ class KernelCRPS(BaseLoss):
         kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
         kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
+        return self.reduce(kcrps_, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
 
     @property
     def name(self) -> str:
@@ -175,7 +175,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,  # noqa: ARG002
+        squash_mode: str = "sum",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
@@ -191,7 +191,7 @@ class AlmostFairKernelCRPS(BaseLoss):
         kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
         kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(kcrps_, squash=squash, squash_mode="sum", group=group if is_sharded else None)
+        return self.reduce(kcrps_, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
 
     @property
     def name(self) -> str:
