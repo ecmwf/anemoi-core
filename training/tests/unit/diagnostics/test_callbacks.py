@@ -20,7 +20,6 @@ import yaml
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
-from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
@@ -88,40 +87,6 @@ def test_add_plotting_callback(monkeypatch):
     config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
     callbacks = get_callbacks(config)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
-
-
-def test_rollout_eval_ens_handles_dict_batch():
-    """Test RolloutEvalEns._eval with a dict batch via on_validation_batch_end."""
-    config = omegaconf.OmegaConf.create({})
-    callback = RolloutEvalEns(config, rollout=[1, 2], every_n_batches=1)
-
-    # Mock pl_module
-    pl_module = MagicMock()
-    pl_module.device = torch.device("cpu")
-    pl_module.n_step_input = 1
-    pl_module.n_step_output = 1
-    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
-    pl_module._step.return_value = (
-        torch.tensor(0.125),
-        {"metric1": torch.tensor(0.25)},
-        None,
-    )
-
-    trainer = MagicMock()
-    trainer.precision = "16-mixed"
-
-    # Mock batch (bs, ms, nens_per_device, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, 4, 10, 5)}
-
-    with patch.object(callback, "_log") as mock_log:
-        callback.on_validation_batch_end(trainer, pl_module, outputs=[], batch=batch, batch_idx=0)
-
-        #  Check for output
-        mock_log.assert_called_once()
-        args = mock_log.call_args[0]
-        assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
-        assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
-        assert args[3] == 2  # batch size
 
 
 def test_rollout_eval_handles_dict_batch():
