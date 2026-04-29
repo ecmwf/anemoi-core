@@ -83,5 +83,11 @@ class SpatialDownscaler(BaseTimelessTask):
             x_lres,
             grid_shard_shapes=None,
             model_comm_group=model_comm_group,
-        )[:, :, None, :, :]  # add ensemble dim: (batch, time, ensemble=1, grid, vars)
+        )[
+            :,
+            None,
+            None,
+            :,
+            :,
+        ]  # add time and ensemble dims: (batch, time=1, ensemble=1, grid, vars)
         return {**x, self.source_dataset: x_upsampled}
