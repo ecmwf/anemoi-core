@@ -1,0 +1,42 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1to3h-no-refc-input
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with:
+#   anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-refc-value-loss-no-refc-input
+#
+# This preserves the no-refc-input role split and uses the same configured
+# training loss/scalers as the refc-value training setup, so PlotSample's
+# "configured training loss" label is computed with matching weights.
+
+training:
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_range_weight_factors']
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          weights:
+            default: 1
+            sphum: 0.6
+            temp: 6
+            ugrd: 0.8
+            vgrd: 0.5
+            height: 12
+            pres_0g: 10
+            refc: 40
+            clmr: 1
+            icmr: 1
+            rwmr: 1
+            snmr: 1
+            grle: 1
+        refc_range_weight_factors:
+          _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
+          variable: refc
+          normalization: min-max
+          thresholds: [5.0, 20.0, 40.0]
+          range_weight_factors: [0.1, 20, 40, 80]
