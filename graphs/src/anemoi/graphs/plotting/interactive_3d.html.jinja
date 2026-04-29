@@ -246,8 +246,11 @@ nor does it submit to any jurisdiction. #}
                     camera.position.add(pan); target.add(pan);
                 } else {
                     const dist = camera.position.distanceTo(target);
-                    const zoomedRotSpeed = rotSpeed * (dist / 50);
-                    velocity.x = dx * zoomedRotSpeed; velocity.y = dy * zoomedRotSpeed;
+                    const r = Number(document.getElementById('mapRadius').value);
+                    const fovRad = camera.fov * Math.PI / 180;
+                    const earthFov = 2 * Math.atan(dist * Math.tan(fovRad / 2) / r);
+                    velocity.x = dx * earthFov / window.innerWidth;
+                    velocity.y = dy * earthFov / window.innerHeight;
                 }
                 startX = e.clientX; startY = e.clientY;
             });
