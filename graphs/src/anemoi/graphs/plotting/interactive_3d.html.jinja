@@ -245,7 +245,9 @@ nor does it submit to any jurisdiction. #}
                     const pan = right.multiplyScalar(-dx * panSpeed).add(up.multiplyScalar(dy * panSpeed));
                     camera.position.add(pan); target.add(pan);
                 } else {
-                    velocity.x = dx * rotSpeed; velocity.y = dy * rotSpeed;
+                    const dist = camera.position.distanceTo(target);
+                    const zoomedRotSpeed = rotSpeed * (dist / 50);
+                    velocity.x = dx * zoomedRotSpeed; velocity.y = dy * zoomedRotSpeed;
                 }
                 startX = e.clientX; startY = e.clientY;
             });
