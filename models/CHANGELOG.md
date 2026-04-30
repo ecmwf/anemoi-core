@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.14.1](https://github.com/ecmwf/anemoi-core/compare/models-0.14.0...models-0.14.1) (2026-04-23)
+
+
+### Bug Fixes
+
+* No learnable parameters for non-model nodes ([#1050](https://github.com/ecmwf/anemoi-core/issues/1050)) ([9c4be94](https://github.com/ecmwf/anemoi-core/commit/9c4be94263e657487597952341a0cda645eb0a36))
+
 ## [0.14.0](https://github.com/ecmwf/anemoi-core/compare/models-0.13.1...models-0.14.0) (2026-04-21)
 
 

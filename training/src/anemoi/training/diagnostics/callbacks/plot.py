@@ -994,9 +994,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-        for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
-
             # Build dictionary of indices and parameters to be plotted
             diagnostics = (
                 []
