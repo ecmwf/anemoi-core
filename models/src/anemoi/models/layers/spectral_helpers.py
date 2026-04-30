@@ -221,20 +221,7 @@ class SphericalHarmonicTransform(Module):
             Fourier space field [..., latitude, zonal wavenumber m]
         """
 
-        # Prepare zero-padded output tensor for filling with rfft
-        output_tensor = torch.zeros(
-            *x.shape[:-1],
-            self.nlat,
-            max(self.lons_per_lat) // 2 + 1,
-            device=x.device,
-            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128,
-        )
-
-        # Do a real-to-complex FFT on each latitude
-        for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
-            output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
-
-        return output_tensor
+        return self.rfft_rings_reduced_banded(x, start_lat=0, end_lat=self.nlat)
 
     def rfft_rings_reduced_banded(self, x: Tensor, start_lat: int, end_lat: int) -> Tensor:
         # Prepare zero-padded output tensor for filling with rfft
