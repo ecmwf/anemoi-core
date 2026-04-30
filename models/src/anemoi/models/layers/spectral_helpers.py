@@ -173,7 +173,7 @@ class SphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
-            self.rfft_rings = self.rfft_rings_reduced_graphed_autograd if use_graphs else self.rfft_rings_reduced_naive
+            self.rfft_rings = self.rfft_rings_reduced_graphed if use_graphs else self.rfft_rings_reduced_naive
         else:
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
@@ -252,7 +252,7 @@ class SphericalHarmonicTransform(Module):
 
         return output_tensor
 
-    def rfft_rings_reduced_graphed_autograd(self, x: Tensor) -> Tensor:
+    def rfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
         Uses graphs.
 
