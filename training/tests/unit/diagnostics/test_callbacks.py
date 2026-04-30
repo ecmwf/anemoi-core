@@ -89,7 +89,8 @@ def test_add_plotting_callback(monkeypatch):
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
-def test_rollout_eval_handles_dict_batch():
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_rollout_eval_handles_dict_batch(n_ensemble):
     """Test RolloutEval._eval with a dict batch (multi-dataset style)."""
     config = omegaconf.OmegaConf.create({})
     callback = RolloutEval(config, rollout=[1, 2], every_n_batches=1)
@@ -110,7 +111,7 @@ def test_rollout_eval_handles_dict_batch():
     trainer.precision = "16-mixed"  # no autocast
 
     # Mock batch (bs, ms, ens, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, 1, 10, 5)}
+    batch = {"data": torch.randn(2, 4, n_ensemble, 10, 5)}
 
     with patch.object(callback, "_log") as mock_log:
 
