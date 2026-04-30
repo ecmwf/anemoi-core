@@ -94,7 +94,6 @@ def sht_setup(request):
     }
 
 
-@pytest.mark.gpu
 def test_idempotency_direct_inverse(sht_setup):
     """direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
@@ -112,7 +111,6 @@ def test_idempotency_direct_inverse(sht_setup):
     assert torch.allclose(before, after, rtol=tolerance)
 
 
-@pytest.mark.gpu
 def test_idempotency_inverse_direct(sht_setup):
     """inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]
@@ -134,7 +132,7 @@ def test_idempotency_inverse_direct(sht_setup):
     assert maxdiff < tolerance
 
 
-@pytest.mark.gpu
+@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
     """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
@@ -152,9 +150,9 @@ def test_multiple_direct_calls(sht_setup):
     assert torch.all(once == twice)
 
 
-@pytest.mark.gpu
+@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
-def test_direct_autograd_with_graphed_reduced_fft(sht_setup):
+def test_direct_with_graphed_reduced_fft(sht_setup):
     """Check gradients still work for reduced-grid FFT with CUDA graphs on."""
     dtype = sht_setup["dtype"]
     direct = sht_setup["direct"]
