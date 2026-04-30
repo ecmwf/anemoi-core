@@ -140,7 +140,7 @@ class SphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphs: bool = True) -> None:
+    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphs: bool = False) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
         Parameters
