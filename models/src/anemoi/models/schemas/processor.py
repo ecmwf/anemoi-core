@@ -108,7 +108,7 @@ class PointWiseMLPProcessorSchema(PointWiseModelComponent):
     "Transformer processor object from anemoi.models.layers.processor."
     num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Transformer processor."
-    num_channels: NonNegativeInt = Field(example=128)
-    "Number of channels."
-    dropout_p: NonNegativeFloat = Field(example=0.1)
+    mlp_hidden_ratio: NonNegativeInt = Field(example=4)
+    "Ratio of the hidden dimension to the processor channel dimension."
+    dropout_p: NonNegativeFloat = Field(default=0.0, example=0.0)
     "Dropout probability, default 0.0"

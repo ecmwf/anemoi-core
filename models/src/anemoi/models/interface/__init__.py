@@ -59,6 +59,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DotDict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
         statistics: dict,
         data_indices: dict,
@@ -69,7 +71,8 @@ class AnemoiModelInterface(torch.nn.Module):
         super().__init__()
         self.config = config
         self.id = str(uuid.uuid4())
-        self.n_step_input = self.config.training.multistep_input
+        self.n_step_input = n_step_input
+        self.n_step_output = n_step_output
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
@@ -141,8 +144,7 @@ class AnemoiModelInterface(torch.nn.Module):
             return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
 
         lead_times = list(statistics_tendencies.get("lead_times") or [])
-        n_step_output = getattr(self.config.training, "multistep_output", None)
-        if n_step_output == 1:
+        if self.n_step_output == 1:
             step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
             stats_for_tendencies = step_stats or statistics_tendencies
             return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
@@ -193,6 +195,8 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
+            n_step_input=self.n_step_input,
+            n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 

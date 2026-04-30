@@ -27,6 +27,17 @@ from anemoi.models.layers.utils import load_layer_kernels
 LOGGER = logging.getLogger(__name__)
 
 
+def _conditional_layer_kernels(condition_shape: int):
+    return load_layer_kernels(
+        {
+            "LayerNorm": {
+                "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                "condition_shape": condition_shape,
+            }
+        }
+    )
+
+
 class TestTransformerProcessorBlock:
     @given(
         factor_attention_heads=st.integers(min_value=1, max_value=10),
@@ -148,6 +159,27 @@ class TestTransformerProcessorBlock:
         x = torch.randn((4, num_channels))
         output = block.forward(x, [[4, num_channels]], batch_size=1)
         assert output[0].shape == (4, num_channels)
+
+    def test_forward_output_with_conditioning(self):
+        condition_shape = 6
+        num_channels = 8
+        block = TransformerProcessorBlock(
+            num_channels=num_channels,
+            hidden_dim=16,
+            num_heads=2,
+            window_size=None,
+            dropout_p=0.0,
+            layer_kernels=_conditional_layer_kernels(condition_shape),
+            attention_implementation="scaled_dot_product_attention",
+            softcap=None,
+            qk_norm=False,
+        )
+
+        x = torch.randn((5, num_channels))
+        cond = torch.randn((5, condition_shape))
+        output = block.forward(x, [[5, num_channels]], batch_size=1, cond=cond)
+
+        assert output[0].shape == (5, num_channels)
 
     def test_custom_attn_channels_must_be_divisible_by_num_heads(self):
         with pytest.raises(ValueError, match="attn_channels"):

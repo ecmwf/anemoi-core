@@ -16,6 +16,7 @@ from pathlib import Path
 
 import psutil
 import pytest
+from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.cuda import empty_cache
 from torch.cuda import reset_peak_memory_stats
@@ -61,7 +62,7 @@ def restore_base_seed(original_seed: str | None) -> None:
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_benchmark_dataloader(
-    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase,
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -72,8 +73,11 @@ def test_benchmark_dataloader(
     LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, random_seed)
 
     try:
+        # Initialize task
+        task = instantiate(cfg.task)
+
         # Initialize datamodule
-        datamodule = AnemoiDatasetsDataModule(config=cfg)
+        datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
 
         # Get training dataloader
         train_dataloader = datamodule.train_dataloader()
@@ -132,7 +136,7 @@ def test_benchmark_dataloader(
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase, task
 ) -> None:
     """Runs a benchmark and then compares them against the values stored on a server."""
     cfg, test_case = benchmark_config
