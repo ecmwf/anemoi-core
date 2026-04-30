@@ -86,6 +86,17 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             self.register_buffer(buf_name, indices, persistent=True)
             self._matching_indices_keys.append((target_ds, source_ds, buf_name))
 
+    def _get_direct_prediction_indices(
+        self,
+        target_dataset: str,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Return (model_indices, data_indices) for direct_prediction vars, or (None, None)."""
+        model_buf = getattr(self, f"_direct_prediction_indices_{target_dataset}", None)
+        data_buf = getattr(self, f"_direct_prediction_data_indices_{target_dataset}", None)
+        if model_buf is not None and len(model_buf) > 0:
+            return model_buf, data_buf
+        return None, None
+
     def _build_matching_channel_indices(self, target_dataset: str, source_dataset: str) -> torch.Tensor:
         """Build indices to reorder source channels to match target's prognostic output order.
 
@@ -229,6 +240,16 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                     skip_imputation=skip_imputation,
                 )
 
+        # Direct-prediction overwrite: prognostic vars that should use raw y with state normalization
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None:
+            target[..., dp_model_idx] = pre_processors_state(
+                y[..., dp_model_idx],
+                in_place=False,
+                data_index=dp_data_idx,
+                skip_imputation=skip_imputation,
+            )
+
         # Diagnostic channels: direct prediction, normalize with state stats
         if len(diagnostic_out) > 0:
             target[..., diagnostic_out] = pre_processors_state(
@@ -239,6 +260,38 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             )
 
         return target
+
+    def apply_interpolate_to_high_res(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes: Optional[list] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> torch.Tensor:
+        """Upsample low-resolution inputs onto the high-resolution grid for eval tooling.
+
+        The shared residual-spectra helper loads the exported inference checkpoint and
+        expects a `ds`-style interpolation interface on the saved model object.
+        Multi-ds already performs the same interpolation internally through the
+        `in_lres` residual branch; this wrapper exposes that path with the expected
+        `(batch, ensemble, grid, variables) -> (batch, ensemble, grid_hres, variables)`
+        contract.
+        """
+        if x.ndim != 4:
+            raise ValueError(
+                f"Expected low-resolution input with shape (batch, ensemble, grid, variables), got {tuple(x.shape)}"
+            )
+        if x.shape[1] != 1:
+            raise ValueError(
+                f"Residual spectra reconstruction expects one ensemble member at a time, got ensemble={x.shape[1]}"
+            )
+
+        x_with_time = x[:, None, :, :, :]
+        x_interp = self.residual["in_lres"](
+            x_with_time,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+        )
+        return x_interp[:, 0, None, :, :]
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components with optional dataset filtering for encoder/decoder."""
