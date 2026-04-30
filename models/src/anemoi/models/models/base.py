@@ -65,6 +65,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
+        self.encoded_dataset_names = model_config.model.get("encoded_dataset_names", self.dataset_names)
 
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
