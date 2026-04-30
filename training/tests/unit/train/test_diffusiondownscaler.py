@@ -265,3 +265,51 @@ def test_resolve_direct_prediction_skips_diagnostic():
     # tp is diagnostic, not prognostic — should be skipped
     assert dp_model_idx is None
     assert dp_data_idx is None
+
+
+def test_apply_interpolate_to_high_res_output_shape():
+    """apply_interpolate_to_high_res returns (batch, 1, 1, grid_hres, vars) given a 4-D input."""
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+
+    batch, grid_lres, grid_hres, n_vars = 2, 16, 64, 3
+
+    # Mock residual callable: takes (batch, time, ensemble, grid, vars) → same shape with grid_hres
+    def _fake_residual(x_5d, grid_shard_shapes=None, model_comm_group=None):
+        b, t, ens, _, v = x_5d.shape
+        return torch.zeros(b, t, ens, grid_hres, v)
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    model.residual = {"in_lres": _fake_residual}
+
+    x = torch.zeros(batch, 1, grid_lres, n_vars)  # (batch, ensemble=1, grid_lres, vars)
+    out = model.apply_interpolate_to_high_res(x)
+
+    assert out.shape == (batch, 1, 1, grid_hres, n_vars), (
+        f"Expected (batch=2, 1, 1, grid_hres=64, vars=3), got {tuple(out.shape)}"
+    )
+
+
+def test_dp_buffer_round_trip():
+    """Buffer registered by task init is readable by _get_direct_prediction_indices."""
+    import torch.nn as nn
+
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    # Simulate what task.__init__ does: resolve → register
+    data_indices = _make_index_collection({"10u": 0, "10v": 1, "tp": 2})
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(["tp"], data_indices)
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    # AnemoiD2ModelEncProcDec inherits register_buffer from nn.Module; init nn.Module state manually
+    nn.Module.__init__(model)
+
+    model.register_buffer("_direct_prediction_indices_out_hres", dp_model_idx, persistent=True)
+    model.register_buffer("_direct_prediction_data_indices_out_hres", dp_data_idx, persistent=True)
+
+    # Verify _get_direct_prediction_indices reads them back correctly
+    result_model, result_data = model._get_direct_prediction_indices("out_hres")
+    assert result_model is not None
+    assert result_model.tolist() == [2]
+    assert result_data is not None
+    assert result_data.tolist() == [2]

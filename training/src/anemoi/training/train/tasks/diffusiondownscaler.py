@@ -31,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 
 def _resolve_direct_prediction_indices(
     dp_fields: list[str],
-    data_indices,
+    data_indices: IndexCollection,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     """Resolve direct_prediction field names to model-space and data-space index tensors.
 

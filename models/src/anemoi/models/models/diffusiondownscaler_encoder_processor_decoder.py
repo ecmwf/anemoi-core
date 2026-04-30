@@ -93,7 +93,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         """Return (model_indices, data_indices) for direct_prediction vars, or (None, None)."""
         model_buf = getattr(self, f"_direct_prediction_indices_{target_dataset}", None)
         data_buf = getattr(self, f"_direct_prediction_data_indices_{target_dataset}", None)
-        if model_buf is not None and len(model_buf) > 0:
+        if model_buf is not None and len(model_buf) > 0 and data_buf is not None:
             return model_buf, data_buf
         return None, None
 
@@ -273,8 +273,24 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         expects a `ds`-style interpolation interface on the saved model object.
         Multi-ds already performs the same interpolation internally through the
         `in_lres` residual branch; this wrapper exposes that path with the expected
-        `(batch, ensemble, grid, variables) -> (batch, ensemble, grid_hres, variables)`
-        contract.
+        interface.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Low-resolution input with shape ``(batch, ensemble, grid_lres, variables)``.
+            Exactly one ensemble member is supported (``ensemble == 1``).
+        grid_shard_shapes : list, optional
+            Shard shapes for distributed execution.
+        model_comm_group : ProcessGroup, optional
+            Process group for distributed execution.
+
+        Returns
+        -------
+        torch.Tensor
+            Interpolated tensor with shape ``(batch, 1, 1, grid_hres, variables)``.
+            The first size-1 dimension is the time axis introduced by the internal
+            5-D residual call; the second size-1 dimension is the ensemble axis.
         """
         if x.ndim != 4:
             raise ValueError(
