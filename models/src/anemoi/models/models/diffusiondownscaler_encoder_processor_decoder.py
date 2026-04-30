@@ -1109,6 +1109,16 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             channel_indices = self.get_matching_channel_indices(target_dataset).to(x_source_denorm.device)
             state_outp[..., prognostic_out] += x_source_denorm[..., channel_indices]
 
+        # Direct-prediction overwrite: state-denormalized raw prediction, no x_interp
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None:
+            state_outp[..., dp_model_idx] = post_processors_state[target_dataset](
+                model_output[..., dp_model_idx],
+                in_place=False,
+                data_index=dp_data_idx,
+                skip_imputation=skip_imputation,
+            )
+
         return state_outp
 
     def _after_sampling(
