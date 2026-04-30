@@ -1,0 +1,17 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1to6h-refc-value-loss-no-refc-input
+  - _self_
+
+config_validation: True
+
+# Verification variant that exports the exact configured validation loss over
+# every validation batch/sample/lead/variable.  It keeps the same model,
+# no-refc-input role split, and refc value/range-weighted training loss as the
+# refc-value/no-refc-input verification config.
+
+diagnostics:
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.loss_table.ExportValidationLossTable
+      output_dir: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/loss_tables/1to6h_refc_value_no_refc_input
+      every_n_batches: 1
+      write_sample_variable_rows: true
