@@ -257,7 +257,7 @@ class SphericalHarmonicTransform(Module):
         from functools import partial
 
         if x.device.type != "cuda":
-            return self.rfft_rings_reduced_naive(x)
+            raise RuntimeError('Graphed rFFT requested but input device is not "cuda"')
 
         key = (tuple(x.shape), x.dtype, x.device, x.requires_grad)
         if key not in self._graphed_rfft_cache:
