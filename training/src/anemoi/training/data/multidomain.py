@@ -63,33 +63,40 @@ class MultiDomainDataset(MultiDataset):
         Return:
             None
         """
+
         self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
         self._lazy_init_model_and_reader_group_info()
-        self.valid_date_indices = {
-            name: get_usable_indices(
-                ds.missing,
-                len(ds.dates),
-                relative_date_indices[name],
-                ds.trajectory_ids if ds.has_trajectories else None,
-            )
-            for name, ds in self.data_readers.items()
-        }
-                # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
+        self.relative_date_indices = relative_date_indices
+        self.valid_date_indices = self._valid_date_indices
+
         self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+            name: normalize_time_indices(indices) for name, indices in self.relative_date_indices.items()
         }
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
-
+    
+    @cached_property
+    def _valid_date_indices(self) -> dict[str, TimeIndices]:
+        """Compute valid date indices for each domain."""
+        return {
+            name: get_usable_indices(
+                ds.missing,
+                len(ds.dates),
+                self.relative_date_indices[name],
+                ds.trajectory_ids if ds.has_trajectories else None,
+            )
+            for name, ds in self.data_readers.items()
+        }
+    
     def per_worker_init(self, n_workers, worker_id):
         self.worker_id = worker_id
 
-        for dataset, indices in self.relative_date_indices.items():
-            shard_size = len(self.valid_date_indices[dataset]) // self.sample_comm_num_groups
+        for dataset, indices in self.valid_date_indices.items():
+            shard_size = len(indices) // self.sample_comm_num_groups
             shard_start = self.sample_comm_group_id * shard_size
 
             self.n_samples_per_worker[dataset] = shard_size // n_workers
@@ -145,17 +152,13 @@ class MultiDomainDataset(MultiDataset):
 
     def __iter__(self) -> tuple[torch.Tensor, str]:
         if self.shuffle:
-            shuffled_indices = {
+            shuffled_chunk_indices = {
                 dataset: self.rng.choice(
                     indices,
                     size=len(indices),
                     replace=False,
-                )
+                )[self.chunk_index_range[dataset]]
                 for dataset, indices in self.valid_date_indices.items()
-            }
-            shuffled_chunk_indices = {
-                domain: shuffled_indices[domain][self.chunk_index_range[domain]]
-                for domain in self.dataset_names
             }
             labeled_samples_and_indexes = [
                 (domain, i)
