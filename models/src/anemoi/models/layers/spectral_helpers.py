@@ -261,7 +261,6 @@ class SphericalHarmonicTransform(Module):
 
         key = (tuple(x.shape), x.dtype, x.device, x.requires_grad)
         if key not in self._graphed_rfft_cache:
-            LOGGER.debug(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
             sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
             with torch.amp.autocast("cuda", cache_enabled=False):
                 # Separate graphs for each latitude band, but all created with a single make_graphed_callables call
@@ -272,8 +271,6 @@ class SphericalHarmonicTransform(Module):
                     ),
                     tuple([(sample_x,)] * len(self.latitude_bands)),
                 )
-        else:
-            LOGGER.debug(f"Reusing graphed callable for rfft_rings_reduced with input signature {key}")
 
         return torch.cat([f(x) for f in self._graphed_rfft_cache[key]], dim=-2)
 
