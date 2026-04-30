@@ -149,6 +149,9 @@ class SphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
+        use_graphs : bool, optional
+            Whether to use CUDA graphs for the reduced grid rFFT. Only has an effect if the input is on CUDA. Default
+            is False.
         """
 
         super().__init__()
@@ -175,6 +178,11 @@ class SphericalHarmonicTransform(Module):
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
 
+        # To have further control over the memory consumption of the graphed implementation, we
+        # group latitudes together into "bands" and create one graph for each band.
+        # It seems that most devices today do not have enough memory to handle a graphed global
+        # rFFT.
+        # 3 bands works well on our H100s with 120 GB of memory.
         number_of_latitude_bands = 3
         self.latitude_bands = []
         for band_idx in range(number_of_latitude_bands):
@@ -246,6 +254,7 @@ class SphericalHarmonicTransform(Module):
 
     def rfft_rings_reduced_graphed_autograd(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+        Uses graphs.
 
         Parameters
         ----------
@@ -268,6 +277,7 @@ class SphericalHarmonicTransform(Module):
             LOGGER.debug(f"Compiling graphed callable for rfft_rings_reduced with input signature {key}")
             sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
             with torch.amp.autocast("cuda", cache_enabled=False):
+                # Separate graphs for each latitude band, but all created with a single make_graphed_callables call
                 self._graphed_rfft_cache[key] = make_graphed_callables(
                     tuple(
                         partial(self.rfft_rings_reduced_banded, start_lat=latitude_band[0], end_lat=latitude_band[1])
