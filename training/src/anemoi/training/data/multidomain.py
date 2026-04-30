@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 import os
 import random
@@ -15,22 +14,16 @@ from functools import cached_property
 
 import numpy as np
 import torch
-from rich.console import Console
-from rich.tree import Tree
-from torch.utils.data import IterableDataset
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
+from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.training.data.usable_indices import get_usable_indices
-from anemoi.training.utils.time_indices import normalize_time_indices
-from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.data.multidataset import MultiDataset
-from anemoi.models.distributed.balanced_partition import (
-    get_balanced_partition_range,
-    get_partition_range,
-)
+from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.training.utils.time_indices import offset_time_indices
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,11 +38,11 @@ class MultiDomainDataset(MultiDataset):
         shuffle: bool = True,
         label: str = "multidomain",
     ) -> None:
-        """
-        A dataset that combines multiple datasets together,
-        where each dataset is associated with a different "domain".
-        The domains are defined by the keys of the `data_readers` and
-        `relative_date_indices` dictionaries.
+        """Initialize a MultiDomainDataset with multiple data_readers.
+
+        Each dataset has it own data reader and relative date indices, allowing for
+        flexible sampling across multiple domains
+        each with its own data reader and relative date indices.
 
         Args:
             data_readers (dict[str, BaseAnemoiReader]):
@@ -63,7 +56,6 @@ class MultiDomainDataset(MultiDataset):
         Return:
             None
         """
-
         self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
@@ -78,7 +70,7 @@ class MultiDomainDataset(MultiDataset):
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
-    
+
     @cached_property
     def _valid_date_indices(self) -> dict[str, TimeIndices]:
         """Compute valid date indices for each domain."""
@@ -91,8 +83,19 @@ class MultiDomainDataset(MultiDataset):
             )
             for name, ds in self.data_readers.items()
         }
-    
-    def per_worker_init(self, n_workers, worker_id):
+
+    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
+        """Initialize specific parts of each data_reader for each worker.
+
+        Each worker will be responsible for a shard of the data,
+        and this method computes the indices for each worker's shard.
+
+        Args:
+            n_workers (int): The number of workers.
+            worker_id (int): The ID of the current worker.'
+        Returns:
+            None
+        """
         self.worker_id = worker_id
 
         for dataset, indices in self.valid_date_indices.items():
@@ -100,9 +103,7 @@ class MultiDomainDataset(MultiDataset):
             shard_start = self.sample_comm_group_id * shard_size
 
             self.n_samples_per_worker[dataset] = shard_size // n_workers
-            low, high = get_balanced_partition_range(
-                shard_size, n_workers, worker_id, offset=shard_start
-            )
+            low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
 
             self.chunk_index_range[dataset] = np.arange(low, high, dtype=np.uint32)
 
@@ -131,19 +132,19 @@ class MultiDomainDataset(MultiDataset):
             )
 
     def get_sample(self, domain_name: str, index: int) -> torch.Tensor:
-        """
-        Get a sample from the specified domain and index.
+        """Get a sample from the specified domain and index.
+
         Args:
             domain_name (str): The name of the domain to sample from.
             index (int): The index of the sample to retrieve.
-        Returns:
+
+        Returns
+        -------
             torch.Tensor: The sample retrieved from the specified domain and index.
         """
         time_step = offset_time_indices(index, self.relative_date_indices[domain_name])
         if self.shard_shapes is not None and self.shard_shapes[domain_name] is not None:
-            start, end = get_partition_range(
-                self.shard_shapes[domain_name], self.reader_group_rank
-            )
+            start, end = get_partition_range(self.shard_shapes[domain_name], self.reader_group_rank)
             grid_indices = slice(start, end)
         else:
             grid_indices = slice(None)
@@ -151,6 +152,13 @@ class MultiDomainDataset(MultiDataset):
         return self.data_readers[domain_name].get_sample(time_step, grid_indices)
 
     def __iter__(self) -> tuple[torch.Tensor, str]:
+        """Return an iterator that yields a tuple torch.Tensor and its corresponding domain name.
+
+        Returns
+        -------
+        tuple[torch.Tensor, str]
+            A tuple containing the tensor sample and its corresponding domain name
+        """
         if self.shuffle:
             shuffled_chunk_indices = {
                 dataset: self.rng.choice(
@@ -161,9 +169,7 @@ class MultiDomainDataset(MultiDataset):
                 for dataset, indices in self.valid_date_indices.items()
             }
             labeled_samples_and_indexes = [
-                (domain, i)
-                for domain, indices in shuffled_chunk_indices.items()
-                for i in indices
+                (domain, i) for domain, indices in shuffled_chunk_indices.items() for i in indices
             ]
 
             labeled_samples = self.rng.choice(
@@ -173,14 +179,9 @@ class MultiDomainDataset(MultiDataset):
             )
         else:
             shuffled_chunk_indices = {
-                domain: indices[self.chunk_index_range[domain]]
-                for domain, indices in self.valid_date_indices.items()
+                domain: indices[self.chunk_index_range[domain]] for domain, indices in self.valid_date_indices.items()
             }
-            labeled_samples = [
-                (domain, i)
-                for domain, inds in shuffled_chunk_indices.items()
-                for i in inds
-            ]
+            labeled_samples = [(domain, i) for domain, inds in shuffled_chunk_indices.items() for i in inds]
 
         LOGGER.debug(
             (

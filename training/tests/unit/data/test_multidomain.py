@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import re
-
 import numpy as np
 import pytest
 from pytest_mock import MockFixture
@@ -40,12 +38,15 @@ class TestMultiDomain:
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
         return MultiDomainDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
-    
+
     def test_sharding(self, multi_domain: MultiDomainDataset) -> None:
         """Test that sharding logic correctly partitions the dataset."""
-        shard_0 = multi_domain.per_worker_init(n_workers=2, worker_id=0)
-        expected_indices ={"dataset_a": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]), "dataset_b": np.array([0, 1, 2, 3, 4, 5, 6])}
-        for key in expected_indices.keys():
+        multi_domain.per_worker_init(n_workers=2, worker_id=0)
+        expected_indices = {
+            "dataset_a": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+            "dataset_b": np.array([0, 1, 2, 3, 4, 5, 6]),
+        }
+        for key in expected_indices:
             assert np.array_equal(multi_domain.chunk_index_range[key], expected_indices[key])
 
     def test_valid_date_indices(self, multi_domain: MultiDomainDataset) -> None:
@@ -61,7 +62,11 @@ class TestMultiDomain:
         valid_indices = multi_domain.valid_date_indices
 
         # Should return a dictionary with concatenation [0, 11, 12, 13, ..., 22, 23]
-        expected_indices = {"dataset_a": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]), 
-                            "dataset_b": np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])}
-        for key in expected_indices.keys():
+        expected_indices = {
+            "dataset_a": np.array(
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+            ),
+            "dataset_b": np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]),
+        }
+        for key in expected_indices:
             assert np.array_equal(valid_indices[key], expected_indices[key])
