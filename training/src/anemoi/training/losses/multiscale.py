@@ -102,7 +102,7 @@ class MultiscaleLossWrapper(BaseLoss):
         """
         super().__init__(ignore_nans=ignore_nans)
 
-        _has_matrices = loss_matrices and any(m is not None for m in loss_matrices)
+        _has_matrices = bool(loss_matrices)  # [None] still signals file mode (identity scale)
         if _has_matrices or loss_matrices_path is not None:
             LOGGER.warning(
                 "Passing 'loss_matrices' / 'loss_matrices_path' as top-level kwargs is deprecated. "
@@ -180,6 +180,15 @@ class MultiscaleLossWrapper(BaseLoss):
         )
 
         if "loss_matrices" in cfg:
+            from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
+
+            onthefly_keys = set(MultiscaleConfigOnTheFlySchema.model_fields)
+            if cfg.keys() & onthefly_keys:
+                msg = (
+                    "multiscale_config mixes file-based ('loss_matrices') and on-the-fly "
+                    f"keys ({cfg.keys() & onthefly_keys}). Use one mode only."
+                )
+                raise ValueError(msg)
             return self._load_file_smoothing_matrices(
                 cfg.get("loss_matrices_path"),
                 cfg["loss_matrices"],

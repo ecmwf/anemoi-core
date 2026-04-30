@@ -91,17 +91,18 @@ def build_truncation_subgraph(
     data_node_name: str,
     truncation_config: Mapping | Any,
 ) -> HeteroData:
-    """Add truncation nodes and edges to *graph_data* in-place.
+    """Build a new subgraph containing data nodes and a coarser truncation grid.
 
-    Builds KNN edges between the data grid and a coarser truncation grid,
-    using hardcoded Gaussian edge weights (``gauss_weight``, ``l1`` norm).
+    To avoid copying data-node coordinates, this creates a fresh ``HeteroData``
+    but shares data-node coordinates with *graph_data* by reference and
+    adds KNN edges to a new ``truncation`` node group.
 
     Parameters
     ----------
     graph_data:
-        Main graph; mutated in-place with truncation nodes/edges added.
+        Main graph; data-node coordinates are read from here by reference.
     data_node_name:
-        Node type in *graph_data* that corresponds to the data grid.
+        Node type in *graph_data* that holds the data-grid coordinates.
     truncation_config:
         Compact mapping with keys:
 
@@ -112,7 +113,8 @@ def build_truncation_subgraph(
     Returns
     -------
     HeteroData
-        The same *graph_data* object, updated in-place.
+        A new subgraph with ``data_node_name`` and ``truncation`` node types
+        and KNN edges between them.
     """
     from anemoi.graphs.create import GraphCreator
 

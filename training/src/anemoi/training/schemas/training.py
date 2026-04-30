@@ -295,15 +295,53 @@ class GraphLossMatrixSchema(BaseModel):
     row_normalize: bool = False
 
 
+class MultiscaleConfigDiskSchema(BaseModel):
+    """File-based multiscale config: smoothing matrices loaded from .npz files."""
+
+    loss_matrices_path: str | None = None
+    loss_matrices: list[str | None]
+
+
+class MultiscaleConfigOnTheFlySchema(BaseModel):
+    """On-the-fly multiscale config: smoothing subgraphs built from the main graph."""
+
+    num_scales: int | None = None
+    base_num_nearest_neighbours: int | None = None
+    base_sigma: float | None = None
+    scale_factor: int | None = None
+    smoothers: list[dict] | None = None
+
+    @model_validator(mode="after")
+    def check_num_scales_or_smoothers(self) -> Self:
+        if self.num_scales is None and self.smoothers is None:
+            msg = "MultiscaleConfigOnTheFlySchema requires either 'num_scales' or 'smoothers'."
+            raise ValueError(msg)
+        return self
+
+
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
     weights: list[float]
     keep_batch_sharded: bool
-    multiscale_config: dict | None = None
-    # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
+    multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
+
+    @model_validator(mode="after")
+    def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
+        """Deprecated top-level file keys must not be combined with an on-the-fly multiscale_config."""
+        if (self.loss_matrices is not None or self.loss_matrices_path is not None) and isinstance(
+            self.multiscale_config,
+            MultiscaleConfigOnTheFlySchema,
+        ):
+            msg = (
+                "Deprecated 'loss_matrices'/'loss_matrices_path' cannot be combined with "
+                "an on-the-fly 'multiscale_config'. Move file paths inside multiscale_config."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -324,7 +362,7 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    losses: list[MultiScaleLossSchema | SpectralLossSchema | BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -332,12 +370,19 @@ class CombinedLossSchema(BaseLossSchema):
     @field_validator("losses", mode="before")
     @classmethod
     def add_empty_scalers(cls, losses: Any) -> Any:
-        """Add empty scalers to loss functions, as scalers can be set at top level."""
+        """Add empty scalers to loss functions that use them (not MultiscaleLossWrapper)."""
+        from omegaconf import OmegaConf
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
+            target = loss.get("_target_", "") if hasattr(loss, "get") else ""
+            if "MultiscaleLossWrapper" in str(target):
+                continue
             if "scalers" not in loss:
-                with open_dict(loss):
+                if OmegaConf.is_config(loss):
+                    with open_dict(loss):
+                        loss["scalers"] = []
+                else:
                     loss["scalers"] = []
         return losses
 

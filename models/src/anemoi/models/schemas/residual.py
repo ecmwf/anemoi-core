@@ -1,7 +1,9 @@
 from typing import Annotated
 from typing import Literal
+from typing import Self
 
 from pydantic import Field
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -17,42 +19,42 @@ class SkipConnectionSchema(BaseModel):
     )
 
 
+class TruncationConfigDiskSchema(BaseModel):
+    """File-based truncation config: projection matrices loaded from .npz files."""
+
+    truncation_up_file_path: str
+    truncation_down_file_path: str
+
+
+class TruncationConfigOnTheFlySchema(BaseModel):
+    """On-the-fly truncation config: truncation subgraph built from the main graph."""
+
+    grid: str | None = None
+    node_builder: dict | None = None
+    num_nearest_neighbours: int = 3
+    sigma: float = 1.0
+
+    @model_validator(mode="after")
+    def check_grid_or_node_builder(self) -> Self:
+        if self.grid is None and self.node_builder is None:
+            raise ValueError("TruncationConfigOnTheFlySchema requires either 'grid' or 'node_builder'.")
+        return self
+
+
 class TruncatedConnectionSchema(BaseModel):
-    """Schema for truncated connection residuals.
-
-    Supports two modes, both specified via ``truncation_config``:
-
-    - **On-the-fly**: provide ``grid`` (or ``node_builder``) — truncation subgraph
-      is built internally from the main graph::
-
-        truncation_config:
-          grid: o32
-          num_nearest_neighbours: 3
-          sigma: 1.0
-
-    - **File-based**: provide ``truncation_up_file_path`` and
-      ``truncation_down_file_path`` inside ``truncation_config``::
-
-        truncation_config:
-          truncation_down_file_path: /path/to/down.npz
-          truncation_up_file_path: /path/to/up.npz
-    """
+    """Schema for truncated connection residuals."""
 
     target_: Literal["anemoi.models.layers.residual.TruncatedConnection"] = Field(..., alias="_target_")
     # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
     step: int = Field(-1, exclude=True)
-    truncation_config: dict | None = Field(
-        None,
-        description="Truncation config. For on-the-fly mode provide 'grid' (or 'node_builder'). "
-        "For file mode provide 'truncation_up_file_path' and 'truncation_down_file_path'.",
-    )
-    edge_weight_attribute: str | None = Field(None)
-    src_node_weight_attribute: str | None = Field(None)
-    autocast: bool = Field(False)
-    row_normalize: bool = Field(False)
+    truncation_config: TruncationConfigDiskSchema | TruncationConfigOnTheFlySchema | None = None
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    autocast: bool = False
+    row_normalize: bool = False
     # Deprecated: pass inside truncation_config instead.
-    truncation_up_file_path: str | None = Field(None)
-    truncation_down_file_path: str | None = Field(None)
+    truncation_up_file_path: str | None = None
+    truncation_down_file_path: str | None = None
 
 
 ResidualConnectionSchema = Annotated[

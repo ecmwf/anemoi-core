@@ -160,6 +160,14 @@ class TruncatedConnection(BaseResidualConnection):
         if truncation_config is not None:
             up_path = truncation_config.get("truncation_up_file_path")
             down_path = truncation_config.get("truncation_down_file_path")
+            has_file = up_path is not None or down_path is not None
+            from anemoi.models.schemas.residual import TruncationConfigOnTheFlySchema
+
+            onthefly_keys = set(TruncationConfigOnTheFlySchema.model_fields)
+            has_onthefly = bool(set(truncation_config) & onthefly_keys)
+            if has_file and has_onthefly:
+                msg = "truncation_config mixes file-based and on-the-fly keys. Use one mode only."
+                raise ValueError(msg)
             if up_path is not None and down_path is not None:
                 truncation_up_file_path = up_path
                 truncation_down_file_path = down_path
