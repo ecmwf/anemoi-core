@@ -29,6 +29,50 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def _resolve_direct_prediction_indices(
+    dp_fields: list[str],
+    data_indices,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Resolve direct_prediction field names to model-space and data-space index tensors.
+
+    Returns (model_indices, data_indices) or (None, None) if no valid dp fields.
+    """
+    if not dp_fields:
+        return None, None
+
+    output_full = data_indices.data.output.full.tolist()
+    name_to_index = data_indices.data.output.name_to_index
+    prognostic_set = set(data_indices.model.output.prognostic.tolist())
+
+    dp_model_indices = []
+    dp_data_indices = []
+
+    for field_name in dp_fields:
+        if field_name not in name_to_index:
+            LOGGER.warning("direct_prediction field '%s' not in output name_to_index — skipping", field_name)
+            continue
+        data_idx = name_to_index[field_name]
+        if data_idx not in output_full:
+            LOGGER.warning("direct_prediction field '%s' (data_idx=%d) not in output.full — skipping", field_name, data_idx)
+            continue
+        model_idx = output_full.index(data_idx)
+        if model_idx not in prognostic_set:
+            LOGGER.warning(
+                "direct_prediction field '%s' (model_idx=%d) is not prognostic — skipping "
+                "(it may already be diagnostic, which is direct prediction by default)",
+                field_name,
+                model_idx,
+            )
+            continue
+        dp_model_indices.append(model_idx)
+        dp_data_indices.append(data_idx)
+        LOGGER.info("direct_prediction: '%s' → model_idx=%d, data_idx=%d", field_name, model_idx, data_idx)
+
+    if not dp_model_indices:
+        return None, None
+    return torch.tensor(dp_model_indices, dtype=torch.long), torch.tensor(dp_data_indices, dtype=torch.long)
+
+
 class GraphDiffusionDownscaler(BaseGraphModule):
     """Graph neural network downscaler for diffusion.
 
@@ -80,6 +124,29 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self._residual_pre_processors: dict[str, object] = {}
         self._residual_post_processors: dict[str, object] = {}
         self._validate_residual_processors()
+
+        # Resolve direct_prediction config and register model buffers
+        for target_ds in self._residual_pairs:
+            ds_config = getattr(config.data.datasets, target_ds, None)
+            dp_fields = list(getattr(ds_config, "direct_prediction", None) or []) if ds_config else []
+
+            dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(
+                dp_fields,
+                self.model.model.data_indices[target_ds],
+            )
+
+            if dp_model_idx is not None:
+                self.model.model.register_buffer(
+                    f"_direct_prediction_indices_{target_ds}",
+                    dp_model_idx,
+                    persistent=True,
+                )
+                self.model.model.register_buffer(
+                    f"_direct_prediction_data_indices_{target_ds}",
+                    dp_data_idx,
+                    persistent=True,
+                )
+                LOGGER.info("Registered direct_prediction buffers for %s: %d vars", target_ds, len(dp_model_idx))
 
     def _validate_residual_processors(self) -> None:
         """Validate and cache residual/tendency processors for each residual pair.

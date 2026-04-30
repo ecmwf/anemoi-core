@@ -230,3 +230,38 @@ def test_add_interp_with_dp_and_tendencies():
     # tendency denorm all: [100,100,10] → prognostic += state(inp): [200,250,13]
     # dp overwrite: state_denorm(model[...,2]) = identity(5) = 5
     assert torch.allclose(result, torch.tensor([[[[[200.0, 250.0, 5.0]]]]]))
+
+
+def test_resolve_direct_prediction_indices():
+    """Field names are correctly resolved to model-space and data-space indices."""
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    data_indices = _make_index_collection({"10u": 0, "10v": 1, "tp": 2})
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(["tp"], data_indices)
+
+    assert dp_model_idx is not None
+    assert dp_model_idx.tolist() == [2]
+    assert dp_data_idx.tolist() == [2]
+
+
+def test_resolve_direct_prediction_empty():
+    """Empty dp_fields returns (None, None)."""
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    data_indices = _make_index_collection({"10u": 0, "10v": 1, "tp": 2})
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices([], data_indices)
+
+    assert dp_model_idx is None
+    assert dp_data_idx is None
+
+
+def test_resolve_direct_prediction_skips_diagnostic():
+    """dp field that is diagnostic (not prognostic) is skipped with warning."""
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    data_indices = _make_index_collection({"10u": 0, "tp": 1}, diagnostic=["tp"])
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(["tp"], data_indices)
+
+    # tp is diagnostic, not prognostic — should be skipped
+    assert dp_model_idx is None
+    assert dp_data_idx is None
