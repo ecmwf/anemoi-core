@@ -1,6 +1,6 @@
+import inspect
 from pathlib import Path
 
-import inspect
 import omegaconf
 import pytest
 import yaml
@@ -180,7 +180,6 @@ def test_mlflow_schema_covers_logger_init_params() -> None:
     run_id and fork_run_id are excluded because they are injected at runtime
     by get_mlflow_logger, not read from the config schema.
     """
-
     # Parameters injected at runtime rather than sourced from config
     runtime_params = {"self", "run_id", "fork_run_id"}
 
