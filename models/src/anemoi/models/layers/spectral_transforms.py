@@ -252,6 +252,7 @@ class ReducedSHT(SpectralTransform):
         self,
         grid: str,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -290,7 +291,9 @@ class ReducedSHT(SpectralTransform):
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -310,6 +313,7 @@ class OctahedralSHT(SpectralTransform):
         self,
         nlat: int,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -326,7 +330,9 @@ class OctahedralSHT(SpectralTransform):
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:

@@ -140,7 +140,7 @@ class SphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphs: bool = False) -> None:
+    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphed_rfft: bool = False) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
         Parameters
@@ -149,7 +149,7 @@ class SphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
-        use_graphs : bool, optional
+        use_graphed_rfft : bool, optional
             Whether to use CUDA graphs for the reduced grid rFFT. Only has an effect if the input is on CUDA. Default
             is False.
         """
@@ -173,7 +173,7 @@ class SphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
-            self.rfft_rings = self.rfft_rings_reduced_graphed if use_graphs else self.rfft_rings_reduced_naive
+            self.rfft_rings = self.rfft_rings_reduced_graphed if use_graphed_rfft else self.rfft_rings_reduced_naive
         else:
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
