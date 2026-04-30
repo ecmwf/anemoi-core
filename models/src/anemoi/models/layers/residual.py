@@ -90,29 +90,33 @@ class TruncatedConnection(BaseResidualConnection):
     ----------
     graph : HeteroData, optional
         Graph containing the truncation subgraphs.
-    edge_weight_attribute : str, optional
-        Edge attribute used as projection weights (default: ``gauss_weight``).
     src_node_weight_attribute : str, optional
         Source-node attribute used as additional projection weights.
-    autocast : bool, default False
-        Whether to use automatic mixed precision for the projections.
-    truncation_up_file_path : str, optional
-        Path to an ``.npz`` file for the up-projection matrix.
-    truncation_down_file_path : str, optional
-        Path to an ``.npz`` file for the down-projection matrix.
+    edge_weight_attribute : str, optional
+        Edge attribute used as projection weights (default: ``gauss_weight``).
+    truncation_config : dict, optional
+        Configuration used to build or load the truncation projections.
     truncation_up_edges_name : tuple[str, str, str], optional
         Pre-resolved ``(src, relation, dst)`` edge type for the up-projection.
     truncation_down_edges_name : tuple[str, str, str], optional
         Pre-resolved ``(src, relation, dst)`` edge type for the down-projection.
+    data_node_name : str, default "data"
+        Name of the data nodes in ``graph``.
+    autocast : bool, default False
+        Whether to use automatic mixed precision for the projections.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
+    truncation_up_file_path : str, optional
+        Deprecated path to an ``.npz`` file for the up-projection matrix.
+    truncation_down_file_path : str, optional
+        Deprecated path to an ``.npz`` file for the down-projection matrix.
 
     Examples
     --------
     >>> # Graph-based path (edge names supplied by ProjectionCreator)
     >>> conn = TruncatedConnection(
     ...     graph=graph,
-    ...     data_nodes="data",
+    ...     data_node_name="data",
     ...     truncation_down_edges_name=("data", "to", "truncation"),
     ...     truncation_up_edges_name=("truncation", "to", "data"),
     ...     edge_weight_attribute="gauss_weight",
@@ -270,9 +274,8 @@ class TruncatedConnection(BaseResidualConnection):
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
-        shard_shapes = apply_shard_shapes(x, 0, grid_shard_shapes) if grid_shard_shapes is not None else None
-
         x = einops.rearrange(x, "batch ensemble grid features -> (batch ensemble) grid features")
+        shard_shapes = apply_shard_shapes(x, -2, grid_shard_shapes) if grid_shard_shapes is not None else None
         x = self._to_channel_shards(x, shard_shapes, model_comm_group)
         x = self.projector(x, self.provider_down.get_edges(device=x.device))
         x = self.projector(x, self.provider_up.get_edges(device=x.device))
