@@ -163,3 +163,70 @@ def test_add_interp_reconstruction():
     # 10u: 50 + 100 = 150, tp: 5 (unchanged)
     assert torch.allclose(result[..., prog_out], torch.tensor([[[[[150.0]]]]]))
     assert torch.allclose(result[..., diag_out], torch.tensor([[[[[5.0]]]]]))
+
+
+def _make_dp_model():
+    """Model where tp is prognostic but direct-predicted (not residual)."""
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    model.data_indices = {
+        "in_lres": _make_index_collection({"10u": 0, "10v": 1, "tp": 2}),
+        "out_hres": _make_index_collection({"10u": 0, "10v": 1, "tp": 2}),
+    }
+    model._residual_pairs = {"out_hres": "in_lres"}
+    model._matching_channel_indices_out_hres = torch.tensor([0, 1, 2])
+    model._matching_indices_keys = [("out_hres", "in_lres", "_matching_channel_indices_out_hres")]
+    # dp buffers: tp (model idx 2) is direct-predicted
+    model._direct_prediction_indices_out_hres = torch.tensor([2], dtype=torch.long)
+    model._direct_prediction_data_indices_out_hres = torch.tensor([2], dtype=torch.long)
+    return model
+
+
+def test_compute_residuals_with_dp():
+    """dp vars get raw y (state-normalized), not residual (tendency-normalized)."""
+    model = _make_dp_model()
+
+    target = model.compute_residuals(
+        y=torch.tensor([[[[[150.0, 200.0, 5.0]]]]]),
+        x_interp=torch.tensor([[[[[100.0, 150.0, 3.0]]]]]),
+        pre_processors_state=_IdentityProcessor(),
+        pre_processors_tendencies=_ScaleBy2Processor(),
+    )
+
+    # 10u: (150-100)*2=100, 10v: (200-150)*2=100, tp: identity(5)=5 (raw, state-normalized)
+    assert torch.allclose(target, torch.tensor([[[[[100.0, 100.0, 5.0]]]]]))
+
+
+def test_add_interp_with_dp():
+    """dp vars get state-denormalized raw prediction, no x_interp addition."""
+    model = _make_dp_model()
+    identity = _IdentityProcessor()
+
+    result = model.add_interp_to_state(
+        state_inp=torch.tensor([[[[[100.0, 150.0, 3.0]]]]]),
+        model_output=torch.tensor([[[[[50.0, 50.0, 5.0]]]]]),
+        post_processors_state={"in_lres": identity, "out_hres": identity},
+        post_processors_tendencies=None,
+    )
+
+    # 10u: 50+100=150, 10v: 50+150=200, tp: identity(5)=5 (no x_interp)
+    assert torch.allclose(result, torch.tensor([[[[[150.0, 200.0, 5.0]]]]]))
+
+
+def test_add_interp_with_dp_and_tendencies():
+    """dp overwrite is correct even when tendency processors are used for initial denorm."""
+    model = _make_dp_model()
+    identity = _IdentityProcessor()
+    scale2 = _ScaleBy2Processor()
+
+    result = model.add_interp_to_state(
+        state_inp=torch.tensor([[[[[100.0, 150.0, 3.0]]]]]),
+        model_output=torch.tensor([[[[[50.0, 50.0, 5.0]]]]]),
+        post_processors_state={"in_lres": identity, "out_hres": identity},
+        post_processors_tendencies={"out_hres": scale2},
+    )
+
+    # tendency denorm all: [100,100,10] → prognostic += state(inp): [200,250,13]
+    # dp overwrite: state_denorm(model[...,2]) = identity(5) = 5
+    assert torch.allclose(result, torch.tensor([[[[[200.0, 250.0, 5.0]]]]]))
