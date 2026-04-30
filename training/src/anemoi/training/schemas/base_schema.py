@@ -35,6 +35,7 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
+from .tasks import TaskSchema
 from .training import TrainingSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -137,6 +138,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Graph configuration."""
     model: ModelSchema
     """Model configuration."""
+    task: TaskSchema
+    """Task configuration."""
     training: TrainingSchema
     """Training configuration."""
     config_validation: bool = True
@@ -181,6 +184,8 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Graph configuration."""
     model: Any
     """Model configuration."""
+    task: Any
+    """Task configuration."""
     training: Any
     """Training configuration."""
     config_validation: bool = False
