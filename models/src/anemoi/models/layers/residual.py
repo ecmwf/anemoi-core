@@ -8,10 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
-import logging
 
 import einops
 import torch
@@ -27,6 +27,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 
 
 LOGGER = logging.getLogger(__name__)
+
 
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
@@ -46,7 +47,9 @@ class BaseResidualConnection(nn.Module, ABC):
 
         self.drop_indices = [model_data_indices.name_to_index[name] for name in self.drop_names]
         if len(self.drop_indices) > 0:
-            LOGGER.info(f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}")
+            LOGGER.info(
+                f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}"
+            )
 
     @abstractmethod
     def forward(
