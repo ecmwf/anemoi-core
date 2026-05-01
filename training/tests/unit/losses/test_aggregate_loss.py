@@ -151,15 +151,15 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
     pred = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
 
-    agg_fn = getattr(torch, agg_op)
-    pred_result = agg_fn(pred, dim=1, keepdim=True)
-    target_result = agg_fn(target, dim=1, keepdim=True)
-    if agg_op in {"min", "max"}:
-        pred_agg = pred_result.values
-        target_agg = target_result.values
+    if agg_op == "min":
+        pred_agg = torch.amin(pred, dim=1, keepdim=True)
+        target_agg = torch.amin(target, dim=1, keepdim=True)
+    elif agg_op == "max":
+        pred_agg = torch.amax(pred, dim=1, keepdim=True)
+        target_agg = torch.amax(target, dim=1, keepdim=True)
     else:
-        pred_agg = pred_result
-        target_agg = target_result
+        pred_agg = torch.mean(pred, dim=1, keepdim=True)
+        target_agg = torch.mean(target, dim=1, keepdim=True)
 
     expected = inner(pred_agg, target_agg)
     result = TimeAggregateLossWrapper([agg_op], inner)(pred, target)
@@ -212,18 +212,31 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
 
-    agg_fn = getattr(torch, agg_op)
-    pred_result = agg_fn(pred, dim=1, keepdim=True)
-    target_result = agg_fn(target, dim=1, keepdim=True)
-    if agg_op in {"min", "max"}:
-        pred_agg = pred_result.values
-        target_agg = target_result.values
+    if agg_op == "min":
+        pred_agg = torch.amin(pred, dim=1, keepdim=True)
+        target_agg = torch.amin(target, dim=1, keepdim=True)
+    elif agg_op == "max":
+        pred_agg = torch.amax(pred, dim=1, keepdim=True)
+        target_agg = torch.amax(target, dim=1, keepdim=True)
     else:
-        pred_agg = pred_result
-        target_agg = target_result
+        pred_agg = torch.mean(pred, dim=1, keepdim=True)
+        target_agg = torch.mean(target, dim=1, keepdim=True)
 
-    expected = inner(pred_agg, target_agg, squash_mode="avg")
+    expected = inner(pred_agg, target_agg)
     result = TimeAggregateLossWrapper([agg_op], inner)(pred, target)
+
+    assert torch.allclose(result, expected, atol=1e-6)
+
+
+def test_crps_wrapper_forwards_explicit_squash_mode() -> None:
+    inner = _make_crps_loss()
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    pred_mean = torch.mean(pred, dim=1, keepdim=True)
+    target_mean = torch.mean(target, dim=1, keepdim=True)
+
+    expected = inner(pred_mean, target_mean, squash_mode="avg")
+    result = TimeAggregateLossWrapper(["mean"], inner)(pred, target, squash_mode="avg")
 
     assert torch.allclose(result, expected, atol=1e-6)
 

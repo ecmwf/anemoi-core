@@ -43,7 +43,7 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: str | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """Compute the time aggregate loss over all time aggregation types.
@@ -64,8 +64,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             Grid shard slice, by default ``None``.
         group : ProcessGroup | None, optional
             Distributed group for reduction, by default ``None``.
-        squash_mode : str, optional
-            Variable-dimension reduction mode, by default ``"avg"``.
+        squash_mode : str | None, optional
+            Variable-dimension reduction mode. If omitted, the wrapped loss default is used.
 
         Returns
         -------
@@ -83,24 +83,24 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
             group=group,
-            squash_mode=squash_mode,
             **kwargs,
         )
+        if squash_mode is not None:
+            shared_kwargs["squash_mode"] = squash_mode
 
         for agg_op in self.time_aggregation_types:
             if agg_op == "diff":
                 pred_agg = pred[:, 1:, ...] - pred[:, :-1, ...]  # (bs, time-1, ens, latlon, nvar)
                 target_agg = target[:, 1:, ...] - target[:, :-1, ...]  # (bs, time-1, latlon, nvar)
-            elif agg_op in {"mean", "min", "max"}:
-                agg_fn = getattr(torch, agg_op)
-                pred_result = agg_fn(pred, dim=1, keepdim=True)
-                target_result = agg_fn(target, dim=1, keepdim=True)
-                if agg_op in {"max", "min"}:
-                    pred_agg = pred_result.values  # (bs, 1, ens, latlon, nvar)
-                    target_agg = target_result.values  # (bs, 1, latlon, nvar)
-                else:
-                    pred_agg = pred_result  # (bs, 1, ens, latlon, nvar)
-                    target_agg = target_result  # (bs, 1, latlon, nvar)
+            elif agg_op == "mean":
+                pred_agg = torch.mean(pred, dim=1, keepdim=True)  # (bs, 1, ens, latlon, nvar)
+                target_agg = torch.mean(target, dim=1, keepdim=True)  # (bs, 1, latlon, nvar)
+            elif agg_op == "min":
+                pred_agg = torch.amin(pred, dim=1, keepdim=True)  # (bs, 1, ens, latlon, nvar)
+                target_agg = torch.amin(target, dim=1, keepdim=True)  # (bs, 1, latlon, nvar)
+            elif agg_op == "max":
+                pred_agg = torch.amax(pred, dim=1, keepdim=True)  # (bs, 1, ens, latlon, nvar)
+                target_agg = torch.amax(target, dim=1, keepdim=True)  # (bs, 1, latlon, nvar)
             else:
                 msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
                 raise ValueError(msg)
