@@ -61,10 +61,10 @@ def test_is_base_loss() -> None:
     assert isinstance(wrapper, BaseLoss)
 
 
-def test_stores_loss_fn_and_agg_types() -> None:
+def test_stores_loss_and_agg_types() -> None:
     inner = _make_loss()
     wrapper = TimeAggregateLossWrapper(["mean", "diff"], inner)
-    assert wrapper.loss_fn is inner
+    assert wrapper.loss is inner
     assert wrapper.time_aggregation_types == ["mean", "diff"]
 
 
