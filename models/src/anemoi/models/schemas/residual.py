@@ -17,6 +17,10 @@ class SkipConnectionSchema(BaseModel):
         description="Timestep index to use for the skip connection. "
         "Defaults to -1, which selects the most recent timestep.",
     )
+    drop: list[str] = Field(
+        [],
+        description="List of prognostic variable names to drop from the skip connection. Defaults to an empty list.",
+    )
 
 
 class TruncatedConnectionSchema(BaseModel):
@@ -52,6 +56,10 @@ class TruncatedConnectionSchema(BaseModel):
     )
     row_normalize: bool = Field(
         False, description="Whether to normalize projection matrix weights per row (target node) so each row sums to 1."
+    )
+    drop: list[str] = Field(
+        [],
+        description="List of prognostic variable names to drop from the skip connection. Defaults to an empty list.",
     )
 
     @model_validator(mode="after")
