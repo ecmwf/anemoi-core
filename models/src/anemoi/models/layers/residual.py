@@ -11,6 +11,7 @@
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
+import logging
 
 import einops
 import torch
@@ -23,6 +24,8 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 
+
+LOGGER = logging.getLogger(__name__)
 
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
@@ -59,9 +62,25 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(self, step: int = -1, **_) -> None:
+    def __init__(
+        self,
+        step: int = -1,
+        drop: list[str] = [],
+        data_indices = None,
+        **_
+    ) -> None:
         super().__init__()
         self.step = step
+        self.drop_names = drop
+
+        model_data_indices = data_indices.model.input
+        assert all(
+            v in model_data_indices.includes for v in self.drop_names
+        ), "Variable names in 'drop' list have to refer to prognostic variables."
+
+        self.drop_indices = [model_data_indices.name_to_index[name] for name in self.drop_names]
+        if len(self.drop_indices) > 0:
+            LOGGER.info(f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}")
 
     def forward(
         self,
@@ -72,6 +91,8 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        if len(self.drop_indices):
+            x_skip[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
         return self._expand_time(x_skip, n_step_output)
 
 
