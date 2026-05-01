@@ -8,10 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
-import logging
 
 import einops
 import torch
@@ -24,8 +24,8 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 
-
 LOGGER = logging.getLogger(__name__)
+
 
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
@@ -33,7 +33,7 @@ class BaseResidualConnection(nn.Module, ABC):
     def __init__(
         self,
         drop: list[str] = [],
-        data_indices = None,
+        data_indices=None,
     ) -> None:
         super().__init__()
         self.drop_names = drop
@@ -45,7 +45,9 @@ class BaseResidualConnection(nn.Module, ABC):
 
         self.drop_indices = [model_data_indices.name_to_index[name] for name in self.drop_names]
         if len(self.drop_indices) > 0:
-            LOGGER.info(f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}")
+            LOGGER.info(
+                f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}"
+            )
 
     @abstractmethod
     def forward(
@@ -84,13 +86,7 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(
-        self,
-        step: int = -1,
-        drop: list[str] = [],
-        data_indices = None,
-        **_
-    ) -> None:
+    def __init__(self, step: int = -1, drop: list[str] = [], data_indices=None, **_) -> None:
         super().__init__(drop=drop, data_indices=data_indices)
         self.step = step
 
@@ -179,7 +175,7 @@ class TruncatedConnection(BaseResidualConnection):
         autocast: bool = False,
         row_normalize: bool = False,
         drop: list[str] = [],
-        data_indices = None,
+        data_indices=None,
     ) -> None:
         super().__init__(drop=drop, data_indices=data_indices)
         up_edges, down_edges = self._get_edges_name(
