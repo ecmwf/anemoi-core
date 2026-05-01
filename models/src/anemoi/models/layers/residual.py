@@ -30,8 +30,22 @@ LOGGER = logging.getLogger(__name__)
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
-    def __init__(self, graph: HeteroData | None = None) -> None:
+    def __init__(
+        self,
+        drop: list[str] = [],
+        data_indices = None,
+    ) -> None:
         super().__init__()
+        self.drop_names = drop
+
+        model_data_indices = data_indices.model.input
+        assert all(
+            v in model_data_indices.includes for v in self.drop_names
+        ), "Variable names in 'drop' list have to refer to prognostic variables."
+
+        self.drop_indices = [model_data_indices.name_to_index[name] for name in self.drop_names]
+        if len(self.drop_indices) > 0:
+            LOGGER.info(f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}")
 
     @abstractmethod
     def forward(
@@ -47,8 +61,16 @@ class BaseResidualConnection(nn.Module, ABC):
         """
         pass
 
+    def _drop_variables(self, x: torch.Tensor) -> torch.Tensor:
+        """Zero out specified prognostic variables in the input tensor."""
+        if len(self.drop_indices):
+            x[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
+
+        return x
+
     @staticmethod
     def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
+        """Expand the input tensor along the time dimension if n_step_output is specified."""
         if n_step_output is None:
             return x
         return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1)
@@ -69,18 +91,8 @@ class SkipConnection(BaseResidualConnection):
         data_indices = None,
         **_
     ) -> None:
-        super().__init__()
+        super().__init__(drop=drop, data_indices=data_indices)
         self.step = step
-        self.drop_names = drop
-
-        model_data_indices = data_indices.model.input
-        assert all(
-            v in model_data_indices.includes for v in self.drop_names
-        ), "Variable names in 'drop' list have to refer to prognostic variables."
-
-        self.drop_indices = [model_data_indices.name_to_index[name] for name in self.drop_names]
-        if len(self.drop_indices) > 0:
-            LOGGER.info(f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}")
 
     def forward(
         self,
@@ -91,8 +103,7 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
-        if len(self.drop_indices):
-            x_skip[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
+        x_skip = self._drop_variables(x_skip)
         return self._expand_time(x_skip, n_step_output)
 
 
@@ -167,8 +178,10 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_file_path: Optional[str] = None,
         autocast: bool = False,
         row_normalize: bool = False,
+        drop: list[str] = [],
+        data_indices = None,
     ) -> None:
-        super().__init__()
+        super().__init__(drop=drop, data_indices=data_indices)
         up_edges, down_edges = self._get_edges_name(
             graph,
             data_nodes,
@@ -244,6 +257,7 @@ class TruncatedConnection(BaseResidualConnection):
         x = self._to_grid_shards(x, shard_shapes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
+        x = self._drop_variables(x)
         return self._expand_time(x, n_step_output)
 
     def _to_channel_shards(self, x, shard_shapes=None, model_comm_group=None):
