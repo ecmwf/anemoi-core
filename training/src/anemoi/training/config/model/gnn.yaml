@@ -1,3 +1,9 @@
+defaults:
+  # See graphtransformer.yaml for full documentation on nesting per dataset.
+  - encoder: gnn
+  - decoder: gnn
+  - residual: skip
+
 num_channels: 512
 cpu_offload: False
 
@@ -29,29 +35,6 @@ processor:
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
-encoder:
-  _target_: anemoi.models.layers.mapper.GNNForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 1
-  mlp_extra_layers: 0
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-
-decoder:
-  _target_: anemoi.models.layers.mapper.GNNBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 1
-  mlp_extra_layers: 0
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

@@ -1,4 +1,5 @@
 defaults:
+  # See graphtransformer.yaml for full documentation on nesting per dataset.
   - encoder: pointwise
   - decoder: pointwise
   - residual: skip

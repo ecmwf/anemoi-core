@@ -1,4 +1,5 @@
 defaults:
+  # See graphtransformer.yaml for full documentation on nesting per dataset.
   - encoder: gt16
   - decoder: gt16
   - residual: skip

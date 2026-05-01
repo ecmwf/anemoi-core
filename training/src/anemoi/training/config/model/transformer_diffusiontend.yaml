@@ -1,4 +1,5 @@
 defaults:
+  # See graphtransformer.yaml for full documentation on nesting per dataset.
   - encoder: gt16_qknorm
   - decoder: gt16_qknorm_zeroinit
   - residual: skip
