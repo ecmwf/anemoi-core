@@ -72,9 +72,7 @@ def test_forward(graph_data, data_indices):
 
 
 def test_forward_no_weight(graph_data, data_indices):
-    mapper = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", data_indices=data_indices
-    )
+    mapper = TruncatedConnection(graph_data, data_nodes="data", truncation_nodes="hidden", data_indices=data_indices)
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
