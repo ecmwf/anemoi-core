@@ -12,7 +12,7 @@ import logging
 from functools import cached_property
 
 import pytorch_lightning as pl
-from hydra import instantiate
+from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection

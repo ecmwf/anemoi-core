@@ -10,7 +10,6 @@
 import logging
 import os
 import random
-from functools import cached_property
 
 import numpy as np
 import torch
@@ -18,7 +17,7 @@ import torch
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.dataset import AnemoiDataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
@@ -30,7 +29,9 @@ LOGGER = logging.getLogger(__name__)
 # it may be that multidomain is not a good name for this, but it is what it is for now
 
 
-class MultiDomainDataset(MultiDataset):
+class MultiDomainDataset(AnemoiDataset):
+    """Multi-domain wrapper that returns different samples from multiple data readers."""
+
     def __init__(
         self,
         data_readers: dict[str, BaseAnemoiReader],
@@ -38,11 +39,7 @@ class MultiDomainDataset(MultiDataset):
         shuffle: bool = True,
         label: str = "multidomain",
     ) -> None:
-        """Initialize a MultiDomainDataset with multiple data_readers.
-
-        Each dataset has it own data reader and relative date indices, allowing for
-        flexible sampling across multiple domains
-        each with its own data reader and relative date indices.
+        """A dataset that combines multiple data_readers together.
 
         Args:
             data_readers (dict[str, BaseAnemoiReader]):
@@ -56,50 +53,46 @@ class MultiDomainDataset(MultiDataset):
         Return:
             None
         """
-        self.data_readers = data_readers
-        self.label = label
-        self.shuffle = shuffle
-        self.dataset_names = list(data_readers.keys())
-        self._lazy_init_model_and_reader_group_info()
-        self.relative_date_indices = relative_date_indices
-        self.valid_date_indices = self._valid_date_indices
+        super().__init__(
+            data_readers=data_readers,
+            shuffle=shuffle,
+            label=label,
+        )
 
+        self.valid_date_indices = {
+            name: get_usable_indices(
+                ds.missing,
+                len(ds.dates),
+                relative_date_indices[name],
+                ds.trajectory_ids if ds.has_trajectories else None,
+            )
+            for name, ds in self.data_readers.items()
+        }
+        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in self.relative_date_indices.items()
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
 
-    @cached_property
-    def _valid_date_indices(self) -> dict[str, TimeIndices]:
-        """Compute valid date indices for each domain."""
-        return {
-            name: get_usable_indices(
-                ds.missing,
-                len(ds.dates),
-                self.relative_date_indices[name],
-                ds.trajectory_ids if ds.has_trajectories else None,
-            )
-            for name, ds in self.data_readers.items()
-        }
-
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Initialize specific parts of each data_reader for each worker.
-
-        Each worker will be responsible for a shard of the data,
-        and this method computes the indices for each worker's shard.
+        """Initialize a specific worker.
 
         Args:
-            n_workers (int): The number of workers.
-            worker_id (int): The ID of the current worker.'
-        Returns:
+            n_workers : int
+                The total number of workers.
+            worker_id : int
+                The ID of the current worker (0-indexed).
+
+        Returns
+        -------
             None
         """
         self.worker_id = worker_id
 
-        for dataset, indices in self.valid_date_indices.items():
-            shard_size = len(indices) // self.sample_comm_num_groups
+        for dataset in self.dataset_names:
+            shard_size = len(self.valid_date_indices[dataset]) // self.sample_comm_num_groups
             shard_start = self.sample_comm_group_id * shard_size
 
             self.n_samples_per_worker[dataset] = shard_size // n_workers
@@ -168,6 +161,7 @@ class MultiDomainDataset(MultiDataset):
                 )[self.chunk_index_range[dataset]]
                 for dataset, indices in self.valid_date_indices.items()
             }
+
             labeled_samples_and_indexes = [
                 (domain, i) for domain, indices in shuffled_chunk_indices.items() for i in indices
             ]
