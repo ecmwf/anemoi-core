@@ -18,13 +18,12 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_channels
 from anemoi.models.distributed.graph import shard_channels
 from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
-from anemoi.models.data_indices.collection import IndexCollection
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,13 +87,7 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(
-        self,
-        step: int = -1,
-        drop: list[str] = [],
-        data_indices: IndexCollection | None = None,
-        **_
-    ) -> None:
+    def __init__(self, step: int = -1, drop: list[str] = [], data_indices: IndexCollection | None = None, **_) -> None:
         super().__init__(drop=drop, data_indices=data_indices)
         self.step = step
 
