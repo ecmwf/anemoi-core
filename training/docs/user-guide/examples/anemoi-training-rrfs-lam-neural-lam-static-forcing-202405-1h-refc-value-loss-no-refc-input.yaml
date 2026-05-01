@@ -1,0 +1,15 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-123h-refc-value-loss-no-refc-input
+  - _self_
+
+# Variant of the refc-value/no-refc-input training setup for a direct 1-hour
+# prediction only. This keeps the same data, model, loss, and no-refc-input
+# role split, but trains only the +1h target instead of the +1h/+2h/+3h
+# multi-output target.
+
+training:
+  multistep_output: 1
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
