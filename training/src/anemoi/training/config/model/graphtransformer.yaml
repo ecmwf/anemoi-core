@@ -10,8 +10,8 @@ defaults:
   #
   # For multiple datasets with different encoder/decoder/residual configs,
   # use the @<path> syntax to nest configs per dataset:
-  #   - encoder@encoder.data: gt16
-  #   - encoder@encoder.other: gnn
+  # - encoder@encoder.data: gt16
+  # - encoder@encoder.other: gnn
   # This produces a dictionary-style config:
   #   encoder:
   #     data:
