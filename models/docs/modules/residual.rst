@@ -14,6 +14,13 @@ approach allows users to select and customize the residual strategy best
 suited for their forecasting task, whether it be a standard skip
 connection, no connection, or a truncated connection.
 
+By default, the residual connection is applied to all prognostic
+variables. To exclude one or more prognostic variables from the
+connection, list their names under the ``drop`` argument of the residual
+configuration. The listed variables will be zeroed out in the skip
+branch, so the model will be predicting full states rathen increments
+for those variables.
+
 The following classes implement the available residual connection types
 in Anemoi.
 
