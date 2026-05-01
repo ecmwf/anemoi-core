@@ -154,10 +154,14 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
-        if (
-            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
-            and self.model.decoder.initialise_data_extractor_zero
+        decoder_schema = (
+            [self.model.decoder] if not isinstance(self.model.decoder, dict) else self.model.decoder.values()
+        )
+        if any(
+            isinstance(decoder, GraphTransformerDecoderSchema)
+            and decoder.initialise_data_extractor_zero
             and self.model.bounding
+            for decoder in decoder_schema
         ):
             error = "bounding_conflict_with_data_extractor_zero"
             msg = (
