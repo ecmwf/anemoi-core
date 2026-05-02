@@ -15,6 +15,8 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 LOGGER = logging.getLogger(__name__)
@@ -36,6 +38,8 @@ class SpectralTransform(torch.nn.Module):
         data : torch.Tensor
             Input data in the spatial domain of expected shape
             `[batch, ensemble, points, variables]`.
+        kwargs : dict
+            Additional keyword arguments for the transform.
 
         Returns
         -------
@@ -57,6 +61,7 @@ class FFT2D(SpectralTransform):
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
         patch_padding: bool = False,
+        projection_matrix: str | None = None,
         **kwargs,
     ) -> None:
         """2D FFT Transform.
@@ -69,6 +74,9 @@ class FFT2D(SpectralTransform):
             size of the spatial dimension y of the original data in 2D
         apply_filter: bool
             Apply low-pass filter to ignore frequencies beyond the Nyquist limit
+        nodes_slice: tuple[int, int] | None
+            Optional slice `(start, end)` to select a subset of nodes for the FFT.
+            If None, all nodes are used.
         patch_size: tuple[int, int] | None
             Optional patch size `(patch_y, patch_x)` for patch-wise FFT.
             If None, FFT is applied on the full `(y, x)` field.
@@ -78,6 +86,8 @@ class FFT2D(SpectralTransform):
         patch_padding: bool
             If True, allow non-divisible `(y_dim, x_dim)` by zero-padding on the
             bottom/right edges before patch extraction.
+        projection_matrix: str | None
+            Optional path to a projection matrix for sparse projection.
         """
         super().__init__()
 
@@ -126,6 +136,42 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
+        if projection_matrix:
+            self.projection_matrices = ProjectionGraphProvider(file_path=projection_matrix)
+            self.projector = SparseProjector()
+        else:
+            self.projection_matrices = None
+
+    def _apply_projector(self, batch: torch.Tensor) -> torch.Tensor:
+        """Apply sparse projector to a batch, handling multi-dimensional inputs."""
+        input_shape = batch.shape
+        batch = batch.reshape(-1, *input_shape[-2:])
+        projection_matrix = self.projection_matrices.get_edges(device=batch.device)
+        batch = self.projector(batch, projection_matrix)
+        return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
+
+    def prepare_for_fft(self, data: torch.Tensor):
+        """Prepare data for FFT: optionally apply sparse projection and reshape."""
+
+        # select nodes based on provided nodes_slice
+        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
+
+        # optionally apply sparse projection matrix
+        if self.projection:
+            data = self._apply_projector(data)
+
+        # reshape to 2D
+        var = data.shape[-1]
+        try:
+            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+
+        return data
+
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
@@ -141,16 +187,8 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
-        var = data.shape[-1]
-        try:
-            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
-        except Exception as e:
-            raise einops.EinopsError(
-                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
-                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
-            ) from e
+        data = self.prepare_for_fft(data)
 
         if self.patch_size is None:
             fft = torch.fft.fft2(data, dim=(-2, -3))
