@@ -70,12 +70,56 @@ def _clean_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return out
 
 
+def _num_leads(by_lead_variable: pd.DataFrame) -> int:
+    return int(by_lead_variable[["rollout_step", "lead_index"]].drop_duplicates().shape[0])
+
+
+def _add_contribution_columns(
+    by_variable: pd.DataFrame,
+    by_sample_variable: pd.DataFrame,
+    by_lead_variable: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Convert variable-row losses to estimated contributions to total loss.
+
+    A single-variable loss call is reduced over one variable, while the full
+    configured loss averages over all output variables. A single-lead variable
+    loss also still contains the time-step scaler for that one lead.
+    """
+    variable = _clean_numeric(by_variable, ["mean_loss"])
+    sample_variable = _clean_numeric(by_sample_variable, ["sample_global_index", "mean_loss"])
+    lead_variable = _clean_numeric(by_lead_variable, ["rollout_step", "lead_index", "mean_loss"])
+
+    if "mean_loss_contribution_to_total" in variable:
+        variable["loss_contribution"] = pd.to_numeric(variable["mean_loss_contribution_to_total"], errors="coerce")
+    else:
+        n_variables = max(1, int(variable["variable"].nunique()))
+        n_leads = max(1, _num_leads(lead_variable))
+        variable["loss_contribution"] = variable["mean_loss"] * n_leads / n_variables
+
+    if "sum_loss_contribution_to_total" in sample_variable:
+        sample_variable["loss_contribution"] = pd.to_numeric(
+            sample_variable["sum_loss_contribution_to_total"],
+            errors="coerce",
+        )
+    else:
+        n_variables = max(1, int(variable["variable"].nunique()))
+        n_leads = max(1, _num_leads(lead_variable))
+        sample_variable["loss_contribution"] = sample_variable["mean_loss"] * n_leads / n_variables
+
+    if "mean_loss_contribution_to_total" in lead_variable:
+        lead_variable["loss_contribution"] = pd.to_numeric(lead_variable["mean_loss_contribution_to_total"], errors="coerce")
+    else:
+        n_variables = max(1, int(variable["variable"].nunique()))
+        lead_variable["loss_contribution"] = lead_variable["mean_loss"] / n_variables
+    return variable, sample_variable, lead_variable
+
+
 def plot_variable_ranking(by_variable: pd.DataFrame, plots_dir: Path, context: str, top_variables: int) -> None:
-    data = by_variable.sort_values("mean_loss", ascending=False).head(top_variables).iloc[::-1]
+    data = by_variable.sort_values("loss_contribution", ascending=False).head(top_variables).iloc[::-1]
     fig_height = max(5.0, 0.28 * len(data) + 1.5)
     fig, ax = plt.subplots(figsize=(10, fig_height))
-    ax.barh(data["variable"], data["mean_loss"], color="#2f6f9f")
-    ax.set_xlabel("Mean configured loss")
+    ax.barh(data["variable"], data["loss_contribution"], color="#2f6f9f")
+    ax.set_xlabel("Estimated contribution to total configured loss")
     ax.set_ylabel("Variable")
     ax.set_title(f"Top Variable Loss Contributions\n{context}")
     ax.grid(axis="x", alpha=0.25)
@@ -110,14 +154,14 @@ def plot_lead_variable_heatmap(
 ) -> None:
     data = _clean_numeric(by_lead_variable, ["rollout_step", "lead_index", "mean_loss"])
     top_names = (
-        by_variable.sort_values("mean_loss", ascending=False)
+        by_variable.sort_values("loss_contribution", ascending=False)
         .head(top_variables)["variable"]
         .astype(str)
         .tolist()
     )
     data = data[data["variable"].isin(top_names)].copy()
     data["lead"] = "r" + data["rollout_step"].astype(int).astype(str) + "_out" + data["lead_index"].astype(int).astype(str)
-    pivot = data.pivot_table(index="lead", columns="variable", values="mean_loss", aggfunc="mean")
+    pivot = data.pivot_table(index="lead", columns="variable", values="loss_contribution", aggfunc="mean")
     pivot = pivot.reindex(columns=top_names)
 
     fig_width = max(10.0, 0.35 * len(pivot.columns) + 3.0)
@@ -132,7 +176,7 @@ def plot_lead_variable_heatmap(
     ax.set_ylabel("Rollout/output lead")
     ax.set_title(f"Lead by Variable Loss Heatmap\n{context}")
     cbar = fig.colorbar(image, ax=ax, shrink=0.9)
-    cbar.set_label("Mean configured loss")
+    cbar.set_label("Estimated contribution to total configured loss")
     _save(fig, plots_dir / "lead_variable_loss_heatmap.png")
 
 
@@ -154,7 +198,7 @@ def plot_top_sample_variable_heatmap(
         .tolist()
     )
     variable_names = (
-        by_variable.sort_values("mean_loss", ascending=False)
+        by_variable.sort_values("loss_contribution", ascending=False)
         .head(top_variables)["variable"]
         .astype(str)
         .tolist()
@@ -163,7 +207,7 @@ def plot_top_sample_variable_heatmap(
     data = _clean_numeric(by_sample_variable, ["sample_global_index", "mean_loss"])
     data["sample_global_index"] = data["sample_global_index"].astype("Int64").astype(str)
     data = data[data["sample_global_index"].isin(sample_names) & data["variable"].isin(variable_names)]
-    pivot = data.pivot_table(index="sample_global_index", columns="variable", values="mean_loss", aggfunc="mean")
+    pivot = data.pivot_table(index="sample_global_index", columns="variable", values="loss_contribution", aggfunc="mean")
     pivot = pivot.reindex(index=sample_names, columns=variable_names)
 
     fig_width = max(10.0, 0.35 * len(pivot.columns) + 3.0)
@@ -178,7 +222,7 @@ def plot_top_sample_variable_heatmap(
     ax.set_ylabel("Top-loss sample global index")
     ax.set_title(f"Top Sample by Variable Loss Heatmap\n{context}")
     cbar = fig.colorbar(image, ax=ax, shrink=0.9)
-    cbar.set_label("Mean configured loss")
+    cbar.set_label("Estimated contribution to total configured loss")
     _save(fig, plots_dir / "top_sample_variable_loss_heatmap.png")
 
 
@@ -201,18 +245,18 @@ def plot_focus_variable(
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8))
     if not sample_data.empty:
-        axes[0].plot(sample_data["sample_global_index"], sample_data["mean_loss"], color="#b24b3a", lw=1.1)
+        axes[0].plot(sample_data["sample_global_index"], sample_data["loss_contribution"], color="#b24b3a", lw=1.1)
         axes[0].set_xlabel("Sample global index")
-        axes[0].set_ylabel(f"{focus_variable} mean loss")
+        axes[0].set_ylabel(f"{focus_variable} contribution")
         axes[0].grid(alpha=0.25)
-    axes[0].set_title(f"{focus_variable} Loss by Sample\n{context}")
+    axes[0].set_title(f"{focus_variable} Contribution to Total Loss by Sample\n{context}")
 
     if not lead_data.empty:
-        axes[1].bar(lead_data["lead"], lead_data["mean_loss"], color="#b24b3a")
+        axes[1].bar(lead_data["lead"], lead_data["loss_contribution"], color="#b24b3a")
         axes[1].set_xlabel("Rollout/output lead")
-        axes[1].set_ylabel(f"{focus_variable} mean loss")
+        axes[1].set_ylabel(f"{focus_variable} contribution")
         axes[1].grid(axis="y", alpha=0.25)
-    axes[1].set_title(f"{focus_variable} Loss by Lead")
+    axes[1].set_title(f"{focus_variable} Contribution to Total Loss by Lead")
 
     _save(fig, plots_dir / f"{focus_variable}_loss_focus.png")
 
@@ -225,7 +269,7 @@ def plot_overview(
     context: str,
     top_variables: int,
 ) -> None:
-    top_var = by_variable.sort_values("mean_loss", ascending=False).head(top_variables)
+    top_var = by_variable.sort_values("loss_contribution", ascending=False).head(top_variables)
     sample_data = _clean_numeric(by_sample, ["mean_loss"])
     lead_data = _clean_numeric(by_lead_variable, ["rollout_step", "lead_index", "mean_loss"]).copy()
     lead_total = lead_data.groupby(["rollout_step", "lead_index"], as_index=False)["mean_loss"].mean()
@@ -234,9 +278,9 @@ def plot_overview(
     )
 
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    axes[0, 0].bar(top_var["variable"], top_var["mean_loss"], color="#2f6f9f")
-    axes[0, 0].set_title("Top Variable Mean Loss")
-    axes[0, 0].set_ylabel("Mean configured loss")
+    axes[0, 0].bar(top_var["variable"], top_var["loss_contribution"], color="#2f6f9f")
+    axes[0, 0].set_title("Top Variable Contributions")
+    axes[0, 0].set_ylabel("Estimated contribution to total loss")
     axes[0, 0].tick_params(axis="x", rotation=45)
     axes[0, 0].grid(axis="y", alpha=0.25)
 
@@ -276,6 +320,11 @@ def plot_summaries(
     by_sample = _read_csv(summaries_dir / "summary_by_sample.csv")
     by_sample_variable = _read_csv(summaries_dir / "summary_by_sample_variable.csv")
     by_lead_variable = _read_csv(summaries_dir / "summary_by_lead_variable.csv")
+    by_variable, by_sample_variable, by_lead_variable = _add_contribution_columns(
+        by_variable,
+        by_sample_variable,
+        by_lead_variable,
+    )
     context = _total_context(summaries_dir, detail_csv)
 
     plot_overview(by_variable, by_sample, by_lead_variable, plots_dir, context, min(top_variables, 16))

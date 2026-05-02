@@ -53,7 +53,9 @@ class ExportValidationLossTable(pl.Callback):
             self.output_dir.mkdir(parents=True, exist_ok=True)
             self._detail_path = self.output_dir / f"validation_loss_detail_epoch{trainer.current_epoch:03d}.csv"
             self._summary_path = self.output_dir / "validation_loss_epoch_summary.csv"
-            self._detail_header_written = self._detail_path.exists() and self._detail_path.stat().st_size > 0
+            if self._detail_path.exists():
+                self._detail_path.unlink()
+            self._detail_header_written = False
             self._summary_header_written = self._summary_path.exists() and self._summary_path.stat().st_size > 0
         self._epoch_weighted_loss = 0.0
         self._epoch_weight = 0
@@ -92,7 +94,11 @@ class ExportValidationLossTable(pl.Callback):
                 self._summary_header_written = True
             writer.writerow(row)
 
-    def _loss_value(
+    @staticmethod
+    def _scaler_names(loss_fn: torch.nn.Module) -> list[str]:
+        return list(getattr(loss_fn.scaler, "tensors", {}).keys()) if hasattr(loss_fn, "scaler") else []
+
+    def _loss_values(
         self,
         loss_fn: torch.nn.Module,
         y_pred: torch.Tensor,
@@ -108,8 +114,29 @@ class ExportValidationLossTable(pl.Callback):
             indexers[1] = slice(lead_idx, lead_idx + 1)
         if var_idx is not None:
             indexers[-1] = [var_idx]
-        loss = loss_fn(y_pred, y_true, scaler_indices=tuple(indexers))
-        return self._as_float(loss)
+        scaler_indices = tuple(indexers)
+        scaled_loss = loss_fn(y_pred, y_true, scaler_indices=scaler_indices)
+        raw_loss = loss_fn(
+            y_pred,
+            y_true,
+            scaler_indices=scaler_indices,
+            without_scalers=self._scaler_names(loss_fn),
+        )
+        return self._as_float(scaled_loss), self._as_float(raw_loss)
+
+    @staticmethod
+    def _row_loss_columns(
+        scaled_loss: float,
+        raw_loss: float | str = "",
+        loss_contribution_to_total: float | None = None,
+    ) -> dict[str, float | str]:
+        contribution = scaled_loss if loss_contribution_to_total is None else loss_contribution_to_total
+        return {
+            "loss": scaled_loss,
+            "scaled_loss": scaled_loss,
+            "raw_unscaled_loss": raw_loss,
+            "loss_contribution_to_total": contribution,
+        }
 
     def on_validation_batch_end(
         self,
@@ -145,7 +172,7 @@ class ExportValidationLossTable(pl.Callback):
                 "lead_index": "all",
                 "variable": "all",
                 "scope": "lightning_val_step_total",
-                "loss": val_step_loss,
+                **self._row_loss_columns(val_step_loss),
                 "note": "This is the exact validation_step loss logged by Lightning for this batch.",
             },
         ]
@@ -161,6 +188,7 @@ class ExportValidationLossTable(pl.Callback):
                     variable_items = [(name, name_to_index[name]) for name in self.variables if name in name_to_index]
                 else:
                     variable_items = sorted(name_to_index.items(), key=lambda item: item[1])
+                n_output_variables = max(1, len(name_to_index))
 
                 for rollout_step, rollout_pred in enumerate(y_preds_by_rollout):
                     y_pred = rollout_pred[dataset_name] if isinstance(rollout_pred, dict) else rollout_pred
@@ -169,6 +197,7 @@ class ExportValidationLossTable(pl.Callback):
                     y_time = dataset_batch.narrow(1, start, pl_module.n_step_output)
                     output_indices = data_indices.data.output.full.to(device=dataset_batch.device)
                     y_true = y_time.index_select(-1, output_indices).detach()
+                    scaled_loss, raw_loss = self._loss_values(loss_fn, y_pred, y_true)
 
                     rows.append(
                         {
@@ -181,13 +210,14 @@ class ExportValidationLossTable(pl.Callback):
                             "lead_index": "all",
                             "variable": "all",
                             "scope": "configured_loss_rollout_all_samples_all_variables",
-                            "loss": self._loss_value(loss_fn, y_pred, y_true),
+                            **self._row_loss_columns(scaled_loss, raw_loss),
                             "note": "Loss for this rollout before the training code averages over rollout count.",
                         },
                     )
 
                     if self.write_sample_variable_rows:
                         for variable_name, variable_index in variable_items:
+                            scaled_loss, raw_loss = self._loss_values(loss_fn, y_pred, y_true, var_idx=variable_index)
                             rows.append(
                                 {
                                     "epoch": trainer.current_epoch,
@@ -199,13 +229,18 @@ class ExportValidationLossTable(pl.Callback):
                                     "lead_index": "all",
                                     "variable": variable_name,
                                     "scope": "configured_loss_rollout_variable_all_samples",
-                                    "loss": self._loss_value(loss_fn, y_pred, y_true, var_idx=variable_index),
-                                    "note": "Variable contribution for this rollout over all samples/leads in this batch.",
+                                    **self._row_loss_columns(
+                                        scaled_loss,
+                                        raw_loss,
+                                        scaled_loss / n_output_variables,
+                                    ),
+                                    "note": "Single-variable loss and its estimated contribution after full-variable averaging.",
                                 },
                             )
 
                     for sample_idx in range(y_pred.shape[0]):
                         sample_global_index = batch_idx * batch_size + sample_idx
+                        scaled_loss, raw_loss = self._loss_values(loss_fn, y_pred, y_true, sample_idx=sample_idx)
                         rows.append(
                             {
                                 "epoch": trainer.current_epoch,
@@ -217,12 +252,19 @@ class ExportValidationLossTable(pl.Callback):
                                 "lead_index": "all",
                                 "variable": "all",
                                 "scope": "configured_loss_sample_all_variables",
-                                "loss": self._loss_value(loss_fn, y_pred, y_true, sample_idx=sample_idx),
+                                **self._row_loss_columns(scaled_loss, raw_loss),
                                 "note": "",
                             },
                         )
 
                         for lead_idx in range(y_pred.shape[1]):
+                            scaled_loss, raw_loss = self._loss_values(
+                                loss_fn,
+                                y_pred,
+                                y_true,
+                                sample_idx=sample_idx,
+                                lead_idx=lead_idx,
+                            )
                             rows.append(
                                 {
                                     "epoch": trainer.current_epoch,
@@ -234,19 +276,21 @@ class ExportValidationLossTable(pl.Callback):
                                     "lead_index": lead_idx,
                                     "variable": "all",
                                     "scope": "configured_loss_sample_lead_all_variables",
-                                    "loss": self._loss_value(
-                                        loss_fn,
-                                        y_pred,
-                                        y_true,
-                                        sample_idx=sample_idx,
-                                        lead_idx=lead_idx,
-                                    ),
+                                    **self._row_loss_columns(scaled_loss, raw_loss),
                                     "note": "",
                                 },
                             )
 
                             if self.write_sample_variable_rows:
                                 for variable_name, variable_index in variable_items:
+                                    scaled_loss, raw_loss = self._loss_values(
+                                        loss_fn,
+                                        y_pred,
+                                        y_true,
+                                        sample_idx=sample_idx,
+                                        lead_idx=lead_idx,
+                                        var_idx=variable_index,
+                                    )
                                     rows.append(
                                         {
                                             "epoch": trainer.current_epoch,
@@ -258,13 +302,10 @@ class ExportValidationLossTable(pl.Callback):
                                             "lead_index": lead_idx,
                                             "variable": variable_name,
                                             "scope": "configured_loss_sample_lead_variable",
-                                            "loss": self._loss_value(
-                                                loss_fn,
-                                                y_pred,
-                                                y_true,
-                                                sample_idx=sample_idx,
-                                                lead_idx=lead_idx,
-                                                var_idx=variable_index,
+                                            **self._row_loss_columns(
+                                                scaled_loss,
+                                                raw_loss,
+                                                scaled_loss / n_output_variables,
                                             ),
                                             "note": "",
                                         },
