@@ -70,6 +70,52 @@ def _clean_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return out
 
 
+def _first_time(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).split(";")[0]
+
+
+def _compact_time(value: object) -> str:
+    text = _first_time(value)
+    if not text:
+        return ""
+    return text.replace("2024-", "").replace(":00.000000000", "").replace("T", " ")
+
+
+def _sample_label(row: pd.Series, sample_column: str = "sample_global_index") -> str:
+    sample = row.get(sample_column, "")
+    dataset_index = row.get("sample_dataset_index", "")
+    target_time = _compact_time(row.get("target_times", ""))
+    if target_time:
+        return f"s{sample} d{dataset_index}\n{target_time}"
+    if dataset_index != "":
+        return f"s{sample} d{dataset_index}"
+    return f"s{sample}"
+
+
+def _set_sparse_time_ticks(ax: plt.Axes, data: pd.DataFrame, x_column: str, max_ticks: int = 10) -> None:
+    if data.empty or "target_times" not in data:
+        return
+    tick_rows = data.dropna(subset=[x_column]).copy()
+    tick_rows = tick_rows[tick_rows["target_times"].astype(str) != ""]
+    if tick_rows.empty:
+        return
+    stride = max(1, int(np.ceil(len(tick_rows) / max_ticks)))
+    tick_rows = tick_rows.iloc[::stride]
+    ax.set_xticks(tick_rows[x_column].to_numpy())
+    ax.set_xticklabels([_compact_time(value) for value in tick_rows["target_times"]], rotation=35, ha="right")
+
+
+def _sample_time_context(by_sample: pd.DataFrame) -> str:
+    if "target_times" not in by_sample:
+        return ""
+    times = [_compact_time(value) for value in by_sample["target_times"] if _compact_time(value)]
+    if not times:
+        return ""
+    return f"target time range={times[0]} to {times[-1]}"
+
+
 def _num_leads(by_lead_variable: pd.DataFrame) -> int:
     return int(by_lead_variable[["rollout_step", "lead_index"]].drop_duplicates().shape[0])
 
@@ -127,14 +173,16 @@ def plot_variable_ranking(by_variable: pd.DataFrame, plots_dir: Path, context: s
 
 
 def plot_sample_distribution(by_sample: pd.DataFrame, plots_dir: Path, context: str) -> None:
-    data = _clean_numeric(by_sample, ["sample_global_index", "mean_loss"]).sort_values("sample_global_index")
+    sort_column = "sample_dataset_index" if "sample_dataset_index" in by_sample else "sample_global_index"
+    data = _clean_numeric(by_sample, ["sample_global_index", "sample_dataset_index", "mean_loss"]).sort_values(sort_column)
     fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=False)
 
-    axes[0].plot(data["sample_global_index"], data["mean_loss"], lw=1.2, color="#2f6f9f")
-    axes[0].set_xlabel("Sample global index")
+    axes[0].plot(data[sort_column], data["mean_loss"], lw=1.2, color="#2f6f9f")
+    axes[0].set_xlabel(sort_column)
     axes[0].set_ylabel("Mean configured loss")
     axes[0].set_title(f"Sample Loss Sequence\n{context}")
     axes[0].grid(alpha=0.25)
+    _set_sparse_time_ticks(axes[0], data, sort_column)
 
     axes[1].hist(data["mean_loss"], bins=50, color="#7f9c57", edgecolor="white")
     axes[1].set_xlabel("Mean configured loss")
@@ -209,6 +257,12 @@ def plot_top_sample_variable_heatmap(
     data = data[data["sample_global_index"].isin(sample_names) & data["variable"].isin(variable_names)]
     pivot = data.pivot_table(index="sample_global_index", columns="variable", values="loss_contribution", aggfunc="mean")
     pivot = pivot.reindex(index=sample_names, columns=variable_names)
+    label_data = sample_data.copy()
+    label_data["sample_global_index"] = label_data["sample_global_index"].astype("Int64").astype(str)
+    labels_by_sample = {
+        str(row["sample_global_index"]): _sample_label(row)
+        for _, row in label_data[label_data["sample_global_index"].isin(sample_names)].iterrows()
+    }
 
     fig_width = max(10.0, 0.35 * len(pivot.columns) + 3.0)
     fig_height = max(6.0, 0.22 * len(pivot.index) + 2.0)
@@ -217,9 +271,9 @@ def plot_top_sample_variable_heatmap(
     ax.set_xticks(np.arange(len(pivot.columns)))
     ax.set_xticklabels(pivot.columns, rotation=45, ha="right")
     ax.set_yticks(np.arange(len(pivot.index)))
-    ax.set_yticklabels(pivot.index)
+    ax.set_yticklabels([labels_by_sample.get(str(index), str(index)) for index in pivot.index], fontsize=8)
     ax.set_xlabel("Variable")
-    ax.set_ylabel("Top-loss sample global index")
+    ax.set_ylabel("Top-loss sample / dataset index / first target time")
     ax.set_title(f"Top Sample by Variable Loss Heatmap\n{context}")
     cbar = fig.colorbar(image, ax=ax, shrink=0.9)
     cbar.set_label("Estimated contribution to total configured loss")
@@ -233,8 +287,9 @@ def plot_focus_variable(
     plots_dir: Path,
     context: str,
 ) -> None:
-    sample_data = _clean_numeric(by_sample_variable, ["sample_global_index", "mean_loss"])
-    sample_data = sample_data[sample_data["variable"] == focus_variable].sort_values("sample_global_index")
+    sort_column = "sample_dataset_index" if "sample_dataset_index" in by_sample_variable else "sample_global_index"
+    sample_data = _clean_numeric(by_sample_variable, ["sample_global_index", "sample_dataset_index", "mean_loss"])
+    sample_data = sample_data[sample_data["variable"] == focus_variable].sort_values(sort_column)
 
     lead_data = _clean_numeric(by_lead_variable, ["rollout_step", "lead_index", "mean_loss"])
     lead_data = lead_data[lead_data["variable"] == focus_variable].copy()
@@ -245,10 +300,11 @@ def plot_focus_variable(
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8))
     if not sample_data.empty:
-        axes[0].plot(sample_data["sample_global_index"], sample_data["loss_contribution"], color="#b24b3a", lw=1.1)
-        axes[0].set_xlabel("Sample global index")
+        axes[0].plot(sample_data[sort_column], sample_data["loss_contribution"], color="#b24b3a", lw=1.1)
+        axes[0].set_xlabel(sort_column)
         axes[0].set_ylabel(f"{focus_variable} contribution")
         axes[0].grid(alpha=0.25)
+        _set_sparse_time_ticks(axes[0], sample_data, sort_column)
     axes[0].set_title(f"{focus_variable} Contribution to Total Loss by Sample\n{context}")
 
     if not lead_data.empty:
@@ -298,6 +354,7 @@ def plot_overview(
 
     text = (
         f"{context}\n\n"
+        f"{_sample_time_context(by_sample)}\n"
         f"variables: {len(by_variable)}\n"
         f"samples: {len(by_sample)}\n"
         f"lead-variable rows: {len(by_lead_variable)}"

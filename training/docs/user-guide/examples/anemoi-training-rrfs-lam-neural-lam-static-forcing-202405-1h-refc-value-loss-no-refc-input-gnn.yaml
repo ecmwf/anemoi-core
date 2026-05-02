@@ -1,0 +1,8 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input
+  - override /model: gnn
+  - _self_
+
+# Same as the direct +1h refc-value/no-refc-input experiment, but using the
+# GNN/interaction-network-style encoder-processor-decoder instead of the
+# GraphTransformer model.

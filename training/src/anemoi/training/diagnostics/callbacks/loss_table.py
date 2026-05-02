@@ -15,6 +15,8 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -138,6 +140,80 @@ class ExportValidationLossTable(pl.Callback):
             "loss_contribution_to_total": contribution,
         }
 
+    @staticmethod
+    def _datetime_strings(dates: Any, indices: list[int]) -> str:
+        values = []
+        for index in indices:
+            if index == "":
+                values.append("")
+            else:
+                values.append(str(dates[int(index)]))
+        return ";".join(values)
+
+    def _sample_time_columns(
+        self,
+        trainer: pl.Trainer,
+        batch_idx: int,
+        batch_size: int,
+        sample_idx: int | None,
+        dataset_name: str | None = None,
+    ) -> dict[str, str | int]:
+        empty = {
+            "sample_dataset_index": "",
+            "sample_worker_id": "",
+            "sample_worker_position": "",
+            "input_times": "",
+            "target_times": "",
+            "sample_time_note": "",
+        }
+        if sample_idx is None or dataset_name is None or not hasattr(trainer, "datamodule"):
+            return empty
+
+        datamodule = trainer.datamodule
+        if datamodule is None or not hasattr(datamodule, "ds_valid"):
+            return empty
+
+        ds_valid = datamodule.ds_valid
+        n_workers = max(1, int(getattr(self.config.dataloader.num_workers, "validation", 1)))
+        valid_date_indices = ds_valid.valid_date_indices
+        sample_order_index = batch_idx * batch_size + sample_idx
+
+        # MultiDataset partitions validation samples into contiguous worker chunks.
+        # PyTorch then returns batches in worker-interleaved order, so the loss-table
+        # sample counter is not the same as the chronological dataset index.
+        worker_id = sample_order_index % n_workers
+        worker_position = sample_order_index // n_workers
+        shard_size = len(valid_date_indices) // ds_valid.sample_comm_num_groups
+        shard_start = ds_valid.sample_comm_group_id * shard_size
+        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+        worker_indices = valid_date_indices[low:high]
+        if worker_position >= len(worker_indices):
+            return empty | {
+                "sample_worker_id": worker_id,
+                "sample_worker_position": worker_position,
+                "sample_time_note": "Could not infer dataset index from worker-interleaved validation order.",
+            }
+
+        dataset_index = int(worker_indices[worker_position])
+        relative_indices = list(map(int, ds_valid.data_relative_date_indices))
+        input_rel = relative_indices[: self.config.training.multistep_input]
+        target_rel = relative_indices[self.config.training.multistep_input :]
+        dataset = ds_valid.datasets[dataset_name]
+        input_indices = [dataset_index + rel for rel in input_rel]
+        target_indices = [dataset_index + rel for rel in target_rel]
+
+        return {
+            "sample_dataset_index": dataset_index,
+            "sample_worker_id": worker_id,
+            "sample_worker_position": worker_position,
+            "input_times": self._datetime_strings(dataset.dates, input_indices),
+            "target_times": self._datetime_strings(dataset.dates, target_indices),
+            "sample_time_note": (
+                "Inferred from validation worker chunks; set dataloader.num_workers.validation=1 "
+                "for strictly chronological sample_global_index."
+            ),
+        }
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -173,6 +249,7 @@ class ExportValidationLossTable(pl.Callback):
                 "variable": "all",
                 "scope": "lightning_val_step_total",
                 **self._row_loss_columns(val_step_loss),
+                **self._sample_time_columns(trainer, batch_idx, batch_size, None),
                 "note": "This is the exact validation_step loss logged by Lightning for this batch.",
             },
         ]
@@ -211,6 +288,7 @@ class ExportValidationLossTable(pl.Callback):
                             "variable": "all",
                             "scope": "configured_loss_rollout_all_samples_all_variables",
                             **self._row_loss_columns(scaled_loss, raw_loss),
+                            **self._sample_time_columns(trainer, batch_idx, batch_size, None),
                             "note": "Loss for this rollout before the training code averages over rollout count.",
                         },
                     )
@@ -234,6 +312,7 @@ class ExportValidationLossTable(pl.Callback):
                                         raw_loss,
                                         scaled_loss / n_output_variables,
                                     ),
+                                    **self._sample_time_columns(trainer, batch_idx, batch_size, None),
                                     "note": "Single-variable loss and its estimated contribution after full-variable averaging.",
                                 },
                             )
@@ -253,6 +332,7 @@ class ExportValidationLossTable(pl.Callback):
                                 "variable": "all",
                                 "scope": "configured_loss_sample_all_variables",
                                 **self._row_loss_columns(scaled_loss, raw_loss),
+                                **self._sample_time_columns(trainer, batch_idx, batch_size, sample_idx, dataset_name),
                                 "note": "",
                             },
                         )
@@ -277,6 +357,7 @@ class ExportValidationLossTable(pl.Callback):
                                     "variable": "all",
                                     "scope": "configured_loss_sample_lead_all_variables",
                                     **self._row_loss_columns(scaled_loss, raw_loss),
+                                    **self._sample_time_columns(trainer, batch_idx, batch_size, sample_idx, dataset_name),
                                     "note": "",
                                 },
                             )
@@ -306,6 +387,13 @@ class ExportValidationLossTable(pl.Callback):
                                                 scaled_loss,
                                                 raw_loss,
                                                 scaled_loss / n_output_variables,
+                                            ),
+                                            **self._sample_time_columns(
+                                                trainer,
+                                                batch_idx,
+                                                batch_size,
+                                                sample_idx,
+                                                dataset_name,
                                             ),
                                             "note": "",
                                         },

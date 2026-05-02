@@ -41,9 +41,20 @@ def _write_summary(path: Path, key_names: list[str], values: dict[tuple[str, ...
             writer.writerow([*key, mean_scaled, mean_scaled, mean_raw, mean_contribution, len(metrics)])
 
 
+def _metadata_from_row(row: dict[str, str]) -> dict[str, str]:
+    return {
+        "sample_dataset_index": row.get("sample_dataset_index", ""),
+        "sample_worker_id": row.get("sample_worker_id", ""),
+        "sample_worker_position": row.get("sample_worker_position", ""),
+        "input_times": row.get("input_times", ""),
+        "target_times": row.get("target_times", ""),
+    }
+
+
 def _write_sample_variable_totals(
     path: Path,
     sample_variable_rows: dict[tuple[str, str], list[dict[str, float]]],
+    sample_metadata: dict[str, dict[str, str]],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -52,6 +63,11 @@ def _write_sample_variable_totals(
             [
                 "sample_global_index",
                 "variable",
+                "sample_dataset_index",
+                "sample_worker_id",
+                "sample_worker_position",
+                "input_times",
+                "target_times",
                 "mean_scaled_loss",
                 "mean_raw_unscaled_loss",
                 "sum_loss_contribution_to_total",
@@ -59,9 +75,17 @@ def _write_sample_variable_totals(
             ],
         )
         for key, metrics in sorted(sample_variable_rows.items()):
+            sample_global_index, variable = key
+            metadata = sample_metadata.get(sample_global_index, {})
             writer.writerow(
                 [
-                    *key,
+                    sample_global_index,
+                    variable,
+                    metadata.get("sample_dataset_index", ""),
+                    metadata.get("sample_worker_id", ""),
+                    metadata.get("sample_worker_position", ""),
+                    metadata.get("input_times", ""),
+                    metadata.get("target_times", ""),
                     _mean([item["scaled_loss"] for item in metrics]),
                     _mean([item["raw_unscaled_loss"] for item in metrics]),
                     sum(item["loss_contribution_to_total"] for item in metrics),
@@ -90,6 +114,7 @@ def summarize(detail_csv: Path, output_dir: Path) -> None:
     by_sample: dict[tuple[str, ...], list[dict[str, float]]] = defaultdict(list)
     by_sample_variable: dict[tuple[str, str], list[dict[str, float]]] = defaultdict(list)
     by_lead_variable: dict[tuple[str, ...], list[dict[str, float]]] = defaultdict(list)
+    sample_metadata: dict[str, dict[str, str]] = {}
 
     with detail_csv.open(newline="") as f:
         reader = csv.DictReader(f)
@@ -101,11 +126,25 @@ def summarize(detail_csv: Path, output_dir: Path) -> None:
                 by_lead_variable[(row["rollout_step"], row["lead_index"], row["variable"])].append(metrics)
             elif scope == "configured_loss_sample_all_variables":
                 by_sample[(row["sample_global_index"],)].append(_metrics_from_row(row))
+                sample_metadata[row["sample_global_index"]] = _metadata_from_row(row)
 
     _write_variable_totals(output_dir / "summary_by_variable.csv", by_sample_variable)
     _write_summary(output_dir / "summary_by_sample.csv", ["sample_global_index"], by_sample)
-    _write_sample_variable_totals(output_dir / "summary_by_sample_variable.csv", by_sample_variable)
+    _write_sample_variable_totals(output_dir / "summary_by_sample_variable.csv", by_sample_variable, sample_metadata)
     _write_summary(output_dir / "summary_by_lead_variable.csv", ["rollout_step", "lead_index", "variable"], by_lead_variable)
+
+    sample_summary = output_dir / "summary_by_sample.csv"
+    rows = []
+    with sample_summary.open(newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            metadata = sample_metadata.get(row["sample_global_index"], {})
+            rows.append(row | metadata)
+    if rows:
+        with sample_summary.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
 
 
 def main() -> None:

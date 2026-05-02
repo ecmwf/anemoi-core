@@ -49,6 +49,7 @@ anemoi-training train \
   dataloader.training.datasets.data.frequency="$FREQ" \
   dataloader.validation.datasets.data.frequency="$FREQ" \
   dataloader.test.datasets.data.frequency="$FREQ" \
+  dataloader.num_workers.validation=1 \
   training.num_sanity_val_steps=0 \
   --cfg job > "$RESOLVED_CONFIG"
 
@@ -68,4 +69,5 @@ anemoi-training train \
   dataloader.training.datasets.data.frequency="$FREQ" \
   dataloader.validation.datasets.data.frequency="$FREQ" \
   dataloader.test.datasets.data.frequency="$FREQ" \
+  dataloader.num_workers.validation=1 \
   training.num_sanity_val_steps=0
