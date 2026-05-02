@@ -10,6 +10,10 @@ config_validation: True
 # refc-value/no-refc-input verification config.
 
 diagnostics:
+  plot:
+    # The loss-table wrapper uses batch_size=1, so the inherited 6h plot
+    # callbacks for sample_idx 6 and 12 would be out of bounds.
+    callbacks: []
   callbacks:
     - _target_: anemoi.training.diagnostics.callbacks.loss_table.ExportValidationLossTable
       output_dir: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/loss_tables/1to6h_refc_value_no_refc_input
