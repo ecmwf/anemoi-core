@@ -157,7 +157,7 @@ class FFT2D(SpectralTransform):
         data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
         # optionally apply sparse projection matrix
-        if self.projection:
+        if self.projection_matrices:
             data = self._apply_projector(data)
 
         # reshape to 2D
