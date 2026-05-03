@@ -216,6 +216,7 @@ class BaseModelSchema(PydanticBaseModel):
     "List of bounding configuration applied in order to the specified variables."
     output_mask: OutputMaskSchemas  # !TODO CHECK!
     "Output mask"
+    encoded_dataset_names: list[str] | None = Field(default=None)
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
     processor: Union[
