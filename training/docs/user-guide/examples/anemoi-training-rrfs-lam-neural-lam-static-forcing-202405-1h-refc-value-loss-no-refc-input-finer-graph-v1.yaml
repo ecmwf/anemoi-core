@@ -1,0 +1,12 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input
+  - _self_
+
+# Same direct +1h refc-value/no-refc-input experiment as the baseline 1h
+# setup, but using the finer_graph_v1 graph:
+#   hidden resolution: 10, expected hidden spacing about 8 km
+#   hidden-hidden scale_resolutions: [8, 9, 10]
+
+system:
+  input:
+    graph: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1.pt
