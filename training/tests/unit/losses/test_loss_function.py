@@ -518,6 +518,41 @@ def test_spectral_crps_fft_and_dct() -> None:
         assert out_total.numel() == 1, f"{transform}: scalar CRPS expected"
 
 
+def test_spectral_crps_fft2d_projection(mocker: pytest.MockFixture) -> None:
+    from scipy.sparse import eye
+
+    bs, ens, nvars = 2, 5, 3
+    x_dim, y_dim = 8, 6
+    grid = x_dim * y_dim
+
+    pred = torch.randn(bs, 1, ens, grid, nvars)
+    target = torch.randn(bs, 1, 1, grid, nvars)
+
+    # Create a mock sparse matrix (e.g., identity)
+    sparse_mat = eye(grid, format="csr")
+
+    # Mock scipy.sparse.load_npz to return our sparse matrix
+    mocker.patch("scipy.sparse.load_npz", return_value=sparse_mat)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
+                "transform": "fft2d",
+                "x_dim": x_dim,
+                "y_dim": y_dim,
+                "projection_matrix": "/path/to/projection_matrix.npz",
+                "scalers": [],
+            },
+        ),
+    )
+
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,), "fft2d: per-variable CRPS expected"
+    out_total = loss(pred, target, squash=True)
+    assert out_total.numel() == 1, "fft2d: scalar CRPS expected"
+
+
 def test_spectral_crps_with_target_without_ensemble_dim() -> None:
     """CRPS should handle target tensors shaped [B,T,G,V] (no ensemble dim)."""
     bs, ens, nvars = 2, 4, 2
