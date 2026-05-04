@@ -9,7 +9,6 @@ from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
 from anemoi.models.layers.residual import TruncatedConnection
-from anemoi.models.layers.residual import ZeroConnection
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -119,21 +118,6 @@ def test_skipconnection(flat_data):
     expected_out = flat_data[:, -1, ...]
 
     assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
-
-
-# ── ZeroConnection tests ─────────────────────────────────────────────────
-
-
-def test_zero_connection_shape(flat_data):
-    conn = ZeroConnection()
-    out = conn.forward(flat_data)
-    assert out.shape == flat_data[:, -1, ...].shape
-
-
-def test_zero_connection_output_is_zeros(flat_data):
-    conn = ZeroConnection()
-    out = conn.forward(flat_data)
-    assert torch.all(out == 0)
 
 
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────

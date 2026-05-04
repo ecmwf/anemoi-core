@@ -286,33 +286,6 @@ def _slice_statistics_to_prognostic(statistics: dict | None, data_indices) -> di
     return {k: v[idx] for k, v in statistics.items() if hasattr(v, "__getitem__")}
 
 
-class ZeroConnection(BaseResidualConnection):
-    """Zero residual connection. Equivalent to ``x(t+1) = model(x(t))``.
-
-    Returns a zero tensor with the same shape as the last timestep of the input,
-    effectively disabling the residual path.
-    """
-
-    def __init__(
-        self,
-        graph: HeteroData | None = None,
-        data_indices=None,
-        dataset_name: str | None = None,
-        **_,
-    ) -> None:
-        super().__init__()
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        grid_shard_shapes=None,
-        model_comm_group=None,
-        n_step_output: int | None = None,
-    ) -> torch.Tensor:
-        out = torch.zeros_like(x[:, -1, ...])
-        return self._expand_time(out, n_step_output)
-
-
 class ScalarOrnsteinConnection(BaseResidualConnection):
     """Mean-reverting residual with a single learnable scalar theta per prognostic variable.
 

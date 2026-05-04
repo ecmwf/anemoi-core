@@ -92,12 +92,6 @@ class TruncatedConnectionSchema(BaseModel):
         return self
 
 
-class ZeroConnectionSchema(BaseModel):
-    """Schema for zero (no-op) residual connections."""
-
-    target_: Literal["anemoi.models.layers.residual.ZeroConnection"] = Field(..., alias="_target_")
-
-
 class ScalarOrnsteinConnectionSchema(BaseModel):
     """Schema for scalar Ornstein residual connections."""
 
@@ -161,7 +155,6 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
     | TruncatedConnectionSchema
-    | ZeroConnectionSchema
     | ScalarOrnsteinConnectionSchema
     | SpectralOrnsteinConnectionSchema,
     Field(discriminator="target_"),

@@ -63,23 +63,6 @@ where :math:`P_{\text{down}}` maps to the coarse grid and
    :no-undoc-members:
    :show-inheritance:
 
-*****************
- Zero Connection
-*****************
-
-Returns a zero tensor, disabling the residual path entirely:
-
-.. math::
-
-   \text{residual}(x) = 0
-
-This is equivalent to :math:`x(t+1) = f_\theta(x(t))`, i.e. the model
-must predict the full state rather than an increment.
-
-.. autoclass:: anemoi.models.layers.residual.ZeroConnection
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
 
 *****************************
  Learnable residual (Ornstein)
