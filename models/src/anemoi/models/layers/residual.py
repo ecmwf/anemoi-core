@@ -287,10 +287,13 @@ def _slice_statistics_to_prognostic(statistics: dict | None, data_indices) -> di
 
 
 class ScalarOrnsteinConnection(BaseResidualConnection):
-    """Mean-reverting residual with a single learnable scalar theta per prognostic variable.
+    """Ornstein residual with learnable scalars theta and mu.
 
-    ``residual(x) = (1 - theta) * x`` where theta is in (theta_buff, 1) and learned
-    independently for each prognostic variable. No spatial or spectral structure.
+    ``residual(x) = (1 - theta) * x + mu + sum_i beta_i * f_i``
+    
+    where theta is in (theta_buff, 1) and learned independently for each
+    prognostic variable. ``f_i`` are forcing variables listed in
+    ``regressors`` No spatial or spectral structure.
 
     Parameters
     ----------
@@ -301,6 +304,8 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         Lower bound buffer for theta. Theta is constrained to (theta_buff, 1).
     theta_train : bool
         Whether theta is a trainable parameter.
+    regressors : list[str] | None
+        Variable names to use as regressors.
     """
 
     def __init__(
@@ -308,6 +313,7 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         theta_init: float = 0.00,
         theta_buff: float = 0.00,
         theta_train: bool = True,
+        regressors: list[str] | None = None,
         graph: HeteroData | None = None,
         statistics: dict | None = None,
         data_indices=None,
@@ -315,22 +321,31 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         **_,
     ) -> None:
         super().__init__()
+        regressors = regressors or []
         assert data_indices is not None, "ScalarOrnsteinConnection needs `data_indices`."
+
         self._internal_input_idx = list(data_indices.model.input.prognostic)
+        variables = data_indices.model.input.name_to_index
+        self._regressors_input_idx = [variables[f] for f in regressors]
 
         sliced_stats = _slice_statistics_to_prognostic(statistics, data_indices)
         theta = _ornstein_init_theta(theta_init, theta_buff, sliced_stats)
         theta = np.log(theta / (1 - theta))
 
-        weight = torch.zeros(len(self._internal_input_idx))
-        weight[:] = torch.from_numpy(np.broadcast_to(theta, weight.shape).copy())
+        weight = torch.zeros(len(regressors) + 2, len(self._internal_input_idx))
+        weight[0, :] = torch.from_numpy(np.broadcast_to(theta, weight.shape).copy())
 
         self.weight = Parameter(weight, theta_train)
         self.theta_buff = theta_buff
 
     def _learnable(self, x_last: torch.Tensor) -> torch.Tensor:
-        gain = 1 - torch.sigmoid(self.weight) * (1 - self.theta_buff) - self.theta_buff
-        return gain * x_last[..., self._internal_input_idx]
+        weight = self.weight
+
+        gain = 1 - torch.sigmoid(weight[0, :]) * (1 - self.theta_buff) - self.theta_buff
+        out = gain * x_last[..., self._internal_input_idx] + weight[1, :]
+        for i, k in enumerate(self._regressors_input_idx):
+            out = out + weight[i + 2, :] * x_last[..., k].unsqueeze(-1)
+        return out
 
     def forward(
         self,
