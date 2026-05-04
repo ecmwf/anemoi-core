@@ -36,6 +36,7 @@ class BaseAnemoiReader:
         drop: list[str] | None = None,
         select: list[str] | None = None,
         fake_forecasts: dict | None = None,
+        fake_hindcasts: dict | None = None,
     ):
         """Initialize Anemoi data reader."""
         ds_kwargs = {}
@@ -50,6 +51,11 @@ class BaseAnemoiReader:
             # applying start/end/frequency first creates a Subset without the
             # fake_forecasts metadata needed to compute forecast indices.
             ds_kwargs["fake_forecasts"] = fake_forecasts
+            self.data = open_dataset(dataset, **ds_kwargs)
+            return
+
+        if fake_hindcasts is not None:
+            ds_kwargs["fake_hindcasts"] = fake_hindcasts
             self.data = open_dataset(dataset, **ds_kwargs)
             return
 
