@@ -54,7 +54,9 @@ def _resolve_direct_prediction_indices(
         data_idx = name_to_index[field_name]
         if data_idx not in output_full:
             LOGGER.warning(
-                "direct_prediction field '%s' (data_idx=%d) not in output.full — skipping", field_name, data_idx,
+                "direct_prediction field '%s' (data_idx=%d) not in output.full — skipping",
+                field_name,
+                data_idx,
             )
             continue
         model_idx = output_full.index(data_idx)
