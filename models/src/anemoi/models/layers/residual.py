@@ -379,14 +379,14 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     lmax : int
         Maximum spherical harmonic degree for the theta/mu coefficients.
     grid : str
-        Grid type: ``"legendre-gauss"`` for regular lat-lon, ``"octahedral"`` for
-        octahedral reduced grids.
+        Grid type: ``"regular"`` for regular lat-lon, ``"octahedral"`` for
+        octahedral reduced grids. Other types are not currently supported and will raise an error.
     theta_init : float
         Initial value for theta.
     theta_buff : float
         Lower bound buffer for theta.
-    zmean_term : bool
-        Whether to include a zonal mean (mu) term.
+    use_mean : bool
+        Whether to include a the mean (mu) term.
     regressors : list[str] | None
         Variable names to use as spatially-varying regressors.
     truncate : bool
@@ -401,10 +401,10 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     def __init__(
         self,
         lmax: int = 2,
-        grid: str = "legendre-gauss",
+        grid: str = "regular",
         theta_init: float = 0.00,
         theta_buff: float = 0.00,
-        zmean_term: bool = True,
+        use_mean: bool = True,
         regressors: list[str] | None = None,
         truncate: bool = False,
         skip_truncate_variables: list[str] | None = None,
@@ -427,7 +427,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
 
         sliced_stats = _slice_statistics_to_prognostic(statistics, data_indices)
         theta = _ornstein_init_theta(theta_init, theta_buff, sliced_stats)
-        theta = np.sqrt(4 * np.pi) * np.log(theta / (1 - theta))
+        theta = 4 * np.pi * np.log(theta / (1 - theta))
 
         weight = torch.zeros(len(regressors) + 2, len(self._internal_input_idx), lmax, lmax, 2)
         weight[0, :, 0, 0, 0] = torch.from_numpy(np.broadcast_to(theta, weight[0, :, 0, 0, 0].shape).copy())
@@ -435,11 +435,13 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
 
         if grid == "octahedral":
             self.isht = InverseOctahedralSHT(self.nlat, truncation=lmax - 1)
-        else:
+        elif grid == "regular":
             self.isht = InverseRegularSHT(self.nlat, truncation=lmax - 1)
+        else:
+            raise ValueError(f"Unsupported grid type {grid!r}. Supported types: ['octahedral', 'regular']")
 
         muzero = torch.ones_like(weight)
-        muzero[1, :, :, :, :] = 1.0 if zmean_term else 0.0
+        muzero[1, :, :, :, :] = 1.0 if use_mean else 0.0
         self.register_buffer("muzero", muzero)
         self.theta_buff = theta_buff
 
@@ -456,12 +458,13 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
             trunc = self.nlat - 1
             self.x_fsht = SphericalHarmonicTransform(lons_per_lat=oct_lons, truncation=trunc)
             self.x_isht = InverseSphericalHarmonicTransform(lons_per_lat=oct_lons, truncation=trunc)
-        else:
-            nlon = 2 * self.nlat
-            reg_lons = [nlon] * self.nlat
+        elif grid == "regular":
+            reg_lons = [self.nlon] * self.nlat
             trunc = self.nlat - 1
             self.x_fsht = SphericalHarmonicTransform(lons_per_lat=reg_lons, truncation=trunc)
             self.x_isht = InverseSphericalHarmonicTransform(lons_per_lat=reg_lons, truncation=trunc)
+        else:
+            raise ValueError(f"Unsupported grid type {grid!r}.")
 
         skip_idx = {variables[v] for v in skip_truncate_variables if v in variables}
         self._truncation_input_idx = [int(idx) for idx in self._internal_input_idx if idx not in skip_idx]
