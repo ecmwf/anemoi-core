@@ -298,12 +298,16 @@ class GraphLossMatrixSchema(BaseModel):
 class MultiscaleConfigDiskSchema(BaseModel):
     """File-based multiscale config: smoothing matrices loaded from .npz files."""
 
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None]
 
 
 class MultiscaleConfigOnTheFlySchema(BaseModel):
     """On-the-fly multiscale config: smoothing subgraphs built from the main graph."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     num_scales: int | None = None
     base_num_nearest_neighbours: int | None = None

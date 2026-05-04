@@ -37,7 +37,8 @@ class TruncationConfigOnTheFlySchema(BaseModel):
     @model_validator(mode="after")
     def check_grid_or_node_builder(self) -> Self:
         if self.grid is None and self.node_builder is None:
-            raise ValueError("TruncationConfigOnTheFlySchema requires either 'grid' or 'node_builder'.")
+            msg = "TruncationConfigOnTheFlySchema requires either 'grid' or 'node_builder'."
+            raise ValueError(msg)
         return self
 
 
