@@ -48,6 +48,7 @@ datasets:
   out_hres:
     forcing:
     diagnostic: []
+    direct_prediction: []
     processors:
       normalizer:
         _target_: anemoi.models.preprocessing.normalizer.InputNormalizer

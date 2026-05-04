@@ -86,36 +86,45 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             self.register_buffer(buf_name, indices, persistent=True)
             self._matching_indices_keys.append((target_ds, source_ds, buf_name))
 
+    def _get_direct_prediction_indices(
+        self,
+        target_dataset: str,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Return (model_indices, data_indices) for direct_prediction vars, or (None, None)."""
+        model_buf = getattr(self, f"_direct_prediction_indices_{target_dataset}", None)
+        data_buf = getattr(self, f"_direct_prediction_data_indices_{target_dataset}", None)
+        if model_buf is not None and len(model_buf) > 0 and data_buf is not None:
+            return model_buf, data_buf
+        return None, None
+
     def _build_matching_channel_indices(self, target_dataset: str, source_dataset: str) -> torch.Tensor:
-        """Build indices to reorder source channels to match target's prognostic output order.
+        """Build source data-space indices matching target model-output prognostic order.
 
-        Only maps channels that exist in both source and target (prognostic outputs).
-        Output variables not present in source are treated as diagnostic (direct prediction)
-        and are excluded from this mapping.
-
-        Parameters
-        ----------
-        target_dataset : str
-            Name of the target dataset (e.g. "out_hres").
-        source_dataset : str
-            Name of the source dataset (e.g. "in_lres").
-
-        Returns
-        -------
-        torch.Tensor
-            Tensor of length == number of prognostic output channels.
+        Raw dataset tensors include forcing channels, while model outputs do not. Residual
+        interpolation therefore has to be indexed in the target model-output space, not by
+        the full target dataset variable list.
         """
         input_name_to_index = self.data_indices[source_dataset].name_to_index
-        output_name_to_index = self.data_indices[target_dataset].name_to_index
-        channel_indices = self._match_tensor_channels(input_name_to_index, output_name_to_index)
+        target_indices = self.data_indices[target_dataset]
+        output_name_to_index = target_indices.model.output.name_to_index
+        prognostic_model_indices = set(target_indices.model.output.prognostic.tolist())
 
-        # Log which channels are residual vs direct prediction
-        common = [name for name in output_name_to_index if name in input_name_to_index]
-        direct = [name for name in output_name_to_index if name not in input_name_to_index]
-        if common:
-            LOGGER.info("Residual channels (%s ∩ %s): %s", target_dataset, source_dataset, common)
-        if direct:
-            LOGGER.info("Direct prediction channels (%s only): %s", target_dataset, direct)
+        channel_names = [
+            name
+            for name, model_idx in sorted(output_name_to_index.items(), key=lambda item: item[1])
+            if model_idx in prognostic_model_indices and name in input_name_to_index
+        ]
+        missing = [
+            name
+            for name, model_idx in sorted(output_name_to_index.items(), key=lambda item: item[1])
+            if model_idx in prognostic_model_indices and name not in input_name_to_index
+        ]
+        channel_indices = torch.tensor([input_name_to_index[name] for name in channel_names], dtype=torch.long)
+
+        if channel_names:
+            LOGGER.info("Residual channels (%s ∩ %s): %s", target_dataset, source_dataset, channel_names)
+        if missing:
+            LOGGER.info("Direct-only prognostic channels (%s not in %s): %s", target_dataset, source_dataset, missing)
 
         return channel_indices
 
@@ -207,38 +216,103 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         target_indices = self.data_indices[target_dataset]
         prognostic_out = target_indices.model.output.prognostic
         diagnostic_out = target_indices.model.output.diagnostic
+        prognostic_data = target_indices.data.output.prognostic
+        diagnostic_data = target_indices.data.output.diagnostic
 
-        target = y.clone()
+        target = y[..., target_indices.data.output.full].clone()
 
-        # Prognostic channels: compute residual, normalize with residual/tendency stats
+        # Prognostic channels: compute residual in model-output space from raw data-space tensors.
         if len(prognostic_out) > 0:
-            target[..., prognostic_out] = y[..., prognostic_out] - x_interp
+            if x_interp.shape[-1] != len(prognostic_out):
+                raise ValueError(
+                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(prognostic_out)} "
+                    f"for {target_dataset} prognostic output channels"
+                )
+            target[..., prognostic_out] = y[..., prognostic_data] - x_interp
 
             if pre_processors_tendencies is not None:
                 target[..., prognostic_out] = pre_processors_tendencies(
                     target[..., prognostic_out],
                     in_place=False,
-                    data_index=target_indices.data.output.prognostic,
+                    data_index=prognostic_data,
                     skip_imputation=skip_imputation,
                 )
             else:
                 target[..., prognostic_out] = pre_processors_state(
                     target[..., prognostic_out],
                     in_place=False,
-                    data_index=target_indices.data.output.prognostic,
+                    data_index=prognostic_data,
                     skip_imputation=skip_imputation,
                 )
 
-        # Diagnostic channels: direct prediction, normalize with state stats
+        # Direct-prediction overwrite: prognostic vars that should use raw y with state normalization.
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None:
+            target[..., dp_model_idx] = pre_processors_state(
+                y[..., dp_data_idx],
+                in_place=False,
+                data_index=dp_data_idx,
+                skip_imputation=skip_imputation,
+            )
+
+        # Diagnostic channels: direct prediction, normalize with state stats.
         if len(diagnostic_out) > 0:
             target[..., diagnostic_out] = pre_processors_state(
-                y[..., diagnostic_out],
+                y[..., diagnostic_data],
                 in_place=False,
-                data_index=target_indices.data.output.diagnostic,
+                data_index=diagnostic_data,
                 skip_imputation=skip_imputation,
             )
 
         return target
+
+    def apply_interpolate_to_high_res(
+        self,
+        x: torch.Tensor,
+        grid_shard_shapes: Optional[list] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> torch.Tensor:
+        """Upsample low-resolution inputs onto the high-resolution grid for eval tooling.
+
+        The shared residual-spectra helper loads the exported inference checkpoint and
+        expects a `ds`-style interpolation interface on the saved model object.
+        Multi-ds already performs the same interpolation internally through the
+        `in_lres` residual branch; this wrapper exposes that path with the expected
+        interface.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Low-resolution input with shape ``(batch, ensemble, grid_lres, variables)``.
+            Exactly one ensemble member is supported (``ensemble == 1``).
+        grid_shard_shapes : list, optional
+            Shard shapes for distributed execution.
+        model_comm_group : ProcessGroup, optional
+            Process group for distributed execution.
+
+        Returns
+        -------
+        torch.Tensor
+            Interpolated tensor with shape ``(batch, 1, 1, grid_hres, variables)``.
+            The first size-1 dimension is the time axis introduced by the internal
+            5-D residual call; the second size-1 dimension is the ensemble axis.
+        """
+        if x.ndim != 4:
+            raise ValueError(
+                f"Expected low-resolution input with shape (batch, ensemble, grid, variables), got {tuple(x.shape)}"
+            )
+        if x.shape[1] != 1:
+            raise ValueError(
+                f"Residual spectra reconstruction expects one ensemble member at a time, got ensemble={x.shape[1]}"
+            )
+
+        x_with_time = x[:, None, :, :, :]
+        x_interp = self.residual["in_lres"](
+            x_with_time,
+            grid_shard_shapes=grid_shard_shapes,
+            model_comm_group=model_comm_group,
+        )
+        return x_interp[:, 0, None, :, :]
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components with optional dataset filtering for encoder/decoder."""
@@ -1055,6 +1129,16 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             x_source_denorm = post_processors_state[source_dataset](state_inp, in_place=False)
             channel_indices = self.get_matching_channel_indices(target_dataset).to(x_source_denorm.device)
             state_outp[..., prognostic_out] += x_source_denorm[..., channel_indices]
+
+        # Direct-prediction overwrite: state-denormalized raw prediction, no x_interp
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None:
+            state_outp[..., dp_model_idx] = post_processors_state[target_dataset](
+                model_output[..., dp_model_idx],
+                in_place=False,
+                data_index=dp_data_idx,
+                skip_imputation=skip_imputation,
+            )
 
         return state_outp
 

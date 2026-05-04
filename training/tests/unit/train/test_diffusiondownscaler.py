@@ -163,3 +163,181 @@ def test_add_interp_reconstruction():
     # 10u: 50 + 100 = 150, tp: 5 (unchanged)
     assert torch.allclose(result[..., prog_out], torch.tensor([[[[[150.0]]]]]))
     assert torch.allclose(result[..., diag_out], torch.tensor([[[[[5.0]]]]]))
+
+
+def _make_dp_model():
+    """Model where tp is prognostic but direct-predicted (not residual)."""
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    model.data_indices = {
+        "in_lres": _make_index_collection({"10u": 0, "10v": 1, "tp": 2}),
+        "out_hres": _make_index_collection({"10u": 0, "10v": 1, "tp": 2}),
+    }
+    model._residual_pairs = {"out_hres": "in_lres"}
+    model._matching_channel_indices_out_hres = torch.tensor([0, 1, 2])
+    model._matching_indices_keys = [("out_hres", "in_lres", "_matching_channel_indices_out_hres")]
+    # dp buffers: tp (model idx 2) is direct-predicted
+    model._direct_prediction_indices_out_hres = torch.tensor([2], dtype=torch.long)
+    model._direct_prediction_data_indices_out_hres = torch.tensor([2], dtype=torch.long)
+    return model
+
+
+def test_compute_residuals_with_dp():
+    """Dp vars get raw y (state-normalized), not residual (tendency-normalized)."""
+    model = _make_dp_model()
+
+    target = model.compute_residuals(
+        y=torch.tensor([[[[[150.0, 200.0, 5.0]]]]]),
+        x_interp=torch.tensor([[[[[100.0, 150.0, 3.0]]]]]),
+        pre_processors_state=_IdentityProcessor(),
+        pre_processors_tendencies=_ScaleBy2Processor(),
+    )
+
+    # 10u: (150-100)*2=100, 10v: (200-150)*2=100, tp: identity(5)=5 (raw, state-normalized)
+    assert torch.allclose(target, torch.tensor([[[[[100.0, 100.0, 5.0]]]]]))
+
+
+def test_compute_residuals_excludes_forcing_and_uses_data_indices_for_dp():
+    """Residual targets are model-output shaped when raw data contains forcing channels."""
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    model.data_indices = {
+        "in_lres": _make_index_collection({"10u": 0, "z": 1, "tp": 2, "2t": 3}, forcing=["z"]),
+        "out_hres": _make_index_collection({"10u": 0, "z": 1, "tp": 2, "2t": 3}, forcing=["z"]),
+    }
+    model._residual_pairs = {"out_hres": "in_lres"}
+    model._direct_prediction_indices_out_hres = torch.tensor([1], dtype=torch.long)
+    model._direct_prediction_data_indices_out_hres = torch.tensor([2], dtype=torch.long)
+
+    target = model.compute_residuals(
+        y=torch.tensor([[[[[150.0, 999.0, 5.0, 252.0]]]]]),
+        x_interp=torch.tensor([[[[[100.0, 4.0, 250.0]]]]]),
+        pre_processors_state=_IdentityProcessor(),
+        pre_processors_tendencies=_ScaleBy2Processor(),
+    )
+
+    assert target.shape[-1] == 3
+    assert torch.allclose(target, torch.tensor([[[[[100.0, 5.0, 4.0]]]]]))
+
+
+def test_add_interp_with_dp():
+    """Dp vars get state-denormalized raw prediction, no x_interp addition."""
+    model = _make_dp_model()
+    identity = _IdentityProcessor()
+
+    result = model.add_interp_to_state(
+        state_inp=torch.tensor([[[[[100.0, 150.0, 3.0]]]]]),
+        model_output=torch.tensor([[[[[50.0, 50.0, 5.0]]]]]),
+        post_processors_state={"in_lres": identity, "out_hres": identity},
+        post_processors_tendencies=None,
+    )
+
+    # 10u: 50+100=150, 10v: 50+150=200, tp: identity(5)=5 (no x_interp)
+    assert torch.allclose(result, torch.tensor([[[[[150.0, 200.0, 5.0]]]]]))
+
+
+def test_add_interp_with_dp_and_tendencies():
+    """Dp overwrite is correct even when tendency processors are used for initial denorm."""
+    model = _make_dp_model()
+    identity = _IdentityProcessor()
+    scale2 = _ScaleBy2Processor()
+
+    result = model.add_interp_to_state(
+        state_inp=torch.tensor([[[[[100.0, 150.0, 3.0]]]]]),
+        model_output=torch.tensor([[[[[50.0, 50.0, 5.0]]]]]),
+        post_processors_state={"in_lres": identity, "out_hres": identity},
+        post_processors_tendencies={"out_hres": scale2},
+    )
+
+    # tendency denorm all: [100,100,10] → prognostic += state(inp): [200,250,13]
+    # dp overwrite: state_denorm(model[...,2]) = identity(5) = 5
+    assert torch.allclose(result, torch.tensor([[[[[200.0, 250.0, 5.0]]]]]))
+
+
+def test_resolve_direct_prediction_indices():
+    """Field names are correctly resolved to model-space and data-space indices."""
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    data_indices = _make_index_collection({"10u": 0, "10v": 1, "tp": 2})
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(["tp"], data_indices)
+
+    assert dp_model_idx is not None
+    assert dp_model_idx.tolist() == [2]
+    assert dp_data_idx.tolist() == [2]
+
+
+def test_resolve_direct_prediction_empty():
+    """Empty dp_fields returns (None, None)."""
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    data_indices = _make_index_collection({"10u": 0, "10v": 1, "tp": 2})
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices([], data_indices)
+
+    assert dp_model_idx is None
+    assert dp_data_idx is None
+
+
+def test_resolve_direct_prediction_skips_diagnostic():
+    """Dp field that is diagnostic (not prognostic) is skipped with warning."""
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    data_indices = _make_index_collection({"10u": 0, "tp": 1}, diagnostic=["tp"])
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(["tp"], data_indices)
+
+    # tp is diagnostic, not prognostic — should be skipped
+    assert dp_model_idx is None
+    assert dp_data_idx is None
+
+
+def test_apply_interpolate_to_high_res_output_shape():
+    """apply_interpolate_to_high_res returns (batch, 1, 1, grid_hres, vars) given a 4-D input."""
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+
+    batch, grid_lres, grid_hres, n_vars = 2, 16, 64, 3
+
+    # Mock residual callable: takes (batch, time, ensemble, grid, vars) → same shape with grid_hres
+    def _fake_residual(x_5d, grid_shard_shapes=None, model_comm_group=None):
+        b, t, ens, _, v = x_5d.shape
+        return torch.zeros(b, t, ens, grid_hres, v)
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    model.residual = {"in_lres": _fake_residual}
+
+    x = torch.zeros(batch, 1, grid_lres, n_vars)  # (batch, ensemble=1, grid_lres, vars)
+    out = model.apply_interpolate_to_high_res(x)
+
+    assert out.shape == (
+        batch,
+        1,
+        1,
+        grid_hres,
+        n_vars,
+    ), f"Expected (batch=2, 1, 1, grid_hres=64, vars=3), got {tuple(out.shape)}"
+
+
+def test_dp_buffer_round_trip():
+    """Buffer registered by task init is readable by _get_direct_prediction_indices."""
+    import torch.nn as nn
+
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+    from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
+
+    # Simulate what task.__init__ does: resolve → register
+    data_indices = _make_index_collection({"10u": 0, "10v": 1, "tp": 2})
+    dp_model_idx, dp_data_idx = _resolve_direct_prediction_indices(["tp"], data_indices)
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    # AnemoiD2ModelEncProcDec inherits register_buffer from nn.Module; init nn.Module state manually
+    nn.Module.__init__(model)
+
+    model.register_buffer("_direct_prediction_indices_out_hres", dp_model_idx, persistent=True)
+    model.register_buffer("_direct_prediction_data_indices_out_hres", dp_data_idx, persistent=True)
+
+    # Verify _get_direct_prediction_indices reads them back correctly
+    result_model, result_data = model._get_direct_prediction_indices("out_hres")
+    assert result_model is not None
+    assert result_model.tolist() == [2]
+    assert result_data is not None
+    assert result_data.tolist() == [2]
