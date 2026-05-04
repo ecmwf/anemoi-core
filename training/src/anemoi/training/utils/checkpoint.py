@@ -30,6 +30,29 @@ chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scrip
 LOGGER = logging.getLogger(__name__)
 
 
+def _resolve_task_class(lightning_checkpoint_path: str) -> type:
+    """Resolve the concrete LightningModule class saved in a checkpoint."""
+    checkpoint = torch.load(lightning_checkpoint_path, weights_only=False, map_location="cpu")
+    config = checkpoint.get("hyper_parameters", {}).get("config")
+    model_task_path = None
+
+    if config is not None:
+        training = config.get("training") if isinstance(config, dict) else getattr(config, "training", None)
+        if training is not None:
+            model_task_path = (
+                training.get("model_task") if isinstance(training, dict) else getattr(training, "model_task", None)
+            )
+
+    if model_task_path is not None:
+        from hydra.utils import get_class
+
+        LOGGER.info("Resolving task class from checkpoint: %s", model_task_path)
+        return get_class(model_task_path)
+
+    LOGGER.warning("model_task not found in checkpoint config; falling back to BaseGraphModule")
+    return BaseGraphModule
+
+
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
     """Load the lightning checkpoint and extract the pytorch model and its metadata.
 
@@ -44,7 +67,8 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    task_cls = _resolve_task_class(lightning_checkpoint_path)
+    module = task_cls.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 
     metadata = dict(**model.metadata)

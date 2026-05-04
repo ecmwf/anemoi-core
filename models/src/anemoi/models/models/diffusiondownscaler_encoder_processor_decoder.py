@@ -98,35 +98,33 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         return None, None
 
     def _build_matching_channel_indices(self, target_dataset: str, source_dataset: str) -> torch.Tensor:
-        """Build indices to reorder source channels to match target's prognostic output order.
+        """Build source data-space indices matching target model-output prognostic order.
 
-        Only maps channels that exist in both source and target (prognostic outputs).
-        Output variables not present in source are treated as diagnostic (direct prediction)
-        and are excluded from this mapping.
-
-        Parameters
-        ----------
-        target_dataset : str
-            Name of the target dataset (e.g. "out_hres").
-        source_dataset : str
-            Name of the source dataset (e.g. "in_lres").
-
-        Returns
-        -------
-        torch.Tensor
-            Tensor of length == number of prognostic output channels.
+        Raw dataset tensors include forcing channels, while model outputs do not. Residual
+        interpolation therefore has to be indexed in the target model-output space, not by
+        the full target dataset variable list.
         """
         input_name_to_index = self.data_indices[source_dataset].name_to_index
-        output_name_to_index = self.data_indices[target_dataset].name_to_index
-        channel_indices = self._match_tensor_channels(input_name_to_index, output_name_to_index)
+        target_indices = self.data_indices[target_dataset]
+        output_name_to_index = target_indices.model.output.name_to_index
+        prognostic_model_indices = set(target_indices.model.output.prognostic.tolist())
 
-        # Log which channels are residual vs direct prediction
-        common = [name for name in output_name_to_index if name in input_name_to_index]
-        direct = [name for name in output_name_to_index if name not in input_name_to_index]
-        if common:
-            LOGGER.info("Residual channels (%s ∩ %s): %s", target_dataset, source_dataset, common)
-        if direct:
-            LOGGER.info("Direct prediction channels (%s only): %s", target_dataset, direct)
+        channel_names = [
+            name
+            for name, model_idx in sorted(output_name_to_index.items(), key=lambda item: item[1])
+            if model_idx in prognostic_model_indices and name in input_name_to_index
+        ]
+        missing = [
+            name
+            for name, model_idx in sorted(output_name_to_index.items(), key=lambda item: item[1])
+            if model_idx in prognostic_model_indices and name not in input_name_to_index
+        ]
+        channel_indices = torch.tensor([input_name_to_index[name] for name in channel_names], dtype=torch.long)
+
+        if channel_names:
+            LOGGER.info("Residual channels (%s ∩ %s): %s", target_dataset, source_dataset, channel_names)
+        if missing:
+            LOGGER.info("Direct-only prognostic channels (%s not in %s): %s", target_dataset, source_dataset, missing)
 
         return channel_indices
 
@@ -218,44 +216,51 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         target_indices = self.data_indices[target_dataset]
         prognostic_out = target_indices.model.output.prognostic
         diagnostic_out = target_indices.model.output.diagnostic
+        prognostic_data = target_indices.data.output.prognostic
+        diagnostic_data = target_indices.data.output.diagnostic
 
-        target = y.clone()
+        target = y[..., target_indices.data.output.full].clone()
 
-        # Prognostic channels: compute residual, normalize with residual/tendency stats
+        # Prognostic channels: compute residual in model-output space from raw data-space tensors.
         if len(prognostic_out) > 0:
-            target[..., prognostic_out] = y[..., prognostic_out] - x_interp
+            if x_interp.shape[-1] != len(prognostic_out):
+                raise ValueError(
+                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(prognostic_out)} "
+                    f"for {target_dataset} prognostic output channels"
+                )
+            target[..., prognostic_out] = y[..., prognostic_data] - x_interp
 
             if pre_processors_tendencies is not None:
                 target[..., prognostic_out] = pre_processors_tendencies(
                     target[..., prognostic_out],
                     in_place=False,
-                    data_index=target_indices.data.output.prognostic,
+                    data_index=prognostic_data,
                     skip_imputation=skip_imputation,
                 )
             else:
                 target[..., prognostic_out] = pre_processors_state(
                     target[..., prognostic_out],
                     in_place=False,
-                    data_index=target_indices.data.output.prognostic,
+                    data_index=prognostic_data,
                     skip_imputation=skip_imputation,
                 )
 
-        # Direct-prediction overwrite: prognostic vars that should use raw y with state normalization
+        # Direct-prediction overwrite: prognostic vars that should use raw y with state normalization.
         dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
         if dp_model_idx is not None:
             target[..., dp_model_idx] = pre_processors_state(
-                y[..., dp_model_idx],
+                y[..., dp_data_idx],
                 in_place=False,
                 data_index=dp_data_idx,
                 skip_imputation=skip_imputation,
             )
 
-        # Diagnostic channels: direct prediction, normalize with state stats
+        # Diagnostic channels: direct prediction, normalize with state stats.
         if len(diagnostic_out) > 0:
             target[..., diagnostic_out] = pre_processors_state(
-                y[..., diagnostic_out],
+                y[..., diagnostic_data],
                 in_place=False,
-                data_index=target_indices.data.output.diagnostic,
+                data_index=diagnostic_data,
                 skip_imputation=skip_imputation,
             )
 

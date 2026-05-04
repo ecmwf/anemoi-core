@@ -392,9 +392,9 @@ class BaseGraphModule(pl.LightningModule, ABC):
         )
 
     def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
-        update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
+        update_cfg = getattr(self.config.training, "update_ds_stats_on_ckpt_load", None)
+        update_states = getattr(update_cfg, "states", False)
+        update_tendencies = getattr(update_cfg, "tendencies", False)
         state_dict = checkpoint.get("state_dict")
         if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
             return

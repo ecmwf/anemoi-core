@@ -198,6 +198,30 @@ def test_compute_residuals_with_dp():
     assert torch.allclose(target, torch.tensor([[[[[100.0, 100.0, 5.0]]]]]))
 
 
+def test_compute_residuals_excludes_forcing_and_uses_data_indices_for_dp():
+    """Residual targets are model-output shaped when raw data contains forcing channels."""
+    from anemoi.models.models.diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+
+    model = object.__new__(AnemoiD2ModelEncProcDec)
+    model.data_indices = {
+        "in_lres": _make_index_collection({"10u": 0, "z": 1, "tp": 2, "2t": 3}, forcing=["z"]),
+        "out_hres": _make_index_collection({"10u": 0, "z": 1, "tp": 2, "2t": 3}, forcing=["z"]),
+    }
+    model._residual_pairs = {"out_hres": "in_lres"}
+    model._direct_prediction_indices_out_hres = torch.tensor([1], dtype=torch.long)
+    model._direct_prediction_data_indices_out_hres = torch.tensor([2], dtype=torch.long)
+
+    target = model.compute_residuals(
+        y=torch.tensor([[[[[150.0, 999.0, 5.0, 252.0]]]]]),
+        x_interp=torch.tensor([[[[[100.0, 4.0, 250.0]]]]]),
+        pre_processors_state=_IdentityProcessor(),
+        pre_processors_tendencies=_ScaleBy2Processor(),
+    )
+
+    assert target.shape[-1] == 3
+    assert torch.allclose(target, torch.tensor([[[[[100.0, 5.0, 4.0]]]]]))
+
+
 def test_add_interp_with_dp():
     """dp vars get state-denormalized raw prediction, no x_interp addition."""
     model = _make_dp_model()

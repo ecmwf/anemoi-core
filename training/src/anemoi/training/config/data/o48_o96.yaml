@@ -1,0 +1,114 @@
+format: zarr
+frequency: 1h
+timestep: ${data.frequency}
+
+datasets:
+  in_lres:
+    forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "cos_solar_zenith_angle"
+      - "lsm"
+      - "z"
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+            - "z"
+          none:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "cos_local_time"
+            - "sin_julian_day"
+            - "sin_local_time"
+            - "cos_solar_zenith_angle"
+            - "lsm"
+
+  in_hres:
+    # Match dataloader.select_forcings. DS keeps cos_solar_zenith_angle in
+    # select_matched but not in the hres forcing-only leg.
+    forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "lsm"
+      - "z"
+    diagnostic: []
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+          min-max:
+          max:
+            - "z"
+          none:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "cos_local_time"
+            - "sin_julian_day"
+            - "sin_local_time"
+            - "lsm"
+
+  out_hres:
+    forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "cos_solar_zenith_angle"
+      - "lsm"
+      - "z"
+    diagnostic: []
+    direct_prediction:
+      - "tp"
+    processors:
+      normalizer:
+        _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+        config:
+          default: "mean-std"
+          std:
+            - "tp"
+          min-max:
+          max:
+            - "z"
+          none:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "cos_local_time"
+            - "sin_julian_day"
+            - "sin_local_time"
+            - "cos_solar_zenith_angle"
+            - "lsm"
+
+num_features: null
