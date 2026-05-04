@@ -333,7 +333,7 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         theta = np.log(theta / (1 - theta))
 
         weight = torch.zeros(len(regressors) + 2, len(self._internal_input_idx))
-        weight[0, :] = torch.from_numpy(np.broadcast_to(theta, weight.shape).copy())
+        weight[0, :] = torch.from_numpy(np.broadcast_to(theta, weight[0, :].shape).copy())
 
         self.weight = Parameter(weight, theta_train)
         self.theta_buff = theta_buff
