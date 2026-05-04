@@ -53,7 +53,9 @@ def _resolve_direct_prediction_indices(
             continue
         data_idx = name_to_index[field_name]
         if data_idx not in output_full:
-            LOGGER.warning("direct_prediction field '%s' (data_idx=%d) not in output.full — skipping", field_name, data_idx)
+            LOGGER.warning(
+                "direct_prediction field '%s' (data_idx=%d) not in output.full — skipping", field_name, data_idx,
+            )
             continue
         model_idx = output_full.index(data_idx)
         if model_idx not in prognostic_set:

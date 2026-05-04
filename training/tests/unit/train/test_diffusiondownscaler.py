@@ -184,7 +184,7 @@ def _make_dp_model():
 
 
 def test_compute_residuals_with_dp():
-    """dp vars get raw y (state-normalized), not residual (tendency-normalized)."""
+    """Dp vars get raw y (state-normalized), not residual (tendency-normalized)."""
     model = _make_dp_model()
 
     target = model.compute_residuals(
@@ -223,7 +223,7 @@ def test_compute_residuals_excludes_forcing_and_uses_data_indices_for_dp():
 
 
 def test_add_interp_with_dp():
-    """dp vars get state-denormalized raw prediction, no x_interp addition."""
+    """Dp vars get state-denormalized raw prediction, no x_interp addition."""
     model = _make_dp_model()
     identity = _IdentityProcessor()
 
@@ -239,7 +239,7 @@ def test_add_interp_with_dp():
 
 
 def test_add_interp_with_dp_and_tendencies():
-    """dp overwrite is correct even when tendency processors are used for initial denorm."""
+    """Dp overwrite is correct even when tendency processors are used for initial denorm."""
     model = _make_dp_model()
     identity = _IdentityProcessor()
     scale2 = _ScaleBy2Processor()
@@ -280,7 +280,7 @@ def test_resolve_direct_prediction_empty():
 
 
 def test_resolve_direct_prediction_skips_diagnostic():
-    """dp field that is diagnostic (not prognostic) is skipped with warning."""
+    """Dp field that is diagnostic (not prognostic) is skipped with warning."""
     from anemoi.training.train.tasks.diffusiondownscaler import _resolve_direct_prediction_indices
 
     data_indices = _make_index_collection({"10u": 0, "tp": 1}, diagnostic=["tp"])
@@ -308,9 +308,13 @@ def test_apply_interpolate_to_high_res_output_shape():
     x = torch.zeros(batch, 1, grid_lres, n_vars)  # (batch, ensemble=1, grid_lres, vars)
     out = model.apply_interpolate_to_high_res(x)
 
-    assert out.shape == (batch, 1, 1, grid_hres, n_vars), (
-        f"Expected (batch=2, 1, 1, grid_hres=64, vars=3), got {tuple(out.shape)}"
-    )
+    assert out.shape == (
+        batch,
+        1,
+        1,
+        grid_hres,
+        n_vars,
+    ), f"Expected (batch=2, 1, 1, grid_hres=64, vars=3), got {tuple(out.shape)}"
 
 
 def test_dp_buffer_round_trip():
