@@ -63,6 +63,26 @@ class TestNativeGridDataset:
         assert dataset.variables is not None
         assert dataset.frequency is not None
 
+    def test_instantiation_with_fake_forecasts(self, monkeypatch) -> None:
+        """Test that forecast filtering options are passed through to anemoi-datasets."""
+        calls = []
+
+        def open_dataset(*args, **kwargs):
+            calls.append((args, kwargs))
+            return object()
+
+        monkeypatch.setattr("anemoi.training.data.dataset.open_dataset", open_dataset)
+        fake_forecasts = {"start": "2024-11", "end": "2024-11", "steps": [6, 12, 18]}
+
+        NativeGridDataset(dataset="/tmp/example.zarr", fake_forecasts=fake_forecasts)
+
+        assert calls == [
+            (
+                ("/tmp/example.zarr",),
+                {"fake_forecasts": fake_forecasts},
+            ),
+        ]
+
     @skip_if_offline
     def test_instantiation_with_time_range(self, dataset_path: str) -> None:
         """Test NativeGridDataset with start and end dates."""

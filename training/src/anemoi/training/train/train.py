@@ -105,8 +105,19 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
-        # Multi-dataset case: store num_features per dataset
+        # Dynamically choose the correct datamodule class based on task type
+        if (
+            hasattr(self.config.training, "model_task")
+            and "graphdiffusiondownscaler" in self.config.training.model_task.lower()
+        ):
+            from anemoi.training.data.downscalingdatamodule import DownscalingAnemoiDatasetsDataModule
+
+            datamodule = DownscalingAnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
+        else:
+            datamodule = AnemoiDatasetsDataModule(
+                convert_to_omegaconf(self.config),
+                self.graph_data,
+            )  # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
         for name, data in datamodule.ds_train.data.items():
@@ -155,7 +166,11 @@ class AnemoiTrainer(ABC):
                 from anemoi.graphs.utils import get_distributed_device
 
                 LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
+                return torch.load(
+                    graph_filename,
+                    map_location=get_distributed_device(),
+                    weights_only=False,
+                )
         else:
             graph_filename = None
 
@@ -225,7 +240,10 @@ class AnemoiTrainer(ABC):
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
             if self.config.training.transfer_learning:
-                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
+                LOGGER.info(
+                    "Loading weights with Transfer Learning from %s",
+                    self.last_checkpoint,
+                )
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
@@ -246,7 +264,10 @@ class AnemoiTrainer(ABC):
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
-            LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
+            LOGGER.info(
+                "The following submodules will NOT be trained: %s",
+                self.config.training.submodules_to_freeze,
+            )
             for submodule_name in self.config.training.submodules_to_freeze:
                 freeze_submodule_by_name(model, submodule_name)
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
@@ -312,7 +333,13 @@ class AnemoiTrainer(ABC):
 
     def _get_checkpoint_directory(self, fork_id: str) -> Path:
         """Returns the directory where checkpoints are stored."""
-        return Path(self.config.system.output.checkpoints.root.parent, fork_id or self.lineage_run) / "last.ckpt"
+        return (
+            Path(
+                self.config.system.output.checkpoints.root.parent,
+                fork_id or self.lineage_run,
+            )
+            / "last.ckpt"
+        )
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
@@ -405,7 +432,11 @@ class AnemoiTrainer(ABC):
         for dataset_name, data in self.datamodule.ds_train.data.items():
             num_forcing_features = len(self.data_indices[dataset_name].forcing)
             num_fc_features = len(data.variables) - num_forcing_features
-            LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
+            LOGGER.info(
+                "Dataset '%s' - Total number of prognostic variables: %d",
+                dataset_name,
+                num_fc_features,
+            )
             LOGGER.info(
                 "Dataset '%s' - Total number of auxiliary variables: %d",
                 dataset_name,

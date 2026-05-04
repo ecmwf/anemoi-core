@@ -1,0 +1,13 @@
+asynchronous: False
+datashader: False
+frequency:
+  batch: 999999
+  epoch: 999999
+
+parameters: []
+sample_idx: 0
+precip_and_related_fields: []
+colormaps: {}
+datasets_to_plot: []
+focus_areas: {}
+callbacks: []

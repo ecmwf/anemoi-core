@@ -18,6 +18,7 @@ precision: 16-mixed
 # 1 = single step scheme, X(t) used to predict Y(t), (if GraphDownscaler)
 # k > 1: multistep scheme, uses [X(t-k+1), ... X(t-1), X(t)] to predict Y(t)
 multistep_input: 1
+multistep_output: 1
 
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k

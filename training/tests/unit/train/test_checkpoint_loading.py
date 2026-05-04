@@ -145,6 +145,25 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
             assert torch.equal(state_dict[full_key], value)
 
 
+def test_on_load_checkpoint_tolerates_missing_update_config() -> None:
+    model = DummyModel(["6h", "12h"], offset=1.0)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in model.state_dict().items()},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+
+    module = DummyGraphModule.__new__(DummyGraphModule)
+    torch.nn.Module.__init__(module)
+    module.model = model
+    module.config = SimpleNamespace(training=SimpleNamespace())
+
+    BaseGraphModule.on_load_checkpoint(module, checkpoint)
+
+    assert module._ckpt_model_name_to_index == {"data": {}}
+    for key, value in model.state_dict().items():
+        assert torch.equal(checkpoint["state_dict"][f"model.{key}"], value)
+
+
 def test_transfer_learning_loading_updates_processors_when_enabled(
     tmp_path: Path,
 ) -> None:

@@ -1,0 +1,70 @@
+---
+overwrite: False
+
+# Node names for downscaling
+data: "data"  # High-resolution output/target nodes
+hidden: "hidden"
+
+nodes:
+  # High-resolution data nodes (output/target)
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: null
+    attributes: ${graph.attributes.nodes}
+
+  # Hidden/latent nodes for processing
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 6
+    attributes: ${graph.attributes.nodes}
+
+
+edges:
+  # Encoder: Upsampled low res + hres input to hidden
+  - source_name: "data"
+    target_name: "hidden"
+    edge_builders:
+    - _target_: anemoi.graphs.edges.CutOffEdges
+      cutoff_factor: 0.7
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+  # Decoder: Hidden to high-res output
+  - source_name: "hidden"
+    target_name: "data"
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+  # Processor: Hidden to hidden (self-connections)
+  - source_name: "hidden"
+    target_name: "hidden"
+    edge_builders:
+    - _target_: anemoi.graphs.edges.MultiScaleEdges
+      x_hops: 1
+      scale_resolutions: [6]
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []

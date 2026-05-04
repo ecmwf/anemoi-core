@@ -1,0 +1,15 @@
+data: ${oc.env:DATA_DIR,/home/mlx/ai-ml/datasets}/
+grids: ${oc.env:GRID_DIR,/home/mlx/ai-ml/grids}/
+
+dataset_in_lres: /home/ecm5702/hpcperm/data/downscaling_od_o48.zarr
+dataset_in_hres: /ec/ai/project/ai-ml/datasets/downscaling-rd-fc-oper-i4ql-mars-o96-2023-2024-24h-v1.zarr
+dataset_out_hres: /ec/ai/project/ai-ml/datasets/downscaling-rd-fc-oper-i4ql-mars-o96-2023-2024-24h-v1.zarr
+
+residual_statistics: ${oc.env:RESIDUAL_STATISTICS_DIR}/o48_o96_residuals.npy
+truncation_inv: ${oc.env:INTER_MAT_DIR}/o96-o48-linear.mat.npz
+truncation: ${oc.env:INTER_MAT_DIR}/o48-o96-linear.mat.npz
+
+graph: ${oc.env:OUTPUT}/graphs/multi_o48_o96.pt
+
+loss_matrices_path: null
+warm_start: null
