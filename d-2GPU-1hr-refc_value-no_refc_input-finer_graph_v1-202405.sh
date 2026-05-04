@@ -25,6 +25,13 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}
 mkdir -p "$TRITON_CACHE_DIR"
 
+GRAPH_BASE=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1.pt
+GRAPH_DATA=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1_data.pt
+if [[ ! -e "$GRAPH_DATA" ]]; then
+  ln -s "$GRAPH_BASE" "$GRAPH_DATA"
+fi
+ls -l "$GRAPH_BASE" "$GRAPH_DATA"
+
 srun --gpu-bind=closest \
   --export=ALL,TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}/${SLURM_PROCID} \
   anemoi-training train \
