@@ -151,7 +151,7 @@ class AnemoiModelInterface(torch.nn.Module):
             'sigma_min': 0.02, 
             'rho': 7, 
             'num_steps': 100, 
-            'num_steps_sdedit': 15, 
+            'num_steps_sdedit': 25, 
             'SDEdit': True
         }
         }

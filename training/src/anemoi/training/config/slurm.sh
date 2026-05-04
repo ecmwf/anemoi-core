@@ -21,10 +21,10 @@ export NCCL_ASYNC_ERROR_HANDLING=1
 
 export PYTHONPATH=/home/users/u101957/code/anemoi-core/models/src:/home/users/u101957/code/anemoi-core/training/src:$PYTHONPATH
 echo $CUDA_VISIBLE_DEVICES
-cd /home/users/u101957/code/anemoi-core/training/src/anemoi/training/config
+cd /home/users/u102751/code/anemoi/anemoi-env
 CUDA_VISIBLE_DEVICES=0,1,2,3
 # puv tree | grep anemoi-models
-srun puv run anemoi-training train --config-name=training_full
+srun puv run anemoi-training train --config-name=training_finetuning --config-dir /home/users/u102751/code/anemoi/anemoi-core/training/src/anemoi/training/config
 
 
 # export PYTHONPATH=/home/users/u102751/code/anemoi-core/models/src:/home/users/u102751/code/anemoi-core/training/src:$PYTHONPATH

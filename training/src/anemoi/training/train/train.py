@@ -240,11 +240,15 @@ class AnemoiTrainer(ABC):
                 LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
                 model = transfer_learning_loading(model, self.last_checkpoint)
             else:
+                from anemoi.models.interface import AnemoiModelInterface
+                torch.serialization.add_safe_globals([AnemoiModelInterface])
+                from anemoi.models.preprocessing import Processors
+                torch.serialization.add_safe_globals([Processors])
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_task.load_from_checkpoint(self.last_checkpoint, weights_only= False, **kwargs, strict=False)
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
