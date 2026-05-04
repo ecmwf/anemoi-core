@@ -137,16 +137,16 @@ class FFT2D(SpectralTransform):
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
         if projection_matrix:
-            self.projection_matrices = ProjectionGraphProvider(file_path=projection_matrix)
+            self.projection_matrix = ProjectionGraphProvider(file_path=projection_matrix)
             self.projector = SparseProjector()
         else:
-            self.projection_matrices = None
+            self.projection_matrix = None
 
     def _apply_projector(self, batch: torch.Tensor) -> torch.Tensor:
         """Apply sparse projector to a batch, handling multi-dimensional inputs."""
         input_shape = batch.shape
         batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = self.projection_matrices.get_edges(device=batch.device)
+        projection_matrix = self.projection_matrix.get_edges(device=batch.device)
         batch = self.projector(batch, projection_matrix)
         return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
 
@@ -157,7 +157,7 @@ class FFT2D(SpectralTransform):
         data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
         # optionally apply sparse projection matrix
-        if self.projection_matrices:
+        if self.projection_matrix:
             data = self._apply_projector(data)
 
         # reshape to 2D
