@@ -231,7 +231,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
-        for dataset_name in self.encoded_dataset_names:
+        for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
@@ -242,28 +242,30 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
 
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
+            if dataset_name in self.encoded_dataset_names:
+                encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
+                    dataset_name
+                ].get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
 
-            # Encoder for this dataset
-            x_data_latent, x_latent = self.encoder[dataset_name](
-                (x_data_latent, x_hidden_latent),
-                batch_size=batch_size,
-                shard_shapes=(shard_shapes_data, shard_shapes_hidden),
-                edge_attr=encoder_edge_attr,
-                edge_index=encoder_edge_index,
-                model_comm_group=model_comm_group,
-                x_src_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
-                x_dst_is_sharded=False,  # x_latent does not come sharded
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edge_shard_shapes=enc_edge_shard_shapes,
-            )
+                # Encoder for this dataset
+                x_data_latent, x_latent = self.encoder[dataset_name](
+                    (x_data_latent, x_hidden_latent),
+                    batch_size=batch_size,
+                    shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+                    edge_attr=encoder_edge_attr,
+                    edge_index=encoder_edge_index,
+                    model_comm_group=model_comm_group,
+                    x_src_is_sharded=in_out_sharded[dataset_name],  # x_data_latent comes sharded iff in_out_sharded
+                    x_dst_is_sharded=False,  # x_latent does not come sharded
+                    keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                    edge_shard_shapes=enc_edge_shard_shapes,
+                )
+                dataset_latents[dataset_name] = x_latent
+
             x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
         x_latent = sum(dataset_latents.values())
