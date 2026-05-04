@@ -290,7 +290,7 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
     """Ornstein residual with learnable scalars theta and mu.
 
     ``residual(x) = (1 - theta) * x + mu + sum_i beta_i * f_i``
-    
+
     where theta is in (theta_buff, 1) and learned independently for each
     prognostic variable. ``f_i`` are forcing variables listed in
     ``regressors`` No spatial or spectral structure.
