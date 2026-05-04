@@ -11,6 +11,7 @@ import einops
 import pytest
 import torch
 from omegaconf import DictConfig
+from pytest_mock import MockerFixture
 
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import FourierCorrelationLoss
@@ -518,7 +519,7 @@ def test_spectral_crps_fft_and_dct() -> None:
         assert out_total.numel() == 1, f"{transform}: scalar CRPS expected"
 
 
-def test_spectral_crps_fft2d_projection(mocker: pytest.MockFixture) -> None:
+def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
     from scipy.sparse import eye
 
     bs, ens, nvars = 2, 5, 3
