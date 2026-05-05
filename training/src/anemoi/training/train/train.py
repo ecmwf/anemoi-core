@@ -37,6 +37,7 @@ from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
@@ -430,7 +431,15 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config)
+        callbacks_context = CallbacksContext(
+            diagnostics=self.config.diagnostics,
+            checkpoints_output=self.config.system.output.checkpoints,
+            plots_output=self.config.system.output.plots,
+            wandb_enabled=getattr(getattr(self.config.diagnostics.log, "wandb", None), "enabled", False),
+            mlflow_enabled=getattr(getattr(self.config.diagnostics.log, "mlflow", None), "enabled", False),
+            weight_averaging_config=getattr(self.config.training, "weight_averaging", None),
+        )
+        return get_callbacks(callbacks_context)
 
     @cached_property
     def metadata(self) -> dict:
