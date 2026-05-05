@@ -170,6 +170,7 @@ class PointWiseMLPProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
@@ -275,6 +276,7 @@ class TransformerProcessor(BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
@@ -363,6 +365,7 @@ class GNNProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         kwargs_build = {
@@ -482,6 +485,7 @@ class GraphTransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.build_layers(

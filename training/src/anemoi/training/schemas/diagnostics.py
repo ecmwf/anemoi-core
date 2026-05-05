@@ -98,33 +98,6 @@ ColormapSchema = Annotated[
 ]
 
 
-class LongRolloutPlotsSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots"] = Field(alias="_target_")
-    "LongRolloutPlots object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    rollout: list[int]
-    "Rollout steps to plot at."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    video_rollout: int = Field(example=0)
-    "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: list[float] | None = Field(default=None)
-    "Accumulation levels to plot, by default None."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    per_sample: int | None = Field(default=None)
-    "Number of plots per sample, by default 6."
-    every_n_epochs: int = Field(example=1)
-    "Epoch frequency to plot at, by default 1."
-    animation_interval: int | None = Field(default=None)
-    "Delay between frames in the animation in milliseconds, by default 400."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
-
-
 class PlotSampleSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
@@ -136,16 +109,12 @@ class PlotSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
-    output_steps: PositiveInt = Field(example=1)
-    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -161,8 +130,6 @@ class PlotSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    output_steps: PositiveInt = Field(example=1)
-    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -178,8 +145,6 @@ class PlotHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    output_steps: PositiveInt = Field(example=1)
-    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
@@ -199,14 +164,10 @@ class PlotEnsSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
     "Number of plots per sample, by default 6."
-    output_steps: PositiveInt = Field(example=1)
-    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     colormaps: dict[str, ColormapSchema] | None = Field(default=None)
@@ -237,8 +198,6 @@ class PlotEnsSpectrumSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    output_steps: PositiveInt = Field(example=1)
-    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
@@ -254,8 +213,6 @@ class PlotEnsHistogramSchema(BaseModel):
     "Index of sample to plot, must be inside batch size."
     parameters: list[str]
     "List of parameters to plot."
-    output_steps: PositiveInt = Field(example=1)
-    "Max number of output steps to plot per rollout for multi-step outputs (forecast mode)."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     every_n_batches: int | None = Field(default=None)
@@ -276,8 +233,7 @@ class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
 
 
 PlotCallbacks = Annotated[
-    LongRolloutPlotsSchema
-    | GraphTrainableFeaturesPlotSchema
+    GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
     | PlotSpectrumSchema
@@ -310,6 +266,14 @@ class PlotSchema(PydanticBaseModel):
     "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    colormaps: dict | None = None
+    "Variable-specific colormaps keyed by 'default', 'error', or variable name group."
+    precip_and_related_fields: list[str] | None = None
+    "Names of precipitation and related fields that use a special colormap."
+    focus_areas: dict | None = None
+    "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
+    datasets_to_plot: list[str] | None = None
+    "Dataset names to include in plots."
 
 
 class TimeLimitSchema(BaseModel):
@@ -414,6 +378,10 @@ class MlflowSchema(BaseModel):
     "Log terminal logs to MLflow."
     run_name: str | None
     "Name of run."
+    prefix: str = ""
+    "Prefix for metric keys logged to MLflow."
+    log_hyperparams: bool = True
+    "Whether to log hyperparameters."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
     expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])

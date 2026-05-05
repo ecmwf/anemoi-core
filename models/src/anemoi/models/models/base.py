@@ -40,6 +40,8 @@ class BaseGraphModel(nn.Module):
         model_config: DotDict,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -59,14 +61,14 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
+        self.n_step_input = n_step_input
+        self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
-        self.n_step_input = model_config.training.multistep_input
-        self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
         self.latent_skip = model_config.model.model.latent_skip
 
@@ -75,6 +77,7 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
+
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
@@ -225,7 +228,13 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data)
+            self.residual[dataset_name] = instantiate(
+                residual_config,
+                graph=self._graph_data,
+                statistics=self.statistics[dataset_name],
+                data_indices=self.data_indices[dataset_name],
+                dataset_name=dataset_name,
+            )
 
     @abstractmethod
     def forward(

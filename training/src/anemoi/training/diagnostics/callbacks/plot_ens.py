@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from typing import Union
 
     import pytorch_lightning as pl
-    from omegaconf import DictConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -95,28 +94,19 @@ class EnsemblePlotMixin:
         if self.latlons is None:
             self.latlons = {}
 
+        if dataset_name not in self.latlons:
+            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
+            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+
         # uniform handling of different ways to specify members
         if members is None:
             members = slice(members)
         elif not isinstance(members, list):
             members = [members]
 
-        if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
+        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
 
-        total_targets = pl_module.plot_adapter.get_total_plot_targets()
-
-        input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
@@ -140,6 +130,10 @@ class EnsemblePlotMixin:
 class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
     """Mixin for per-batch ensemble plotting callbacks."""
 
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        # Call parent's on_fit_start to check NCCL conditions
+        super().on_fit_start(trainer, pl_module)
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -149,13 +143,6 @@ class EnsemblePerBatchPlotMixin(EnsemblePlotMixin):
         batch_idx: int,
         **kwargs,
     ) -> None:
-        if (
-            self.config.diagnostics.plot.asynchronous
-            and self.config.dataloader.read_group_size > 1
-            and pl_module.local_rank == 0
-        ):
-            LOGGER.warning("Asynchronous plotting can result in NCCL timeouts with reader_group_size > 1.")
-
         if batch_idx % self.every_n_batches == 0:
             processed_batch, processed_output = self._handle_ensemble_batch_and_output(pl_module, output, batch)
             # When running in Async mode, it might happen that in the last epoch these tensors
@@ -218,11 +205,9 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
@@ -230,22 +215,22 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         dataset_names: list[str] | None = None,
         members: list | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: Any | None = None,
         **kwargs: Any,
     ) -> None:
         # Initialize PlotSample first
         _PlotSample.__init__(
             self,
-            config,
             sample_idx,
             parameters,
             accumulation_levels_plot,
-            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
             every_n_batches,
             dataset_names,
             focus_area,
+            plotting_settings=plotting_settings,
             **kwargs,
         )
         self.plot_members = members
@@ -268,11 +253,9 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
         for dataset_name in dataset_names:
 
             # Build dictionary of indices and parameters to be plotted
-            diagnostics = (
-                []
-                if self.config.data.datasets[dataset_name].diagnostic is None
-                else self.config.data.datasets[dataset_name].diagnostic
-            )
+            input_data = pl_module.data_indices[dataset_name].data.input.todict()
+            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             plot_parameters_dict = {
                 pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
                 for name in self.parameters
@@ -287,7 +270,7 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
+            latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
                 self.latlons[dataset_name],
                 data,
@@ -295,22 +278,13 @@ class PlotEnsSample(EnsemblePerBatchPlotMixin, _PlotSample):
             )
 
             local_rank = pl_module.local_rank
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    y_true, y_pred, tag_suffix = item[0], item[1], item[2]
-                else:
-                    _, y_true, y_pred, tag_suffix = item
+            for _, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 y_true = np.asarray(y_true).squeeze()
                 y_pred = np.asarray(y_pred).squeeze()
                 fig = plot_predicted_ensemble(
                     parameters=plot_parameters_dict,
                     n_plots_per_sample=4,
-                    latlons=self.latlons[dataset_name],
+                    latlons=latlons,
                     clevels=self.accumulation_levels_plot,
                     y_true=y_true,
                     y_pred=y_pred,
@@ -361,26 +335,24 @@ class PlotSpectrum(BaseEnsemblePlotCallback, _PlotSpectrum):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: Any | None = None,
     ) -> None:
         """Initialise the PlotSpectrum callback."""
         _PlotSpectrum.__init__(
             self,
-            config,
             sample_idx,
             parameters,
-            output_steps,
             min_delta,
             every_n_batches,
             dataset_names,
             focus_area,
+            plotting_settings=plotting_settings,
         )
 
 
@@ -389,33 +361,31 @@ class PlotSample(BaseEnsemblePlotCallback, _PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: Any | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialise the PlotSample callback."""
         _PlotSample.__init__(
             self,
-            config,
             sample_idx,
             parameters,
             accumulation_levels_plot,
-            output_steps,
             precip_and_related_fields,
             colormaps,
             per_sample,
             every_n_batches,
             dataset_names,
             focus_area,
+            plotting_settings=plotting_settings,
             **kwargs,
         )
 
@@ -425,28 +395,26 @@ class PlotHistogram(BaseEnsemblePlotCallback, _PlotHistogram):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: Any | None = None,
     ) -> None:
         """Initialise the PlotHistogram callback."""
         _PlotHistogram.__init__(
             self,
-            config,
             sample_idx,
             parameters,
-            output_steps,
             precip_and_related_fields,
             log_scale,
             every_n_batches,
             dataset_names,
             focus_area,
+            plotting_settings=plotting_settings,
         )
 
 
@@ -455,9 +423,14 @@ class GraphTrainableFeaturesPlot(_GraphTrainableFeaturesPlot):
 
     def __init__(
         self,
-        config: DictConfig,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
+        plotting_settings: Any | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback."""
-        _GraphTrainableFeaturesPlot.__init__(self, config, dataset_names, every_n_epochs)
+        _GraphTrainableFeaturesPlot.__init__(
+            self,
+            dataset_names=dataset_names,
+            every_n_epochs=every_n_epochs,
+            plotting_settings=plotting_settings,
+        )

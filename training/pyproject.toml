@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
 [build-system]
 requires = [ "setuptools>=60", "setuptools-scm>=8" ]
 
@@ -37,8 +36,8 @@ dependencies = [
   "anemoi-datasets>=0.5.34",
   "anemoi-graphs>=0.5.2",
   "anemoi-models[migrations]>=0.9.5",
-  "anemoi-training[mlflow]",
   "anemoi-transform>=0.1.11",
+  "anemoi-utils[mlflow]>=0.4.37",
   "anemoi-utils[provenance]>=0.5.1",
   "datashader>=0.17",
   "einops>=0.6.1",
@@ -57,7 +56,7 @@ dependencies = [
   "tqdm>=4.65",
   "zarr>=2.14.2",
 ]
-# Optional extras: pip install anemoi-training[mlflow,tests], etc.
+# Optional extras: pip install anemoi-training[azure,tests], etc.
 optional-dependencies.all = [ "anemoi-training[remote]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
@@ -72,10 +71,6 @@ optional-dependencies.docs = [
   "sphinx>=8.2; python_version>='3.11'",
   "sphinx-argparse",
   "sphinx-rtd-theme",
-]
-optional-dependencies.mlflow = [
-  "anemoi-utils[mlflow]>=0.4.37",
-  "mlflow-skinny>=2.11.1",
 ]
 optional-dependencies.plotting = [
   "cartopy>=0.25",
@@ -92,12 +87,12 @@ optional-dependencies.remote = [
   "aiohttp>=3.8",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                         # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                    # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
+  "anemoi-graphs[tri]",                  # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",             # required to test the DCT2D spectral loss
+  "anemoi-training[azure,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
   "hypothesis>=6.11",
   "pytest>=8",
-  "pytest-asyncio>=0.23",                       # required for async checkpoint tests
+  "pytest-asyncio>=0.23",                # required for async checkpoint tests
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
@@ -206,5 +201,5 @@ lint.ignore = [
   "TD003",
   "UP007",
 ]
-lint.flake8-import-conventions.extend-aliases."pytorch_lightning" = "pl"
+lint.flake8-import-conventions.extend-aliases.pytorch_lightning = "pl"
 lint.pydocstyle.convention = "numpy"
