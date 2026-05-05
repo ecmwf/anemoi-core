@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Annotated
 from typing import Any
 from typing import Literal
 from typing import Union
@@ -75,3 +76,9 @@ class TransformerEncoderSchema(TransformerModelComponent):
 class PointWiseForwardMapperSchema(PointWiseMapperComponent):
     target_: Literal["anemoi.models.layers.mapper.PointWiseForwardMapper"] = Field(..., alias="_target_")
     "Point-wise encoder object from anemoi.models.layers.mapper."
+
+
+EncoderSchema = Annotated[
+    GNNEncoderSchema | GraphTransformerEncoderSchema | TransformerEncoderSchema | PointWiseForwardMapperSchema,
+    Field(discriminator="target_"),
+]

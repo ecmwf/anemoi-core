@@ -192,9 +192,8 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Flag to disable validation of the configuration"""
 
 
-def convert_to_omegaconf(config: BaseSchema) -> dict:
-    config = config.model_dump(by_alias=True)
-    return OmegaConf.create(config)
+def convert_to_omegaconf(config: BaseSchema | UnvalidatedBaseSchema) -> DictConfig:
+    return OmegaConf.create(config.model_dump(by_alias=True))
 
 
 def validate_schema(config: DictConfig) -> BaseSchema:

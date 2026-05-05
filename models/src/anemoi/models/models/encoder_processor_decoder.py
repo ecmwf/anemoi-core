@@ -36,17 +36,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
+
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=sub_encoder_config.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=sub_encoder_config.get("trainable_size", 0),
             )
 
             self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
+                sub_encoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
@@ -74,16 +76,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
+
+            # Create graph providers
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=sub_decoder_config.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=sub_decoder_config.get("trainable_size", 0),
             )
 
             self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
+                sub_decoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
