@@ -263,6 +263,9 @@ class ReducedSHT(SpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
 
@@ -321,9 +324,12 @@ class OctahedralSHT(SpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
+            on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
         self.nlat = nlat
