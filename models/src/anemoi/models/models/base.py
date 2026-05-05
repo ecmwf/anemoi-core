@@ -300,7 +300,7 @@ class BaseGraphModel(nn.Module):
 
         # Early return for direct instantiation
         if "_target_" in config:
-            return dataset_name, config, {}
+            return dataset_name, config, {v: False for v in (prefix_mapping.values() if prefix_mapping else [])}
 
         def equals_with_mapping(key: str, target_key: str) -> tuple[bool, dict[T, bool]]:
             """Check if the key matches the target key after removing any prefixes defined in the prefix_mapping."""
