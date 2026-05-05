@@ -137,17 +137,34 @@ At forward time, the model validates that all **required** (non-``~``)
 datasets are present in the input batch. Optional datasets may be
 absent without raising an error.
 
-Shared Encoders/Decoders
+Shared Configuration (``,``)
+-----------------------------
+
+Multiple datasets can share the same configuration by joining their
+names with ``,``. Each dataset gets its own independently instantiated
+encoder/decoder, but they share the same config:
+
+.. code:: yaml
+
+   encoder:
+     dataset1,dataset2:
+       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+       ...
+
+This is equivalent to writing the same config under each dataset key
+individually. Each dataset receives a separate module instance built
+from the shared config.
+
+Shared Instance (``&``)
 ------------------------
 
 .. note::
 
-   Shared encoders/decoders are not yet fully supported. The
-   configuration syntax is defined but will raise
-   ``NotImplementedError`` at build time until forward pass support is
-   added.
+   Shared instances are not yet fully supported. The configuration
+   syntax is defined but will raise ``NotImplementedError`` at build
+   time until forward pass support is added.
 
-Multiple datasets can share a single encoder/decoder instance by
+Multiple datasets can share a single encoder/decoder **instance** by
 joining their names with ``&``:
 
 .. code:: yaml
@@ -157,8 +174,8 @@ joining their names with ``&``:
        _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
        ...
 
-When enabled, the model will instantiate the encoder once and reuse it
-for both datasets.
+Unlike ``,``, this instantiates the encoder **once** and reuses the
+same module for both datasets.
 
 Typically the model is instantiated in :doc:`Anemoi Training
 <anemoi-training:index>` or :doc:`Anemoi Inference

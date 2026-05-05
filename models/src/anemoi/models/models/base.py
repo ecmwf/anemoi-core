@@ -238,6 +238,9 @@ class BaseGraphModel(nn.Module):
         """Extract a nested configuration for a specific dataset if the config is provided in a multi-dataset format.
         If not provided in a multi-dataset format, return the base config.
 
+        Use `&` for objects shared across datasets (e.g., "dataset1&dataset2") and the dataset name as the key for dataset-specific configs.
+        Use `,` for configs shared across datasets.
+
         The key can be used to maintain the association, particuarly for the shared use case.
         For `dict`'s built with this, use `self._get_from_dict_with_and` to retrieve the correct value based on the dataset name.
 
@@ -260,6 +263,13 @@ class BaseGraphModel(nn.Module):
         3) Multi-dataset config with '&' in keys (e.g., "dataset1&dataset2"):
             ```
             dataset1&dataset2:
+                _target_: SomeClass
+                param1: value1
+                param2: value2
+            ```
+        4) Multi-dataset config with ',' in keys (e.g., "dataset1,dataset2"):
+            ```
+            dataset1,dataset2:
                 _target_: SomeClass
                 param1: value1
                 param2: value2
@@ -334,6 +344,13 @@ class BaseGraphModel(nn.Module):
                 )
                 _assert_is_valid_nested_config(config[key])
                 return key, config[key], prefix_flags
+
+        # Check for multi-dataset config with ',' in keys, e.g., "dataset1,dataset2"
+        for key in (k for k in config.keys() if "," in k):
+            _, prefix_flags = equals_with_mapping(key, dataset_name)
+            if any(equals_with_mapping(part, dataset_name)[0] for part in key.split(",")):
+                _assert_is_valid_nested_config(config[key])
+                return dataset_name, config[key], prefix_flags
 
         raise ValueError(
             f"Could not find a valid configuration for dataset '{dataset_name}'. Expected either a direct config with '_target_' or a nested config under key '{dataset_name}' or keys containing '{dataset_name}' separated by '&'. Got config: {config}"
