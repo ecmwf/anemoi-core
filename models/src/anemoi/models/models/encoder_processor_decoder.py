@@ -21,7 +21,8 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.models import BaseGraphModel
+from anemoi.models.models.base import PREFIX_TO_MEANING
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -35,8 +36,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
+        self.encoder_flags = {}
+
         for dataset_name in self.dataset_names:
-            sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
+            key, sub_encoder_config, prefix_flags = self._get_nested_configuration(
+                model_config.model.encoder, dataset_name, prefix_mapping=PREFIX_TO_MEANING
+            )
+            if not prefix_flags["optional"]:
+                prefix_flags["required"] = True  # Mark as required if not explicitly marked as optional
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
@@ -47,7 +54,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=sub_encoder_config.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
+            self.encoder_flags[dataset_name] = prefix_flags
+
+            if key in self.encoder:
+                continue  # Encoder already built for this dataset (e.g., shared encoder), skip to avoid overwriting
+
+            self.encoder[key] = instantiate(
                 sub_encoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
@@ -75,8 +87,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
+        self.decoder_flags = {}
+
         for dataset_name in self.dataset_names:
-            sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
+            key, sub_decoder_config, prefix_flags = self._get_nested_configuration(
+                model_config.model.decoder, dataset_name, prefix_mapping=PREFIX_TO_MEANING
+            )
+
+            if not prefix_flags["optional"]:
+                prefix_flags["required"] = True  # Mark as required if not explicitly marked as optional
 
             # Create graph providers
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
@@ -87,7 +106,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=sub_decoder_config.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
+            self.decoder_flags[dataset_name] = prefix_flags
+
+            if key in self.decoder:
+                continue  # Decoder already built for this dataset (e.g., shared decoder), skip to avoid overwriting
+
+            self.decoder[key] = instantiate(
                 sub_decoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
@@ -215,6 +239,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
         dataset_names = list(x.keys())
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.encoder_flags.items() if not d[1].get("optional", False))
+        )
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.decoder_flags.items() if not d[1].get("optional", False))
+        )
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)

@@ -181,6 +181,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Output tensor
         """
         dataset_names = list(x.keys())
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.encoder_flags.items() if not d[1].get("optional", False))
+        )
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.decoder_flags.items() if not d[1].get("optional", False))
+        )
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
