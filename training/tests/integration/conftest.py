@@ -162,6 +162,7 @@ def global_config(
         "node_weights",
         "output_steps",
     ]
+
     return cfg, url, model_architecture
 
 

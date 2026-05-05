@@ -3,12 +3,7 @@ overwrite: True
 
 
 nodes:
-  # Data nodes
-  data:
-    node_builder:
-      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${dataloader.training.datasets.data.dataset_config}
-    attributes: ${graph.attributes.nodes}
+  # Hidden nodes
   hidden_1:
     node_builder:
       _target_: anemoi.graphs.nodes.TriNodes
