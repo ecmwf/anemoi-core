@@ -11,7 +11,6 @@
 
 from unittest.mock import MagicMock
 
-import omegaconf
 import torch
 
 from anemoi.training.diagnostics.callbacks.plot_ens import EnsemblePlotMixin
@@ -158,28 +157,8 @@ def test_ensemble_plot_mixin_process():
 
 def test_ensemble_plot_callbacks_instantiation():
     """Test that ensemble plot callbacks can be instantiated."""
-    config = omegaconf.OmegaConf.create(
-        {
-            "system": {"output": {"plots": "path_to_plots"}},
-            "diagnostics": {
-                "plot": {
-                    "parameters": ["temperature", "pressure"],
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"batch": 1},
-                },
-            },
-            "data": {
-                "diagnostic": None,
-                "datasets": {"data": {"diagnostic": None}},
-            },
-            "dataloader": {"read_group_size": 1},
-        },
-    )
-
     # Test plotting class instantiation
     plot_ens_sample = PlotEnsSample(
-        config=config,
         sample_idx=0,
         parameters=["temperature", "pressure"],
         accumulation_levels_plot=[0.1, 0.5, 0.9],
@@ -187,7 +166,6 @@ def test_ensemble_plot_callbacks_instantiation():
     assert plot_ens_sample is not None
 
     plot_sample = PlotSample(
-        config=config,
         sample_idx=0,
         parameters=["temperature"],
         accumulation_levels_plot=[0.5],
@@ -195,14 +173,12 @@ def test_ensemble_plot_callbacks_instantiation():
     assert plot_sample is not None
 
     plot_spectrum = PlotSpectrum(
-        config=config,
         sample_idx=0,
         parameters=["temperature"],
     )
     assert plot_spectrum is not None
 
     plot_histogram = PlotHistogram(
-        config=config,
         sample_idx=0,
         parameters=["temperature"],
     )
