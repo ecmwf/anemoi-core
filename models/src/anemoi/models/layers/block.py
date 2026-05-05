@@ -542,6 +542,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self.edge_pre_mlp = nn.Identity()
 
         self.graph_attention_backend = graph_attention_backend
+        self._attention_backend_applied = False
         self.set_attention_function()
 
     def set_attention_function(self):
@@ -643,9 +644,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
 
-        # Check at runtime if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set and update backend if so
-        if ATTENTION_BACKEND != "":
+        # Check once at runtime if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set and update backend if so
+        if ATTENTION_BACKEND != "" and not self._attention_backend_applied:
             self.set_attention_function()
+            self._attention_backend_applied = True
 
         if self.graph_attention_backend == "triton":
             csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True)

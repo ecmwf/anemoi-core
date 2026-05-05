@@ -117,6 +117,7 @@ class MultiHeadSelfAttention(nn.Module):
             raise ValueError(f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})")
 
         self.attention_implementation = attention_implementation
+        self._attention_backend_applied = False
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
@@ -236,9 +237,10 @@ class MultiHeadSelfAttention(nn.Module):
         key = self.lin_k(x)
         value = self.lin_v(x)
 
-        # Check at runtime if the Attention backend env var has been set, and update attention backend accordingly
-        if ATTENTION_BACKEND:
+        # Check once at runtime if the Attention backend env var has been set, and update attention backend accordingly
+        if ATTENTION_BACKEND and not self._attention_backend_applied:
             self.set_attention_function()
+            self._attention_backend_applied = True
 
         return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
 
