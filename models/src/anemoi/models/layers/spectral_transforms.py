@@ -15,14 +15,9 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
-<<<<<<< feat/fft2d-projection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
-
-=======
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-
->>>>>>> main
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 LOGGER = logging.getLogger(__name__)
