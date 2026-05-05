@@ -14,6 +14,8 @@ from .graph_edge_crps import GraphEdgeCRPSLoss
 from .graph_edge_energy_score import GraphEdgeEnergyScoreLoss
 from .graph_energy_score import GraphEnergyScoreLoss
 from .graph_variogram_score import GraphVariogramScoreLoss
+from .gradient import (DiscreteSobolevH1Loss, GradientMeanSquareLoss, 
+                       GradientMeanAbsLoss, GradientMaxAbsLoss)
 from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
@@ -34,19 +36,27 @@ from .weighted_mse import WeightedMSELoss
 __all__ = [
     "CRPS",
     "CombinedLoss",
+<<<<<<< HEAD
     "EnergyScoreLoss",
     "FourierCorrelationLoss",
     "GraphEdgeCRPSLoss",
     "GraphEdgeEnergyScoreLoss",
     "GraphEnergyScoreLoss",
     "GraphVariogramScoreLoss",
+=======
+    "DiscreteSobolevH1Loss",
+    "FourierCorrelationLoss",
+    "GradientMeanSquareLoss",
+    "GradientMeanAbsLoss",
+    "GradientMaxAbsLoss",     
+>>>>>>> 939408efe (feat(training) : add gradient loss)
     "HuberLoss",
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
     "LossVariableMapper",
     "MAELoss",
-    "MSELoss",
+    "MSELoss",    
     "MultiscaleLossWrapper",
     "PowerSpectrumLoss",
     "RMSELoss",
