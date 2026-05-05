@@ -58,6 +58,108 @@ First, let's take the model configuration ``transformer.yaml``:
      - edge_dirs
      nodes: []
 
+.. _multi-dataset-enc-dec:
+
+Multi-Dataset Encoder/Decoder Configuration
+============================================
+
+When training with multiple datasets, each dataset can have its own
+encoder and decoder configuration. This is done by nesting configs
+under dataset-name keys using Hydra's ``@`` package directive.
+
+**Single dataset** (flat config, the default):
+
+.. code:: yaml
+
+   defaults:
+     - encoder: gt16
+     - decoder: gt16
+
+This produces a flat config with ``_target_`` at the top level:
+
+.. code:: yaml
+
+   encoder:
+     _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+     ...
+
+**Multiple datasets** with different encoders/decoders:
+
+.. code:: yaml
+
+   defaults:
+     - encoder@encoder.data: gt16
+     - encoder@encoder.other: gnn
+     - decoder@decoder.data: gt16
+     - decoder@decoder.other: gnn
+
+This produces a dictionary-style config:
+
+.. code:: yaml
+
+   encoder:
+     data:
+       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+       ...
+     other:
+       _target_: anemoi.models.layers.mapper.GNNForwardMapper
+       ...
+
+The model resolves the correct encoder/decoder for each dataset at
+build time using ``_get_nested_configuration``.
+
+Optional Encoders/Decoders
+--------------------------
+
+In multi-dataset setups, some datasets may not always be present at
+inference time. Prefix the dataset key with ``~`` to mark its
+encoder/decoder as optional:
+
+.. code:: yaml
+
+   defaults:
+     - encoder@encoder.data: gt16
+     - encoder@encoder.~other: gnn
+
+This produces:
+
+.. code:: yaml
+
+   encoder:
+     data:
+       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+       ...
+     ~other:
+       _target_: anemoi.models.layers.mapper.GNNForwardMapper
+       ...
+
+At forward time, the model validates that all **required** (non-``~``)
+datasets are present in the input batch. Optional datasets may be
+absent without raising an error.
+
+Shared Encoders/Decoders
+------------------------
+
+.. note::
+
+   Shared encoders/decoders are not yet fully supported. The
+   configuration syntax is defined but will raise
+   ``NotImplementedError`` at build time until forward pass support is
+   added.
+
+Multiple datasets can share a single encoder/decoder instance by
+joining their names with ``&``:
+
+.. code:: yaml
+
+   encoder:
+     dataset1&dataset2:
+       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+       ...
+
+When enabled, the model will instantiate the encoder once and reuse it
+for both datasets.
+
 Typically the model is instantiated in :doc:`Anemoi Training
 <anemoi-training:index>` or :doc:`Anemoi Inference
 <anemoi-inference:index>`. For this example we will load the model
