@@ -9,6 +9,8 @@
 
 from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
+from .gradient import (DiscreteSobolevH1Loss, GradientMeanSquareLoss, 
+                       GradientMeanAbsLoss, GradientMaxAbsLoss)
 from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
@@ -29,14 +31,18 @@ from .weighted_mse import WeightedMSELoss
 __all__ = [
     "CRPS",
     "CombinedLoss",
+    "DiscreteSobolevH1Loss",
     "FourierCorrelationLoss",
+    "GradientMeanSquareLoss",
+    "GradientMeanAbsLoss",
+    "GradientMaxAbsLoss",     
     "HuberLoss",
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
     "LossVariableMapper",
     "MAELoss",
-    "MSELoss",
+    "MSELoss",    
     "MultiscaleLossWrapper",
     "RMSELoss",
     "SpectralAMSELoss",

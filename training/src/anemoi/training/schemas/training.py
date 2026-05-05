@@ -252,6 +252,10 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     crps = "anemoi.training.losses.CRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
+    discrete_h1 = "anemoi.training.losses.DiscreteSobolevH1Loss"
+    gradient_meanl2 = "anemoi.training.losses.GradientMeanSquareLoss"
+    gradient_meanl1 = "anemoi.training.losses.GradientMeanAbsLoss"
+    gradient_maxl1 = "anemoi.training.losses.GradientMaxAbsLoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
@@ -309,6 +313,12 @@ class CRPSSchema(BaseLossSchema):
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
+
+class GradientLossSchema(BaseLossSchema):
+    graph : str
+    "Graph defining the knn from the data to the data"
+    graph_name : str
+    "Name for data grid"
 
 class GraphLossMatrixSchema(BaseModel):
     """One graph-backed smoothing matrix definition for multiscale loss."""
@@ -537,6 +547,13 @@ def _loss_discriminator(v: Any) -> str:
         "anemoi.training.losses.SpectralAMSELoss",
     }:
         return "spectral"
+    if target in {
+        "anemoi.training.losses.DiscreteSobolevH1Loss",
+        "anemoi.training.losses.GradientMeanSquareLoss",
+        "anemoi.training.losses.GradientMeanAbsLoss",
+        "anemoi.training.losses.GradientMaxAbsLoss",
+    }:
+        return "gradient"
     if target == "anemoi.training.losses.HuberLoss":
         return "huber"
     if target == "anemoi.training.losses.aggregate.TimeAggregateLossWrapper":
@@ -560,6 +577,7 @@ class CombinedLossSchema(BaseLossSchema):
     losses: list[
         Annotated[
             Annotated[BaseLossSchema, Tag("base")]
+            | Annotated[GradientLossSchema, Tag("gradient")]
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
@@ -614,6 +632,7 @@ class CombinedLossSchema(BaseLossSchema):
 
 LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
+    | Annotated[GradientLossSchema, Tag("gradient")]
     | Annotated[HuberLossSchema, Tag("huber")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
