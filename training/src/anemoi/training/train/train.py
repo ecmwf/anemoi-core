@@ -280,16 +280,14 @@ class AnemoiTrainer(ABC):
             )
             and not (
                 any(
-                    "GLU" in encoder_config.layer_kernels["Activation"]["_target_"]
-                    and ".Transformer" in encoder_config.target_
-                    for encoder_config in encoder_config
+                    "GLU" in enc_conf.layer_kernels["Activation"]["_target_"] and ".Transformer" in enc_conf.target_
+                    for enc_conf in encoder_config
                 )
             )
             and not (
                 any(
-                    "GLU" in decoder_config.layer_kernels["Activation"]["_target_"]
-                    and ".Transformer" in decoder_config.target_
-                    for decoder_config in decoder_config
+                    "GLU" in dec_conf.layer_kernels["Activation"]["_target_"] and ".Transformer" in dec_conf.target_
+                    for dec_conf in decoder_config
                 )
             )
         ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
