@@ -368,7 +368,13 @@ class BaseGraphModel(nn.Module):
                 )
             # if key in self.residual:
             #     continue # Residual already built for this dataset (e.g., shared residual), skip to avoid overwriting
-            self.residual[dataset_name] = instantiate(config, graph=self._graph_data)
+            self.residual[dataset_name] = instantiate(
+                config,
+                graph=self._graph_data,
+                statistics=self.statistics[dataset_name],
+                data_indices=self.data_indices[dataset_name],
+                dataset_name=dataset_name,
+            )
 
     @abstractmethod
     def forward(
