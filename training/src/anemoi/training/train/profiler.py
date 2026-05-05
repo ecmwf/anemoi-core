@@ -283,7 +283,13 @@ class AnemoiProfiler(AnemoiTrainer):
             available = check_torch_version()
 
             if available:  # if torch is below 2.1.0, the callback will not be added
-                callbacks.append(MemorySnapshotRecorder(self.config))
+                callbacks.append(
+                    MemorySnapshotRecorder(
+                        dirpath=self.config.system.output.profiler,
+                        steps=self.config.diagnostics.benchmark_profiler.snapshot.steps,
+                        warmup=self.config.diagnostics.benchmark_profiler.snapshot.warmup,
+                    ),
+                )
         return callbacks
 
     def get_example_input_array(self) -> dict[str, torch.Tensor]:
