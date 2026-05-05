@@ -365,10 +365,13 @@ class InverseSphericalHarmonicTransform(Module):
         self.lons_per_lat = lons_per_lat
         self.n_grid_points = sum(self.lons_per_lat)
 
+        # Set offsets to start of each latitude in flattened grid dimension
+        self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
+
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
-            self.irfft_rings = self.irfft_rings_reduced
+            self.irfft_rings = self.irfft_rings_reduced_naive
         else:
             LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
             self.irfft_rings = self.irfft_rings_regular
@@ -383,7 +386,7 @@ class InverseSphericalHarmonicTransform(Module):
 
         self.register_buffer("pct", pct, persistent=False)
 
-    def irfft_rings_reduced(self, x: Tensor) -> Tensor:
+    def irfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
 
         Parameters
@@ -397,12 +400,24 @@ class InverseSphericalHarmonicTransform(Module):
             field [..., grid]
         """
 
-        irfft = [torch.fft.irfft(x[..., t, :], nlon, norm="forward") for t, nlon in enumerate(self.lons_per_lat)]
+        return self.irfft_rings_reduced_banded(x, start_lat=0, end_lat=self.nlat)
 
-        return torch.cat(
-            tensors=irfft,
-            dim=-1,
+    def irfft_rings_reduced_banded(self, x: Tensor, start_lat: int, end_lat: int) -> Tensor:
+        # Prepare zero-padded output tensor for filling with rfft
+        output_tensor = torch.zeros(
+            *x.shape[:-2],
+            sum(self.lons_per_lat[start_lat:end_lat]),
+            device=x.device,
+            dtype=torch.float32 if x.dtype == torch.complex64 else torch.float64,
         )
+
+        # Do a complex-to-real IFFT on each latitude
+        for i, (slon, nlon) in enumerate(zip(self.slon[start_lat:end_lat], self.lons_per_lat[start_lat:end_lat])):
+            output_tensor[..., slon - self.slon[start_lat] : slon - self.slon[start_lat] + nlon] = torch.fft.irfft(
+                x[..., start_lat + i, :], nlon, norm="forward"
+            )
+
+        return output_tensor
 
     def irfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
