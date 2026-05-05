@@ -152,7 +152,7 @@ def test_spectral_ornstein_regular(truncate):
     data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
-        grid="legendre-gauss",
+        grid="regular",
         truncate=truncate,
         graph=graph,
         data_indices=data_indices,
@@ -185,7 +185,7 @@ def test_spectral_ornstein_skip_truncate_variables():
     data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
-        grid="legendre-gauss",
+        grid="regular",
         truncate=True,
         skip_truncate_variables=["var0"],
         graph=graph,
@@ -207,7 +207,7 @@ def test_spectral_ornstein_no_truncation_has_no_filter():
     data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
-        grid="legendre-gauss",
+        grid="regular",
         truncate=False,
         graph=graph,
         data_indices=data_indices,
@@ -222,7 +222,7 @@ def test_spectral_ornstein_truncation_has_filter():
     data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
-        grid="legendre-gauss",
+        grid="regular",
         truncate=True,
         graph=graph,
         data_indices=data_indices,
