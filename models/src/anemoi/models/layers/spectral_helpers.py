@@ -173,7 +173,10 @@ class SphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
-            self.rfft_rings = self.rfft_rings_reduced_graphed if use_graphed_rfft else self.rfft_rings_reduced_naive
+            if use_graphed_rfft:
+                self.rfft_rings = self.rfft_rings_reduced_graphed
+            else:
+                self.rfft_rings = self.rfft_rings_reduced_naive
         else:
             LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
