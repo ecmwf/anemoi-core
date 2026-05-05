@@ -333,20 +333,6 @@ class MultiScaleLossSchema(BaseModel):
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
 
-    @model_validator(mode="after")
-    def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
-        """Deprecated top-level file keys must not be combined with an on-the-fly multiscale_config."""
-        if (self.loss_matrices is not None or self.loss_matrices_path is not None) and isinstance(
-            self.multiscale_config,
-            MultiscaleConfigOnTheFlySchema,
-        ):
-            msg = (
-                "Deprecated 'loss_matrices'/'loss_matrices_path' cannot be combined with "
-                "an on-the-fly 'multiscale_config'. Move file paths inside multiscale_config."
-            )
-            raise ValueError(msg)
-        return self
-
 
 class HuberLossSchema(BaseLossSchema):
     delta: float = 1.0

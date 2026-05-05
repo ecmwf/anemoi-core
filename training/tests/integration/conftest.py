@@ -259,17 +259,18 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
         multiscale_cfg = training_loss_cfg.get("multiscale_config")
         if multiscale_cfg is None:
             continue
-        for file in multiscale_cfg.get("loss_matrices", []):
+        for file in multiscale_cfg.get("loss_matrices") or []:
             if file is not None:
                 tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
         if tmp_path_loss_matrices is not None:
+            resolved_path = str(Path(tmp_path_loss_matrices).parent)
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
             OmegaConf.set_struct(multiscale_cfg, False)
-            multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+            multiscale_cfg.loss_matrices_path = resolved_path
 
             val_multiscale_cfg = cfg.training.validation_metrics.datasets[dataset_name].multiscale.multiscale_config
             OmegaConf.set_struct(val_multiscale_cfg, False)
-            val_multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+            val_multiscale_cfg.loss_matrices_path = resolved_path
         cfg.training.training_loss.datasets[dataset_name] = training_loss_cfg
     return cfg
 
@@ -320,7 +321,6 @@ def ensemble_graph_multiscale_config(
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     cfg.training.training_loss.datasets.data.weights = [1.0, 1.0, 1.0, 1.0, 1.0]
-    OmegaConf.set_struct(cfg.training.training_loss.datasets.data, False)
     cfg.training.training_loss.datasets.data.multiscale_config = {
         "num_scales": 4,
         "base_num_nearest_neighbours": 16,
@@ -366,11 +366,10 @@ def ensemble_truncated_connection_config(
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
-    OmegaConf.set_struct(cfg.training.training_loss.datasets.data, False)
-    cfg.training.training_loss.datasets.data.multiscale_config = {"loss_matrices": [None]}
+    cfg.training.training_loss.datasets.data.multiscale_config = None
     cfg.training.training_loss.datasets.data.weights = [1.0]
 
-    cfg.training.validation_metrics.datasets.data.multiscale.multiscale_config = {"loss_matrices": [None]}
+    cfg.training.validation_metrics.datasets.data.multiscale.multiscale_config = None
     cfg.training.validation_metrics.datasets.data.multiscale.weights = [1.0]
     cfg.diagnostics.plot.callbacks = []
 
