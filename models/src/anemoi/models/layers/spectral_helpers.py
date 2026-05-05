@@ -172,14 +172,13 @@ class SphericalHarmonicTransform(Module):
 
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
-            LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
             if use_graphed_rfft:
                 self.rfft_rings = self.rfft_rings_reduced_graphed
             else:
                 self.rfft_rings = self.rfft_rings_reduced_naive
         else:
-            LOGGER.debug("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
+        LOGGER.info(f"SphericalHarmonicTransform: Using {self.rfft_rings.__name__} for rfft_rings")
 
         # To have further control over the memory consumption of the graphed implementation, we
         # group latitudes together into "bands" and create one graph for each band.
@@ -376,14 +375,13 @@ class InverseSphericalHarmonicTransform(Module):
 
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
-            LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
             if use_graphed_irfft:
                 self.irfft_rings = self.irfft_rings_reduced_graphed
             else:
                 self.irfft_rings = self.irfft_rings_reduced_naive
         else:
-            LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
             self.irfft_rings = self.irfft_rings_regular
+        LOGGER.info(f"InverseSphericalHarmonicTransform: Using {self.irfft_rings.__name__} for irfft_rings")
 
         # To have further control over the memory consumption of the graphed implementation, we
         # group latitudes together into "bands" and create one graph for each band.
