@@ -1047,11 +1047,7 @@ class PlotSample(BasePlotAdditionalMetrics):
 
 
 class PlotEnsSample(PlotSample):
-    """Plots a post-processed ensemble sample: input, target and prediction.
-
-    Uses the ensemble-aware plot adapter (via ``pl_module.plot_adapter``) and calls
-    ``plot_predicted_ensemble`` to visualise multiple ensemble members side-by-side.
-    """
+    """Plot ensemble mean, spread, and the difference of members to the mean for each variable."""
 
     def __init__(
         self,
