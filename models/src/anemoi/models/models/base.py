@@ -244,6 +244,9 @@ class BaseGraphModel(nn.Module):
                 residual_config,
                 graph=self._graph_data,
                 data_node_name=data_node_name,
+                statistics=self.statistics[dataset_name],
+                data_indices=self.data_indices[dataset_name],
+                dataset_name=dataset_name,
             )
 
     def _build_named_node_attributes_graph(self) -> HeteroData:

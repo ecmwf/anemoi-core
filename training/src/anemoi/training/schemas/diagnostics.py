@@ -378,6 +378,10 @@ class MlflowSchema(BaseModel):
     "Log terminal logs to MLflow."
     run_name: str | None
     "Name of run."
+    prefix: str = ""
+    "Prefix for metric keys logged to MLflow."
+    log_hyperparams: bool = True
+    "Whether to log hyperparameters."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
     expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])
