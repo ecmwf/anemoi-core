@@ -345,7 +345,7 @@ class InverseSphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphed_irfft: bool = False) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
 
         Parameters
@@ -354,6 +354,9 @@ class InverseSphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
+        use_graphed_irfft : bool, optional
+            Whether to use CUDA graphs for the reduced grid irFFT. Only has an effect if the input is on CUDA. Default
+            is False.
         """
 
         super().__init__()
@@ -371,10 +374,25 @@ class InverseSphericalHarmonicTransform(Module):
         # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
             LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_reduced for reduced grid")
-            self.irfft_rings = self.irfft_rings_reduced_naive
+            if use_graphed_irfft:
+                self.irfft_rings = self.irfft_rings_reduced_graphed
+            else:
+                self.irfft_rings = self.irfft_rings_reduced_naive
         else:
             LOGGER.debug("InverseSphericalHarmonicTransform: Using irfft_rings_regular for regular grid")
             self.irfft_rings = self.irfft_rings_regular
+
+        # To have further control over the memory consumption of the graphed implementation, we
+        # group latitudes together into "bands" and create one graph for each band.
+        # It seems that most devices today do not have enough memory to handle a graphed global
+        # rFFT.
+        # 3 bands works well on our H100s with 120 GB of memory.
+        number_of_latitude_bands = 3
+        self.latitude_bands = []
+        for band_idx in range(number_of_latitude_bands):
+            start_lat = band_idx * self.nlat // number_of_latitude_bands
+            end_lat = (band_idx + 1) * self.nlat // number_of_latitude_bands
+            self.latitude_bands.append((start_lat, end_lat))
 
         # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
         theta, _ = legendre_gauss_weights(nlat)
@@ -383,6 +401,8 @@ class InverseSphericalHarmonicTransform(Module):
         # Precompute associated Legendre polynomials
         pct = legpoly(self.truncation, self.truncation, np.cos(theta), inverse=True)
         pct = torch.from_numpy(pct)
+
+        self._graphed_irfft_cache = {}
 
         self.register_buffer("pct", pct, persistent=False)
 
@@ -418,6 +438,41 @@ class InverseSphericalHarmonicTransform(Module):
             )
 
         return output_tensor
+
+    def irfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
+        r"""Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+        Uses graphs.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+
+        Returns
+        -------
+        torch.Tensor
+            field [..., grid]
+        """
+
+        from functools import partial
+
+        if x.device.type != "cuda":
+            raise RuntimeError('Graphed irFFT requested but input device is not "cuda"')
+
+        key = (tuple(x.shape), x.dtype, x.device, x.requires_grad)
+        if key not in self._graphed_irfft_cache:
+            sample_x = torch.zeros_like(x, requires_grad=x.requires_grad)
+            with torch.amp.autocast("cuda", cache_enabled=False):
+                # Separate graphs for each latitude band, but all created with a single make_graphed_callables call
+                self._graphed_irfft_cache[key] = make_graphed_callables(
+                    tuple(
+                        partial(self.irfft_rings_reduced_banded, start_lat=latitude_band[0], end_lat=latitude_band[1])
+                        for latitude_band in self.latitude_bands
+                    ),
+                    tuple([(sample_x,)] * len(self.latitude_bands)),
+                )
+
+        return torch.cat([f(x) for f in self._graphed_irfft_cache[key]], dim=-1)
 
     def irfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
