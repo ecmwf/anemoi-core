@@ -185,17 +185,18 @@ class Forecaster(BaseTask):
 
     def advance_input(
         self,
-        x: dict[str, torch.Tensor],
-        y_pred: dict[str, torch.Tensor],
-        batch: dict[str, torch.Tensor],
+        x: "Batch",
+        y_pred: "Batch",
+        batch: "Batch",
         rollout_step: int = 0,
         data_indices: dict[str, IndexCollection] | None = None,
         output_mask: dict[str, object] | None = None,
         grid_shard_slice: dict[str, slice | None] | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Advance the input state for the next rollout step."""
-        for dataset_name in x:
-            x[dataset_name] = self._advance_dataset_input(
+    ) -> "Batch":
+        """Advance the input state for the next rollout step, preserving coords and metadata."""
+        new_data = {}
+        for dataset_name in x.dataset_names:
+            new_data[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
                 y_pred[dataset_name],
                 batch[dataset_name],
@@ -204,7 +205,7 @@ class Forecaster(BaseTask):
                 output_mask=None if output_mask is None else output_mask[dataset_name],
                 grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice[dataset_name],
             )
-        return x
+        return x.with_data(new_data)
 
     def log_extra(self, logger: Callable, logger_enabled: bool) -> None:
         """Log any task-specific information."""

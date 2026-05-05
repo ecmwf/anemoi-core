@@ -26,7 +26,7 @@ class SingleTraining(BaseTrainingModule):
 
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: "Batch",
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""

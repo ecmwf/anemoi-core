@@ -125,61 +125,59 @@ class BaseTask(ABC):
 
     def get_inputs(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: "Batch",
         data_indices: dict[str, IndexCollection],
         **_kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Extract model inputs from a batch.
+    ) -> "Batch":
+        """Extract model inputs from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Full batch keyed by dataset name.
+        batch : Batch
+            Full batch object (data, coords, metadata) keyed by dataset name.
         data_indices : dict[str, IndexCollection]
             Data indices per dataset.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Input tensors per dataset with shape
-            ``(bs, num_inputs, grid, nvar)``.
+        Batch
+            New Batch with input tensors per dataset (shape ``(bs, num_inputs, grid, nvar)``),
+            sharing coords and metadata by reference.
         """
         time_indices = self.get_batch_input_indices()
         time_indices = normalize_time_indices(time_indices)
 
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
+        new_data = {}
+        for dataset_name, dataset_batch in batch.data.items():
             dataset_batch = dataset_batch[:, time_indices]
-            x[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
+            new_data[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(new_data[dataset_name].shape))
+        return batch.with_data(new_data)
 
-    def get_targets(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
-        """Extract model targets from a batch.
+    def get_targets(self, batch: "Batch", **kwargs) -> "Batch":
+        """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Full batch keyed by dataset name.
+        batch : Batch
+            Full batch object (data, coords, metadata) keyed by dataset name.
         **kwargs
-            Forwarded to ``get_batch_output_indices`` (e.g.
-            ``rollout_step``).
+            Forwarded to ``get_batch_output_indices`` (e.g. ``rollout_step``).
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Target tensors per dataset with shape
-            ``(bs, num_outputs, ensemble, grid, full_nvar)`` in DATA_FULL
-            variable space (all variables including forcings).
+        Batch
+            New Batch with target tensors per dataset (shape ``(bs, num_outputs, ensemble, grid, full_nvar)``),
+            sharing coords and metadata by reference.
         """
         time_indices = self.get_batch_output_indices(**kwargs)
         time_indices = normalize_time_indices(time_indices)
 
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, time_indices]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y
+        new_targets = {}
+        for dataset_name, dataset_batch in batch.data.items():
+            new_targets[dataset_name] = dataset_batch[:, time_indices]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(new_targets[dataset_name].shape))
+        return batch.with_data(new_targets)
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
@@ -210,13 +208,13 @@ class BaseTask(ABC):
 class BaseSingleStepTask(BaseTask):
     """Base class for single-step tasks."""
 
-    def advance_input(self, *args, **_kwargs) -> dict[str, torch.Tensor]:
+    def advance_input(self, batch: "Batch", *args, **_kwargs) -> "Batch":
         """Advance the input state for each dataset based on the task's requirements.
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
         Returns
         -------
-            dict[str, torch.Tensor]: The advanced input state for each dataset.
+            Batch: The advanced input state for each dataset (default: passthrough).
         """
-        return args[0]
+        return batch

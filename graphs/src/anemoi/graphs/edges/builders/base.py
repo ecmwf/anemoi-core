@@ -160,6 +160,30 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     @abstractmethod
     def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
 
+    def _compute_edge_index(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        """Compute edge index using torch-cluster.
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            Coordinates of source nodes.
+        target_coords : torch.Tensor
+            Coordinates of target nodes.
+
+        Returns
+        -------
+        torch.Tensor
+            Edge index tensor of shape (2, num_edges).
+        """
+        if TORCH_CLUSTER_AVAILABLE:
+            edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
+        else:
+            LOGGER.warning(TORCH_CLUSTER_INSTRUCTIONS)
+            adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
+            edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+
+        return edge_index
+
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices.
 

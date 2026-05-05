@@ -134,32 +134,30 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
-    def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _expand_ens_dim(self, batch: "Batch") -> "Batch":
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device, 1, 1)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+        new_data = {}
+        for dataset_name, dataset_batch in batch.data.items():
+            new_data[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device, 1, 1)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(new_data[dataset_name].shape))
+        return batch.with_data(new_data)
 
-        return x
-
-    def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _collapse_ens_dim(self, batch: "Batch") -> "Batch":
         """Collapse ensemble dimension.
 
         Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
         dimension.
         """
-        y: dict[str, torch.Tensor] = {}
-        for dataset_name, target in batch.items():
+        new_data = {}
+        for dataset_name, target in batch.data.items():
             msg = (
                 "Expected singleton ensemble dimension in target for "
                 f"{dataset_name}, got shape {tuple(target.shape)}."
             )
             assert target.ndim == 5 and target.shape[2] == 1, msg
-            y[dataset_name] = target[:, :, 0, :, :]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-
-        return y
+            new_data[dataset_name] = target[:, :, 0, :, :]
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(new_data[dataset_name].shape))
+        return batch.with_data(new_data)
 
     def compute_dataset_loss_metrics(
         self,

@@ -217,7 +217,7 @@ class DiffusionTraining(BaseDiffusionTraining):
 
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: "Batch",
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         """Step for the diffusion training.
@@ -226,7 +226,7 @@ class DiffusionTraining(BaseDiffusionTraining):
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             Normalized batch to use for rollout (assumed to be already preprocessed).
         validation_mode : bool, optional
             Whether in validation mode and to calculate validation metrics, by default False.

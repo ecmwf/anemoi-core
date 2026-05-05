@@ -100,10 +100,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_shapes: dict | None,
         model_comm_group=None,
         dataset_name: str = None,
-        coords: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size, coords=coords)
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](
@@ -237,14 +236,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         for dataset_name in dataset_names:
-            dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
                 grid_shard_shapes=grid_shard_shapes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
-                coords=dataset_coords,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_shapes_data_dict[dataset_name] = shard_shapes_data
@@ -253,8 +250,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
-                src_coords=dataset_coords,
-                dst_coords=None,
+                src_coords=self.node_attributes.get_coordinates(dataset_name),
+                dst_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
                 model_comm_group=model_comm_group,
             )
 
@@ -305,8 +302,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
-                src_coords=None,
-                dst_coords=batch.node_coords(dataset_name),
+                src_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
+                dst_coords=self.node_attributes.get_coordinates(dataset_name),
                 model_comm_group=model_comm_group,
             )
 

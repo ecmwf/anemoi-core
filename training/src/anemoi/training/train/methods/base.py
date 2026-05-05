@@ -335,11 +335,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
+        self._batch_size: int | None = None
 
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
         return self.task._plot_adapter
+
+    @property
+    def batch_size(self) -> int | None:
+        """Batch size inferred from the most recent batch."""
+        return self._batch_size
+
+    @staticmethod
+    def _batch_size_from_batch(batch: Batch) -> int:
+        """Infer batch size from the first dataset tensor in a Batch."""
+        try:
+            return next(iter(batch.data.values())).shape[0]
+        except StopIteration as exc:
+            msg = "Cannot infer batch size from an empty Batch."
+            raise ValueError(msg) from exc
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
@@ -767,8 +782,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
-        assert isinstance(y_pred, dict), "y_pred must be a dict keyed by dataset name"
-        assert isinstance(y, dict), "y must be a dict keyed by dataset name"
+        assert isinstance(y_pred, dict | Batch), "y_pred must be a dict keyed by dataset name"
+        assert isinstance(y, dict | Batch), "y must be a dict keyed by dataset name"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
@@ -1013,8 +1028,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         del batch_idx
         assert isinstance(batch, Batch), "batch must be a Batch instance"
-        # Get batch size from any dataset's data tensor.
-        batch_size = next(iter(batch.data.values())).shape[0]
+        self._batch_size = self._batch_size_from_batch(batch)
 
         train_loss, *_ = self._step(batch)
         train_loss = train_loss.sum()
@@ -1026,7 +1040,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch_size,
+            batch_size=self.batch_size,
             sync_dist=True,
         )
 
@@ -1046,9 +1060,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         del batch_idx
         assert isinstance(batch, Batch), "batch must be a Batch instance"
-
-        # Get batch size from any dataset's data tensor.
-        batch_size = next(iter(batch.data.values())).shape[0]
+        self._batch_size = self._batch_size_from_batch(batch)
 
         with torch.no_grad():
             val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
@@ -1061,7 +1073,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch_size,
+            batch_size=self.batch_size,
             sync_dist=True,
         )
 
@@ -1078,7 +1090,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     on_step=True,
                     prog_bar=False,
                     logger=self.logger_enabled,
-                    batch_size=batch_size,
+                    batch_size=self.batch_size,
                     sync_dist=True,
                 )
 
@@ -1094,7 +1106,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     on_step=False,
                     prog_bar=False,
                     logger=self.logger_enabled,
-                    batch_size=batch_size,
+                    batch_size=self.batch_size,
                     sync_dist=True,
                 )
 

@@ -652,11 +652,15 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs[1][i][dataset_name]
-                y_true = pl_module.task.get_targets(
-                    batch={dataset_name: batch[dataset_name]},
+                # Pass full batch as Batch, index after
+                from anemoi.training.data.batch import Batch
+                batch_obj = batch if isinstance(batch, Batch) else Batch(data=batch)
+                y_true_batch = pl_module.task.get_targets(
+                    batch=batch_obj,
                     data_indices=pl_module.data_indices,
                     **task_kwargs,
-                )[dataset_name]
+                )
+                y_true = y_true_batch[dataset_name]
                 loss = reduce_to_last_dim(
                     self.loss[dataset_name](
                         y_hat,

@@ -26,6 +26,7 @@ from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.layers.graph import TrainableTensor
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 LOGGER = logging.getLogger(__name__)
 
@@ -319,6 +320,8 @@ class DynamicGraphProvider(BaseGraphProvider):
             Expected dimension of edge attributes
         """
         super().__init__()
+        from anemoi.graphs.edges import KNNEdges
+        self.edge_builder = KNNEdges(source_name="-", target_name="-", num_nearest_neighbours=8)
         self._edge_dim = edge_dim
 
     @property
@@ -345,13 +348,12 @@ class DynamicGraphProvider(BaseGraphProvider):
         -------
         tuple[Tensor, Adj]
             Edge attributes and edge index
-
-        Raises
-        ------
-        NotImplementedError
-            This functionality is not yet implemented
         """
-        raise NotImplementedError("Dynamic graph construction is not yet implemented. ")
+        edge_index = self.edge_builder._compute_edge_index(
+            source_coords=latlon_rad_to_cartesian(src_nodes),
+            target_coords=latlon_rad_to_cartesian(dst_nodes),
+        )
+        return edge_index
 
     def _get_edges_impl(
         self,
