@@ -10,7 +10,9 @@
 
 import logging
 from abc import abstractmethod
+from typing import Any
 from typing import Optional
+from typing import TypeVar
 
 import torch
 from hydra.utils import instantiate
@@ -29,6 +31,7 @@ from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class BaseGraphModel(nn.Module):
@@ -212,27 +215,98 @@ class BaseGraphModel(nn.Module):
 
         return dim_sizes[0]
 
-    def _get_nested_configuration(self, config: DotDict, dataset_name: str) -> DotDict:
+    def _get_from_dict_with_and(self, container: dict[str, T] | nn.ModuleDict, key: str) -> T | nn.Module:
+        """Helper function to get a value from a dictionary where keys can be in the format 'dataset1&dataset2'.
+
+        Will first look for the exact key, then look for keys containing '&' and check if the key is part of the split keys.
+        """
+        if key in container:
+            return container[key]
+        for k in container.keys():
+            if "&" in k and key in k.split("&"):
+                return container[k]
+        raise KeyError(f"Key '{key}' not found in container with keys {list(container.keys())}")
+
+    def _get_nested_configuration(self, config: DotDict, dataset_name: str) -> tuple[str, DotDict]:
         """Extract a nested configuration for a specific dataset if the config is provided in a multi-dataset format.
         If not provided in a multi-dataset format, return the base config.
 
-        Expects `_target_` key to be present in the final config for instantiation.
+        The key can be used to maintain the association, particuarly for the shared use case.
+        For `dict`'s built with this, use `self._get_from_dict_with_and` to retrieve the correct value based on the dataset name.
+
+        Examples
+        --------
+        Examples of valid config formats for a dataset named 'dataset1':
+        1) Direct config with '_target_':
+            ```
+            _target_: SomeClass
+            param1: value1
+            param2: value2
+            ```
+        2) Nested config under key matching the dataset name:
+            ```
+            dataset1:
+                _target_: SomeClass
+                param1: value1
+                param2: value2
+            ```
+        3) Multi-dataset config with '&' in keys (e.g., "dataset1&dataset2"):
+            ```
+            dataset1&dataset2:
+                _target_: SomeClass
+                param1: value1
+                param2: value2
+            ```
+
+        Parameters
+        ----------
+        config : DotDict
+            The configuration dictionary, potentially containing nested configurations for multiple datasets.
+        dataset_name : str
+            The name of the dataset for which to extract the configuration.
+
+        Returns
+        -------
+        tuple[str, DotDict]
+            A tuple containing the key found for the config, and the corresponding configuration dictionary.
+
+        Raises
+        ------
+        ValueError
+            If the dataset-specific configuration is not a dictionary with a '_target_' key.
+        ValueError
+            If no valid configuration is found for the specified dataset.
         """
         assert (
             dataset_name in self.dataset_names
         ), f"Dataset name '{dataset_name}' not found in model's dataset names {self.dataset_names}"
 
-        if dataset_name in config and isinstance(config[dataset_name], dict):
-            if "_target_" not in config[dataset_name]:
-                raise ValueError(
-                    f"Dataset-specific configuration for '{dataset_name}' must contain a '_target_' key for instantiation."
-                )
-            return config[dataset_name]
-
+        # Early return for direct instantiation
         if "_target_" in config:
-            return config
+            return dataset_name, config
+
+        def _assert_is_valid_nested_config(nested_config: Any) -> None:
+            if not isinstance(nested_config, dict) or "_target_" not in nested_config:
+                raise ValueError(
+                    f"Dataset-specific configuration for '{dataset_name}' must be a dict with '_target_' key, got {type(nested_config)}: {nested_config}."
+                )
+
+        # Check for nested config under key matching the dataset name
+        if dataset_name in config:
+            _assert_is_valid_nested_config(config[dataset_name])
+            return dataset_name, config[dataset_name]
+
+        # Check for multi-dataset config with '&' in keys, e.g., "dataset1&dataset2"
+        for key in (k for k in config.keys() if "&" in k):
+            if dataset_name in key.split("&"):
+                raise NotImplementedError(  # Temporary: Disallow shared blocks until supported in the forward pass
+                    f"Shared configurations for multiple datasets (e.g., with keys like 'dataset1&dataset2') are not yet implemented. Found key '{key}' for dataset '{dataset_name}'."
+                )
+                _assert_is_valid_nested_config(config[key])
+                return key, config[key]
+
         raise ValueError(
-            f"Configuration for dataset '{dataset_name}' is not properly specified. Expected either a multi-dataset config for each dataset or a base config with a '_target_' key."
+            f"Could not find a valid configuration for dataset '{dataset_name}'. Expected either a direct config with '_target_' or a nested config under key '{dataset_name}' or keys containing '{dataset_name}' separated by '&'. Got config: {config}"
         )
 
     @abstractmethod
@@ -251,13 +325,14 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            self.residual[dataset_name] = instantiate(
-                self._get_nested_configuration(residual_config, dataset_name),
-                graph=self._graph_data,
-                statistics=self.statistics[dataset_name],
-                data_indices=self.data_indices[dataset_name],
-                dataset_name=dataset_name,
-            )
+            key, config = self._get_nested_configuration(residual_config, dataset_name)
+            if "&" in key:
+                raise NotImplementedError(
+                    f"Shared residual configurations for multiple datasets (e.g., with keys like 'dataset1&dataset2') are not yet implemented. Found key '{key}' for dataset '{dataset_name}'."
+                )
+            # if key in self.residual:
+            #     continue # Residual already built for this dataset (e.g., shared residual), skip to avoid overwriting
+            self.residual[dataset_name] = instantiate(config, graph=self._graph_data)
 
     @abstractmethod
     def forward(

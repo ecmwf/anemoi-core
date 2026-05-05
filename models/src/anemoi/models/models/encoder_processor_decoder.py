@@ -35,8 +35,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
+
         for dataset_name in self.dataset_names:
-            sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
+            key, sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
@@ -47,7 +48,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=sub_encoder_config.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
+            if key in self.encoder:
+                continue  # Encoder already built for this dataset (e.g., shared encoder), skip to avoid overwriting
+
+            self.encoder[key] = instantiate(
                 sub_encoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
@@ -76,7 +80,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
+            key, sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
 
             # Create graph providers
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
@@ -87,7 +91,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=sub_decoder_config.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
+            if key in self.decoder:
+                continue  # Decoder already built for this dataset (e.g., shared decoder), skip to avoid overwriting
+
+            self.decoder[key] = instantiate(
                 sub_decoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,

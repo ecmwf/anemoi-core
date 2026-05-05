@@ -95,7 +95,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.encoder_graph_provider = nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
+            key, sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
 
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
@@ -104,7 +104,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
                 trainable_size=sub_encoder_config.get("trainable_size", 0),
             )
-            self.encoder[dataset_name] = instantiate(
+
+            if key in self.encoder:
+                continue  # Encoder already built for this dataset (e.g., shared encoder), skip to avoid overwriting
+
+            self.encoder[key] = instantiate(
                 sub_encoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
@@ -165,7 +169,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
-            sub_downscale_config = self._get_nested_configuration(model_config.model.encoder, src_nodes_name)
+            key, sub_downscale_config = self._get_nested_configuration(model_config.model.encoder, src_nodes_name)
+            if key in self.downscale:
+                raise ValueError(
+                    f"Downscale module for hidden node {src_nodes_name} is already defined. Please check your configuration for duplicate entries."
+                )
 
             self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
@@ -192,7 +200,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i - 1]
 
-            sub_upscale_config = self._get_nested_configuration(model_config.model.decoder, src_nodes_name)
+            key, sub_upscale_config = self._get_nested_configuration(model_config.model.decoder, src_nodes_name)
+            if key in self.upscale:
+                raise ValueError(
+                    f"Upscale module for hidden node {src_nodes_name} is already defined. Please check your configuration for duplicate entries."
+                )
 
             self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
@@ -216,7 +228,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self.decoder_graph_provider = nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
+            key, sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
 
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
@@ -226,7 +238,10 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 trainable_size=sub_decoder_config.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
+            if key in self.decoder:
+                continue  # Decoder already built for this dataset (e.g., shared decoder), skip to avoid overwriting
+
+            self.decoder[key] = instantiate(
                 sub_decoder_config,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
