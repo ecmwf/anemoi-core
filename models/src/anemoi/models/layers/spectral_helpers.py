@@ -210,7 +210,7 @@ class SphericalHarmonicTransform(Module):
 
     def rfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
-        Uses naive (eager) implementation.
+        Naive (eager) implementation using rfft_rings_reduced_banded with a single band.
 
         Parameters
         ----------
@@ -226,6 +226,20 @@ class SphericalHarmonicTransform(Module):
         return self.rfft_rings_reduced_banded(x, start_lat=0, end_lat=self.nlat)
 
     def rfft_rings_reduced_banded(self, x: Tensor, start_lat: int, end_lat: int) -> Tensor:
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid, from start_lat to end_lat.
+        Naive (eager) implementation.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
+
         # Prepare zero-padded output tensor for filling with rfft
         output_tensor = torch.zeros(
             *x.shape[:-1],
@@ -409,6 +423,7 @@ class InverseSphericalHarmonicTransform(Module):
 
     def irfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+        Naive (eager) implementation using irfft_rings_reduced_banded with a single band.
 
         Parameters
         ----------
@@ -424,7 +439,21 @@ class InverseSphericalHarmonicTransform(Module):
         return self.irfft_rings_reduced_banded(x, start_lat=0, end_lat=self.nlat)
 
     def irfft_rings_reduced_banded(self, x: Tensor, start_lat: int, end_lat: int) -> Tensor:
-        # Prepare zero-padded output tensor for filling with rfft
+        """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid, from start_lat to end_lat.
+        Naive (eager) implementation.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+
+        Returns
+        -------
+        torch.Tensor
+            field [..., grid]
+        """
+
+        # Prepare zero-padded output tensor for filling with irfft
         output_tensor = torch.zeros(
             *x.shape[:-2],
             sum(self.lons_per_lat[start_lat:end_lat]),
