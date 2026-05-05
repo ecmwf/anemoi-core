@@ -38,14 +38,14 @@ class BaseGridIndices(ABC):
     def get_shard_slice(self, reader_group_rank: int) -> slice:
         """Get the grid shard slice according to the reader rank."""
         start, end = get_partition_range(
-            partition_sizes=self.shard_shapes,
+            partition_sizes=self.shard_sizes,
             partition_id=reader_group_rank,
         )
 
         return slice(start, end)
 
     @cached_property
-    def shard_shapes(self) -> list:
+    def shard_sizes(self) -> list:
         return get_balanced_partition_sizes(self.grid_size, self.reader_group_size)
 
     @property

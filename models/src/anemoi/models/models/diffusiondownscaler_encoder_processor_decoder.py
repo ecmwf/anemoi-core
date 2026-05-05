@@ -23,9 +23,11 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.distributed.shapes import get_or_apply_shard_shapes
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
 from anemoi.models.samplers import diffusion_samplers
 from anemoi.utils.config import DotDict
@@ -269,7 +271,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def apply_interpolate_to_high_res(
         self,
         x: torch.Tensor,
-        grid_shard_shapes: Optional[list] = None,
+        grid_shard_sizes: ShardSizes = None,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> torch.Tensor:
         """Upsample low-resolution inputs onto the high-resolution grid for eval tooling.
@@ -285,8 +287,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x : torch.Tensor
             Low-resolution input with shape ``(batch, ensemble, grid_lres, variables)``.
             Exactly one ensemble member is supported (``ensemble == 1``).
-        grid_shard_shapes : list, optional
-            Shard shapes for distributed execution.
+        grid_shard_sizes : ShardSizes
+            Shard sizes for distributed execution.
         model_comm_group : ProcessGroup, optional
             Process group for distributed execution.
 
@@ -309,7 +311,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_with_time = x[:, None, :, :, :]
         x_interp = self.residual["in_lres"](
             x_with_time,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
         )
         return x_interp[:, 0, None, :, :]
@@ -449,7 +451,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Forward pass for downscaling with two separate inputs.
@@ -464,8 +466,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Noise level dict with key "out_hres"
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        grid_shard_shapes : Optional[dict[str, list]]
-            Grid shard shapes for distributed processing
+        grid_shard_sizes : DatasetShardSizes | None
+            Per-dataset grid shard sizes for distributed processing
         **kwargs
             Additional arguments
 
@@ -488,7 +490,10 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         ensemble_size = x_in_lres.shape[2]
 
         bse = batch_size * ensemble_size
-        in_out_sharded = grid_shard_shapes is not None
+        in_out_sharded = self._resolve_in_out_sharded(
+            dataset_names=[dataset_name],
+            grid_shard_sizes=grid_shard_sizes,
+        )
         self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded, model_comm_group)
 
         # Embed sigma into noise conditioning space (matching parent's _build_conditioning_kwargs pattern)
@@ -504,47 +509,51 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
             noise_cond, dataset_name=dataset_name, edge_conditioning=False
         )
-        shape_c_data = get_shard_shapes(c_data, 0, model_comm_group=model_comm_group)
-        shape_c_hidden = get_shard_shapes(c_hidden, 0, model_comm_group=model_comm_group)
+        c_data_shard_sizes = get_shard_sizes(c_data, 0, model_comm_group=model_comm_group)
+        c_hidden_shard_sizes = get_shard_sizes(c_hidden, 0, model_comm_group=model_comm_group)
 
-        c_data = shard_tensor(c_data, 0, shape_c_data, model_comm_group)
-        c_hidden = shard_tensor(c_hidden, 0, shape_c_hidden, model_comm_group)
+        c_data = shard_tensor(c_data, 0, c_data_shard_sizes, model_comm_group)
+        c_hidden = shard_tensor(c_hidden, 0, c_hidden_shard_sizes, model_comm_group)
 
         fwd_mapper_kwargs = {"cond": (c_data, c_hidden)}
         processor_kwargs = {"cond": c_hidden}
         bwd_mapper_kwargs = {"cond": (c_hidden, c_data)}
 
         # Assemble input with two separate inputs
-        x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-            x_in_lres, x_in_hres, y_noised_tensor, bse, grid_shard_shapes, model_comm_group, dataset_name
+        x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
+            x_in_lres, x_in_hres, y_noised_tensor, bse, grid_shard_sizes, model_comm_group, dataset_name
         )
 
         x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
-        shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
-        encoder_edge_attr, encoder_edge_index, enc_edge_shard_shapes = self.encoder_graph_provider[
+        encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
             dataset_name
         ].get_edges(
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
 
+        enc_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_sizes_data if in_out_sharded["out_hres"] else None,
+            dst_nodes=shard_sizes_hidden,
+            edges=enc_edge_shard_sizes,
+        )
+
         x_data_latent, x_latent = self.encoder[dataset_name](
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
-            shard_shapes=(shard_shapes_data, shard_shapes_hidden),
+            shard_info=enc_shard_info,
             edge_attr=encoder_edge_attr,
             edge_index=encoder_edge_index,
             model_comm_group=model_comm_group,
-            x_src_is_sharded=in_out_sharded,
-            x_dst_is_sharded=False,
             keep_x_dst_sharded=True,
-            edge_shard_shapes=enc_edge_shard_shapes,
             **fwd_mapper_kwargs,
         )
 
         # Processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
@@ -552,32 +561,35 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_latent_proc = self.processor(
             x=x_latent,
             batch_size=bse,
-            shard_shapes=shard_shapes_hidden,
+            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
-            edge_shard_shapes=proc_edge_shard_shapes,
             **processor_kwargs,
         )
 
         # Decoder
-        decoder_edge_attr, decoder_edge_index, dec_edge_shard_shapes = self.decoder_graph_provider[
+        decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
             dataset_name
         ].get_edges(
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
 
+        dec_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_sizes_hidden,
+            dst_nodes=shard_sizes_data,
+            edges=dec_edge_shard_sizes,
+        )
+
         x_out = self.decoder[dataset_name](
             (x_latent_proc, x_data_latent),
             batch_size=bse,
-            shard_shapes=(shard_shapes_hidden, shard_shapes_data),
+            shard_info=dec_shard_info,
             edge_attr=decoder_edge_attr,
             edge_index=decoder_edge_index,
             model_comm_group=model_comm_group,
-            x_src_is_sharded=True,
-            x_dst_is_sharded=in_out_sharded,
-            edge_shard_shapes=dec_edge_shard_shapes,
+            keep_x_dst_sharded=in_out_sharded["out_hres"],
             **bwd_mapper_kwargs,
         )
 
@@ -593,7 +605,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> dict[str, torch.Tensor]:
         """Forward pass with pre-conditioning for downscaling.
 
@@ -607,8 +619,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Noise level dict with key "out_hres"
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        grid_shard_shapes : Optional[dict[str, list]]
-            Grid shard shapes for distributed processing
+        grid_shard_sizes : DatasetShardSizes | None
+            Per-dataset grid shard sizes for distributed processing
 
         Returns
         -------
@@ -627,10 +639,9 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             y_noised_precond,
             c_noise,
             model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
-        # Apply output preconditioning
         D_x = {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
 
         return D_x
@@ -660,10 +671,10 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_in_hres: torch.Tensor,
         y_noised: torch.Tensor,
         bse: int,
-        grid_shard_shapes: dict | None = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group=None,
         dataset_name="out_hres",
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[list]]:
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], ShardSizes]:
         """Assemble inputs for downscaling: concatenate in_lres (upsampled) + in_hres.
 
         Parameters
@@ -676,8 +687,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             Noised target, shape (batch, time, ensemble, grid, vars)
         bse : int
             Batch size * ensemble size
-        grid_shard_shapes : dict | None
-            Shard shapes for distributed processing
+        grid_shard_sizes : DatasetShardSizes | None
+            Per-dataset shard sizes for distributed processing
         model_comm_group : ProcessGroup
             Communication group
         dataset_name : str
@@ -685,24 +696,21 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         Returns
         -------
-        tuple[torch.Tensor, Optional[torch.Tensor], Optional[list]]
-            Assembled input tensor, skip connection tensor, shard shapes
+        tuple[torch.Tensor, Optional[torch.Tensor], ShardSizes]
+            Assembled input tensor, skip connection tensor, shard sizes
         """
         assert dataset_name is not None, "dataset_name must be provided."
 
         # Get node attributes for the data nodes
         node_attributes_data = self.node_attributes[dataset_name](self._graph_name_data, batch_size=bse)
-        grid_shard_shapes_data = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
+        grid_shard_sizes_data = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
         # Compute skip connection (for residual prediction)
-        x_skip = self.residual[dataset_name](x_in_lres, grid_shard_shapes_data, model_comm_group)
+        x_skip = self.residual[dataset_name](x_in_lres, grid_shard_sizes_data, model_comm_group)
 
         # Shard node attributes if grid sharding is enabled
-        if grid_shard_shapes_data is not None:
-            shard_shapes_nodes = get_or_apply_shard_shapes(
-                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes_data, model_comm_group=model_comm_group
-            )
-            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+        if grid_shard_sizes_data is not None:
+            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes_data, model_comm_group)
 
         # Reshape inputs: combine batch and ensemble dimensions
         # x_in_lres: low-res input (already upsampled to hres)
@@ -732,12 +740,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             dim=-1,  # feature dimension
         )
 
-        # Get shard shapes for the assembled data
-        shard_shapes_data = get_or_apply_shard_shapes(
-            x_data_latent, 0, shard_shapes_dim=grid_shard_shapes_data, model_comm_group=model_comm_group
-        )
-
-        return x_data_latent, x_skip, shard_shapes_data
+        return x_data_latent, x_skip, grid_shard_sizes_data
 
     def _before_sampling(
         self,
@@ -746,7 +749,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
-    ) -> tuple[tuple[torch.Tensor, torch.Tensor], dict]:
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], DatasetShardSizes | None]:
         """Prepare batch before sampling (prediction/inference mode).
 
         During prediction, in_lres comes at low resolution and needs upsampling.
@@ -768,8 +771,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         Returns
         -------
-        tuple[tuple[torch.Tensor, torch.Tensor], dict]
-            Tuple of (x_in_lres_upsampled, x_in_hres) and grid shard shapes dict
+        tuple[tuple[torch.Tensor, torch.Tensor], DatasetShardSizes | None]
+            Tuple of (x_in_lres_upsampled, x_in_hres) and per-dataset grid shard sizes
         """
         # Extract inputs from batch
         x_in_lres = batch.get("in_lres")  # Low-res input
@@ -792,7 +795,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         # Follow training pattern exactly: pass 5D tensor, residual handles ensemble internally
         x_in_lres_upsampled = self.residual["in_lres"](
             x_in_lres,  # (batch, time, ensemble, grid, features)
-            grid_shard_shapes=None,
+            grid_shard_sizes=None,
             model_comm_group=model_comm_group,
         )[
             :, :, None, :, :
@@ -803,20 +806,20 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_in_hres = pre_processors["in_hres"](x_in_hres, in_place=False)
 
         # Setup grid sharding if distributed
-        grid_shard_shapes = None
+        grid_shard_sizes: DatasetShardSizes | None = None
         if model_comm_group is not None:
             # Shard along grid dimension (-2)
-            shard_shapes_lres = get_shard_shapes(x_in_lres_upsampled, -2, model_comm_group=model_comm_group)
-            shard_shapes_hres = get_shard_shapes(x_in_hres, -2, model_comm_group=model_comm_group)
-            grid_shard_shapes = {
-                "in_lres": [shape[-2] for shape in shard_shapes_lres],
-                "in_hres": [shape[-2] for shape in shard_shapes_hres],
-                "out_hres": [shape[-2] for shape in shard_shapes_hres],  # output matches hres grid
+            shard_sizes_lres = get_shard_sizes(x_in_lres_upsampled, -2, model_comm_group=model_comm_group)
+            shard_sizes_hres = get_shard_sizes(x_in_hres, -2, model_comm_group=model_comm_group)
+            grid_shard_sizes = {
+                "in_lres": shard_sizes_lres,
+                "in_hres": shard_sizes_hres,
+                "out_hres": shard_sizes_hres,  # output matches hres grid
             }
-            x_in_lres_upsampled = shard_tensor(x_in_lres_upsampled, -2, shard_shapes_lres, model_comm_group)
-            x_in_hres = shard_tensor(x_in_hres, -2, shard_shapes_hres, model_comm_group)
+            x_in_lres_upsampled = shard_tensor(x_in_lres_upsampled, -2, shard_sizes_lres, model_comm_group)
+            x_in_hres = shard_tensor(x_in_hres, -2, shard_sizes_hres, model_comm_group)
 
-        return (x_in_lres_upsampled, x_in_hres), grid_shard_shapes
+        return (x_in_lres_upsampled, x_in_hres), grid_shard_sizes
 
     def predict_step(
         self,
@@ -907,7 +910,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 5-dimensional tensor, got {dataset_tensor.shape}!'
 
             # Before sampling hook - will upsample in_lres and preprocess both inputs
-            before_sampling_data, grid_shard_shapes = self._before_sampling(
+            before_sampling_data, grid_shard_sizes = self._before_sampling(
                 batch,
                 pre_processors,
                 n_step_input,
@@ -929,7 +932,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 x_in_lres_upsampled,
                 x_in_hres,
                 model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
+                grid_shard_sizes=grid_shard_sizes,
                 noise_scheduler_params=noise_scheduler_config,
                 sampler_params=sampler_config,
                 **remaining_kwargs,
@@ -941,7 +944,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 post_processors,
                 before_sampling_data,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
                 gather_out,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
@@ -955,7 +958,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_in_lres_upsampled: torch.Tensor,
         x_in_hres: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
@@ -970,8 +973,8 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             High-res forcings, shape (batch, time, ensemble, grid, vars)
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        grid_shard_shapes : Optional[dict]
-            Grid shard shapes for distributed processing
+        grid_shard_sizes : DatasetShardSizes | None
+            Per-dataset grid shard sizes for distributed processing
         noise_scheduler_params : Optional[dict]
             Dictionary of noise scheduler parameters (schedule_type, num_steps, sigma_max, etc.) to override defaults
         sampler_params : Optional[dict]
@@ -1050,7 +1053,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             sigmas,
             self.fwd_with_preconditioning,
             model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
             dtype=x_in_lres_upsampled.dtype,
         )
 
@@ -1148,7 +1151,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         post_processors: nn.Module,
         before_sampling_data: Union[torch.Tensor, tuple[torch.Tensor, ...]],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         gather_out: bool = True,
         post_processors_tendencies: Optional[nn.Module] = None,
         **kwargs,
@@ -1176,11 +1179,11 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         )
 
         # Gather if needed
-        if gather_out and model_comm_group is not None and grid_shard_shapes is not None:
+        if gather_out and model_comm_group is not None and grid_shard_sizes is not None:
             out = gather_tensor(
                 out,
                 -2,
-                apply_shard_shapes(out, -2, grid_shard_shapes[target_ds]),
+                grid_shard_sizes[target_ds],
                 model_comm_group,
             )
 

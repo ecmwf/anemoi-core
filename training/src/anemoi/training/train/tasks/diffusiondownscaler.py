@@ -192,7 +192,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
         )
 
     def _compute_loss(
@@ -244,7 +244,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # Interpolate source dataset to target resolution
         x_in_lres_upsampled = self.model.model.residual["in_lres"](
             x_in_lres,
-            grid_shard_shapes=None,
+            grid_shard_sizes=self.grid_shard_sizes.get("in_lres", None),
             model_comm_group=self.model_comm_group,
         )[
             :,

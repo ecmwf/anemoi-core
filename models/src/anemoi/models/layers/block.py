@@ -99,7 +99,7 @@ class PointWiseMLPProcessorBlock(BaseBlock):
     def forward(
         self,
         x: Tensor,
-        shard_shapes: ShardShapes,
+        shard_sizes: ShardSizes,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
@@ -154,7 +154,7 @@ class TransformerProcessorBlock(BaseBlock):
     def forward(
         self,
         x: Tensor,
-        shard_shapes: ShardShapes,
+        shard_sizes: ShardSizes,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
@@ -165,7 +165,7 @@ class TransformerProcessorBlock(BaseBlock):
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = x + self.attention(
-            self.layer_norm_attention(x, **cond_kwargs), shard_shapes, batch_size, model_comm_group=model_comm_group
+            self.layer_norm_attention(x, **cond_kwargs), shard_sizes, batch_size, model_comm_group=model_comm_group
         )
         x = x + self.mlp(
             self.layer_norm_mlp(

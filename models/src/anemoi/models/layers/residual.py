@@ -114,7 +114,7 @@ class InterpolationConnection(BaseResidualConnection):
 
         self.projector = SparseProjector(autocast=autocast)
 
-    def forward(self, x: torch.Tensor, grid_shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
         """Apply interpolation from source to target resolution."""
         batch_size = x.shape[0]
         x = x[:, self.step, ...]  # pick timestep
@@ -122,8 +122,16 @@ class InterpolationConnection(BaseResidualConnection):
         # Reshape: (batch, time, grid, features) → (batch*time, grid, features)
         x = einops.rearrange(x, "batch time grid features -> (batch time) grid features")
 
+        channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
+        if grid_shard_sizes is not None:  # grid sharding -> channel sharding
+            x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+
         # Apply single interpolation projection
         x = self.projector(x, self.provider.get_edges(device=x.device))
+
+        output_grid_shard_sizes = get_shard_sizes(x, -2, model_comm_group)
+        if grid_shard_sizes is not None:  # channel sharding -> grid sharding
+            x = all_to_all_transpose(x, -2, output_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
 
         # Reshape back: (batch*time, grid, features) → (batch, time, grid, features)
         x = einops.rearrange(x, "(batch time) grid features -> batch time grid features", batch=batch_size)
