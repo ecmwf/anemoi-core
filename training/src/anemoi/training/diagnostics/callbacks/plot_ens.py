@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from typing import Any
 
     from matplotlib.figure import Figure
-    from omegaconf import DictConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ class PlotEnsSample(_PlotSample):
 
     def __init__(
         self,
-        config: DictConfig,
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
@@ -46,10 +44,12 @@ class PlotEnsSample(_PlotSample):
         dataset_names: list[str] | None = None,
         members: list | None = None,
         focus_area: list[dict] | None = None,
+        plotting_settings: Any | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(
-            config,
+        # Initialize PlotSample first
+        _PlotSample.__init__(
+            self,
             sample_idx,
             parameters,
             accumulation_levels_plot,
@@ -59,6 +59,7 @@ class PlotEnsSample(_PlotSample):
             every_n_batches,
             dataset_names,
             focus_area,
+            plotting_settings=plotting_settings,
             **kwargs,
         )
         self.plot_members = members

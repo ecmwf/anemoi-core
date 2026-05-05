@@ -12,7 +12,6 @@
 from unittest.mock import MagicMock
 
 import numpy as np
-import omegaconf
 import torch
 
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapter
@@ -130,27 +129,7 @@ def test_base_adapter_prepare_loss_batch_is_noop():
 
 def test_ensemble_plot_ens_sample_instantiation():
     """Test that PlotEnsSample can be instantiated."""
-    config = omegaconf.OmegaConf.create(
-        {
-            "system": {"output": {"plots": "path_to_plots"}},
-            "diagnostics": {
-                "plot": {
-                    "parameters": ["temperature", "pressure"],
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"batch": 1},
-                },
-            },
-            "data": {
-                "diagnostic": None,
-                "datasets": {"data": {"diagnostic": None}},
-            },
-            "dataloader": {"read_group_size": 1},
-        },
-    )
-
     plot_ens_sample = PlotEnsSample(
-        config=config,
         sample_idx=0,
         parameters=["temperature", "pressure"],
         accumulation_levels_plot=[0.1, 0.5, 0.9],
