@@ -1046,6 +1046,74 @@ class PlotSample(BasePlotAdditionalMetrics):
         )
 
 
+class PlotEnsSample(PlotSample):
+    """Plots a post-processed ensemble sample: input, target and prediction.
+
+    Uses the ensemble-aware plot adapter (via ``pl_module.plot_adapter``) and calls
+    ``plot_predicted_ensemble`` to visualise multiple ensemble members side-by-side.
+    """
+
+    def __init__(
+        self,
+        sample_idx: int,
+        parameters: list[str],
+        accumulation_levels_plot: list[float],
+        precip_and_related_fields: list[str] | None = None,
+        colormaps: dict[str] | None = None,
+        per_sample: int = 6,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        members: list | None = None,
+        focus_area: list[dict] | None = None,
+        plotting_settings: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        # Initialize PlotSample first
+        PlotSample.__init__(
+            self,
+            sample_idx,
+            parameters,
+            accumulation_levels_plot,
+            precip_and_related_fields,
+            colormaps,
+            per_sample,
+            every_n_batches,
+            dataset_names,
+            focus_area,
+            plotting_settings=plotting_settings,
+            **kwargs,
+        )
+        self.plot_members = members
+
+    def _get_process_members(self) -> list | None:
+        """Return configured ensemble members (None = all members)."""
+        return self.plot_members
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,  # noqa: ARG002
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create an ensemble figure with members, mean, spread and error."""
+        from anemoi.training.diagnostics.plots import plot_predicted_ensemble
+
+        return plot_predicted_ensemble(
+            parameters=plot_parameters_dict,
+            n_plots_per_sample=4,
+            latlons=latlons,
+            clevels=self.accumulation_levels_plot,
+            y_true=np.asarray(y_true).squeeze(),
+            y_pred=np.asarray(y_pred).squeeze(),
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
+
+
 class PlotSpectrum(BasePlotAdditionalMetrics):
     """Plots TP related metric comparing target and prediction.
 

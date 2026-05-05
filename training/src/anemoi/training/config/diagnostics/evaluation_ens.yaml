@@ -15,7 +15,7 @@ callbacks:
 plot:
   callbacks:
     # Add plot callbacks here.
-    - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample
+    - _target_: anemoi.training.diagnostics.callbacks.plot.PlotEnsSample
       dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       sample_idx: ${diagnostics.plot.sample_idx}
       per_sample : 2

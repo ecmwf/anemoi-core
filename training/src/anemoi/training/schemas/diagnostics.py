@@ -154,7 +154,7 @@ class PlotHistogramSchema(BaseModel):
 
 
 class PlotEnsSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample"] = Field(alias="_target_")
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotEnsSample"] = Field(alias="_target_")
     "PlotEnsSample object from anemoi training diagnostics callbacks."
     dataset_names: list[str] = Field(examples=["data"])
     "List of dataset names to plot."

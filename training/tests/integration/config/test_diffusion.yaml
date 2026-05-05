@@ -18,7 +18,7 @@ diagnostics:
     parameters: [tp, 2t]
     callbacks:
       # Add plot callbacks here.
-      - _target_: anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample
+      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotEnsSample
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}
         per_sample : 2
