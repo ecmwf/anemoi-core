@@ -1,0 +1,4 @@
+_target_: anemoi.models.layers.mapper.PointWiseForwardMapper
+cpu_offload: ${model.cpu_offload}
+gradient_checkpointing: True
+layer_kernels: ${model.layer_kernels}

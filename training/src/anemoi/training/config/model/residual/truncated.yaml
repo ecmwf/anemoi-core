@@ -1,0 +1,2 @@
+_target_: anemoi.models.layers.residual.TruncatedConnection
+# TODO: Add defaults here

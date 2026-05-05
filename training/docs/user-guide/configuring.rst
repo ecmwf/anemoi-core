@@ -58,6 +58,33 @@ the config groups.:
 
 This will override the default model config with the transformer model.
 
+Model configs themselves use nested defaults for the encoder, decoder,
+and residual connection. For example, ``model/transformer.yaml``
+begins with:
+
+.. code:: yaml
+
+   defaults:
+     - encoder: gt16
+     - decoder: gt16
+     - residual: skip
+
+These reference config files under ``model/encoder/``,
+``model/decoder/``, and ``model/residual/`` respectively. You can
+override them individually:
+
+.. code:: yaml
+
+   model:
+     defaults:
+       - encoder: pointwise
+       - decoder: pointwise
+       - residual: truncated
+
+For multi-dataset training, per-dataset components can be specified
+using Hydra's package directive (see :ref:`per-dataset-components` in
+the Models page).
+
 You can also override individual settings. For example, to change the
 learning rate from the default value of 0.625e-4 to 1e-3, you can add
 the following to the config you're using:
