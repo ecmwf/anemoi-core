@@ -104,12 +104,12 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: Tensor,
+        x: dict[str, Tensor],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: dict[str, Optional[list]] | None = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         """Forward pass of the model.
 
         Parameters
@@ -123,11 +123,17 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
         Returns
         -------
-        Tensor
+        dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
 
         dataset_names = list(x.keys())
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.encoder_flags.items() if not d[1].get("optional", False))
+        )
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.decoder_flags.items() if not d[1].get("optional", False))
+        )
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)

@@ -19,6 +19,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models.base import PREFIX_TO_MEANING
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,8 +37,15 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Encoder data -> hidden
         self.encoder_graph_provider = nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
+        self.encoder_flags = {}
         for dataset_name in self.dataset_names:
-            key, sub_encoder_config = self._get_nested_configuration(model_config.model.encoder, dataset_name)
+            key, sub_encoder_config, prefix_flags = self._get_nested_configuration(
+                model_config.model.encoder, dataset_name, prefix_mapping=PREFIX_TO_MEANING
+            )
+            if not prefix_flags["optional"]:
+                prefix_flags["required"] = True  # Mark as required if not explicitly marked as optional
+
+            self.encoder_flags[dataset_name] = prefix_flags
 
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
@@ -128,7 +136,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
-            key, sub_downscale_config = self._get_nested_configuration(model_config.model.encoder, src_nodes_name)
+            key, sub_downscale_config, _ = self._get_nested_configuration(model_config.model.encoder, src_nodes_name)
             if key in self.downscale:
                 raise ValueError(
                     f"Downscale module for hidden node {src_nodes_name} is already defined. Please check your configuration for duplicate entries."
@@ -158,7 +166,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i - 1]
 
-            key, sub_upscale_config = self._get_nested_configuration(model_config.model.decoder, src_nodes_name)
+            key, sub_upscale_config, _ = self._get_nested_configuration(model_config.model.decoder, src_nodes_name)
             if key in self.upscale:
                 raise ValueError(
                     f"Upscale module for hidden node {src_nodes_name} is already defined. Please check your configuration for duplicate entries."
@@ -185,8 +193,15 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Decoder hidden -> data
         self.decoder_graph_provider = nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
+        self.decoder_flags = {}
         for dataset_name in self.dataset_names:
-            key, sub_decoder_config = self._get_nested_configuration(model_config.model.decoder, dataset_name)
+            key, sub_decoder_config, prefix_flags = self._get_nested_configuration(
+                model_config.model.decoder, dataset_name, prefix_mapping=PREFIX_TO_MEANING
+            )
+            if not prefix_flags["optional"]:
+                prefix_flags["required"] = True  # Mark as required if not explicitly marked as optional
+
+            self.decoder_flags[dataset_name] = prefix_flags
 
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
@@ -233,6 +248,12 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
         dataset_names = list(x.keys())
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.encoder_flags.items() if not d[1].get("optional", False))
+        )
+        self._validate_required(
+            dataset_names, required=list(d[0] for d in self.decoder_flags.items() if not d[1].get("optional", False))
+        )
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)

@@ -33,6 +33,11 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 T = TypeVar("T")
 
+PREFIX_TO_MEANING = {
+    "~": "optional",
+    # "!": "required", # Default is required, so no need for a prefix to indicate this, but can be added if desired for clarity
+}
+
 
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
@@ -227,7 +232,9 @@ class BaseGraphModel(nn.Module):
                 return container[k]
         raise KeyError(f"Key '{key}' not found in container with keys {list(container.keys())}")
 
-    def _get_nested_configuration(self, config: DotDict, dataset_name: str) -> tuple[str, DotDict]:
+    def _get_nested_configuration(
+        self, config: DotDict, dataset_name: str, *, prefix_mapping: dict[str, T] | None = None
+    ) -> tuple[str, DotDict, dict[T, bool]]:
         """Extract a nested configuration for a specific dataset if the config is provided in a multi-dataset format.
         If not provided in a multi-dataset format, return the base config.
 
@@ -264,11 +271,21 @@ class BaseGraphModel(nn.Module):
             The configuration dictionary, potentially containing nested configurations for multiple datasets.
         dataset_name : str
             The name of the dataset for which to extract the configuration.
+        prefix_mapping : dict[str, T], optional
+            Optional mapping to translate prefixes in the nested config name to semantic meaning
+            based on the dictionary values, returned the 3rd element as a dict of booleans of
+            if present in the key.
+
+            Only works for multi-dataset configs, either with individual dataset keys or shared keys with '&'.
+                For example, with `{"~": "optional"}`, a config key of "~dataset1" would indicate that the
+                configuration is optional for dataset1, and the returned dictionary would contain
+                {"optional": True} for that dataset.
 
         Returns
         -------
-        tuple[str, DotDict]
-            A tuple containing the key found for the config, and the corresponding configuration dictionary.
+        tuple[str, DotDict, dict[T, bool]]
+            A tuple containing the key found for the config, the corresponding configuration dictionary,
+            and a dictionary of booleans indicating the presence of each prefix in the key.
 
         Raises
         ------
@@ -283,7 +300,17 @@ class BaseGraphModel(nn.Module):
 
         # Early return for direct instantiation
         if "_target_" in config:
-            return dataset_name, config
+            return dataset_name, config, {}
+
+        def equals_with_mapping(key: str, target_key: str) -> tuple[bool, dict[T, bool]]:
+            """Check if the key matches the target key after removing any prefixes defined in the prefix_mapping."""
+            prefix_flags = {v: False for v in (prefix_mapping.values() if prefix_mapping else [])}
+            if prefix_mapping:
+                for prefix, meaning in prefix_mapping.items():
+                    if key.startswith(prefix):
+                        key = key[len(prefix) :]
+                        prefix_flags[meaning] = True
+            return key == target_key, prefix_flags
 
         def _assert_is_valid_nested_config(nested_config: Any) -> None:
             if not isinstance(nested_config, dict) or "_target_" not in nested_config:
@@ -292,22 +319,31 @@ class BaseGraphModel(nn.Module):
                 )
 
         # Check for nested config under key matching the dataset name
-        if dataset_name in config:
-            _assert_is_valid_nested_config(config[dataset_name])
-            return dataset_name, config[dataset_name]
+        for key in config.keys():
+            equal, prefix_flags = equals_with_mapping(key, dataset_name)
+            if equal:
+                _assert_is_valid_nested_config(config[key])
+                return key, config[key], prefix_flags
 
         # Check for multi-dataset config with '&' in keys, e.g., "dataset1&dataset2"
         for key in (k for k in config.keys() if "&" in k):
-            if dataset_name in key.split("&"):
+            _, prefix_flags = equals_with_mapping(key, dataset_name)
+            if any(equals_with_mapping(part, dataset_name)[0] for part in key.split("&")):
                 raise NotImplementedError(  # Temporary: Disallow shared blocks until supported in the forward pass
                     f"Shared configurations for multiple datasets (e.g., with keys like 'dataset1&dataset2') are not yet implemented. Found key '{key}' for dataset '{dataset_name}'."
                 )
                 _assert_is_valid_nested_config(config[key])
-                return key, config[key]
+                return key, config[key], prefix_flags
 
         raise ValueError(
             f"Could not find a valid configuration for dataset '{dataset_name}'. Expected either a direct config with '_target_' or a nested config under key '{dataset_name}' or keys containing '{dataset_name}' separated by '&'. Got config: {config}"
         )
+
+    def _validate_required(self, keys: list[str], required: list[str]) -> None:
+        """Helper function to validate that all required keys are present in the list of keys."""
+        missing = set(required) - set(keys)
+        if missing:
+            raise ValueError(f"Missing required keys: {missing}. Found keys: {keys}")
 
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
@@ -325,7 +361,7 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            key, config = self._get_nested_configuration(residual_config, dataset_name)
+            key, config, _ = self._get_nested_configuration(residual_config, dataset_name)
             if "&" in key:
                 raise NotImplementedError(
                     f"Shared residual configurations for multiple datasets (e.g., with keys like 'dataset1&dataset2') are not yet implemented. Found key '{key}' for dataset '{dataset_name}'."
