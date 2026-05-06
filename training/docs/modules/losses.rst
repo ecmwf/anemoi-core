@@ -62,9 +62,16 @@ reference it in the config as follows:
 
 The following probabilistic loss functions are available by default:
 
--  ``KernelCRPSLoss``: Kernel CRPS loss.
--  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
-   et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+-  ``CRPS``: Kernel CRPS loss for ensemble predictions. ``alpha=0`` gives
+   standard CRPS, ``alpha=1`` gives fair CRPS, and values between 0 and 1
+   give the almost fair CRPS formulation (`Lang et al. (2024)
+   <http://arxiv.org/abs/2412.15832>`_). The default ``alpha: 0.95``
+   combines 5% standard CRPS with 95% fair CRPS.
+   The ``backend`` option can be set to:
+
+   - ``naive``: simple loop over unordered ensemble-member pairs.
+   - ``stable``: materializes pairwise tensors and uses the numerically
+     stable all-pairs formulation.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
    handle noise weights
 
@@ -78,7 +85,7 @@ deterministic:
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
+            _target_: anemoi.training.losses.CRPS
             # loss function kwargs here
 
 ***************************
@@ -87,7 +94,7 @@ deterministic:
 
 The `MultiscaleLossWrapper` implements the multiscale loss formulation
 presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
-functions such as the `AlmostFairKernelCRPSLoss` to provide scale-aware
+functions such as the `CRPS` to provide scale-aware
 model training.
 
 The config for the multiscale loss functions is the following:
@@ -105,11 +112,11 @@ The config for the multiscale loss functions is the following:
                - 1.0
 
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
-               alpha: 1.0
+               alpha: 0.95
 
 ************************
 Spectral loss functions
