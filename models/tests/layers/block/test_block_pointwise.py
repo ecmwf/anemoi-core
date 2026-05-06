@@ -56,8 +56,6 @@ class TestPointWiseMLPProcessorBlock:
             [
                 "torch.nn.ReLU",
                 "torch.nn.GELU",
-                "anemoi.models.layers.activations.GLU",
-                "anemoi.models.layers.activations.SwiGLU",
             ]
         ),
         shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
@@ -75,10 +73,7 @@ class TestPointWiseMLPProcessorBlock:
         dropout_p,
     ):
         hidden_dim = num_channels * mlp_hidden_ratio
-        kwargs = dict()
-        if "GLU" in activation:
-            kwargs["dim"] = hidden_dim
-        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, **kwargs}})
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation}})
 
         block = PointWiseMLPProcessorBlock(
             num_channels=num_channels,
@@ -87,7 +82,33 @@ class TestPointWiseMLPProcessorBlock:
             layer_kernels=layer_kernels,
         )
 
-        x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
+        x = torch.randn((batch_size, num_channels))
         output = block.forward(x, shapes, batch_size)
         assert isinstance(output[0], torch.Tensor)
         assert output[0].shape == (batch_size, num_channels)
+
+    @given(
+        num_channels=st.integers(min_value=1, max_value=64),
+        mlp_hidden_ratio=st.integers(min_value=1, max_value=16),
+        activation=st.sampled_from(
+            [
+                "anemoi.models.layers.activations.GLU",
+                "anemoi.models.layers.activations.SwiGLU",
+            ]
+        ),
+        dropout_p=st.floats(min_value=0.0, max_value=1.0),
+    )
+    @settings(max_examples=5)
+    def test_glu_activation_raises(self, num_channels, mlp_hidden_ratio, activation, dropout_p):
+        hidden_dim = num_channels * mlp_hidden_ratio
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, "dim": hidden_dim}})
+
+        import pytest
+
+        with pytest.raises(ValueError, match="GLU-based activations are not supported"):
+            PointWiseMLPProcessorBlock(
+                num_channels=num_channels,
+                hidden_dim=hidden_dim,
+                dropout_p=dropout_p,
+                layer_kernels=layer_kernels,
+            )

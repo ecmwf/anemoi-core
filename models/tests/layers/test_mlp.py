@@ -84,6 +84,26 @@ class TestMLP:
         assert isinstance(mlp.mlp[0], GatedMLPLayer)
         assert isinstance(mlp.mlp[0].gating, gate_type)
 
+    @pytest.mark.parametrize("mlp_implementation", ["glu", "swiglu", "geglu", "reglu"])
+    def test_gated_implementation_ignores_activation_kernel(
+        self, num_features, hdim, num_out_feature, mlp_implementation
+    ):
+        layer_kernels = load_layer_kernels({"Activation": {"_target_": "torch.nn.ReLU"}})
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            MLP(
+                num_features,
+                hdim,
+                num_out_feature,
+                layer_kernels,
+                n_extra_layers=0,
+                layer_norm=False,
+                mlp_implementation=mlp_implementation,
+            )
+        assert any("layer_kernels.Activation is ignored" in str(w.message) for w in caught)
+
     def test_glu_activation_requires_mlp_implementation(self, num_features, hdim, num_out_feature):
         layer_kernels = load_layer_kernels(
             {"Activation": {"_target_": "anemoi.models.layers.activations.GLU", "dim": hdim}}

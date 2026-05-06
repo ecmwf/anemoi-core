@@ -330,6 +330,7 @@ class GNNProcessor(BaseProcessor):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -349,6 +350,8 @@ class GNNProcessor(BaseProcessor):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to num_channels. Default 1.0 preserves existing behaviour.
         mlp_implementation: MLPImplementation
             Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool
@@ -370,6 +373,7 @@ class GNNProcessor(BaseProcessor):
 
         kwargs_build = {
             "mlp_extra_layers": mlp_extra_layers,
+            "mlp_hidden_ratio": mlp_hidden_ratio,
             "mlp_implementation": mlp_implementation,
             "layer_kernels": self.layer_factory,
             "edge_dim": None,

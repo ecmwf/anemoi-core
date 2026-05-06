@@ -763,6 +763,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
@@ -786,6 +787,8 @@ class GNNBaseMapper(BaseMapper, ABC):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to hidden_dim. Default 1.0 preserves existing behaviour.
         mlp_implementation: MLPImplementation
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
@@ -807,7 +810,7 @@ class GNNBaseMapper(BaseMapper, ABC):
 
         self.emb_edges = MLP(
             in_features=edge_dim,
-            hidden_dim=hidden_dim,
+            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
@@ -905,6 +908,7 @@ class GNNForwardMapper(GNNBaseMapper):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -928,6 +932,8 @@ class GNNForwardMapper(GNNBaseMapper):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to hidden_dim. Default 1.0 preserves existing behaviour.
         mlp_implementation: MLPImplementation
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
@@ -945,16 +951,20 @@ class GNNForwardMapper(GNNBaseMapper):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
+            mlp_hidden_ratio=mlp_hidden_ratio,
             mlp_implementation=mlp_implementation,
             layer_kernels=layer_kernels,
             **kwargs,
         )
+
+        mlp_hidden_dim = compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio)
 
         self.proc = GraphConvMapperBlock(
             in_channels=hidden_dim,
             out_channels=hidden_dim,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_hidden_ratio=mlp_hidden_ratio,
             mlp_implementation=mlp_implementation,
             update_src_nodes=True,
             num_chunks=num_chunks,
@@ -964,7 +974,7 @@ class GNNForwardMapper(GNNBaseMapper):
 
         self.emb_nodes_src = MLP(
             in_features=in_channels_src,
-            hidden_dim=hidden_dim,
+            hidden_dim=mlp_hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
@@ -973,7 +983,7 @@ class GNNForwardMapper(GNNBaseMapper):
 
         self.emb_nodes_dst = MLP(
             in_features=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=mlp_hidden_dim,
             out_features=hidden_dim,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
@@ -1010,6 +1020,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -1033,6 +1044,8 @@ class GNNBackwardMapper(GNNBaseMapper):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to hidden_dim. Default 1.0 preserves existing behaviour.
         mlp_implementation: MLPImplementation
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool
@@ -1050,16 +1063,20 @@ class GNNBackwardMapper(GNNBaseMapper):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             edge_dim=edge_dim,
+            mlp_hidden_ratio=mlp_hidden_ratio,
             mlp_implementation=mlp_implementation,
             layer_kernels=layer_kernels,
             **kwargs,
         )
+
+        mlp_hidden_dim = compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio)
 
         self.proc = GraphConvMapperBlock(
             in_channels=hidden_dim,
             out_channels=hidden_dim,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_hidden_ratio=mlp_hidden_ratio,
             mlp_implementation=mlp_implementation,
             update_src_nodes=False,
             num_chunks=num_chunks,
@@ -1069,7 +1086,7 @@ class GNNBackwardMapper(GNNBaseMapper):
 
         self.node_data_extractor = MLP(
             in_features=self.hidden_dim,
-            hidden_dim=self.hidden_dim,
+            hidden_dim=mlp_hidden_dim,
             out_features=self.out_channels_dst,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,

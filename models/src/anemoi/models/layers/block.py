@@ -36,6 +36,7 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
@@ -76,11 +77,17 @@ class PointWiseMLPProcessorBlock(BaseBlock):
     def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
         super().__init__()
         assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
+        activation = layer_kernels.Activation()
+        if "GLU" in activation.__class__.__name__.upper():
+            raise ValueError(
+                "GLU-based activations are not supported in PointWiseMLPProcessorBlock. "
+                "Use a standard activation (GELU, ReLU, SiLU) via layer_kernels.Activation."
+            )
         layers = [
             layer_kernels.Linear(num_channels, hidden_dim),
             # This pattern has been proven to produce good results in point-wise models
             layer_kernels.LayerNorm(hidden_dim),
-            layer_kernels.Activation(),
+            activation,
         ]
         if num_channels != hidden_dim:
             layers.append(layer_kernels.Linear(hidden_dim, num_channels))
@@ -263,6 +270,7 @@ class GraphConvBaseBlock(BaseBlock):
         out_channels: int,
         num_chunks: int,
         mlp_extra_layers: int = 0,
+        mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
@@ -281,6 +289,8 @@ class GraphConvBaseBlock(BaseBlock):
             do message passing in X chunks
         mlp_extra_layers : int
             Extra layers in MLP, by default 0
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to out_channels. Default 1.0 preserves existing behaviour.
         update_src_nodes: bool
             Update src if src and dst nodes are given, by default True
         layer_kernels : DotDict
@@ -289,10 +299,12 @@ class GraphConvBaseBlock(BaseBlock):
         """
         super().__init__(**kwargs)
 
+        hidden_dim = compute_mlp_hidden_dim(out_channels, mlp_hidden_ratio)
+
         if edge_dim:
             self.emb_edges = MLP(
                 in_features=edge_dim,
-                hidden_dim=out_channels,
+                hidden_dim=hidden_dim,
                 out_features=out_channels,
                 layer_kernels=layer_kernels,
                 n_extra_layers=mlp_extra_layers + 1,
@@ -306,7 +318,7 @@ class GraphConvBaseBlock(BaseBlock):
 
         self.node_mlp = MLP(
             in_features=2 * in_channels,
-            hidden_dim=out_channels,
+            hidden_dim=hidden_dim,
             out_features=out_channels,
             layer_kernels=layer_kernels,
             n_extra_layers=mlp_extra_layers + 1,

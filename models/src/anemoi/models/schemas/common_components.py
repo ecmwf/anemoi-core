@@ -64,6 +64,8 @@ class GNNModelComponent(BaseModel):
     "Edge attributes to consider in the model component features."
     mlp_extra_layers: NonNegativeInt = Field(example=0)
     "The number of extra hidden layers in MLP. Default to 0."
+    mlp_hidden_ratio: PositiveFloat = Field(default=1.0, example=1.0)
+    "Ratio of MLP hidden dimension to channel width. Use 1.0 for no expansion, ~2.67 for gated variants to match transformer parameter counts."
     mlp_implementation: Literal["mlp", "glu", "swiglu", "geglu", "reglu"] = Field(default="mlp", example="mlp")
     "Implementation of feed-forward blocks (`mlp`, `glu`, `swiglu`, `geglu`, `reglu`). Default to `mlp`."
     layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)

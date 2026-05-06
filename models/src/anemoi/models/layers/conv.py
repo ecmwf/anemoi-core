@@ -23,6 +23,7 @@ from torch_geometric.utils import softmax
 
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.utils.config import DotDict
 
 

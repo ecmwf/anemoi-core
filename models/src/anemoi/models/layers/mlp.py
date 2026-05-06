@@ -9,6 +9,7 @@
 
 
 import logging
+import warnings
 from typing import Literal
 
 import torch
@@ -84,6 +85,12 @@ def build_feedforward_modules(
             )
         return [Linear(in_features, out_features), activation]
 
+    warnings.warn(
+        f"mlp_implementation={mlp_implementation!r} uses its own gating activation; "
+        "layer_kernels.Activation is ignored.",
+        UserWarning,
+        stacklevel=2,
+    )
     return [GatedMLPLayer(in_features, out_features, layer_kernels, mlp_implementation)]
 
 
@@ -100,7 +107,7 @@ class MLP(nn.Module):
         final_activation: bool = False,
         layer_norm: bool = True,
         mlp_implementation: MLPImplementation = "mlp",
-    ) -> nn.Module:
+    ) -> None:
         """Generate a multi-layer perceptron.
 
         Parameters
