@@ -1,0 +1,8 @@
+_target_: anemoi.models.layers.mapper.GNNForwardMapper
+trainable_size: ${model.trainable_parameters.data2hidden}
+sub_graph_edge_attributes: ${model.attributes.edges}
+num_chunks: 1
+mlp_extra_layers: 0
+cpu_offload: ${model.cpu_offload}
+gradient_checkpointing: True
+layer_kernels: ${model.layer_kernels}

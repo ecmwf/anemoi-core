@@ -69,16 +69,16 @@ class AnemoiTrainer(ABC):
 
         if config.config_validation:
             OmegaConf.resolve(config)
-            self.config = BaseSchema(**config)
+            resolved_config = BaseSchema(**config)
 
             LOGGER.info("Config validated.")
         else:
-            config = OmegaConf.to_object(config)
-            self.config = UnvalidatedBaseSchema(**DictConfig(config))
+            resolved_config = OmegaConf.to_object(config)
+            resolved_config = UnvalidatedBaseSchema(**DictConfig(resolved_config))
 
             LOGGER.info("Skipping config validation.")
 
-        self.config = convert_to_omegaconf(self.config)
+        self.config = convert_to_omegaconf(resolved_config)
 
         # Optionally override the torch default BLAS backend.
         _blas_backend = self.config.training.get("preferred_blas_backend", None)
@@ -261,6 +261,17 @@ class AnemoiTrainer(ABC):
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
+        encoder_config = (
+            [self.config.model.encoder]
+            if "_target_" in self.config.model.encoder
+            else list(self.config.model.encoder.values())
+        )
+        decoder_config = (
+            [self.config.model.decoder]
+            if "_target_" in self.config.model.decoder
+            else list(self.config.model.decoder.values())
+        )
+
         assert (
             not (
                 "layer_kernels" in self.config.model.processor
@@ -268,12 +279,16 @@ class AnemoiTrainer(ABC):
                 and ".Transformer" in self.config.model.processor.target_
             )
             and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
+                any(
+                    "GLU" in enc_conf.layer_kernels["Activation"]["_target_"] and ".Transformer" in enc_conf.target_
+                    for enc_conf in encoder_config
+                )
             )
             and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
+                any(
+                    "GLU" in dec_conf.layer_kernels["Activation"]["_target_"] and ".Transformer" in dec_conf.target_
+                    for dec_conf in decoder_config
+                )
             )
         ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
         "Please use a different activation function."

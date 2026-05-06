@@ -26,19 +26,9 @@ from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
-from .decoder import GNNDecoderSchema  # noqa: TC001
-from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
-from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
-from .decoder import TransformerDecoderSchema  # noqa: TC001
-from .encoder import GNNEncoderSchema  # noqa: TC001
-from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
-from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
-from .encoder import TransformerEncoderSchema  # noqa: TC001
-from .processor import GNNProcessorSchema  # noqa: TC001
-from .processor import GraphTransformerProcessorSchema  # noqa: TC001
-from .processor import NoOpProcessorSchema  # noqa: TC001
-from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
-from .processor import TransformerProcessorSchema  # noqa: TC001
+from .decoder import DecoderSchema
+from .encoder import EncoderSchema
+from .processor import ProcessorSchema
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -218,38 +208,16 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
-    processor: Union[
-        NoOpProcessorSchema,
-        GNNProcessorSchema,
-        GraphTransformerProcessorSchema,
-        TransformerProcessorSchema,
-        PointWiseMLPProcessorSchema,
-    ] = Field(
+    processor: ProcessorSchema = Field(
         ...,
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema, PointWiseForwardMapperSchema
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
+    encoder: Union[EncoderSchema, dict[str, EncoderSchema]]
     "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
+    decoder: Union[DecoderSchema, dict[str, DecoderSchema]]
+    "GNN decoder schema."
+    residual: Union[ResidualConnectionSchema, dict[str, ResidualConnectionSchema]]
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"

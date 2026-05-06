@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Annotated
 from typing import Any
 from typing import Literal
 from typing import Union
@@ -112,3 +113,13 @@ class PointWiseMLPProcessorSchema(PointWiseModelComponent):
     "Ratio of the hidden dimension to the processor channel dimension."
     dropout_p: NonNegativeFloat = Field(default=0.0, example=0.0)
     "Dropout probability, default 0.0"
+
+
+ProcessorSchema = Annotated[
+    NoOpProcessorSchema
+    | GNNProcessorSchema
+    | GraphTransformerProcessorSchema
+    | TransformerProcessorSchema
+    | PointWiseMLPProcessorSchema,
+    Field(discriminator="target_"),
+]

@@ -1,0 +1,2 @@
+_target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+step: -1 # use the latest step as skip connection

@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Annotated
 from typing import Any
 from typing import Literal
 from typing import Union
@@ -81,3 +82,9 @@ class PointWiseBackwardMapperSchema(PointWiseMapperComponent):
     "Point-wise decoder object from anemoi.models.layers.mapper."
     initialise_data_extractor_zero: bool = Field(default=False)
     "Initialise the data extractor with zeros. Default to False."
+
+
+DecoderSchema = Annotated[
+    GNNDecoderSchema | GraphTransformerDecoderSchema | TransformerDecoderSchema | PointWiseBackwardMapperSchema,
+    Field(discriminator="target_"),
+]

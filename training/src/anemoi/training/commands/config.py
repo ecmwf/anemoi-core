@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
@@ -60,6 +61,8 @@ class ConfigGenerator(Command):
         validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
 
         validate.add_argument("--config-name", help="Name of the primary config file")
+        validate.add_argument("--open", help="Open config files in an editor", action="store_true")
+        validate.add_argument("--viewer", help="Viewer to use for opening config files", default="vim")
         validate.add_argument("--overwrite", "-f", action="store_true")
         validate.add_argument(
             "--mask_env_vars",
@@ -103,7 +106,15 @@ class ConfigGenerator(Command):
                     the config_validation flag to false."
                 "So this command will validate the config regardless of the flag.",
             )
-            self.validate_config(args.config_name, args.mask_env_vars)
+            validated_config = self.validate_config(args.config_name, args.mask_env_vars)
+            if args.open:
+                with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as tmp_file:
+                    tmp_file_path = Path(tmp_file.name)
+                    dumped_config = validated_config.model_dump(by_alias=True)
+                    with tmp_file_path.open("w") as f:
+                        f.write(OmegaConf.to_yaml(dumped_config))
+                    assert args.viewer in ["vim", "nano", "code"], "Viewer must be one of 'vim', 'nano', or 'code'"
+                    subprocess.run([args.viewer, str(tmp_file_path)], check=False)  # noqa: S603
             LOGGER.info("Config files validated.")
             return
 
@@ -191,14 +202,14 @@ class ConfigGenerator(Command):
 
         return OmegaConf.create(updated_cfg)
 
-    def validate_config(self, config_name: Path | str, mask_env_vars: bool) -> None:
+    def validate_config(self, config_name: Path | str, mask_env_vars: bool) -> BaseSchema:
         """Validates the configuration files in the given directory."""
         with initialize(version_base=None, config_path=""):
             cfg = compose(config_name=config_name)
             if mask_env_vars:
                 cfg = self._mask_slurm_env_variables(cfg)
             OmegaConf.resolve(cfg)
-            BaseSchema(**cfg)
+            return BaseSchema(**cfg)
 
     def dump_config(self, config_path: Path, name: str, output: Path) -> None:
         """Dump config files in one YAML file."""

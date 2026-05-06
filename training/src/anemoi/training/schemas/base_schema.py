@@ -154,10 +154,14 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
-        if (
-            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
-            and self.model.decoder.initialise_data_extractor_zero
+        decoder_schema = (
+            [self.model.decoder] if not isinstance(self.model.decoder, dict) else self.model.decoder.values()
+        )
+        if any(
+            isinstance(decoder, GraphTransformerDecoderSchema)
+            and decoder.initialise_data_extractor_zero
             and self.model.bounding
+            for decoder in decoder_schema
         ):
             error = "bounding_conflict_with_data_extractor_zero"
             msg = (
@@ -192,9 +196,8 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Flag to disable validation of the configuration"""
 
 
-def convert_to_omegaconf(config: BaseSchema) -> dict:
-    config = config.model_dump(by_alias=True)
-    return OmegaConf.create(config)
+def convert_to_omegaconf(config: BaseSchema | UnvalidatedBaseSchema) -> DictConfig:
+    return OmegaConf.create(config.model_dump(by_alias=True))
 
 
 def validate_schema(config: DictConfig) -> BaseSchema:

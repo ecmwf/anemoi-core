@@ -106,9 +106,61 @@ as there is no message passing or interaction between nodes.
 *******************
 
 The encoders and decoders can be chosen to be GNNs, GraphTransformers,
-or Transformers. This choice is independent of the processor, but
-currently the encoders and decoders must be the same model type otherwise
-the code will break.
+Transformers, or Point-wise MLPs. This choice is independent of the
+processor.
+
+Encoder and decoder configurations are defined as separate Hydra config
+groups under ``model/encoder/`` and ``model/decoder/``. Each model
+config file references them via Hydra defaults:
+
+.. code:: yaml
+
+   # training/config/model/transformer.yaml
+   defaults:
+     - encoder: gt16
+     - decoder: gt16
+     - residual: skip
+
+Available encoder presets include ``gnn``, ``gt16``, ``gt16_qknorm``,
+``pointwise``, and ``transformer``. Decoder presets mirror these with
+the addition of ``gt16_qknorm_zeroinit`` for diffusion models.
+
+.. _per-dataset-components:
+
+Per-dataset Encoders and Decoders
+=================================
+
+When training with multiple datasets, each dataset can use a different
+encoder, decoder, or residual connection. This is configured by nesting
+the component config under the dataset name:
+
+.. code:: yaml
+
+   defaults:
+     - encoder@encoder.data: gt16
+     - decoder@decoder.data: gt16
+     - residual: skip
+
+Here ``encoder@encoder.data`` tells Hydra to place the ``gt16`` encoder
+config at the path ``encoder.data`` within the model config, where
+``data`` is the dataset name. The model will then use that specific
+encoder for the ``data`` dataset.
+
+This can be extended to multiple datasets:
+
+.. code:: yaml
+
+   defaults:
+     - encoder@encoder.dataset_a: gt16
+     - encoder@encoder.dataset_b: pointwise
+     - decoder@decoder.dataset_a: gt16
+     - decoder@decoder.dataset_b: pointwise
+     - residual@residual.dataset_a: skip
+     - residual@residual.dataset_b: truncated
+
+When a single (non-nested) config is provided, it is shared across all
+datasets -- this is the default behaviour and matches the previous
+configuration style.
 
 *******************
  Switchable Layers

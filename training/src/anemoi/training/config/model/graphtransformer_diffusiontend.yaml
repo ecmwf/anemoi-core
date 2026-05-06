@@ -1,3 +1,9 @@
+defaults:
+  # See graphtransformer.yaml for full documentation on nesting per dataset.
+  - encoder: gt16_qknorm
+  - decoder: gt16_qknorm
+  - residual: skip
+
 num_channels: 1024
 condition_on_residual: False
 cpu_offload: False
@@ -67,39 +73,6 @@ processor:
   layer_kernels: ${model.layer_kernels}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-encoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
-
-
-decoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
-
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

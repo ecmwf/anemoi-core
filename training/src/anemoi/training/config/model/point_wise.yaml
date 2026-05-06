@@ -1,3 +1,9 @@
+defaults:
+  # See graphtransformer.yaml for full documentation on nesting per dataset.
+  - encoder: pointwise
+  - decoder: pointwise
+  - residual: skip
+
 num_channels: 1024
 cpu_offload: False
 
@@ -32,22 +38,6 @@ processor:
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
-encoder:
-  _target_: anemoi.models.layers.mapper.PointWiseForwardMapper
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-
-decoder:
-  _target_: anemoi.models.layers.mapper.PointWiseBackwardMapper
-  initialise_data_extractor_zero: False
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

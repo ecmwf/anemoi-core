@@ -131,3 +131,41 @@ unfiltered fields.
    :members:
    :no-undoc-members:
    :show-inheritance:
+****************
+ Configuration
+****************
+
+The residual connection type is configured under the ``residual`` key in
+the model config. In the training config, residual presets are stored
+under ``model/residual/`` and referenced via Hydra defaults.
+
+Skip connection (default):
+
+.. code:: yaml
+
+   residual:
+     _target_: anemoi.models.layers.residual.SkipConnection
+     step: -1
+
+Graph-based truncated connection:
+
+.. code:: yaml
+
+   residual:
+     _target_: anemoi.models.layers.residual.TruncatedConnection
+     data_nodes: data
+     truncation_nodes: "int"
+     edge_weight_attribute: gauss_weight
+
+File-based truncated connection:
+
+.. code:: yaml
+
+   residual:
+     _target_: anemoi.models.layers.residual.TruncatedConnection
+     truncation_down_file_path: /path/to/n320_to_o96.npz
+     truncation_up_file_path: /path/to/o96_to_n320.npz
+
+For multi-dataset training, different residual connections can be
+specified per dataset. See the training documentation for details on
+per-dataset configuration.

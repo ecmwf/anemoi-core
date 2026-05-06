@@ -1,0 +1,10 @@
+_target_: anemoi.models.layers.residual.SpectralOrnsteinConnection
+lmax: 2
+grid: legendre-gauss
+theta_init: 0.0
+theta_buff: 0.0
+zmean_term: true
+regressors: null
+truncate: false
+anti_aliasing: true
+skip_truncate_variables: null

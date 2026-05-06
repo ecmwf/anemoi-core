@@ -212,6 +212,29 @@ class BaseGraphModel(nn.Module):
 
         return dim_sizes[0]
 
+    def _get_nested_configuration(self, config: DotDict, dataset_name: str) -> DotDict:
+        """Extract a nested configuration for a specific dataset if the config is provided in a multi-dataset format.
+        If not provided in a multi-dataset format, return the base config.
+
+        Expects `_target_` key to be present in the final config for instantiation.
+        """
+        assert (
+            dataset_name in self.dataset_names
+        ), f"Dataset name '{dataset_name}' not found in model's dataset names {self.dataset_names}"
+
+        if dataset_name in config and isinstance(config[dataset_name], dict):
+            if "_target_" not in config[dataset_name]:
+                raise ValueError(
+                    f"Dataset-specific configuration for '{dataset_name}' must contain a '_target_' key for instantiation."
+                )
+            return config[dataset_name]
+
+        if "_target_" in config:
+            return config
+        raise ValueError(
+            f"Configuration for dataset '{dataset_name}' is not properly specified. Expected either a multi-dataset config for each dataset or a base config with a '_target_' key."
+        )
+
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the networks for the model."""
@@ -229,7 +252,7 @@ class BaseGraphModel(nn.Module):
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             self.residual[dataset_name] = instantiate(
-                residual_config,
+                self._get_nested_configuration(residual_config, dataset_name),
                 graph=self._graph_data,
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],

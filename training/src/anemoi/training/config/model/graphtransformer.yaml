@@ -1,3 +1,29 @@
+defaults:
+  # Encoder, decoder, and residual configs are loaded from the subdirectories.
+  # Each default populates the corresponding top-level key (e.g. encoder: gt16
+  # loads encoder/gt16.yaml into the `encoder` key).
+  #
+  # For a single dataset, this gives a flat config:
+  #   encoder:
+  #     _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  #     ...
+  #
+  # For multiple datasets with different encoder/decoder/residual configs,
+  # use the @<path> syntax to nest configs per dataset:
+  # - encoder@encoder.data: gt16
+  # - encoder@encoder.other: gnn
+  # This produces a dictionary-style config:
+  #   encoder:
+  #     data:
+  #       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  #       ...
+  #     other:
+  #       _target_: anemoi.models.layers.mapper.GNNForwardMapper
+  #       ...
+  - encoder: gt16
+  - decoder: gt16
+  - residual: skip
+
 num_channels: 1024
 cpu_offload: False
 
@@ -38,41 +64,6 @@ processor:
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
 
-encoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: False
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
-  edge_pre_mlp: False
-
-decoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
-  num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
-  qk_norm: False
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
-  edge_pre_mlp: False
-
-
-residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask

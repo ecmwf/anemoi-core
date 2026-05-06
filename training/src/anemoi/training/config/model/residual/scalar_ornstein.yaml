@@ -1,0 +1,4 @@
+_target_: anemoi.models.layers.residual.ScalarOrnsteinConnection
+theta_init: 0.0
+theta_buff: 0.0
+theta_train: true
