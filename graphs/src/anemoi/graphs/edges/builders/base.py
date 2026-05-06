@@ -59,7 +59,8 @@ class BaseEdgeBuilder(ABC):
         return self.source_name, "to", self.target_name
 
     @abstractmethod
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor: ...
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor: 
+        raise NotImplementedError
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
@@ -160,7 +161,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     @abstractmethod
     def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
 
-    def _compute_edge_index(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         """Compute edge index using torch-cluster.
 
         Parameters

@@ -31,7 +31,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    def _build_networks(self, model_config: DotDict) -> None:
+    def _build_networks(self, model_config: DotDict, graph_config: dict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
@@ -39,8 +39,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.dataset_names:
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_builder_config=graph_config[(dataset_name, self._graph_name_hidden)]["edge_builder"],
+                edge_attributes_configs=graph_config[(dataset_name, self._graph_name_hidden)]["attributes_config"],
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
@@ -76,8 +76,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_builder_config=graph_config[(self._graph_name_hidden, dataset_name)]["edge_builder"],
+                edge_attributes_configs=graph_config[(self._graph_name_hidden, dataset_name)]["attributes_config"],
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
@@ -250,10 +250,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
-                src_coords=self.node_attributes.get_coordinates(dataset_name),
+                src_coords=batch.node_coords(dataset_name),
                 dst_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
                 model_comm_group=model_comm_group,
             )
+            encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)
+            encoder_edge_index = encoder_edge_index.to(x_data_latent.device)
 
             # Encoder for this dataset
             x_data_latent, x_latent = self.encoder[dataset_name](
@@ -276,9 +278,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
+            src_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
+            dst_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
+        processor_edge_attr = processor_edge_attr.to(x_latent.device)
+        processor_edge_index = processor_edge_index.to(x_latent.device)
 
         x_latent_proc = self.processor(
             x=x_latent,
@@ -303,9 +309,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ].get_edges(
                 batch_size=batch_size,
                 src_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
-                dst_coords=self.node_attributes.get_coordinates(dataset_name),
+                dst_coords=batch.node_coords(dataset_name),
                 model_comm_group=model_comm_group,
             )
+            decoder_edge_attr = decoder_edge_attr.to(x_latent.device)
+            decoder_edge_index = decoder_edge_index.to(x_latent.device)
 
             x_out = self.decoder[dataset_name](
                 (x_latent, x_data_latent_dict[dataset_name]),

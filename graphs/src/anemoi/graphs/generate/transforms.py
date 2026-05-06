@@ -54,7 +54,7 @@ def latlon_rad_to_cartesian_np(locations: np.ndarray, radius: float = 1) -> np.n
     return np.stack((x, y, z), axis=-1)
 
 
-def latlon_rad_to_cartesian(locations: torch.Tensor, radius: float = 1) -> torch.Tensor:
+def latlon_rad_to_cartesian(locations: torch.Tensor | tuple, radius: float = 1) -> torch.Tensor:
     """Convert planar coordinates to 3D coordinates in a sphere.
 
     Parameters
@@ -69,7 +69,12 @@ def latlon_rad_to_cartesian(locations: torch.Tensor, radius: float = 1) -> torch
     torch.Tensor of shape (N, 3)
         3D coordinates of the points in the sphere.
     """
-    latr, lonr = locations[..., 0], locations[..., 1]
+    if isinstance(locations, dict):
+        latr, lonr = locations["latitudes"], locations["longitudes"]
+    elif isinstance(locations, tuple):
+        latr, lonr = locations
+    else:
+        latr, lonr = locations[..., 0], locations[..., 1]
     x = radius * torch.cos(latr) * torch.cos(lonr)
     y = radius * torch.cos(latr) * torch.sin(lonr)
     z = radius * torch.sin(latr)

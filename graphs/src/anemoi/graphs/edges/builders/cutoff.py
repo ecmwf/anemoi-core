@@ -94,6 +94,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.cutoff_factor = cutoff_factor
         self.cutoff_distance_km = cutoff_distance_km
         self.max_num_neighbours = max_num_neighbours
+        self.radius = None
 
     @staticmethod
     def get_reference_distance(nodes: NodeStorage, mask_attr_name: torch.Tensor | None = None) -> float:
@@ -115,8 +116,16 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             # If masking nodes, we have to recompute the grid reference distance only over the masked nodes
             mask = nodes[mask_attr_name]
             _grid_reference_distance = get_grid_reference_distance(nodes.x, mask)
-        else:
+        elif "_grid_reference_distance" in nodes:
             _grid_reference_distance = nodes["_grid_reference_distance"]
+        else:
+            if isinstance(nodes, NodeStorage):
+                _grid_reference_distance = get_grid_reference_distance(nodes.x)
+                nodes["_grid_reference_distance"] = _grid_reference_distance
+            elif isinstance(nodes, torch.Tensor):
+                _grid_reference_distance = get_grid_reference_distance(nodes.x)
+            else:
+                raise ValueError("Unsupported type for nodes. Expected NodeStorage or torch.Tensor.")
 
         return _grid_reference_distance
 
@@ -144,9 +153,12 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             radius = self.cutoff_distance_km / EARTH_RADIUS
         else:
             # Use factor-based approach
-            reference_dist = CutOffEdges.get_reference_distance(
-                graph[self.target_name], mask_attr_name=self.target_mask_attr_name
-            )
+            if isinstance(graph, HeteroData):
+                target_nodes = graph[self.target_name]
+            elif isinstance(graph, torch.Tensor):
+                target_nodes = graph
+
+            reference_dist = CutOffEdges.get_reference_distance(target_nodes, mask_attr_name=self.target_mask_attr_name)
             radius = reference_dist * self.cutoff_factor
         return radius
 
@@ -201,6 +213,10 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
     def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
+
+        if self.radius is None:
+            radius = 0.1
+
         adj_matrix = nearest_neighbour.radius_neighbors_graph(
             target_coords.cpu(), radius=self.radius, mode="distance"
         ).tocoo()

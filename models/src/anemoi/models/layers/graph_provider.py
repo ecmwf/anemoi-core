@@ -23,6 +23,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
+from hydra.utils import instantiate
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.layers.graph import TrainableTensor
@@ -33,6 +34,8 @@ LOGGER = logging.getLogger(__name__)
 
 def create_graph_provider(
     graph: Optional[HeteroData] = None,
+    edge_builder_config: Optional[dict] = None,
+    edge_attributes_configs: Optional[dict[dict]] = None,
     edge_attributes: Optional[list[str]] = None,
     src_size: Optional[int] = None,
     dst_size: Optional[int] = None,
@@ -61,7 +64,13 @@ def create_graph_provider(
     BaseGraphProvider
         Appropriate graph provider instance
     """
-    if graph:
+    if graph is None and edge_builder_config is not None:
+        return DynamicGraphProvider(
+            edge_builder_config=edge_builder_config,
+            edge_attributes_configs=edge_attributes_configs,
+            edge_dim=3,  # Example edge dimension for dynamic provider (e.g., length + direction)
+        )
+    elif graph:
         return StaticGraphProvider(
             graph=graph,
             edge_attributes=edge_attributes,
@@ -311,25 +320,35 @@ class DynamicGraphProvider(BaseGraphProvider):
     (e.g., k-NN graphs, radius graphs, adaptive connectivity).
     """
 
-    def __init__(self, edge_dim: int) -> None:
+    def __init__(
+        self,
+        edge_builder_config: dict,
+        edge_attributes_configs: dict,
+        edge_dim: int
+    ) -> None:
         """Initialize DynamicGraphProvider.
 
         Parameters
         ----------
+        edge_builder_config : dict
+            Configuration for the edge builder
+        edge_attributes_configs : dict
+            Configuration for edge attributes
         edge_dim : int
             Expected dimension of edge attributes
         """
         super().__init__()
-        from anemoi.graphs.edges import KNNEdges
-        self.edge_builder = KNNEdges(source_name="-", target_name="-", num_nearest_neighbours=8)
+        self.edge_builder = instantiate(edge_builder_config, source_name="-", target_name="-")
+        self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
         self._edge_dim = edge_dim
-
+        self.device = "cpu"
+    
     @property
     def edge_dim(self) -> int:
         """Return the edge dimension."""
         return self._edge_dim
 
-    def build_graph(self, src_nodes: Tensor, dst_nodes: Tensor, **kwargs) -> tuple[Tensor, Adj]:
+    def build_graph(self, src_coords: Tensor, dst_coords: Tensor, **kwargs) -> tuple[Tensor, Adj]:
         """Build graph dynamically from source and destination nodes.
 
         This method will be implemented in the future to support on-the-fly
@@ -337,9 +356,9 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         Parameters
         ----------
-        src_nodes : Tensor
+        src_coords : Tensor
             Source node features/positions
-        dst_nodes : Tensor
+        dst_coords : Tensor
             Destination node features/positions
         **kwargs
             Additional parameters for graph construction algorithm
@@ -349,11 +368,17 @@ class DynamicGraphProvider(BaseGraphProvider):
         tuple[Tensor, Adj]
             Edge attributes and edge index
         """
-        edge_index = self.edge_builder._compute_edge_index(
-            source_coords=latlon_rad_to_cartesian(src_nodes),
-            target_coords=latlon_rad_to_cartesian(dst_nodes),
+        source_coords = latlon_rad_to_cartesian(src_coords).to(self.device, dtype=torch.float32)
+        target_coords = latlon_rad_to_cartesian(dst_coords).to(self.device, dtype=torch.float32)
+
+        edge_index = self.edge_builder.compute_edge_index_from_coords(source_coords, target_coords)
+        edge_index = edge_index.to(self.device)
+
+        edge_attr = torch.cat(
+            [attr.propagate(edge_index, x=(source_coords, target_coords)) for attr in self.attributes_config.values()],
+            dim=1,
         )
-        return edge_index
+        return edge_attr, edge_index
 
     def _get_edges_impl(
         self,

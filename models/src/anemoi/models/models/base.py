@@ -32,6 +32,16 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+def get_graph_recipe(graph_config: DotDict) -> DotDict:
+    edges = {}
+    for edge_config in graph_config.edges:
+        edges[(edge_config.source_name, edge_config.target_name)] = {
+            "edge_builder": edge_config.edge_builders[0],
+            "attributes_config": edge_config.attributes,
+        }
+    return edges
+
+
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
@@ -85,8 +95,10 @@ class BaseGraphModel(nn.Module):
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
+        graph_config = get_graph_recipe(model_config.graph)
+
         # build networks
-        self._build_networks(model_config)
+        self._build_networks(model_config, graph_config)
 
         # build residual connection
         self._build_residual(model_config.model.residual)
