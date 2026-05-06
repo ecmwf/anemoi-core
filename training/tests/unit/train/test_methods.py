@@ -315,7 +315,6 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=MSELoss(),
         weights=[1.0],
-        keep_batch_sharded=True,
     )
     prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_sizes))
     monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)

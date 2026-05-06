@@ -84,7 +84,6 @@ def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, t
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     pred, target, loss_result = loss_inputs_multiscale
@@ -125,7 +124,6 @@ def test_multi_scale(
         loss_matrices=[None, "fake"],
         per_scale_loss=per_scale_loss,
         weights=weights,
-        keep_batch_sharded=False,
     )
 
     pred, target, _ = loss_inputs_multiscale
@@ -152,7 +150,6 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     loss = multiscale_loss(pred, target)
@@ -170,7 +167,6 @@ def test_multiscale_forwards_layout_kwargs_to_filtered_per_scale_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
                 "weights": [1.0],
-                "keep_batch_sharded": False,
                 "loss_matrices": [None],
                 "per_scale_loss": {
                     "_target_": "anemoi.training.losses.MSELoss",
@@ -207,7 +203,6 @@ def test_multiscale_loss_forwards_scaler_indices() -> None:
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     scaler_indices = (..., [1])
@@ -222,7 +217,6 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     pred = torch.zeros((1, 1, 1, 2, 1))
@@ -253,7 +247,6 @@ def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixtu
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=True,
     )
     group = FakeGroup(size=2)
     grid_shard_sizes = [1, 1]
@@ -288,7 +281,6 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     pred = torch.zeros((1, 1, 1, 2, 1))
