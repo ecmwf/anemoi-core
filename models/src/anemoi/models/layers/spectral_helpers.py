@@ -150,8 +150,7 @@ class SphericalHarmonicTransform(Module):
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
         use_graphed_rfft : bool, optional
-            Whether to use CUDA graphs for the reduced grid rFFT. Only has an effect if the input is on CUDA. Default
-            is False.
+            Whether to use CUDA graphs for the reduced grid rFFT. Default is False.
         """
 
         super().__init__()
@@ -371,8 +370,7 @@ class InverseSphericalHarmonicTransform(Module):
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
         use_graphed_irfft : bool, optional
-            Whether to use CUDA graphs for the reduced grid irFFT. Only has an effect if the input is on CUDA. Default
-            is False.
+            Whether to use CUDA graphs for the reduced grid irFFT. Default is False.
         """
 
         super().__init__()
