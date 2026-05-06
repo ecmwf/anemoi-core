@@ -18,6 +18,7 @@ from einops import rearrange
 from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree
+from abc import ABC
 
 from anemoi.datasets import open_dataset
 from anemoi.training.utils.time_indices import TimeIndices
@@ -76,7 +77,7 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
     return normalized
 
 
-class BaseAnemoiReader:
+class BaseAnemoiReader(ABC):
     """Anemoi data reader for native grid datasets."""
 
     def __init__(
@@ -97,11 +98,6 @@ class BaseAnemoiReader:
     def dates(self) -> np.ndarray:
         """Return dataset dates."""
         return self.data.dates
-
-    @property
-    def grid_size(self) -> int:
-        """Return dataset grid size."""
-        return sum(self.data.grids)
 
     @property
     def statistics(self) -> dict:
@@ -173,15 +169,6 @@ class BaseAnemoiReader:
     def longitudes(self) -> np.ndarray:
         """Return per-grid-point longitudes in **radians**."""
         return np.deg2rad(np.asarray(self.data.longitudes))
-
-    @property
-    def is_static_grid(self) -> bool:
-        """Whether the dataset's grid is static across time.
-
-        Native gridded ``anemoi.datasets`` payloads carry a fixed grid;
-        subclasses backing dynamic point clouds must override this.
-        """
-        return True
 
     def get_coordinates(
         self,
@@ -263,7 +250,7 @@ class BaseAnemoiReader:
         data = self.get_data(time_indices, grid_shard_indices)
         coords = self.get_coordinates(time_indices, grid_shard_indices)
         return {"data": data, "coords": coords}
-    
+
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
         with console.capture() as capture:
@@ -279,7 +266,47 @@ class BaseAnemoiReader:
         return tree
 
 
-class NativeGridDataset(BaseAnemoiReader):
+class GriddedDataReader(BaseAnemoiReader, ABC):
+    """Gridded dataset reader with static grid."""
+
+    @property
+    def is_static_grid(self) -> bool:
+        """Whether the dataset's grid is static across time.
+
+        Native gridded ``anemoi.datasets`` payloads carry a fixed grid;
+        subclasses backing dynamic point clouds must override this.
+        """
+        return True
+
+    @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return sum(self.data.grids)
+
+class ObservationDataReader(BaseAnemoiReader):
+    """Observation dataset reader (e.g. from tabular-zarrs)."""
+
+    @property
+    def is_static_grid(self) -> bool:
+        """Whether the dataset's grid is static across time.
+
+        Native gridded ``anemoi.datasets`` payloads carry a fixed grid;
+        subclasses backing dynamic point clouds must override this.
+        """
+        return False
+
+    @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        raise NotImplementedError("ObservationDataReader does not implement grid_size since it does not have a static grid.")
+
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return False
+
+
+class NativeGridDataset(GriddedDataReader):
     """Native grid dataset."""
 
     @property
@@ -288,7 +315,7 @@ class NativeGridDataset(BaseAnemoiReader):
         return False
 
 
-class TrajectoryDataset(BaseAnemoiReader):
+class TrajectoryDataset(GriddedDataReader):
     """Trajectory dataset."""
 
     def __init__(

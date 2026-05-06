@@ -13,7 +13,6 @@ from typing import Optional
 import torch
 from hydra.utils import instantiate
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -35,8 +34,6 @@ class AnemoiModelInterface(torch.nn.Module):
         A unique identifier for the model instance.
     n_step_input : int
         Number of input timesteps provided to the model.
-    graph_data : HeteroData
-        Graph data for the model.
     statistics : dict
         Statistics for the data.
     metadata : dict
@@ -61,10 +58,10 @@ class AnemoiModelInterface(torch.nn.Module):
         config: DotDict,
         n_step_input: int,
         n_step_output: int,
-        graph_data: HeteroData,
         statistics: dict,
         data_indices: dict,
         metadata: dict,
+        data_readers: dict,
         statistics_tendencies: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
@@ -73,12 +70,12 @@ class AnemoiModelInterface(torch.nn.Module):
         self.id = str(uuid.uuid4())
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
-        self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
+        self.is_dataset_static = {key: val.is_static_grid for key, val in data_readers.items()}
         self._build_model()
         self._update_metadata()
 
@@ -192,9 +189,10 @@ class AnemoiModelInterface(torch.nn.Module):
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config,
+            model_graph_config=self.config.graph,
             data_indices=self.data_indices,
             statistics=self.statistics,
-            graph_data=self.graph_data,
+            is_dataset_static=self.is_dataset_static,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra

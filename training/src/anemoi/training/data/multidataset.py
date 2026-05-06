@@ -148,6 +148,11 @@ class MultiDataset(IterableDataset):
             assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
 
+    @property
+    def is_dataset_static(self) -> dict[str, bool]:
+        """Return combined is_dataset_static from all data readers."""
+        return {name: not getattr(dataset, "is_tabular", False) for name, dataset in self.data_readers.items()}
+
     def set_comm_group_info(
         self,
         global_rank: int,

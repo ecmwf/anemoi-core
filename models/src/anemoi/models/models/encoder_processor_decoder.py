@@ -11,6 +11,7 @@
 import logging
 from typing import Optional
 
+from anemoi.graphs.create import HeteroData
 import einops
 import torch
 from hydra.utils import instantiate
@@ -31,16 +32,19 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    def _build_networks(self, model_config: DotDict, graph_config: dict) -> None:
+    def _build_networks(self, model_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            bipartite_graph_name = (dataset_name, "to", self._graph_name_hidden)
+
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                edge_builder_config=graph_config[(dataset_name, self._graph_name_hidden)]["edge_builder"],
-                edge_attributes_configs=graph_config[(dataset_name, self._graph_name_hidden)]["attributes_config"],
+                graph=static_graph[bipartite_graph_name],
+                edge_attribute_names=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                **dynamic_graph_config[bipartite_graph_name],
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
@@ -57,8 +61,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            graph=static_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            edge_attribute_names=model_config.model.processor.get("sub_graph_edge_attributes"),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             trainable_size=model_config.model.processor.get("trainable_size", 0),
@@ -75,9 +79,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            bipartite_graph_name = (self._graph_name_hidden, "to", dataset_name)
+
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                edge_builder_config=graph_config[(self._graph_name_hidden, dataset_name)]["edge_builder"],
-                edge_attributes_configs=graph_config[(self._graph_name_hidden, dataset_name)]["attributes_config"],
+                graph=static_graph[bipartite_graph_name],
+                edge_attribute_names=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                **dynamic_graph_config[bipartite_graph_name],
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),

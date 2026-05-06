@@ -19,6 +19,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.create import GraphCreator
 from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
@@ -28,18 +29,54 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
+from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 
 
-def get_graph_recipe(graph_config: DotDict) -> DotDict:
-    edges = {}
+def split_graph_config(
+    graph_config: DotDict,
+    is_dataset_static: dict[str, bool],
+    hidden_nodes_name: str | list[str],
+) -> tuple[DotDict, DotDict]:
+    """This function creates the static graph structure and returns the dictionary for the dynamic graph configuration.
+
+    Parameters
+    ----------
+    graph_config : DotDict
+        Graph configuration
+    is_dataset_static : dict[str, bool]
+        Dictionary indicating whether each dataset is static (e.g., static grid) or not.
+    hidden_nodes_name : str or list of str
+        Name(s) of the hidden nodes in the graph. They are considered to be static.
+    """
+    if isinstance(hidden_nodes_name, str):
+        is_dataset_static[hidden_nodes_name] = True
+    elif isinstance(hidden_nodes_name, list):
+        for hidden_name in hidden_nodes_name:
+            is_dataset_static[hidden_name] = True
+    else:
+        raise TypeError(f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}")
+
+    static_graph_config, dynamic_graph_config = {"nodes": {}, "edges": []}, {"nodes": {}, "edges": {}}
+    for nodes_name, nodes_config in graph_config.nodes.items():
+        if is_dataset_static[nodes_name]:
+            static_graph_config["nodes"][nodes_name] = nodes_config
+        else:
+            dynamic_graph_config["nodes"][nodes_name] = nodes_config
+    
     for edge_config in graph_config.edges:
-        edges[(edge_config.source_name, edge_config.target_name)] = {
-            "edge_builder": edge_config.edge_builders[0],
-            "attributes_config": edge_config.attributes,
-        }
-    return edges
+        source_name = edge_config.source_name
+        target_name = edge_config.target_name
+        if is_dataset_static[source_name] and is_dataset_static[target_name]:
+            static_graph_config["edges"].append(edge_config)
+            dynamic_graph_config["edges"][(source_name, "to", target_name)] = {}
+        else:
+            dynamic_graph_config["edges"][(source_name, "to", target_name)] = {
+                "edge_builders": edge_config.edge_builders, "attributes": edge_config.attributes
+            }
+
+    return DotDict(static_graph_config), DotDict(dynamic_graph_config)
 
 
 class BaseGraphModel(nn.Module):
@@ -49,11 +86,12 @@ class BaseGraphModel(nn.Module):
         self,
         *,
         model_config: DotDict,
-        data_indices: dict,
-        statistics: dict,
+        model_graph_config: DotDict,
+        data_indices: dict[str, IndexCollection],
+        statistics: dict[str, dict],
+        is_dataset_static: dict[str, bool],
         n_step_input: int,
         n_step_output: int,
-        graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -65,11 +103,20 @@ class BaseGraphModel(nn.Module):
             Data indices
         statistics : dict
             Data statistics
-        graph_data : HeteroData
-            Graph definition
+        model_graph_config : DotDict
+            Graph configuration
         """
         super().__init__()
-        self._graph_data = graph_data
+
+        model_config = DotDict(model_config)
+        model_graph_config = DotDict(model_graph_config)
+        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+
+        static_graph_config, dynamic_graph_config = split_graph_config(
+            model_graph_config, is_dataset_static, self._graph_name_hidden
+        )
+
+        self._graph_data = GraphCreator(static_graph_config).create()
         self.data_indices = data_indices
         self.statistics = statistics
         self.n_step_input = n_step_input
@@ -95,10 +142,8 @@ class BaseGraphModel(nn.Module):
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
-        graph_config = get_graph_recipe(model_config.graph)
-
         # build networks
-        self._build_networks(model_config, graph_config)
+        self._build_networks(model_config, self._graph_data, dynamic_graph_config.edges)
 
         # build residual connection
         self._build_residual(model_config.model.residual)
@@ -226,7 +271,7 @@ class BaseGraphModel(nn.Module):
         return dim_sizes[0]
 
     @abstractmethod
-    def _build_networks(self, model_config: DotDict) -> None:
+    def _build_networks(self, model_config: DotDict, static_graph: HeteroData, graph_config: DotDict) -> None:
         """Builds the networks for the model."""
         pass
 

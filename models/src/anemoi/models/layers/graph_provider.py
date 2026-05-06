@@ -34,9 +34,9 @@ LOGGER = logging.getLogger(__name__)
 
 def create_graph_provider(
     graph: Optional[HeteroData] = None,
-    edge_builder_config: Optional[dict] = None,
-    edge_attributes_configs: Optional[dict[dict]] = None,
-    edge_attributes: Optional[list[str]] = None,
+    edge_builders: Optional[list[dict[str, dict]]] = None,
+    attributes: Optional[dict[str, dict]] = None,
+    edge_attribute_names: Optional[list[str]] = None,
     src_size: Optional[int] = None,
     dst_size: Optional[int] = None,
     trainable_size: int = 0,
@@ -64,16 +64,16 @@ def create_graph_provider(
     BaseGraphProvider
         Appropriate graph provider instance
     """
-    if graph is None and edge_builder_config is not None:
+    if graph is None and edge_builders is not None:
         return DynamicGraphProvider(
-            edge_builder_config=edge_builder_config,
-            edge_attributes_configs=edge_attributes_configs,
+            edge_builder_config=edge_builders,
+            edge_attributes_configs=attributes,
             edge_dim=3,  # Example edge dimension for dynamic provider (e.g., length + direction)
         )
     elif graph:
         return StaticGraphProvider(
             graph=graph,
-            edge_attributes=edge_attributes,
+            edge_attributes=edge_attribute_names,
             src_size=src_size,
             dst_size=dst_size,
             trainable_size=trainable_size,

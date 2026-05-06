@@ -144,10 +144,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         task: BaseTask,
-        graph_config: dict,
-        statistics: dict,
-        statistics_tendencies: dict,
+        statistics: dict[str, dict],
+        statistics_tendencies: dict[str, dict],
         data_indices: dict[str, IndexCollection],
+        data_readers: dict,
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -157,8 +157,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
-        graph_config : dict
-            Configuration for creating graph objects
         statistics : dict
             Statistics of the training data
         data_indices : dict[str, IndexCollection]
@@ -173,17 +171,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.task = task
         self.config = config
 
-        #assert isinstance(graph_config, dict), "graph_config must be a dict"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
         # Handle dictionary of graph_data
-        graph_data = self.create_graph(graph_config)
-        graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
+            name: instantiate(
+                config.model.output_mask,
+                nodes=data_readers[name], #TODO(Mario): Fix.
+            ) for name in self.dataset_names
         }
 
         # Handle supporting_arrays merge with all output masks
@@ -195,15 +193,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.n_step_output = self.task.num_output_timesteps
 
         self.model = AnemoiModelInterface(
+            config=config,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
+            data_readers=data_readers,
             metadata=metadata,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
             supporting_arrays=combined_supporting_arrays,
-            graph_data=graph_data,
-            config=config,
         )
 
         self.data_indices = data_indices
@@ -243,7 +241,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
                 task=self.task,
-                graph_data=graph_data,
+                graph_data=self.model.model._graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -298,9 +296,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.shard_shapes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            self.grid_sizes[dataset_name] = data_readers[dataset_name].grid_size
             self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,
