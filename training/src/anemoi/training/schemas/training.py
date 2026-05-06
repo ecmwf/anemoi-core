@@ -286,7 +286,6 @@ class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
     per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
     weights: list[float]
-    keep_batch_sharded: bool
     loss_matrices_path: str
     loss_matrices: list[str | None]
 
