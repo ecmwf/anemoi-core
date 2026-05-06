@@ -522,6 +522,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         row_normalize: bool,
     ) -> None:
         """Create sparse projection matrix."""
+        row_index = edge_index[0].long()
+        edge_index = torch.stack([row_index, edge_index[1].long()])
 
         if row_normalize:
             weights = self._row_normalize_weights(edge_index, weights, src_size)
@@ -535,10 +537,11 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
         self._edge_dim = self.projection_matrix.shape[1]
 
-        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, edge_index[0], weights)
+        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, row_index, weights)
         if not torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5):
             LOGGER.warning(
                 "Projection matrix rows do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
+                "This is unexpected; please check your matrix. "
                 "Consider using row_normalize=True or pre-normalized weights.",
                 row_sums.min().item(),
                 row_sums.max().item(),
@@ -549,9 +552,10 @@ class ProjectionGraphProvider(BaseGraphProvider):
     def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_rows: int) -> Tensor:
         """Normalize weights per row (target node) so each row sums to 1."""
         total = torch.zeros(num_rows, device=weights.device)
+        row_index = edge_index[0].long()
         # edge_index[0] contains row indices (targets) for COO tensor format
-        norm = total.scatter_add_(0, edge_index[0].long(), weights)
-        norm = norm[edge_index[0]]
+        norm = total.scatter_add_(0, row_index, weights)
+        norm = norm[row_index]
         return weights / (norm + 1e-8)
 
     @property

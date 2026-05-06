@@ -14,6 +14,7 @@ from typing import Optional
 import einops
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
@@ -32,7 +33,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
@@ -49,12 +50,14 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             n_step_output=n_step_output,
         )
 
-    def _build_networks(self, model_config):
+    def _build_networks(self, model_config: DotDict) -> None:
         super()._build_networks(model_config)
+
         self.noise_injector = instantiate(
             model_config.model.noise_injector,
             _recursive_=False,
             num_channels=self.num_channels,
+            graph_data=self._graph_data,
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:

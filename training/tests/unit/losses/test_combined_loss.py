@@ -9,11 +9,13 @@
 
 
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 import torch
 from hydra.errors import InstantiationException
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
@@ -119,6 +121,50 @@ def test_combined_loss_seperate_scalers() -> None:
     assert isinstance(loss.losses[1], MAELoss)
     assert "test" not in loss.losses[1].scaler
     assert "test2" in loss.losses[1].scaler
+
+
+def test_combined_loss_forwards_graph_context_to_nested_multiscale_loss() -> None:
+    graph = HeteroData()
+    captured: dict[str, object] = {}
+
+    def fake_load_smoothing_matrices(
+        self: MultiscaleLossWrapper,
+        multiscale_config: dict[str, object],
+        graph_data: HeteroData | None,
+        data_node_name: str | None,
+    ) -> list[None]:
+        del self, multiscale_config
+        captured["graph_data"] = graph_data
+        captured["data_node_name"] = data_node_name
+        return [None]
+
+    with patch.object(MultiscaleLossWrapper, "_load_smoothing_matrices", fake_load_smoothing_matrices):
+        loss = get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.CombinedLoss",
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                            "weights": [1.0],
+                            "keep_batch_sharded": False,
+                            "multiscale_config": {
+                                "num_scales": 1,
+                                "base_num_nearest_neighbours": 1,
+                                "base_sigma": 1.0,
+                            },
+                            "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss"},
+                        },
+                    ],
+                },
+            ),
+            scalers={},
+            graph_data=graph,
+            data_node_name="era5",
+        )
+
+    assert isinstance(loss, CombinedLoss)
+    assert captured == {"graph_data": graph, "data_node_name": "era5"}
 
 
 def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapping() -> None:
