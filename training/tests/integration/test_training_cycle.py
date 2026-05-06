@@ -221,6 +221,18 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
     BaseSchema(**cfg)
 
 
+def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = ensemble_graph_multiscale_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_ensemble_truncated_connection(
+    ensemble_truncated_connection_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_truncated_connection_config
+    BaseSchema(**cfg)
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_hierarchical(

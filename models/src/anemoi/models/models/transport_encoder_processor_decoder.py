@@ -16,6 +16,7 @@ from typing import Union
 import einops
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -46,7 +47,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
@@ -54,9 +55,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         graph_data: HeteroData,
     ) -> None:
 
-        model_config_local = DotDict(model_config)
+        model_config = DotDict(model_config)
 
-        transport_params = model_config_local.model.model.transport
+        transport_params = model_config.model.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -621,16 +622,16 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
-        model_config_local = DotDict(model_config)
+        model_config = DotDict(model_config)
 
-        self.condition_on_residual = model_config_local.model.condition_on_residual
+        self.condition_on_residual = model_config.model.condition_on_residual
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,

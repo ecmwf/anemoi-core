@@ -15,13 +15,13 @@ training:
   training_loss:
     datasets:
       data:
-        loss_matrices: [ null]
+        multiscale_config: null
         weights: [1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          loss_matrices: [null]
+          multiscale_config: null
           weights: [1.0]
 
 dataloader:
