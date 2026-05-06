@@ -274,6 +274,7 @@ class PlotSchema(PydanticBaseModel):
     "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
     datasets_to_plot: list[str] | None = None
     "Dataset names to include in plots."
+    enabled: bool = True
 
 
 class TimeLimitSchema(BaseModel):
