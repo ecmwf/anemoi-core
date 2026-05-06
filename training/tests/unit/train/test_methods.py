@@ -26,7 +26,6 @@ from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantSettings
 from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceSettings
-from anemoi.models.transport.paths import STOCHASTIC_INTERPOLANT_ENDPOINT_EPS
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -627,8 +626,12 @@ def test_stochastic_interpolant_time_sampling_avoids_exact_endpoints(
 
     time_level = objective._sample_time_level({"data": (2, 1, 2, 3, 1)}, torch.device("cpu"))["data"]
 
-    assert torch.min(time_level) >= STOCHASTIC_INTERPOLANT_ENDPOINT_EPS
-    assert torch.max(time_level) <= 1.0 - STOCHASTIC_INTERPOLANT_ENDPOINT_EPS
+    eps = 1e-7
+    expected_base = eps + (1.0 - 2.0 * eps) * torch.tensor([[0.0, 1.0], [0.5, 0.99999]])
+    expected = expected_base[:, None, :, None, None].expand_as(time_level)
+    torch.testing.assert_close(time_level, expected)
+    assert torch.min(time_level) > 0.0
+    assert torch.max(time_level) < 1.0
 
 
 # ── BaseTrainingModule: calculate_val_metrics ──────────────────────────────────

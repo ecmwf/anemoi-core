@@ -15,9 +15,9 @@ from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.paths import karras_sigma_from_unit_time
 from anemoi.models.transport.paths import stochastic_interpolant_beta
 from anemoi.models.transport.paths import stochastic_interpolant_beta_dot
+from anemoi.models.transport.paths import stochastic_interpolant_bridge_noise_velocity_ratio
 from anemoi.models.transport.paths import stochastic_interpolant_clean_mean
 from anemoi.models.transport.paths import stochastic_interpolant_sigma
-from anemoi.models.transport.paths import stochastic_interpolant_sigma_dot
 from anemoi.models.transport.paths import unit_time_grid
 
 
@@ -77,11 +77,16 @@ def test_stochastic_interpolant_brownian_bridge_sigma_is_zero_at_endpoints() -> 
 
     torch.testing.assert_close(sigma, expected)
 
-    sigma_dot = stochastic_interpolant_sigma_dot(time, schedule="brownian_bridge", noise_scale=2.0)
-    assert torch.isfinite(sigma_dot).all()
-    assert sigma_dot[0] > 0.0
-    torch.testing.assert_close(sigma_dot[1], torch.tensor(0.0, dtype=torch.float64))
-    assert sigma_dot[2] < 0.0
+
+def test_stochastic_interpolant_brownian_bridge_ratio_matches_noise_velocity_interior() -> None:
+    time = torch.tensor([0.25, 0.5, 0.75], dtype=torch.float64)
+    noise_scale = 2.0
+
+    sigma = stochastic_interpolant_sigma(time, schedule="brownian_bridge", noise_scale=noise_scale)
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(time, schedule="brownian_bridge", eps=0.0)
+    expected_velocity = noise_scale * (1.0 - 2.0 * time) / torch.sqrt(2.0 * time * (1.0 - time))
+
+    torch.testing.assert_close(ratio * sigma, expected_velocity)
 
 
 def test_stochastic_interpolant_quadratic_bridge_sigma_is_zero_at_endpoints() -> None:
@@ -91,9 +96,18 @@ def test_stochastic_interpolant_quadratic_bridge_sigma_is_zero_at_endpoints() ->
     expected = 2.0 * time * (1.0 - time)
 
     torch.testing.assert_close(sigma, expected)
+
+
+def test_stochastic_interpolant_quadratic_bridge_ratio_matches_noise_velocity_interior() -> None:
+    time = torch.tensor([0.25, 0.5, 0.75], dtype=torch.float64)
+    noise_scale = 2.0
+
+    sigma = stochastic_interpolant_sigma(time, schedule="quadratic_bridge", noise_scale=noise_scale)
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(time, schedule="quadratic_bridge", eps=0.0)
+
     torch.testing.assert_close(
-        stochastic_interpolant_sigma_dot(time, schedule="quadratic_bridge", noise_scale=2.0),
-        2.0 * (1.0 - 2.0 * time),
+        ratio * sigma,
+        noise_scale * (1.0 - 2.0 * time),
     )
 
 
@@ -106,7 +120,12 @@ def test_quadratic_bridge_reconstructs_clean_endpoint_near_source_endpoint() -> 
     beta = stochastic_interpolant_beta(time_level)
     sigma = stochastic_interpolant_sigma(time_level, schedule="quadratic_bridge")
     interpolant = (1.0 - time_level) * anchor + beta * clean + sigma * noise
-    drift = -anchor + clean + stochastic_interpolant_sigma_dot(time_level, schedule="quadratic_bridge") * noise
+    drift_noise = (
+        stochastic_interpolant_bridge_noise_velocity_ratio(time_level, schedule="quadratic_bridge", eps=1e-8)
+        * sigma
+        * noise
+    )
+    drift = -anchor + clean + drift_noise
 
     reconstructed = stochastic_interpolant_clean_mean(
         drift=drift,
@@ -158,8 +177,8 @@ def test_stochastic_interpolant_reconstructs_clean_endpoint_with_bridge_noise(
 
     alpha_dot = -torch.ones_like(time_level)
     beta_dot = stochastic_interpolant_beta_dot(time_level, beta_schedule)
-    sigma_dot = stochastic_interpolant_sigma_dot(time_level, schedule=sigma_schedule, noise_scale=noise_scale)
-    drift = alpha_dot * anchor + beta_dot * clean + sigma_dot * noise
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(time_level, schedule=sigma_schedule, eps=1e-8)
+    drift = alpha_dot * anchor + beta_dot * clean + ratio * sigma * noise
 
     reconstructed = stochastic_interpolant_clean_mean(
         drift=drift,

@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import torch
 
-STOCHASTIC_INTERPOLANT_ENDPOINT_EPS = 1e-4
-
 
 def karras_sigma_from_unit_time(
     t: torch.Tensor,
@@ -44,6 +42,10 @@ def unit_time_grid(
     return torch.linspace(0.0, 1.0, int(num_steps) + 1, device=device, dtype=dtype)
 
 
+def _brownian_bridge_variance(t: torch.Tensor) -> torch.Tensor:
+    return 2.0 * t * (1.0 - t)
+
+
 def stochastic_interpolant_alpha(t: torch.Tensor, schedule: str = "linear") -> torch.Tensor:
     """Weight applied to the source field along the stochastic-interpolant bridge."""
     if schedule != "linear":
@@ -65,7 +67,7 @@ def stochastic_interpolant_sigma(
 ) -> torch.Tensor:
     """Noise amplitude used by the stochastic-interpolant bridge and sampler."""
     if schedule == "brownian_bridge":
-        variance = torch.clamp(2.0 * t * (1.0 - t), min=0.0)
+        variance = torch.clamp(_brownian_bridge_variance(t), min=0.0)
         return noise_scale * torch.sqrt(variance)
     if schedule == "quadratic_bridge":
         return noise_scale * t * (1.0 - t)
@@ -88,19 +90,17 @@ def stochastic_interpolant_beta_dot(t: torch.Tensor, schedule: str = "linear") -
     raise ValueError(f"Unsupported stochastic interpolant beta schedule: {schedule}")
 
 
-def stochastic_interpolant_sigma_dot(
+def stochastic_interpolant_bridge_noise_velocity_ratio(
     t: torch.Tensor,
     *,
     schedule: str = "brownian_bridge",
-    noise_scale: float = 1.0,
+    eps: float = 1e-8,
 ) -> torch.Tensor:
-    """Rate of change of the bridge-noise amplitude with interpolation time."""
+    """Factor sigma_dot / sigma that maps bridge noise to bridge-noise velocity."""
     if schedule == "brownian_bridge":
-        variance = 2.0 * t * (1.0 - t)
-        denom = torch.sqrt(torch.clamp(variance, min=STOCHASTIC_INTERPOLANT_ENDPOINT_EPS))
-        return noise_scale * (1.0 - 2.0 * t) / denom
+        return (1.0 - 2.0 * t) / (_brownian_bridge_variance(t) + eps)
     if schedule == "quadratic_bridge":
-        return noise_scale * (1.0 - 2.0 * t)
+        return (1.0 - 2.0 * t) / (t * (1.0 - t) + eps)
     raise ValueError(f"Unsupported stochastic interpolant sigma schedule: {schedule}")
 
 
@@ -122,10 +122,8 @@ def stochastic_interpolant_clean_mean(
     ), "SI clean reconstruction requires at least float32 precision."
     alpha = stochastic_interpolant_alpha(t, alpha_schedule)
     beta = stochastic_interpolant_beta(t, beta_schedule)
-    sigma = stochastic_interpolant_sigma(t, schedule=sigma_schedule, noise_scale=noise_scale)
     alpha_dot = stochastic_interpolant_alpha_dot(t, alpha_schedule)
     beta_dot = stochastic_interpolant_beta_dot(t, beta_schedule)
-    sigma_dot = stochastic_interpolant_sigma_dot(t, schedule=sigma_schedule, noise_scale=noise_scale)
     if noise_scale == 0.0:
         use_drift = beta_dot.abs() > reconstruction_eps
         use_interpolant = beta.abs() > reconstruction_eps
@@ -136,5 +134,10 @@ def stochastic_interpolant_clean_mean(
         fallback_clean = torch.where(use_interpolant, clean_from_interpolant, anchor)
         return torch.where(use_drift, clean_from_drift, fallback_clean)
 
-    denom = torch.clamp(beta_dot * sigma - beta * sigma_dot, min=reconstruction_eps)
-    return (sigma * (drift - alpha_dot * anchor) - sigma_dot * (interpolant - alpha * anchor)) / denom
+    ratio = stochastic_interpolant_bridge_noise_velocity_ratio(
+        t,
+        schedule=sigma_schedule,
+        eps=reconstruction_eps,
+    )
+    denom = torch.clamp(beta_dot - beta * ratio, min=reconstruction_eps)
+    return (drift - alpha_dot * anchor - ratio * (interpolant - alpha * anchor)) / denom

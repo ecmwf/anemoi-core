@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import torch
 
-from anemoi.models.transport.paths import STOCHASTIC_INTERPOLANT_ENDPOINT_EPS
 from anemoi.models.transport.paths import stochastic_interpolant_alpha
 from anemoi.models.transport.paths import stochastic_interpolant_alpha_dot
 from anemoi.models.transport.paths import stochastic_interpolant_beta
 from anemoi.models.transport.paths import stochastic_interpolant_beta_dot
+from anemoi.models.transport.paths import stochastic_interpolant_bridge_noise_velocity_ratio
 from anemoi.models.transport.paths import stochastic_interpolant_clean_mean
 from anemoi.models.transport.paths import stochastic_interpolant_sigma
-from anemoi.models.transport.paths import stochastic_interpolant_sigma_dot
 from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
@@ -111,13 +110,13 @@ class StochasticInterpolantTransportObjective(TransportObjective):
                     schedule=self._sigma_schedule,
                     noise_scale=noise_scale,
                 )
-                sigma_dot = stochastic_interpolant_sigma_dot(
+                bridge_noise = sigma * noise
+                ratio = stochastic_interpolant_bridge_noise_velocity_ratio(
                     time_dataset,
                     schedule=self._sigma_schedule,
-                    noise_scale=noise_scale,
+                    eps=1e-8,
                 )
-                bridge_noise = sigma * noise
-                drift_noise = sigma_dot * noise
+                drift_noise = ratio * bridge_noise
             interpolant_state[dataset_name] = alpha * source[dataset_name] + beta * clean_dataset + bridge_noise
             drift_target[dataset_name] = alpha_dot * source[dataset_name] + beta_dot * clean_dataset + drift_noise
 
@@ -164,10 +163,8 @@ class StochasticInterpolantTransportObjective(TransportObjective):
                 shape_x[0] == batch_size and shape_x[2] == ensemble_size
             ), "Batch or ensemble dimension mismatch across datasets when sampling stochastic-interpolant times."
 
-        time_base = torch.rand((batch_size, ensemble_size), device=device).clamp(
-            STOCHASTIC_INTERPOLANT_ENDPOINT_EPS,
-            1.0 - STOCHASTIC_INTERPOLANT_ENDPOINT_EPS,
-        )
+        eps = 1e-7
+        time_base = eps + (1.0 - 2.0 * eps) * torch.rand((batch_size, ensemble_size), device=device)
         time_base = time_base[:, None, :, None, None]
         # Important: the model later reads the condition from one dataset and
         # assumes every dataset carries the same bridge time. Keep this shared
