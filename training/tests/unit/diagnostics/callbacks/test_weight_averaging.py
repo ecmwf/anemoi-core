@@ -24,7 +24,7 @@ training:
 def test_weight_averaging_disabled_when_null() -> None:
     """Test that weight averaging is disabled when set to null."""
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    callbacks = _get_weight_averaging_callback(config)
+    callbacks = _get_weight_averaging_callback(config.training.weight_averaging)
     assert callbacks == []
 
 
@@ -42,6 +42,6 @@ def test_ema_callback_available() -> None:
         "_target_": "pytorch_lightning.callbacks.EMAWeightAveraging",
         "decay": 0.999,
     }
-    callbacks = _get_weight_averaging_callback(config)
+    callbacks = _get_weight_averaging_callback(config.training.weight_averaging)
     assert len(callbacks) == 1
     assert isinstance(callbacks[0], EMAWeightAveraging)
