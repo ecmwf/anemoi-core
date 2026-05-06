@@ -23,7 +23,7 @@ from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
-from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapter
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
@@ -901,19 +901,19 @@ diagnostics:
 
 # Ensemble adapter tests
 def test_ensemble_plot_adapter_is_ensemble():
-    """Test EnsemblePlotAdapter.is_ensemble property."""
+    """Test EnsemblePlotAdapterWrapper.is_ensemble property."""
     task = MagicMock()
     inner = ForecasterPlotAdapter(task)
-    adapter = EnsemblePlotAdapter(inner)
+    adapter = EnsemblePlotAdapterWrapper(inner)
     assert adapter.is_ensemble is True
     assert inner.is_ensemble is False
 
 
 def test_ensemble_plot_adapter_select_members():
-    """Test EnsemblePlotAdapter.select_members method."""
+    """Test EnsemblePlotAdapterWrapper.select_members method."""
     task = MagicMock()
     inner = ForecasterPlotAdapter(task)
-    adapter = EnsemblePlotAdapter(inner)
+    adapter = EnsemblePlotAdapterWrapper(inner)
 
     tensor = torch.randn(2, 3, 4, 100, 5)  # (batch, steps, members, grid, vars)
 
@@ -932,10 +932,10 @@ def test_ensemble_plot_adapter_select_members():
 
 
 def test_ensemble_plot_adapter_prepare_loss_batch():
-    """Test EnsemblePlotAdapter.prepare_loss_batch squeezes to member 0."""
+    """Test EnsemblePlotAdapterWrapper.prepare_loss_batch squeezes to member 0."""
     task = MagicMock()
     inner = ForecasterPlotAdapter(task)
-    adapter = EnsemblePlotAdapter(inner)
+    adapter = EnsemblePlotAdapterWrapper(inner)
 
     batch = {"data": torch.randn(2, 5, 3, 100, 5)}  # (batch, time, members, grid, vars)
     result = adapter.prepare_loss_batch(batch)
@@ -945,14 +945,14 @@ def test_ensemble_plot_adapter_prepare_loss_batch():
 
 
 def test_ensemble_plot_adapter_delegates_to_inner():
-    """Test that EnsemblePlotAdapter delegates iter_plot_samples and other methods to inner."""
+    """Test that EnsemblePlotAdapterWrapper delegates iter_plot_samples and other methods to inner."""
     task = MagicMock()
     inner = MagicMock()
     inner._task = task
     inner.get_loss_plot_batch_start.return_value = 42
     inner.prepare_plot_output_tensor.side_effect = lambda x: x
 
-    adapter = EnsemblePlotAdapter(inner)
+    adapter = EnsemblePlotAdapterWrapper(inner)
 
     assert adapter.get_loss_plot_batch_start(rollout_step=1) == 42
     inner.get_loss_plot_batch_start.assert_called_once_with(rollout_step=1)

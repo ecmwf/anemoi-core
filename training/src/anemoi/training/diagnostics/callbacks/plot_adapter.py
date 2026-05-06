@@ -9,8 +9,11 @@
 
 """Plot adapter: single entry point for diagnostics callbacks.
 
-Groups the five plot-related hooks so task classes expose one attribute
+Groups the plot-related hooks so task classes expose one attribute
 (plot_adapter) instead of five small methods.
+
+The EnsemblePlotAdapterWrapper allows to wrap any task-specific adapter,
+adding ensemble member handling without modifying the inner adapter's logic.
 """
 
 from __future__ import annotations
@@ -57,7 +60,10 @@ class BasePlotAdapter(ABC):
 
 
 class ForecasterPlotAdapter(BasePlotAdapter):
-    """Rollout forecaster: multiple loss plots, n_step_output targets per step, multi-step iter."""
+    """Plot Adapter to adapt plots to the rollout set-up of the Forecaster Task.
+
+    Handles multiple loss plots, n_step_output targets per step, multi-step iter.
+    """
 
     def get_init_step(self) -> int:
         return -1
@@ -85,7 +91,10 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
 
 class TemporalDownscalerPlotAdapter(BasePlotAdapter):
-    """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
+    """Plot Adapter for TemporalDownscaler Task.
+
+    Handles squeezing (1, n_step_output, ...) -> (n_step_output, ...).
+    """
 
     def get_init_step(self) -> int:
         return 0
@@ -113,7 +122,7 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 
 
 class AutoencoderPlotAdapter(BasePlotAdapter):
-    """Autoencoder: single (sample, recon, tag) yield."""
+    """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
@@ -121,7 +130,7 @@ class AutoencoderPlotAdapter(BasePlotAdapter):
         yield sample, sample, recon, "recon"
 
 
-class EnsemblePlotAdapter(BasePlotAdapter):
+class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     """Wraps any task-specific adapter, adding ensemble member handling.
 
     This adapter decorates an inner (task-specific) adapter to handle the
