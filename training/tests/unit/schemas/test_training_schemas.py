@@ -46,6 +46,12 @@ _MULTISCALE_BASE = {
     "keep_batch_sharded": False,
 }
 
+_ON_THE_FLY_MULTISCALE_CONFIG = {
+    "num_scales": 4,
+    "base_num_nearest_neighbours": 16,
+    "base_sigma": 0.01570,
+}
+
 
 def test_multiscale_config_disk_valid() -> None:
     MultiscaleConfigDiskSchema(loss_matrices=["filter.npz", None])
@@ -57,7 +63,11 @@ def test_multiscale_config_disk_requires_loss_matrices() -> None:
 
 
 def test_multiscale_config_on_the_fly_valid() -> None:
-    MultiscaleConfigOnTheFlySchema(num_scales=4)
+    MultiscaleConfigOnTheFlySchema(**_ON_THE_FLY_MULTISCALE_CONFIG)
+
+
+def test_multiscale_config_on_the_fly_smoothers_valid() -> None:
+    MultiscaleConfigOnTheFlySchema(smoothers={"smooth_2x": {"num_nearest_neighbours": 16, "sigma": 0.01570}})
 
 
 def test_multiscale_config_on_the_fly_requires_num_scales_or_smoothers() -> None:
@@ -65,12 +75,17 @@ def test_multiscale_config_on_the_fly_requires_num_scales_or_smoothers() -> None
         MultiscaleConfigOnTheFlySchema()
 
 
+def test_multiscale_config_on_the_fly_requires_base_parameters_with_num_scales() -> None:
+    with pytest.raises(ValidationError, match=r"base_num_nearest_neighbours.*base_sigma"):
+        MultiscaleConfigOnTheFlySchema(num_scales=4)
+
+
 def test_multiscale_loss_disk_mode_valid() -> None:
     MultiScaleLossSchema(**{**_MULTISCALE_BASE, "multiscale_config": {"loss_matrices": ["filter.npz", None]}})
 
 
 def test_multiscale_loss_on_the_fly_valid() -> None:
-    MultiScaleLossSchema(**{**_MULTISCALE_BASE, "multiscale_config": {"num_scales": 4}})
+    MultiScaleLossSchema(**{**_MULTISCALE_BASE, "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG})
 
 
 def test_multiscale_loss_mixed_mode_rejected() -> None:
@@ -91,7 +106,7 @@ def test_multiscale_loss_deprecated_loss_matrices_with_on_the_fly_config_rejecte
             **{
                 **_MULTISCALE_BASE,
                 "loss_matrices": [None],
-                "multiscale_config": {"num_scales": 4},
+                "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG,
             },
         )
 
@@ -103,7 +118,7 @@ def test_multiscale_loss_deprecated_loss_matrices_path_with_on_the_fly_config_re
             **{
                 **_MULTISCALE_BASE,
                 "loss_matrices_path": "/some/path",
-                "multiscale_config": {"num_scales": 4},
+                "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG,
             },
         )
 
@@ -133,7 +148,7 @@ def test_combined_loss_with_multiscale_valid() -> None:
         **{
             **_COMBINED_LOSS_BASE,
             "losses": [
-                {**_MULTISCALE_BASE, "multiscale_config": {"num_scales": 4}},
+                {**_MULTISCALE_BASE, "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG},
             ],
         },
     )

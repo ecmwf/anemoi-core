@@ -197,9 +197,9 @@ class AnemoiTrainer(ABC):
             if not save_path.exists():
                 msg = f"Existing graph file not found: {save_path}"
                 raise FileNotFoundError(msg)
-            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
             graph = load_graph_from_file(save_path)
+            fused = uses_fused_dataset_graph(graph, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
             validate_loaded_graph(graph, required)
             return graph
 

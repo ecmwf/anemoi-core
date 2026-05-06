@@ -314,12 +314,23 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
     base_num_nearest_neighbours: int | None = None
     base_sigma: float | None = None
     scale_factor: int | None = None
-    smoothers: list[dict] | None = None
+    smoothers: dict[str, dict] | None = None
 
     @model_validator(mode="after")
     def check_num_scales_or_smoothers(self) -> Self:
-        if self.num_scales is None and self.smoothers is None:
+        if self.smoothers is not None:
+            return self
+
+        if self.num_scales is None:
             msg = "MultiscaleConfigOnTheFlySchema requires either 'num_scales' or 'smoothers'."
+            raise ValueError(msg)
+
+        missing = [name for name in ("base_num_nearest_neighbours", "base_sigma") if getattr(self, name) is None]
+        if missing:
+            msg = (
+                "MultiscaleConfigOnTheFlySchema with 'num_scales' requires "
+                f"{', '.join(repr(name) for name in missing)}."
+            )
             raise ValueError(msg)
         return self
 
