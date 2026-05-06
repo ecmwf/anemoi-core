@@ -156,8 +156,8 @@ def get_loss_function(
 
     graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
 
-    if "per_scale_loss" in loss_config:
-        per_scale_loss_config = loss_config.pop("per_scale_loss")
+    per_scale_loss_config = loss_config.pop("per_scale_loss", None)
+    if per_scale_loss_config is not None:
         per_scale_loss = get_loss_function(
             OmegaConf.create(per_scale_loss_config),
             scalers,

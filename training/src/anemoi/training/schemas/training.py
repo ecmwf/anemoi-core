@@ -21,6 +21,7 @@ from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
@@ -365,6 +366,7 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     losses: list[MultiScaleLossSchema | SpectralLossSchema | BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
@@ -399,15 +401,39 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = (
-    BaseLossSchema
-    | HuberLossSchema
-    | CombinedLossSchema
-    | AlmostFairKernelCRPSSchema
-    | KernelCRPSSchema
-    | SpectralLossSchema
-    | MultiScaleLossSchema
-)
+def _loss_discriminator(v: Any) -> str:
+    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
+    if target == "anemoi.training.losses.combined.CombinedLoss":
+        return "combined"
+    if target == "anemoi.training.losses.MultiscaleLossWrapper":
+        return "multiscale"
+    if target == "anemoi.training.losses.kcrps.AlmostFairKernelCRPS":
+        return "almost_fair"
+    if target == "anemoi.training.losses.kcrps.KernelCRPS":
+        return "kernel"
+    if target in {
+        "anemoi.training.losses.spectral.FourierCorrelationLoss",
+        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.LogFFT2Distance",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.SpectralL2Loss",
+    }:
+        return "spectral"
+    if target == "anemoi.training.losses.HuberLoss":
+        return "huber"
+    return "base"
+
+
+LossSchemas = Annotated[
+    Annotated[BaseLossSchema, Tag("base")]
+    | Annotated[HuberLossSchema, Tag("huber")]
+    | Annotated[CombinedLossSchema, Tag("combined")]
+    | Annotated[AlmostFairKernelCRPSSchema, Tag("almost_fair")]
+    | Annotated[KernelCRPSSchema, Tag("kernel")]
+    | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[MultiScaleLossSchema, Tag("multiscale")],
+    Discriminator(_loss_discriminator),
+]
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
