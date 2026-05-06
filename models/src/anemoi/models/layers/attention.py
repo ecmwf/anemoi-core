@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import Optional
 from typing import Union
 
@@ -32,6 +33,9 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+# Change attention implementation during inference runtime
+ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -117,6 +121,7 @@ class MultiHeadSelfAttention(nn.Module):
             raise ValueError(f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})")
 
         self.attention_implementation = attention_implementation
+        self._attention_backend_applied = False
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
@@ -152,7 +157,20 @@ class MultiHeadSelfAttention(nn.Module):
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
-        assert self.attention_implementation in attn_funcs, f"{self.attention_implementation} not supported. \
+
+        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND:
+            if ATTENTION_BACKEND == self.attention_implementation:
+                # Attention backend has already been updated, return early
+                return
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                self.attention_implementation,
+                ATTENTION_BACKEND,
+            )
+            self.attention_implementation = ATTENTION_BACKEND
+
+        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here
@@ -235,6 +253,11 @@ class MultiHeadSelfAttention(nn.Module):
         query = self.lin_q(x)
         key = self.lin_k(x)
         value = self.lin_v(x)
+
+        # Check once at runtime if the Attention backend env var has been set, and update attention backend accordingly
+        if ATTENTION_BACKEND and not self._attention_backend_applied:
+            self.set_attention_function()
+            self._attention_backend_applied = True
 
         return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
 

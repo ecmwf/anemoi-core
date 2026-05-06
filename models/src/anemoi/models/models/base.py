@@ -234,7 +234,13 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data)
+            self.residual[dataset_name] = instantiate(
+                residual_config,
+                graph=self._graph_data,
+                statistics=self.statistics[dataset_name],
+                data_indices=self.data_indices[dataset_name],
+                dataset_name=dataset_name,
+            )
 
     @abstractmethod
     def forward(

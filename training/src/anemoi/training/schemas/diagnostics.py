@@ -109,8 +109,6 @@ class PlotSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
@@ -166,8 +164,6 @@ class PlotEnsSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
@@ -270,6 +266,14 @@ class PlotSchema(PydanticBaseModel):
     "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    colormaps: dict | None = None
+    "Variable-specific colormaps keyed by 'default', 'error', or variable name group."
+    precip_and_related_fields: list[str] | None = None
+    "Names of precipitation and related fields that use a special colormap."
+    focus_areas: dict | None = None
+    "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
+    datasets_to_plot: list[str] | None = None
+    "Dataset names to include in plots."
 
 
 class TimeLimitSchema(BaseModel):
@@ -374,6 +378,10 @@ class MlflowSchema(BaseModel):
     "Log terminal logs to MLflow."
     run_name: str | None
     "Name of run."
+    prefix: str = ""
+    "Prefix for metric keys logged to MLflow."
+    log_hyperparams: bool = True
+    "Whether to log hyperparameters."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
     expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])
