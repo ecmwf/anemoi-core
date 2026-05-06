@@ -568,7 +568,7 @@ def stochastic_interpolant_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.training_method=anemoi.training.train.methods.TransportTraining",
+                "training=multi_transport",
                 "training.prediction_mode=state",
                 "training.transport_objective=diffusion",
             ],
@@ -577,7 +577,7 @@ def stochastic_interpolant_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.training_method=anemoi.training.train.methods.TransportTraining",
+                "training=multi_transport",
                 "training.prediction_mode=tendency",
                 "training.transport_objective=diffusion",
             ],
