@@ -1055,29 +1055,52 @@ class PlotEnsSample(PlotSample):
         parameters: list[str],
         accumulation_levels_plot: list[float],
         precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        members: list | None = None,
+        members: list[int] | int | None = None,
         focus_area: list[dict] | None = None,
-        plotting_settings: Any | None = None,
-        **kwargs: Any,
+        plotting_settings: PlottingSettings | None = None,
     ) -> None:
-        # Initialize PlotSample first
-        PlotSample.__init__(
-            self,
-            sample_idx,
-            parameters,
-            accumulation_levels_plot,
-            precip_and_related_fields,
-            colormaps,
-            per_sample,
-            every_n_batches,
-            dataset_names,
-            focus_area,
+        """Initialise the PlotEnsSample callback.
+
+        Parameters
+        ----------
+        sample_idx : int
+            Sample to plot
+        parameters : list[str]
+            Parameters to plot
+        accumulation_levels_plot : list[float]
+            Accumulation levels to plot
+        precip_and_related_fields : list[str] | None, optional
+            Precip variable names, by default None
+        colormaps : dict[str, Colormap] | None, optional
+            Dictionary of colormaps, by default None
+        per_sample : int, optional
+            Number of plots per sample, by default 6
+        every_n_batches : int | None, optional
+            Batch frequency to plot at, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        members : list[int] | int | None, optional
+            Ensemble members to plot. None plots all members, by default None.
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings | None, optional
+            Plotting configuration settings, by default None (uses defaults)
+        """
+        super().__init__(
+            sample_idx=sample_idx,
+            parameters=parameters,
+            accumulation_levels_plot=accumulation_levels_plot,
+            precip_and_related_fields=precip_and_related_fields,
+            colormaps=colormaps,
+            per_sample=per_sample,
+            every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
+            focus_area=focus_area,
             plotting_settings=plotting_settings,
-            **kwargs,
         )
         self.plot_members = members
 
