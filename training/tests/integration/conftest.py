@@ -395,11 +395,8 @@ def benchmark_config(
         overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
     elif test_case == "diffusiontend":
-        overrides = [
-            "model=graphtransformer_diffusiontend",
-            "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
-        ]
-        base_config = "diffusion"
+        overrides = []
+        base_config = "transport_diffusion_tendency"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
@@ -521,24 +518,41 @@ def imerg_target_config(
 
 
 @pytest.fixture(
-    params=[
-        [],
-        [
-            "model=graphtransformer_diffusiontend",
-            "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
-        ],
-    ],
-    ids=["diffusion", "diffusiontend"],
+    params=["transport_diffusion", "transport_diffusion_tendency"],
+    ids=["transport_diffusion", "transport_diffusion_tendency"],
 )
 def diffusion_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
-    overrides = request.param
-
     with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
-        template = compose(config_name="diffusion", overrides=overrides)
+        template = compose(config_name=request.param)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, url_dataset
+
+
+@pytest.fixture(
+    params=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
+    ids=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
+)
+def stochastic_interpolant_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_path: GetTmpPath,
+) -> tuple[OmegaConf, str]:
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_stochastic_interpolant",
+    ):
+        template = compose(config_name=request.param)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
@@ -554,14 +568,18 @@ def diffusion_config(
         pytest.param(
             [
                 "model=graphtransformer_diffusion",
-                "training.training_method=anemoi.training.train.methods.DiffusionTraining",
+                "training.training_method=anemoi.training.train.methods.TransportTraining",
+                "training.prediction_mode=state",
+                "training.transport_objective=diffusion",
             ],
             id="diffusion",
         ),
         pytest.param(
             [
                 "model=graphtransformer_diffusiontend",
-                "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
+                "training.training_method=anemoi.training.train.methods.TransportTraining",
+                "training.prediction_mode=tendency",
+                "training.transport_objective=diffusion",
             ],
             id="diffusiontend",
         ),

@@ -460,20 +460,16 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
     "Training objective."
 
 
-class DiffusionTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
+class TransportTrainingSchema(BaseTrainingSchema):
+    training_method: Literal["anemoi.training.train.methods.TransportTraining"] = Field(..., alias="training_method")
     "Training objective."
-
-
-class DiffusionTendencyTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTendencyTraining"] = Field(
-        ...,
-        alias="training_method",
-    )
-    "Training objective."
+    prediction_mode: Literal["state", "tendency"] = "state"
+    "Endpoint semantics for the transport objective."
+    transport_objective: Literal["diffusion", "stochastic_interpolant"] = "diffusion"
+    "Transport objective used to perturb targets and train the model."
 
 
 TrainingSchema = Annotated[
-    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendencyTrainingSchema,
+    SingleTrainingSchema | EnsembleTrainingSchema | TransportTrainingSchema,
     Discriminator("training_method"),
 ]

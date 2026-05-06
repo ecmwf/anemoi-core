@@ -119,6 +119,12 @@ class PlotSampleSchema(BaseModel):
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
+    prediction_label: str = Field(default="pred")
+    "Label used for the prediction panels."
+    auxiliary_label: str = Field(default="corrupted targets")
+    "Label used for the optional panel that shows the corrupted target seen by the model."
+    plot_transport_conditioned_target: bool = Field(default=False)
+    "Add a panel for the corrupted transport target when the training method provides it."
 
 
 class PlotSpectrumSchema(BaseModel):

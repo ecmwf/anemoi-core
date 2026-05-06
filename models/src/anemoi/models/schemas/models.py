@@ -19,6 +19,7 @@ from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
+from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
@@ -51,14 +52,14 @@ class DefinedModels(str, Enum):
     ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
-        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
+    ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportModelEncProcDec"
     )
-    ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionModelEncProcDec"
-    ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC = (
-        "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionTendModelEncProcDec"
+    ANEMOI_TRANSPORT_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportModelEncProcDec"
+    ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
-    ANEMOI_DIFFUSION_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiDiffusionTendModelEncProcDec"
+    ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
     ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
@@ -76,9 +77,49 @@ class Model(BaseModel):
     "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
 
 
-class DiffusionModel(Model):
-    diffusion: DiffusionSchema = Field(default=None)
-    "Diffusion configuration for diffusion models"
+class TransportSourceConfig(BaseModel):
+    kind: Literal["default", "zero", "gaussian", "reference_state"] = "default"
+    "Starting field used before the transport objective moves toward the target."
+    scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
+    "Multiplier applied to the starting/source field."
+    noise_scale: NonNegativeFloat = Field(default=0.0, examples=[0.1])
+    "Additional additive Gaussian noise applied to the starting/source field."
+
+
+class TransportConfig(BaseModel):
+    objective: Literal["diffusion", "stochastic_interpolant"] = "diffusion"
+    "Training and sampling objective used by the transport model."
+    sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
+    "Typical data scale used by EDM diffusion."
+    noise_channels: PositiveInt = Field(default=32, examples=[32])
+    "Number of channels in the noise or bridge-time embedding."
+    noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
+    "Size of the conditioning vector passed to conditional layers."
+    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
+    "Maximum EDM diffusion noise level used during training."
+    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
+    "Minimum EDM diffusion noise level used during training."
+    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
+    "Shape parameter for the Karras EDM noise schedule."
+    si_alpha_schedule: Literal["linear"] = "linear"
+    "Schedule for how strongly the SI bridge keeps the source field."
+    si_beta_schedule: Literal["linear", "quadratic"] = "linear"
+    "Schedule for how strongly the SI bridge moves toward the target field."
+    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = "brownian_bridge"
+    "Schedule for the SI bridge-noise amplitude."
+    source: TransportSourceConfig = Field(default_factory=TransportSourceConfig)
+    "Configuration for the starting/source field."
+    si_noise_scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
+    "Overall scale of the stochastic-interpolant bridge noise."
+    noise_embedder: dict = Field(default_factory=dict)
+    "Hydra configuration for embedding the current noise level or bridge time."
+    inference_defaults: dict = Field(default_factory=dict)
+    "Default sampler parameters used during inference."
+
+
+class TransportModel(Model):
+    transport: TransportConfig = Field(default_factory=TransportConfig)
+    "Transport model objective, path, conditioning, and inference configuration."
 
 
 class TrainableParameters(PydanticBaseModel):
@@ -142,7 +183,9 @@ class NormalizedReluBoundingSchema(BaseModel):
     normalizer: list[str]
 
     @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(self) -> NormalizedReluBoundingSchema:
+    def check_num_normalizers_and_min_val_matches_num_variables(
+        self,
+    ) -> NormalizedReluBoundingSchema:
         error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
         match the number of variables ({len(self.variables)})"""
         assert len(self.normalizer) == len(self.variables), error_msg
@@ -184,25 +227,6 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
-class DiffusionSchema(BaseModel):
-    sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
-    "Data scaling parameter"
-    noise_channels: PositiveInt = Field(default=32, examples=[32])
-    "Number of channels for noise embedding"
-    noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
-    "Dimension of noise conditioning"
-    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
-    "Maximum noise level for training"
-    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
-    "Minimum noise level for training"
-    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
-    "Karras schedule parameter for training noise distribution"
-    noise_embedder: dict = Field(default_factory=dict)
-    "Noise embedder configuration with _target_ for Hydra instantiation"
-    inference_defaults: dict = Field(default_factory=dict)
-    "Default parameters for inference sampling"
-
-
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
@@ -230,7 +254,10 @@ class BaseModelSchema(PydanticBaseModel):
     )
     "GNN processor schema."
     encoder: Union[
-        GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema, PointWiseForwardMapperSchema
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
     ] = Field(
         ...,
         discriminator="target_",
@@ -311,23 +338,23 @@ class EnsModelSchema(BaseModelSchema):
     "Whether to condition the noise injection on the residual connection."
 
 
-class DiffusionModelSchema(BaseModelSchema):
-    model: DiffusionModel = Field(default_factory=DiffusionModel)
-    "Diffusion Model schema"
+class TransportModelSchema(BaseModelSchema):
+    model: TransportModel = Field(default_factory=TransportModel)
+    "Transport model schema."
 
     @model_validator(mode="after")
-    def validate_no_bounding_for_diffusion(self) -> "DiffusionModelSchema":
+    def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
         if self.bounding:
             msg = (
-                "Diffusion models do not support bounding layers. "
+                "Transport models do not support bounding layers. "
                 f"Found {len(self.bounding)} bounding configuration(s). "
-                "Please remove all bounding configurations for diffusion models."
+                "Please remove all bounding configurations for transport models."
             )
             raise ValueError(msg)
         return self
 
 
-class DiffusionTendModelSchema(DiffusionModelSchema):
+class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
     "Whether to condition the noise injection on the residual connection."
 
@@ -340,5 +367,9 @@ class HierarchicalModelSchema(BaseModelSchema):
 
 
 ModelSchema = Union[
-    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+    BaseModelSchema,
+    EnsModelSchema,
+    HierarchicalModelSchema,
+    TransportModelSchema,
+    TransportTendModelSchema,
 ]

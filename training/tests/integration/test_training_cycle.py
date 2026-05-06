@@ -346,6 +346,11 @@ def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -
     BaseSchema(**cfg)
 
 
+def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = stochastic_interpolant_config
+    BaseSchema(**cfg)
+
+
 @skip_if_offline
 @pytest.mark.slow
 @pytest.mark.mlflow

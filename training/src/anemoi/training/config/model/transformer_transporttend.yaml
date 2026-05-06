@@ -1,14 +1,15 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
+  _target_: anemoi.models.models.AnemoiTransportTendModelEncProcDec
   hidden_nodes_name: "hidden"
   latent_skip: True
-  # Diffusion parameters
-  diffusion:
+  transport:
+    objective: diffusion
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
@@ -17,7 +18,7 @@ model:
     rho: 7.0
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
-      num_channels: ${model.model.diffusion.noise_channels}
+      num_channels: ${model.model.transport.noise_channels}
       max_period: 1000
     inference_defaults:
       noise_scheduler:
@@ -32,6 +33,9 @@ model:
         S_min: 0.0
         S_max: .inf
         S_noise: 1.0
+      stochastic_interpolant_sampler:
+        sampler: "euler_maruyama"
+        num_steps: 50
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -82,7 +86,6 @@ encoder:
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
-
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper

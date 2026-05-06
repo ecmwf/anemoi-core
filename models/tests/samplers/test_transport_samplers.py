@@ -12,14 +12,17 @@ from collections.abc import Callable
 import pytest
 import torch
 
-from anemoi.models.samplers.diffusion_samplers import DEFAULT_FINAL_SIGMA_EPS
-from anemoi.models.samplers.diffusion_samplers import CosineScheduler
-from anemoi.models.samplers.diffusion_samplers import DPMpp2MSampler
-from anemoi.models.samplers.diffusion_samplers import EDMHeunSampler
-from anemoi.models.samplers.diffusion_samplers import ExponentialScheduler
-from anemoi.models.samplers.diffusion_samplers import KarrasScheduler
-from anemoi.models.samplers.diffusion_samplers import LinearScheduler
-from anemoi.models.samplers.diffusion_samplers import NoiseScheduler
+from anemoi.models.samplers.transport_samplers import DEFAULT_FINAL_SIGMA_EPS
+from anemoi.models.samplers.transport_samplers import CosineScheduler
+from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
+from anemoi.models.samplers.transport_samplers import EDMHeunSampler
+from anemoi.models.samplers.transport_samplers import ExponentialScheduler
+from anemoi.models.samplers.transport_samplers import KarrasScheduler
+from anemoi.models.samplers.transport_samplers import LinearScheduler
+from anemoi.models.samplers.transport_samplers import NoiseScheduler
+from anemoi.models.samplers.transport_samplers import StochasticInterpolantEulerMaruyamaSampler
+from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
+from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
 
 DATASET_NAME = "test_dataset"
 
@@ -241,3 +244,110 @@ def test_heun_uses_corrector_before_final_step() -> None:
     sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
 
     assert denoiser.call_count == 3
+
+
+@pytest.mark.parametrize("sampler_cls", [VectorFieldEulerSampler, VectorFieldHeunSampler])
+def test_vector_field_samplers_integrate_constant_velocity(
+    sampler_cls: type[VectorFieldEulerSampler] | type[VectorFieldHeunSampler],
+) -> None:
+    x, y = make_inputs(dtype=torch.float32)
+    times = torch.linspace(0.0, 1.0, 5, dtype=torch.float64)
+
+    def velocity_fn(
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        time: dict[str, torch.Tensor],
+        model_comm_group=None,
+        grid_shard_shapes=None,
+    ) -> dict[str, torch.Tensor]:
+        del model_comm_group, grid_shard_shapes
+        time_expanded = time[DATASET_NAME]
+        assert time_expanded.dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
+        assert time_expanded.shape == (
+            y[DATASET_NAME].shape[0],
+            1,
+            y[DATASET_NAME].shape[2],
+            1,
+            1,
+        )
+        return {dataset_name: torch.ones_like(y_data) for dataset_name, y_data in y.items()}
+
+    sampler = sampler_cls(dtype=torch.float64)
+    result = sampler.sample(x=x, y=y, times=times, vector_field_fn=velocity_fn)
+
+    assert result[DATASET_NAME].dtype == x[DATASET_NAME].dtype
+    assert torch.allclose(result[DATASET_NAME], y[DATASET_NAME] + 1.0)
+
+
+def test_vector_field_heun_matches_linear_ode_predictor_corrector_step() -> None:
+    x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float64)}
+    y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float64)}
+    times = torch.tensor([0.0, 0.25], dtype=torch.float64)
+
+    def vector_field_fn(
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        time: dict[str, torch.Tensor],
+        model_comm_group=None,
+        grid_shard_shapes=None,
+    ) -> dict[str, torch.Tensor]:
+        del x, model_comm_group, grid_shard_shapes
+        return {DATASET_NAME: 2.0 * y[DATASET_NAME] + time[DATASET_NAME]}
+
+    sampler = VectorFieldHeunSampler(dtype=torch.float64)
+    result = sampler.sample(x=x, y=y, times=times, vector_field_fn=vector_field_fn)
+
+    dt = times[1] - times[0]
+    f1 = 2.0 * y[DATASET_NAME] + times[0]
+    y_predictor = y[DATASET_NAME] + dt * f1
+    f2 = 2.0 * y_predictor + times[1]
+    expected = y[DATASET_NAME] + dt * (f1 + f2) / 2.0
+    torch.testing.assert_close(result[DATASET_NAME], expected)
+
+
+def test_stochastic_interpolant_euler_maruyama_matches_drift_when_noise_disabled() -> None:
+    x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float32)}
+    y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float32)}
+    times = torch.tensor([0.0, 0.25, 1.0], dtype=torch.float64)
+
+    def drift_fn(
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        time: dict[str, torch.Tensor],
+        model_comm_group=None,
+        grid_shard_shapes=None,
+    ) -> dict[str, torch.Tensor]:
+        del model_comm_group, grid_shard_shapes
+        assert time[DATASET_NAME].dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
+        return {DATASET_NAME: torch.ones_like(y[DATASET_NAME])}
+
+    sampler = StochasticInterpolantEulerMaruyamaSampler(dtype=torch.float64, noise_scale=0.0)
+    result = sampler.sample(x=x, y=y, times=times, drift_fn=drift_fn, sigma_fn=lambda t: 1.0 - t)
+
+    assert result[DATASET_NAME].dtype == x[DATASET_NAME].dtype
+    torch.testing.assert_close(result[DATASET_NAME], y[DATASET_NAME] + 1.0)
+
+
+def test_stochastic_interpolant_euler_maruyama_adds_path_noise_with_fixed_seed() -> None:
+    x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float64)}
+    y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float64)}
+    times = torch.tensor([0.0, 0.25], dtype=torch.float64)
+
+    def drift_fn(
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        time: dict[str, torch.Tensor],
+        model_comm_group=None,
+        grid_shard_shapes=None,
+    ) -> dict[str, torch.Tensor]:
+        del x, time, model_comm_group, grid_shard_shapes
+        return {dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()}
+
+    seed = 123
+    torch.manual_seed(seed)
+    sampler = StochasticInterpolantEulerMaruyamaSampler(dtype=torch.float64, noise_scale=0.5)
+    result = sampler.sample(x=x, y=y, times=times, drift_fn=drift_fn, sigma_fn=lambda t: 2.0)
+
+    torch.manual_seed(seed)
+    expected = y[DATASET_NAME] + 0.5 * 2.0 * torch.sqrt(times[1] - times[0]) * torch.randn_like(y[DATASET_NAME])
+    torch.testing.assert_close(result[DATASET_NAME], expected)

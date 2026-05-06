@@ -302,6 +302,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
         self.every_n_batches = every_n_batches or 750
 
+    def _additional_plot_kwargs(self, pl_module: pl.LightningModule) -> dict[str, Any]:
+        """Return callback-specific keyword arguments for the plot call."""
+        del pl_module
+        return {}
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -346,6 +351,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
+            plot_kwargs = self._additional_plot_kwargs(pl_module)
             self.plot(
                 trainer,
                 pl_module,
@@ -354,6 +360,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
+                **plot_kwargs,
                 **kwargs,
             )
 
@@ -863,19 +870,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
 
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                    self.sample_idx : self.sample_idx + 1
-                ]
-                for x in outputs[1]
-            ),
-        )
+        output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs[1])
 
-        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
-        output_tensor = (
-            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
-        )
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(
             data[1:, ...],
             dim=pl_module.grid_dim,
@@ -885,9 +881,33 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         return data, output_tensor
 
+    def process_output_tensor(
+        self,
+        pl_module: pl.LightningModule,
+        dataset_name: str,
+        outputs: list[dict[str, torch.Tensor]],
+    ) -> np.ndarray:
+        """Post-process and mask per-step output tensors for plotting."""
+        output_tensor = torch.cat(
+            tuple(
+                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                    self.sample_idx : self.sample_idx + 1
+                ]
+                for x in outputs
+            ),
+        )
+
+        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
+        return (
+            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
+        )
+
 
 class PlotSample(BasePlotAdditionalMetrics):
     """Plots a post-processed sample: input, target and prediction."""
+
+    output_tag_prefix = "pred_val_sample"
+    exp_log_tag_prefix = "val_pred_sample"
 
     def __init__(
         self,
@@ -900,6 +920,9 @@ class PlotSample(BasePlotAdditionalMetrics):
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
+        prediction_label: str = "pred",
+        auxiliary_label: str = "corrupted targets",
+        plot_transport_conditioned_target: bool = False,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -940,11 +963,48 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.accumulation_levels_plot = accumulation_levels_plot
         self.per_sample = per_sample
         self.colormaps = colormaps
+        self.prediction_label = prediction_label
+        self.auxiliary_label = auxiliary_label
+        self.plot_transport_conditioned_target = plot_transport_conditioned_target
+        if self.plot_transport_conditioned_target:
+            self.per_sample = max(self.per_sample, 7)
+        self._missing_conditioned_target_warning_logged = False
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
             self.precip_and_related_fields,
         )
+
+    def _figure_tags(self, dataset_name: str, tag_suffix: str, batch_idx: int, local_rank: int) -> tuple[str, str]:
+        focus_tag = self.focus_mask.tag
+        tag = (
+            f"{self.output_tag_prefix}_{dataset_name}_{tag_suffix}_"
+            f"batch{batch_idx:04d}_rank{local_rank:01d}{focus_tag}"
+        )
+        exp_log_tag = f"{self.exp_log_tag_prefix}_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{focus_tag}"
+        return tag, exp_log_tag
+
+    def _additional_plot_kwargs(self, pl_module: pl.LightningModule) -> dict[str, Any]:
+        """Return the optional corrupted-target field for sample plots."""
+        if not self.plot_transport_conditioned_target:
+            return {}
+
+        conditioned_target = getattr(pl_module, "_last_transport_conditioned_target", None)
+        if conditioned_target is None:
+            if not self._missing_conditioned_target_warning_logged:
+                LOGGER.warning(
+                    "%s has plot_transport_conditioned_target=true, but no validation conditioned "
+                    "transport target was found.",
+                    type(self).__name__,
+                )
+                self._missing_conditioned_target_warning_logged = True
+            return {}
+
+        conditioned_target = {
+            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+            for dataset_name, dataset_tensor in conditioned_target.items()
+        }
+        return {"auxiliary_output": conditioned_target}
 
     @rank_zero_only
     def _plot(
@@ -956,6 +1016,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
+        auxiliary_output: dict[str, torch.Tensor] | None = None,
     ) -> None:
         logger = trainer.logger
 
@@ -973,18 +1034,42 @@ class PlotSample(BasePlotAdditionalMetrics):
             }
 
             data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            auxiliary_tensor = (
+                None
+                if auxiliary_output is None
+                else self.process_output_tensor(pl_module, dataset_name, [auxiliary_output])
+            )
 
             local_rank = pl_module.local_rank
 
-            # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
+            if auxiliary_tensor is not None:
+                latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    data,
+                    output_tensor,
+                    auxiliary_tensor,
+                )
+            else:
+                # Apply spatial mask
+                latlons, data, output_tensor = self.focus_mask.apply(
+                    pl_module.model.model._graph_data,
+                    self.latlons[dataset_name],
+                    data,
+                    output_tensor,
+                )
+            auxiliary_by_suffix = {}
+            if auxiliary_tensor is not None:
+                auxiliary_by_suffix = {
+                    auxiliary_suffix: auxiliary
+                    for _, _, auxiliary, auxiliary_suffix in pl_module.plot_adapter.iter_plot_samples(
+                        data,
+                        auxiliary_tensor,
+                    )
+                }
 
             for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+                auxiliary = auxiliary_by_suffix.get(tag_suffix)
                 fig = plot_predicted_multilevel_flat_sample(
                     plot_parameters_dict,
                     self.per_sample,
@@ -997,19 +1082,18 @@ class PlotSample(BasePlotAdditionalMetrics):
                     precip_and_related_fields=self.precip_and_related_fields,
                     colormaps=self.colormaps,
                     projection_kind=self.projection_kind,
+                    prediction_label=self.prediction_label,
+                    auxiliary=auxiliary,
+                    auxiliary_label=self.auxiliary_label,
                 )
 
+                tag, exp_log_tag = self._figure_tags(dataset_name, tag_suffix, batch_idx, local_rank)
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=(
-                        f"pred_val_sample_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                    exp_log_tag=(
-                        f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
+                    tag=tag,
+                    exp_log_tag=exp_log_tag,
                 )
 
 
