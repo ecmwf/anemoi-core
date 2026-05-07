@@ -12,6 +12,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 DEFAULT_DATASET_NAME = "data"
+COORDS_DIM = 4 # cosine and sine of latitude and longitude 
 
 
 # This function retrieves the configuration for multiple datasets, supporting both new and old config formats.

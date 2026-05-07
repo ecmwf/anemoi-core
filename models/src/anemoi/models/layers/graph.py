@@ -52,9 +52,11 @@ class NamedNodesAttributes(nn.Module):
     Attributes
     ----------
     num_nodes : dict[str, int]
-        Number of nodes for each group of nodes.
-    attr_ndims : dict[str, int]
-        Total dimension of node attributes (non-trainable + trainable) for each group of nodes.
+        Number of nodes for each group of nodes. None if the number of nodes is not fixed over time 
+        (e.g. for tabular datasets).
+    num_trainable_parameters : dict[str, int]
+        Total dimension of node attributes (non-trainable + trainable) for each group of nodes. If the dataset is
+        tabular, trainable_parameter is set to 0.
     trainable_tensors : nn.ModuleDict
         Dictionary of trainable tensors for each group of nodes.
 
@@ -70,7 +72,7 @@ class NamedNodesAttributes(nn.Module):
     """
 
     num_nodes: dict[str, int]
-    attr_ndims: dict[str, int]
+    num_trainable_parameters: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
     def __init__(self, trainable_parameters: dict[str, int], graph_data: HeteroData) -> None:
@@ -89,11 +91,14 @@ class NamedNodesAttributes(nn.Module):
     def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
         """Define fixed attributes."""
         nodes_names = list(graph_data.node_types)
-        self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
-        self.attr_ndims = {
-            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
-            for nodes_name in nodes_names
-        }
+        self.num_nodes = defaultdict(
+            lambda: None,
+            {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
+        )
+        self.num_trainable_parameters = defaultdict(
+            int,
+            {nodes_name: trainable_parameters[nodes_name] for nodes_name in nodes_names}
+        )
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:
         """Register coordinates."""

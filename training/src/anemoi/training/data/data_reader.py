@@ -58,7 +58,32 @@ def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> dict:
 
 
 def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
-    """Validate and normalize reader configuration."""
+    """Validate and normalize reader configuration.
+
+    Arguments
+    ---------
+    dataset_config : dict or DictConfig
+        Dataset configuration dictionary.
+
+    Returns
+    -------
+    dict
+        Normalized dataset configuration dictionary with the following contract:
+        {
+            "dataset_config": {
+                "dataset": str,
+                "window": int,  # optional, for tabular datasets
+                "frequency": str,  # optional, for tabular datasets
+                ... other open_dataset kwargs ...
+            },
+            "start": datetime | int | None,  # optional
+            "end": datetime | int | None,  # optional
+            "trajectory": {  # optional, for trajectory datasets
+                "start": datetime,
+                "length": int,
+            }
+        }
+    """
     normalized = dict(dataset_config)
 
     if "dataset" in normalized:
@@ -120,8 +145,13 @@ class BaseAnemoiReader(ABC):
             raise ValueError(msg)
         try:
             return self.data.statistics_tendencies(timestep)
-        except (KeyError, AttributeError):
+        except (KeyError, AttributeError, TypeError):
             return None
+
+    @property
+    def is_tabular(self) -> bool:
+        """Return whether the dataset is tabular."""
+        return len(self.data.shape) == 2
 
     @property
     def variables(self) -> list[str]:
@@ -142,11 +172,6 @@ class BaseAnemoiReader(ABC):
     def frequency(self) -> datetime.timedelta:
         """Return dataset frequency."""
         return self.data.frequency
-
-    @property
-    def supporting_arrays(self) -> dict:
-        """Return dataset supporting_arrays."""
-        return self.data.supporting_arrays()
 
     @property
     def name_to_index(self) -> dict[str, int]:
@@ -199,21 +224,6 @@ class BaseAnemoiReader(ABC):
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
 
-    @cached_property
-    def cutout_mask(self) -> np.ndarray:
-        """Return cutout mask."""
-        cutout_mask = np.zeros(self.grid_size, dtype=bool)
-        if len(self.data.grids) <= 1:
-            err_msg = "Dataset `cutout_mask` property requires a cutout grid but does not have one."
-            raise ValueError(err_msg)
-        cutout_mask[: self.data.grids[0]] = True
-        return cutout_mask
-
-    @cached_property
-    def boundary_mask(self) -> np.ndarray:
-        """Return boundary mask, defined as the complement of the cutout mask."""
-        return ~self.cutout_mask
-
     @property
     @abstractmethod
     def has_trajectories(self) -> bool:
@@ -239,8 +249,8 @@ class BaseAnemoiReader(ABC):
         tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
         tree.add(f"Dataset: {self.data}")
         tree.add(f"Frequency: {self.frequency}")
-        tree.add(f"Resolution: {self.resolution}")
         tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Resolution: {self.resolution}")
         return tree
 
 
@@ -248,18 +258,34 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     """Gridded dataset reader with static grid."""
 
     @property
-    def is_static_grid(self) -> bool:
-        """Whether the dataset's grid is static across time.
-
-        Native gridded ``anemoi.datasets`` payloads carry a fixed grid;
-        subclasses backing dynamic point clouds must override this.
-        """
-        return True
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting_arrays."""
+        return self.data.supporting_arrays()
 
     @property
     def grid_size(self) -> int:
         """Return dataset grid size."""
         return sum(self.data.grids)
+
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return False
+
+    @cached_property
+    def cutout_mask(self) -> np.ndarray:
+        """Return cutout mask."""
+        cutout_mask = np.zeros(self.grid_size, dtype=bool)
+        if len(self.data.grids) <= 1:
+            err_msg = "Dataset `cutout_mask` property requires a cutout grid but does not have one."
+            raise ValueError(err_msg)
+        cutout_mask[: self.data.grids[0]] = True
+        return cutout_mask
+
+    @cached_property
+    def boundary_mask(self) -> np.ndarray:
+        """Return boundary mask, defined as the complement of the cutout mask."""
+        return ~self.cutout_mask
 
     def get_coordinates(
         self,
@@ -296,18 +322,19 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
             "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
         }
 
+    def tree(self, prefix: str = "") -> Tree:
+        tree = super().tree(prefix)
+        tree.add(f"Resolution: {self.resolution}")
+        return tree
+
 
 class ObservationDataReader(BaseAnemoiReader):
     """Observation dataset reader (e.g. from tabular-zarrs)."""
 
     @property
-    def is_static_grid(self) -> bool:
-        """Whether the dataset's grid is static across time.
-
-        Native gridded ``anemoi.datasets`` payloads carry a fixed grid;
-        subclasses backing dynamic point clouds must override this.
-        """
-        return False
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting_arrays."""
+        return {}
 
     @property
     def grid_size(self) -> int:
@@ -354,13 +381,10 @@ class ObservationDataReader(BaseAnemoiReader):
         }
 
 
-class NativeGridDataset(GriddedDataReader):
-    """Native grid dataset."""
-
-    @property
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
-        return False
+    def tree(self, prefix: str = "") -> Tree:
+        tree = super().tree(prefix)
+        tree.add(f"Num of : {self.resolution}")
+        return tree
 
 
 class TrajectoryDataset(GriddedDataReader):
@@ -402,10 +426,6 @@ class TrajectoryDataset(GriddedDataReader):
 def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
-    if "window" in dataset_config and "frequency" in dataset_config:
-        LOGGER.info("Creating ObservationDataReader...")
-        return ObservationDataReader(**dataset_config)
-
 
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
@@ -416,5 +436,10 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
             trajectory_length=trajectory_config["length"],
         )
 
+    if "window" in dataset_config["dataset_config"] and "frequency" in dataset_config["dataset_config"]:
+        LOGGER.info("Creating ObservationDataReader...")
+        return ObservationDataReader(**dataset_config)
+
+
     LOGGER.info("Creating NativeGridDataset...")
-    return NativeGridDataset(**dataset_config)
+    return GriddedDataReader(**dataset_config)

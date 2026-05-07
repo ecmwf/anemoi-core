@@ -30,7 +30,7 @@ from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
 from anemoi.models.data_indices.collection import IndexCollection
-
+from anemoi.models.utils.config import COORDS_DIM
 LOGGER = logging.getLogger(__name__)
 
 
@@ -186,12 +186,12 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+        return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
+        return COORDS_DIM + self.node_attributes.num_trainable_parameters[nodes_name]
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
         if isinstance(hidden_nodes_name, str):

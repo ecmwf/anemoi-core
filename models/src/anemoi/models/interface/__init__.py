@@ -75,7 +75,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
-        self.is_dataset_static = {key: val.is_static_grid for key, val in data_readers.items()}
+        self.is_dataset_static = {key: not val.is_tabular for key, val in data_readers.items()}
         self._build_model()
         self._update_metadata()
 
