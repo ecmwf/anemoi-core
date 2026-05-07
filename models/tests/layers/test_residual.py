@@ -5,6 +5,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+import anemoi.models.layers.residual as residual_module
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
