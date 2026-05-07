@@ -20,10 +20,12 @@ def graph_data():
     g["hidden"].num_nodes = 1
     g["hidden", "to", "data"].edge_index = torch.tensor([[0, 0], [0, 1]])
     g["hidden", "to", "data"].edge_length = torch.tensor([1.0, 2.0])
+    g["hidden", "to", "data"].gauss_weight = torch.tensor([0.5, 0.5])
     g["data", "to", "hidden"].edge_index = torch.tensor([[0, 1], [0, 0]])
     g["data", "to", "hidden"].edge_length = torch.tensor([1.0, 2.0])
-    g["data"].weight = torch.tensor([1.0, 0.5])
-    g["hidden"].weight = torch.tensor([0.8])
+    g["data", "to", "hidden"].gauss_weight = torch.tensor([0.5, 0.5])
+    g["data"].weight = torch.tensor([1.0, 0.5])  # Example weights for data nodes
+    g["hidden"].weight = torch.tensor([0.8])  # Example weight for hidden node
     return g
 
 
@@ -80,13 +82,19 @@ def _make_octahedral_graph(nlat=8):
 
 def test_truncation_mapper_init(graph_data):
     _ = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", edge_weight_attribute="edge_length"
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
     )
 
 
 def test_forward(graph_data):
     mapper = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", edge_weight_attribute="edge_length"
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
@@ -94,7 +102,11 @@ def test_forward(graph_data):
 
 
 def test_forward_no_weight(graph_data):
-    mapper = TruncatedConnection(graph_data, data_nodes="data", truncation_nodes="hidden")
+    mapper = TruncatedConnection(
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+    )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
@@ -102,14 +114,58 @@ def test_forward_no_weight(graph_data):
 
 def test_forward_with_src_node_weight(graph_data):
     mapper = TruncatedConnection(
-        graph_data, data_nodes="data", truncation_nodes="hidden", src_node_weight_attribute="weight"
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        src_node_weight_attribute="weight",
     )
     x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
     x_truncated = mapper.forward(x)
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-# ── SkipConnection tests ─────────────────────────────────────────────────
+def test_forward_with_edges_name(graph_data):
+    mapper = TruncatedConnection(
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
+    )
+    x = torch.randn(5, 2, 2, 2, 3)  # (batch, dates, ensemble, grid, features)
+    x_truncated = mapper.forward(x)
+    assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
+
+
+def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data, monkeypatch):
+    mapper = TruncatedConnection(
+        graph_data,
+        truncation_down_edges_name=("data", "to", "hidden"),
+        truncation_up_edges_name=("hidden", "to", "data"),
+        edge_weight_attribute="edge_length",
+    )
+    calls = []
+
+    def fake_all_to_all(x, scatter_dim, scatter_sizes, gather_dim, gather_sizes, group):
+        calls.append(
+            {
+                "scatter_dim": scatter_dim,
+                "scatter_sizes": scatter_sizes,
+                "gather_dim": gather_dim,
+                "gather_sizes": gather_sizes,
+            }
+        )
+        return x
+
+    monkeypatch.setattr("anemoi.models.layers.residual.all_to_all_transpose", fake_all_to_all)
+    monkeypatch.setattr("anemoi.models.layers.residual.get_shard_sizes", lambda x, dim, group: [x.shape[dim]])
+
+    x = torch.randn(3, 2, 1, 2, 3)  # (batch, dates, ensemble, grid, features)
+    mapper.forward(x, grid_shard_sizes=[1, 1])
+
+    # Two all-to-all calls: grid->channel before projection, channel->grid after
+    assert len(calls) == 2
+    assert calls[0]["gather_sizes"] == [1, 1]  # grid_shard_sizes used as gather
+    assert calls[1]["scatter_sizes"] == [1, 1]  # grid_shard_sizes used as scatter
 
 
 def test_skipconnection(flat_data):

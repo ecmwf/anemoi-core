@@ -17,6 +17,7 @@ from hypothesis import settings
 from hypothesis import strategies as st
 from torch import nn
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import GraphConvProcessorBlock
@@ -87,7 +88,6 @@ class TestTransformerProcessorBlock:
         num_heads=st.integers(min_value=1, max_value=10),
         activation=st.sampled_from(["torch.nn.ReLU", "torch.nn.GELU"]),
         mlp_implementation=st.sampled_from(["mlp", "glu", "swiglu", "geglu", "reglu"]),
-        shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
         batch_size=st.integers(min_value=1, max_value=40),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
         qk_norm=st.booleans(),
@@ -100,7 +100,6 @@ class TestTransformerProcessorBlock:
         num_heads,
         activation,
         mlp_implementation,
-        shapes,
         batch_size,
         dropout_p,
         qk_norm,
@@ -123,7 +122,8 @@ class TestTransformerProcessorBlock:
         )
 
         x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
-        output = block.forward(x, shapes, batch_size)
+        shape_info = GraphShardInfo(nodes=[batch_size])
+        output = block.forward(x, shape_info, batch_size)
         assert isinstance(output[0], torch.Tensor)
         assert output[0].shape == (batch_size, num_channels)
 
@@ -150,7 +150,7 @@ class TestTransformerProcessorBlock:
         assert block.attention.projection.out_features == num_channels
 
         x = torch.randn((4, num_channels))
-        output = block.forward(x, [[4, num_channels]], batch_size=1)
+        output = block.forward(x, GraphShardInfo(nodes=[4]), batch_size=1)
         assert output[0].shape == (4, num_channels)
 
     def test_forward_output_with_conditioning(self):
@@ -170,7 +170,7 @@ class TestTransformerProcessorBlock:
 
         x = torch.randn((5, num_channels))
         cond = torch.randn((5, condition_shape))
-        output = block.forward(x, [[5, num_channels]], batch_size=1, cond=cond)
+        output = block.forward(x, GraphShardInfo(nodes=[5]), batch_size=1, cond=cond)
 
         assert output[0].shape == (5, num_channels)
 

@@ -25,7 +25,6 @@ layer_kernels:
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
-  _convert_: all
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -44,7 +43,6 @@ processor:
 
 encoder:
   _target_: anemoi.models.layers.mapper.TransformerForwardMapper
-  _convert_: all
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   num_chunks: 2
@@ -63,7 +61,6 @@ encoder:
 
 decoder:
   _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
-  _convert_: all
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   num_chunks: 2
