@@ -380,12 +380,10 @@ class ObservationDataReader(BaseAnemoiReader):
             "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
         }
 
-
-    def tree(self, prefix: str = "") -> Tree:
-        tree = super().tree(prefix)
-        tree.add(f"Num of : {self.resolution}")
-        return tree
-
+    @property
+    def metadata(self) -> dict:
+        """Return dataset metadata."""
+        return {}
 
 class TrajectoryDataset(GriddedDataReader):
     """Trajectory dataset."""
