@@ -38,6 +38,8 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.train.checkpoint_integration import has_checkpoint_pipeline_config
+from anemoi.training.train.checkpoint_integration import load_checkpoint_with_pipeline
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -224,7 +226,33 @@ class AnemoiTrainer(ABC):
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
 
         # Load the model weights
-        if self.load_weights_only:
+        # New checkpoint pipeline takes precedence if configured AND there's a checkpoint to load
+        if has_checkpoint_pipeline_config(self.config) and self.last_checkpoint is not None:
+            LOGGER.info("Using checkpoint pipeline for loading from %s", self.last_checkpoint)
+            model = load_checkpoint_with_pipeline(
+                config=self.config.training.checkpoint_pipeline,
+                model=model,
+                checkpoint_path=self.last_checkpoint,
+            )
+            model.data_indices = self.data_indices
+            # check data indices in original checkpoint and current data indices are the same
+            # Skip this check if there's no variable overlap (cross-architecture transfer learning)
+            if hasattr(model, "_ckpt_model_name_to_index") and model._ckpt_model_name_to_index:
+                for dataset_name, data_indices in self.data_indices.items():
+                    ckpt_name_to_index = model._ckpt_model_name_to_index.get(dataset_name, {})
+                    # Only validate if there's variable overlap; otherwise it's cross-architecture transfer
+                    ckpt_vars = set(ckpt_name_to_index.keys())
+                    data_vars = set(data_indices.name_to_index.keys())
+                    if ckpt_vars & data_vars:  # intersection exists
+                        data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                    else:
+                        LOGGER.warning(
+                            "No variable overlap between checkpoint and data for dataset '%s'. "
+                            "Skipping variable order validation (cross-architecture transfer learning).",
+                            dataset_name,
+                        )
+        elif self.load_weights_only:
+            # Legacy loading path
             # Sanify the checkpoint for transfer learning
             if self.config.training.transfer_learning:
                 LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
@@ -243,8 +271,10 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            for dataset_name, data_indices in self.data_indices.items():
+                # _ckpt_model_name_to_index is dict[dataset_name, name_to_index]
+                ckpt_name_to_index = model._ckpt_model_name_to_index.get(dataset_name, {})
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -526,7 +556,11 @@ class AnemoiTrainer(ABC):
 
         params["model"] = self.model
         params["datamodule"] = self.datamodule
-        params["ckpt_path"] = None if (self.load_weights_only) else self.last_checkpoint
+        # Don't pass ckpt_path if:
+        # 1. load_weights_only is True (legacy behavior)
+        # 2. checkpoint_pipeline is configured (we already loaded weights ourselves)
+        skip_lightning_restore = self.load_weights_only or has_checkpoint_pipeline_config(self.config)
+        params["ckpt_path"] = None if skip_lightning_restore else self.last_checkpoint
 
         if version.parse("2.6.0") <= PL_VERSION:
             params["weights_only"] = False

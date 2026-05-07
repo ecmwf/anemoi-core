@@ -131,7 +131,11 @@ class TransferLearningLoader(LoadingStrategy):
             msg = f"Failed to load filtered state dict into model: {e}"
             raise CheckpointLoadError(msg) from e
 
-        self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        # NOTE: Do NOT call _preserve_anemoi_metadata here.
+        # For transfer learning, we intentionally discard the checkpoint's variable
+        # mapping (data_indices) because we're loading into a model with different
+        # architecture/variables. The sanity check callback will fall back to using
+        # the new dataset's indices, which is the correct behavior.
         self._mark_weights_loaded(context.model)
 
         # Discard optimizer/scheduler — transfer learning means fresh training state

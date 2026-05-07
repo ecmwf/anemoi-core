@@ -152,12 +152,25 @@ class LoadingStrategy(PipelineStage):
         """
         hyper_params = checkpoint_data.get("hyper_parameters", {})
         data_indices = hyper_params.get("data_indices")
-        if data_indices is not None and hasattr(data_indices, "name_to_index"):
-            model._ckpt_model_name_to_index = data_indices.name_to_index
-            LOGGER.debug("Restored _ckpt_model_name_to_index from checkpoint hyper_parameters")
+        if data_indices is not None:
+            # data_indices is a dict[str, IndexCollection], not a single IndexCollection
+            if isinstance(data_indices, dict):
+                model._ckpt_model_name_to_index = {
+                    k: v.name_to_index for k, v in data_indices.items() if hasattr(v, "name_to_index")
+                }
+                LOGGER.debug("Restored _ckpt_model_name_to_index from checkpoint hyper_parameters (multi-dataset)")
+            elif hasattr(data_indices, "name_to_index"):
+                # Legacy single-dataset format
+                model._ckpt_model_name_to_index = data_indices.name_to_index
+                LOGGER.debug("Restored _ckpt_model_name_to_index from checkpoint hyper_parameters (single-dataset)")
+            else:
+                LOGGER.debug(
+                    "data_indices found but has no name_to_index attribute; "
+                    "skipping _ckpt_model_name_to_index restoration",
+                )
         else:
             LOGGER.debug(
-                "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
+                "Checkpoint does not contain hyper_parameters.data_indices; "
                 "skipping _ckpt_model_name_to_index restoration",
             )
 
