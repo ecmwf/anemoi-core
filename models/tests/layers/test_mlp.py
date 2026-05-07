@@ -104,10 +104,12 @@ class TestMLP:
             )
         assert any("layer_kernels.Activation is ignored" in str(w.message) for w in caught)
 
-    def test_glu_activation_requires_mlp_implementation(self, num_features, hdim, num_out_feature):
-        layer_kernels = load_layer_kernels(
-            {"Activation": {"_target_": "anemoi.models.layers.activations.GLU", "dim": hdim}}
-        )
+    def test_glu_activation_requires_mlp_implementation(self, num_features, hdim, num_out_feature, layer_kernels):
+        class FakeGLU(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        layer_kernels.Activation = FakeGLU
         with pytest.raises(ValueError, match="GLU-based activations"):
             MLP(
                 num_features,

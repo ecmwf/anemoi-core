@@ -90,20 +90,20 @@ class TestPointWiseMLPProcessorBlock:
     @given(
         num_channels=st.integers(min_value=1, max_value=64),
         mlp_hidden_ratio=st.integers(min_value=1, max_value=16),
-        activation=st.sampled_from(
-            [
-                "anemoi.models.layers.activations.GLU",
-                "anemoi.models.layers.activations.SwiGLU",
-            ]
-        ),
         dropout_p=st.floats(min_value=0.0, max_value=1.0),
     )
     @settings(max_examples=5)
-    def test_glu_activation_raises(self, num_channels, mlp_hidden_ratio, activation, dropout_p):
-        hidden_dim = num_channels * mlp_hidden_ratio
-        layer_kernels = load_layer_kernels({"Activation": {"_target_": activation, "dim": hidden_dim}})
-
+    def test_glu_activation_raises(self, num_channels, mlp_hidden_ratio, dropout_p):
         import pytest
+
+        hidden_dim = num_channels * mlp_hidden_ratio
+        layer_kernels = load_layer_kernels()
+
+        class FakeGLU(nn.Module):
+            def forward(self, x):
+                return x
+
+        layer_kernels.Activation = FakeGLU
 
         with pytest.raises(ValueError, match="GLU-based activations are not supported"):
             PointWiseMLPProcessorBlock(

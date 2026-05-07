@@ -259,7 +259,7 @@ processor below:
      num_chunks: 2
      layer_kernels:
        Activation:
-         _target_: anemoi.models.layers.activation.GLU
+         _target_: torch.nn.SiLU
 
 Available Layer Kernels
 =======================
@@ -292,9 +292,11 @@ Examples for suitable alternatives within Anemoi are:
 
 **Activation functions** (see :doc:`modules/activations`):
 
--  ``anemoi.models.layers.activation.GLU``
--  ``anemoi.models.layers.activation.SwiGLU``
--  ``anemoi.models.layers.activation.Sine``
+-  ``anemoi.models.layers.activations.Sine``
+-  ``torch.nn.SiLU``, ``torch.nn.ReLU``, or any ``torch.nn`` activation
+
+For gated variants (GLU, SwiGLU, GEGLU, ReGLU), use ``mlp_implementation``
+on the processor/encoder/decoder instead of ``layer_kernels.Activation``.
 
 The ``_target_`` can be any local or installed class (see Hydra
 documentation [#f4]_).
