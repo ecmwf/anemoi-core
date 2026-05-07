@@ -308,6 +308,8 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     module = MagicMock(spec=BaseTrainingModule)
     group = FakeGroup(size=2)
     grid_shard_sizes = [1, 1]
+    channel_shard_sizes_pred = [1, 1]
+    channel_shard_sizes_y = [1, 1]
     pred = torch.randn(1, 1, 1, 2, 1)
     target = torch.randn(1, 1, 2, 1)
     grid_shard_slice = slice(0, 1)
@@ -316,7 +318,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
         per_scale_loss=MSELoss(),
         weights=[1.0],
     )
-    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_sizes))
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, channel_shard_sizes_pred, channel_shard_sizes_y))
     monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
     monkeypatch.setattr("anemoi.training.losses.multiscale.all_to_all_transpose", lambda x, *_args, **_kw: x)
     monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)

@@ -99,7 +99,6 @@ def test_multiscale_weights_length_mismatch_raises() -> None:
         MultiscaleLossWrapper(
             per_scale_loss=per_scale_loss,
             weights=[1.0],  # 1 weight but multiscale_config gives 2 scales
-            keep_batch_sharded=False,
             multiscale_config={"loss_matrices": [None, None]},
         )
 
@@ -260,14 +259,15 @@ def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixtu
     )
     group = FakeGroup(size=2)
     grid_shard_sizes = [1, 1]
-    channel_shard_sizes = [1]
+    channel_shard_sizes_pred = [1, 1]
+    channel_shard_sizes_pred = [1, 1]
     pred = torch.zeros((1, 1, 1, 2, 1))
     target = torch.zeros((1, 1, 2, 1))
 
     prepare = mocker.patch.object(
         multiscale_loss,
         "_prepare_for_smoothing",
-        return_value=(pred, target, channel_shard_sizes),
+        return_value=(pred, target, channel_shard_sizes_pred, channel_shard_sizes_pred),
     )
     a2a = mocker.patch(
         "anemoi.training.losses.multiscale.all_to_all_transpose",
