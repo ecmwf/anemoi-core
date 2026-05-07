@@ -142,7 +142,6 @@ def test_add_plotting_callback(monkeypatch):
     monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
 
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.plot.enabled = True
     config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
     context = CallbacksContext(
         diagnostics=config.diagnostics,
