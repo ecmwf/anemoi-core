@@ -94,6 +94,17 @@ def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, t
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
 
 
+def test_multiscale_weights_length_mismatch_raises() -> None:
+    per_scale_loss = MSELoss()
+    with pytest.raises(AssertionError):
+        MultiscaleLossWrapper(
+            per_scale_loss=per_scale_loss,
+            weights=[1.0],  # 1 weight but multiscale_config gives 2 scales
+            keep_batch_sharded=False,
+            multiscale_config={"loss_matrices": [None, None]},
+        )
+
+
 @pytest.mark.parametrize("per_scale_loss", [AlmostFairKernelCRPS(), MSELoss()])
 @pytest.mark.parametrize("weights", [torch.tensor([0.3, 0.7]), torch.tensor([1.0, 2.0])])
 def test_multi_scale(
@@ -122,7 +133,6 @@ def test_multi_scale(
     )
 
     multiscale_loss = MultiscaleLossWrapper(
-        loss_matrices=[None, "fake"],
         per_scale_loss=per_scale_loss,
         weights=weights,
         keep_batch_sharded=False,
