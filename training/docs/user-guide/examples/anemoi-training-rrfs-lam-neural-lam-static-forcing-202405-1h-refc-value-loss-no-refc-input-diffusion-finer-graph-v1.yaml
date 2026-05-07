@@ -1,0 +1,69 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-finer-graph-v1
+  - override /model: graphtransformer_diffusion
+  - override /training: diffusion
+  - _self_
+
+# Initial diffusion experiment for the RRFS 1-hour no-refc-input setup using
+# the finer_graph_v1 graph. This keeps the same data role split and refc
+# weighting logic, but switches the model/training path to Anemoi's standard
+# diffusion forecaster.
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/diffusion_finer_graph_v1/
+
+training:
+  multistep_input: 2
+  multistep_output: 1
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+
+  max_epochs: 1200
+  max_steps: 9999999
+  accum_grad_batches: 8
+
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_range_weight_factors']
+
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          weights:
+            default: 1
+            sphum: 0.6
+            temp: 6
+            ugrd: 5
+            vgrd: 5
+            height: 12
+            pres_0g: 10
+            refc: 80
+            clmr: 1
+            icmr: 1
+            rwmr: 1
+            snmr: 1
+            grle: 1
+        refc_range_weight_factors:
+          _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
+          variable: refc
+          normalization: min-max
+          thresholds: [0.0, 20.0, 40.0]
+          range_weight_factors: [0.1, 10, 40, 80]
+
+  metrics:
+    datasets:
+      data:
+        - height_500
+        - refc
+
+  variable_groups:
+    datasets:
+      data:
+        default: sfc
+        pl:
+          is_pressure_level: True
