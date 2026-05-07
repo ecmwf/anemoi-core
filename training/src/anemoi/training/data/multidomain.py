@@ -124,7 +124,7 @@ class MultiDomainDataset(AnemoiDataset):
                 sanity_rnd,
             )
 
-    def get_sample(self, domain_name: str, index: int) -> torch.Tensor:
+    def get_sample(self, domain_name: str, index: int) -> dict[str, torch.Tensor]:
         """Get a sample from the specified domain and index.
 
         Args:
@@ -133,7 +133,7 @@ class MultiDomainDataset(AnemoiDataset):
 
         Returns
         -------
-            torch.Tensor: The sample retrieved from the specified domain and index.
+            dict[str, torch.Tensor]: The sample retrieved from the specified domain and index.
         """
         time_step = offset_time_indices(index, self.relative_date_indices[domain_name])
         if self.shard_shapes is not None and self.shard_shapes[domain_name] is not None:
@@ -142,9 +142,9 @@ class MultiDomainDataset(AnemoiDataset):
         else:
             grid_indices = slice(None)
 
-        return self.data_readers[domain_name].get_sample(time_step, grid_indices)
+        return {domain_name: self.data_readers[domain_name].get_sample(time_step, grid_indices)}
 
-    def __iter__(self) -> tuple[torch.Tensor, str]:
+    def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields a tuple torch.Tensor and its corresponding domain name.
 
         Returns
@@ -194,4 +194,4 @@ class MultiDomainDataset(AnemoiDataset):
 
         for batch in labeled_samples:
             domain_name, index = batch
-            yield domain_name, self.get_sample(domain_name, int(index))
+            yield self.get_sample(domain_name, int(index))
