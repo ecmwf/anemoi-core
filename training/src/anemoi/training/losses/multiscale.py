@@ -20,9 +20,9 @@ from anemoi.graphs.builders import _expand_smoother_config
 from anemoi.graphs.builders import build_smoother_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
-from anemoi.models.distributed.graph import gather_channels
-from anemoi.models.distributed.graph import shard_channels
-from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
@@ -40,7 +40,6 @@ class MultiscaleLossWrapper(BaseLoss):
         self,
         per_scale_loss: BaseLoss,
         weights: list[float],
-        keep_batch_sharded: bool,
         multiscale_config: object | None = None,
         graph_data: HeteroData | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
@@ -58,12 +57,6 @@ class MultiscaleLossWrapper(BaseLoss):
             Loss to be used at each scale
         weights : list[float]
             Per-scale loss weights
-        keep_batch_sharded : bool
-            Whether the task should keep the batch grid-sharded during loss
-            computation. When enabled, the task passes shard-layout metadata to
-            this wrapper and multiscale smoothing follows the sharded path.
-            If disabled, the loss is evaluated on replicated full-grid tensors
-            on each model rank.
         multiscale_config : object | None
             Configuration for the smoothing matrices.  Accepts two forms:
 
@@ -127,20 +120,13 @@ class MultiscaleLossWrapper(BaseLoss):
         self.weights = weights
         self.loss = per_scale_loss
         self.scaler = self.loss.scaler
-        self.keep_batch_sharded = keep_batch_sharded
         self.supports_sharding = True
         self.mloss = None
         self.projector = SparseProjector(autocast=autocast)
 
     @property
     def needs_shard_layout_info(self) -> bool:
-        """Whether the wrapper needs shard-layout metadata from the task.
-
-        This is tied to ``keep_batch_sharded`` because the wrapper only
-        redistributes tensors across the model group when the batch remains
-        grid-sharded during loss computation.
-        """
-        return self.keep_batch_sharded
+        return True
 
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         """Update the scaler values for the internal loss.
@@ -263,34 +249,30 @@ class MultiscaleLossWrapper(BaseLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
         group: ProcessGroup | None,
-        grid_dim: int,
-        grid_shard_shapes: list,
-    ) -> tuple[torch.Tensor, torch.Tensor, list | None, list | None]:
+        grid_shard_sizes: ShardSizes,
+    ) -> tuple[torch.Tensor, torch.Tensor, list, list]:
         """Prepare tensors for smoothing.
 
-        Args:
-            y_pred_ens: torch.Tensor
-                Ensemble predictions
-            y: torch.Tensor
-                Ground truth
-            group: ProcessGroup | None
-                Model communication group
+        Transitions from grid-sharded to channel-sharded layout via all-to-all
+        so that smoothing (which needs the full grid) can run locally.
 
         Returns
         -------
-            y_pred_ens_interp: torch.Tensor
-                Predictions for interpolation
-            y_interp: torch.Tensor
-                Ground truth for interpolation
-            shard_shapes: list | None
-                Prediction shard shapes for later gathering
-            shard_shapes_y: list | None
-                Target shard shapes for later gathering
+            y_pred_ens_interp, y_interp, channel_shard_sizes_pred, channel_shard_sizes_y
         """
         batch_size, out_times, ensemble_size = y_pred_ens.shape[0], y_pred_ens.shape[1], y_pred_ens.shape[2]
         y_pred_ens_interp = einops.rearrange(y_pred_ens, "b t e g c -> (b e) t g c")
-        shard_shapes = apply_shard_shapes(y_pred_ens_interp, grid_dim, grid_shard_shapes)
-        y_pred_ens_interp = shard_channels(y_pred_ens_interp, shard_shapes, group)
+
+        # grid-sharded -> channel-sharded: split along channels (dim_split=-1), concat along grid (dim_concat=-2)
+        channel_shard_sizes_pred = get_shard_sizes(y_pred_ens_interp, -1, group)
+        y_pred_ens_interp = all_to_all_transpose(
+            y_pred_ens_interp,
+            -1,
+            channel_shard_sizes_pred,
+            -2,
+            grid_shard_sizes,
+            group,
+        )
         y_pred_ens_interp = einops.rearrange(
             y_pred_ens_interp,
             "(b e) t g c -> b t e g c",
@@ -299,10 +281,17 @@ class MultiscaleLossWrapper(BaseLoss):
             t=out_times,
         )
 
-        shard_shapes_y = apply_shard_shapes(y, grid_dim, grid_shard_shapes)
-        y_interp = shard_channels(y, shard_shapes_y, group)
+        channel_shard_sizes_y = get_shard_sizes(y, -1, group)
+        y_interp = all_to_all_transpose(
+            y,
+            -1,
+            channel_shard_sizes_y,
+            -2,
+            grid_shard_sizes,
+            group,
+        )
 
-        return y_pred_ens_interp, y_interp, shard_shapes, shard_shapes_y
+        return y_pred_ens_interp, y_interp, channel_shard_sizes_pred, channel_shard_sizes_y
 
     def _apply_projector(self, batch: torch.Tensor, provider: ProjectionGraphProvider) -> torch.Tensor:
         """Apply sparse projector to a batch, handling multi-dimensional inputs."""
@@ -329,20 +318,22 @@ class MultiscaleLossWrapper(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        grid_shard_sizes: ShardSizes = None,
         grid_dim: int | None = None,
-        grid_shard_shapes: list | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        shard_shapes, shard_shapes_y = None, None
-        is_model_sharded = grid_shard_shapes is not None
+        channel_shard_sizes_pred = None
+        channel_shard_sizes_y = None
+        is_model_sharded = grid_shard_sizes is not None
         if is_model_sharded:
             # go to full sequence dimension for smoothing
-            y_pred_ens_for_smooth, y_for_smooth, shard_shapes, shard_shapes_y = self._prepare_for_smoothing(
-                y_pred_ens,
-                y,
-                group,
-                grid_dim,
-                grid_shard_shapes,
+            y_pred_ens_for_smooth, y_for_smooth, channel_shard_sizes_pred, channel_shard_sizes_y = (
+                self._prepare_for_smoothing(
+                    y_pred_ens,
+                    y,
+                    group,
+                    grid_shard_sizes,
+                )
             )
         else:
             y_pred_ens_for_smooth = y_pred_ens
@@ -362,8 +353,23 @@ class MultiscaleLossWrapper(BaseLoss):
             y_pred_ens_tmp, y_tmp = self._smooth_for_loss(y_pred_ens_for_smooth, y_for_smooth, i)
 
             if is_model_sharded:
-                y_pred_ens_tmp = gather_channels(y_pred_ens_tmp, shard_shapes, group)
-                y_tmp = gather_channels(y_tmp, shard_shapes_y, group)
+                # channel-sharded -> grid-sharded: reverse the all-to-all
+                y_pred_ens_tmp = all_to_all_transpose(
+                    y_pred_ens_tmp,
+                    -2,
+                    grid_shard_sizes,
+                    -1,
+                    channel_shard_sizes_pred,
+                    group,
+                )
+                y_tmp = all_to_all_transpose(
+                    y_tmp,
+                    -2,
+                    grid_shard_sizes,
+                    -1,
+                    channel_shard_sizes_y,
+                    group,
+                )
 
             # save for next loss scale
             y_preds_ens.append(y_pred_ens_tmp)
@@ -373,6 +379,12 @@ class MultiscaleLossWrapper(BaseLoss):
                 y_pred_ens_tmp = y_pred_ens_tmp - y_preds_ens[i - 1]
                 y_tmp = y_tmp - y_ens[i - 1]
 
+            # sharding kwargs - only pass if the loss needs them
+            sharding_kwargs = (
+                {"grid_shard_sizes": grid_shard_sizes, "grid_dim": grid_dim}
+                if self.loss.needs_shard_layout_info
+                else {}
+            )
             # compute the loss
             loss_inc.append(
                 self.loss(
@@ -383,6 +395,7 @@ class MultiscaleLossWrapper(BaseLoss):
                     without_scalers=without_scalers,
                     grid_shard_slice=grid_shard_slice,
                     group=group,
+                    **sharding_kwargs,
                     **kwargs,
                 ),
             )

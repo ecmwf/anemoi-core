@@ -15,6 +15,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
@@ -111,11 +112,11 @@ class TestGraphTransformerProcessor:
             (self.NUM_NODES, graphtransformer_init.num_channels),
             device=next(graphtransformer_processor.parameters()).device,
         )
-        shard_shapes = [list(x.shape)]
+        shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
 
         # Run forward pass of processor
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        output = graphtransformer_processor.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
+        output = graphtransformer_processor.forward(x, batch_size, shard_info, edge_attr, edge_index)
         assert output.shape == (self.NUM_NODES, graphtransformer_init.num_channels)
 
         # Generate dummy target and loss function
