@@ -65,8 +65,8 @@ def sort_edges_1hop_sharding(
     edge_index: Adj,
     mgroup: Optional[ProcessGroup] = None,
     relabel_dst_nodes: bool = False,
-) -> tuple[Adj, Tensor, ShardSizes]:
-    """Rearanges edges into 1 hop neighbourhoods for sharding across GPUs.
+) -> tuple[Tensor, Adj, ShardSizes]:
+    """Rearrange edges into 1-hop neighbourhoods for sharding across GPUs.
 
     Parameters
     ----------
@@ -83,9 +83,9 @@ def sort_edges_1hop_sharding(
 
     Returns
     -------
-    tuple[Adj, Tensor, list]
-        edges sorted according to k hop neigh., edge attributes of sorted edges,
-        shapes of edges for partitioning between GPUs
+    tuple[Tensor, Adj, ShardSizes]
+        Edge attributes and edge indices sorted according to 1-hop neighbourhoods,
+        plus edge shard sizes when a model communication group is provided.
     """
     if mgroup:
         num_chunks = dist.get_world_size(group=mgroup)
@@ -98,7 +98,7 @@ def sort_edges_1hop_sharding(
 
         return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_shard_sizes
 
-    return edge_attr, edge_index, []
+    return edge_attr, edge_index, None
 
 
 def shard_edges_1hop(
@@ -125,8 +125,8 @@ def shard_edges_1hop(
 
     Returns
     -------
-    tuple[Tensor, Adj, list[int]]
-        Sharded edge_attr, sharded edge_index, and list of edge_shard_sizes
+    tuple[Tensor, Adj, ShardSizes]
+        Sharded edge_attr, sharded edge_index, and edge_shard_sizes.
     """
     from anemoi.models.distributed.graph import shard_tensor
 

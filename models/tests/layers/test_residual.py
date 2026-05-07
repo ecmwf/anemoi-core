@@ -5,6 +5,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+import anemoi.models.layers.residual as residual_module
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
@@ -136,29 +137,53 @@ def test_forward_with_edges_name(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-def test_truncated_connection_shard_shapes_follow_grid_dimension(graph_data, monkeypatch):
+def test_truncated_connection_shard_sizes_follow_grid_dimension(graph_data, monkeypatch):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
         edge_weight_attribute="edge_length",
     )
-    captured = {}
+    calls = []
 
-    def capture_to_channel_shards(x, shard_shapes=None, model_comm_group=None):
-        del model_comm_group
-        captured["x_shape"] = tuple(x.shape)
-        captured["shard_shapes"] = shard_shapes
+    def capture_all_to_all(x, dim_split, split_sizes, dim_concat, concat_sizes, model_comm_group):
+        calls.append(
+            {
+                "x_shape": tuple(x.shape),
+                "dim_split": dim_split,
+                "split_sizes": split_sizes,
+                "dim_concat": dim_concat,
+                "concat_sizes": concat_sizes,
+                "model_comm_group": model_comm_group,
+            }
+        )
         return x
 
-    monkeypatch.setattr(mapper, "_to_channel_shards", capture_to_channel_shards)
-    monkeypatch.setattr(mapper, "_to_grid_shards", lambda x, shard_shapes=None, model_comm_group=None: x)
+    monkeypatch.setattr(residual_module, "get_shard_sizes", lambda *args, **kwargs: [2, 1])
+    monkeypatch.setattr(residual_module, "all_to_all_transpose", capture_all_to_all)
 
     x = torch.randn(3, 2, 1, 2, 3)  # (batch, dates, ensemble, grid, features)
-    mapper.forward(x, grid_shard_shapes=[1, 1])
+    group = object()
+    mapper.forward(x, grid_shard_sizes=[1, 1], model_comm_group=group)
 
-    assert captured["x_shape"] == (3, 2, 3)
-    assert captured["shard_shapes"] == [[3, 1, 3], [3, 1, 3]]
+    assert calls == [
+        {
+            "x_shape": (3, 2, 3),
+            "dim_split": -1,
+            "split_sizes": [2, 1],
+            "dim_concat": -2,
+            "concat_sizes": [1, 1],
+            "model_comm_group": group,
+        },
+        {
+            "x_shape": (3, 2, 3),
+            "dim_split": -2,
+            "split_sizes": [1, 1],
+            "dim_concat": -1,
+            "concat_sizes": [2, 1],
+            "model_comm_group": group,
+        },
+    ]
 
 
 def test_skipconnection(flat_data):
