@@ -16,6 +16,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import reference_state_sampling_source
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.diffusion import DiffusionTransportObjective
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
@@ -325,6 +326,13 @@ class BaseTransportTraining(BaseTrainingModule):
     def prediction_mode(self) -> PredictionMode:
         """Return the state/tendency target handler for this module."""
         return self._prediction_mode
+
+    @property
+    def plot_adapter(self) -> EnsemblePlotAdapterWrapper:
+        """Wrap the task plot adapter with ensemble-dimension handling."""
+        if not hasattr(self, "_ensemble_plot_adapter"):
+            self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
+        return self._ensemble_plot_adapter
 
     def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Select the target variables that are present in the dataset output."""
