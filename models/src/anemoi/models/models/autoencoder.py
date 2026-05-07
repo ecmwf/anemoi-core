@@ -21,9 +21,6 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.models import BaseGraphModel
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
