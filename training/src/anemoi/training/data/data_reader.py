@@ -32,11 +32,11 @@ def _as_dict(value: str | dict | DictConfig) -> str | dict:
     return dict(value) if isinstance(value, DictConfig) else value
 
 
-def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | dict:
+def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> dict:
     """Normalize dataset payload to the open_dataset dictionary contract."""
     dataset_config = _as_dict(dataset_config)
-    if not isinstance(dataset_config, dict):
-        return dataset_config
+    if isinstance(dataset_config, str):
+        return {"dataset": dataset_config}
 
     if "dataset" not in dataset_config:
         msg = "dataset_config must contain the 'dataset' key."
@@ -88,11 +88,15 @@ class BaseAnemoiReader(ABC):
         end: datetime.datetime | int | None = None,
     ):
         """Initialize Anemoi data reader."""
-        source = dataset_config if dataset_config is not None else dataset
-        if source is None:
-            msg = "Either dataset or dataset_config must be provided."
-            raise ValueError(msg)
-        self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+        assert not (dataset and dataset_config), "Only one of dataset or dataset_config should be provided."
+        assert dataset or dataset_config, "Either dataset or dataset_config must be provided."
+
+        source: dict = _normalize_dataset_config(dataset_config or dataset)
+        source |= {"start": start, "end": end}
+        # start and end arguments have to be passed at the same level as the window and frequency arguments for
+        # tabular datasets
+
+        self.data = open_dataset(source)
 
     @property
     def dates(self) -> np.ndarray:
@@ -170,40 +174,14 @@ class BaseAnemoiReader(ABC):
         """Return per-grid-point longitudes in **radians**."""
         return np.deg2rad(np.asarray(self.data.longitudes))
 
+    @abstractmethod
     def get_coordinates(
         self,
         time_indices: TimeIndices | None = None,
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> dict[str, torch.Tensor]:
-        """Return coordinate tensors for the requested time/grid slice.
-
-        For a static grid the ``time_indices`` argument is ignored and the
-        full grid is returned (sliced by ``grid_shard_indices`` when given).
-        Subclasses with dynamic grids must override.
-
-        Parameters
-        ----------
-        time_indices : TimeIndices, optional
-            Time indices; ignored on static grids.
-        grid_shard_indices : np.ndarray or slice, optional
-            Per-rank grid shard.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Mapping ``{"latitudes": tensor, "longitudes": tensor}`` in radians.
-        """
-        del time_indices  # unused for static grids
-        lats = self.latitudes
-        lons = self.longitudes
-        if grid_shard_indices is not None:
-            lats = lats[grid_shard_indices]
-            lons = lons[grid_shard_indices]
-
-        return {
-            "latitudes": torch.from_numpy(np.ascontiguousarray(lats)),
-            "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
-        }
+        """Return coordinate tensors for the requested time/grid slice."""
+        raise NotImplementedError("Subclasses must implement get_coordinates() method.")
 
     def get_data(self, time_indices: TimeIndices, grid_shard_indices: np.ndarray | slice | None = None) -> torch.Tensor:
         """Return data tensor for the requested time/grid slice."""
@@ -283,6 +261,42 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         """Return dataset grid size."""
         return sum(self.data.grids)
 
+    def get_coordinates(
+        self,
+        time_indices: TimeIndices | None = None,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Return coordinate tensors for the requested time/grid slice.
+
+        For a static grid the ``time_indices`` argument is ignored and the
+        full grid is returned (sliced by ``grid_shard_indices`` when given).
+        Subclasses with dynamic grids must override.
+
+        Parameters
+        ----------
+        time_indices : TimeIndices, optional
+            Time indices; ignored on static grids.
+        grid_shard_indices : np.ndarray or slice, optional
+            Per-rank grid shard.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Mapping ``{"latitudes": tensor, "longitudes": tensor}`` in radians.
+        """
+        del time_indices  # unused for static grids
+        lats = self.latitudes
+        lons = self.longitudes
+        if grid_shard_indices is not None:
+            lats = lats[grid_shard_indices]
+            lons = lons[grid_shard_indices]
+
+        return {
+            "latitudes": torch.from_numpy(np.ascontiguousarray(lats)),
+            "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
+        }
+
+
 class ObservationDataReader(BaseAnemoiReader):
     """Observation dataset reader (e.g. from tabular-zarrs)."""
 
@@ -304,6 +318,40 @@ class ObservationDataReader(BaseAnemoiReader):
     def has_trajectories(self) -> bool:
         """Return whether the dataset has trajectories."""
         return False
+
+    def get_coordinates(
+        self,
+        time_indices: TimeIndices | None = None,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Return coordinate tensors for the requested time/grid slice.
+
+        For a static grid the ``time_indices`` argument is ignored and the
+        full grid is returned (sliced by ``grid_shard_indices`` when given).
+        Subclasses with dynamic grids must override.
+
+        Parameters
+        ----------
+        time_indices : TimeIndices, optional
+            Time indices; ignored on static grids.
+        grid_shard_indices : np.ndarray or slice, optional
+            Per-rank grid shard.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Mapping ``{"latitudes": tensor, "longitudes": tensor}`` in radians.
+        """
+        lats = self.latitudes[time_indices]
+        lons = self.longitudes[time_indices]
+        if grid_shard_indices is not None:
+            lats = lats[grid_shard_indices]
+            lons = lons[grid_shard_indices]
+
+        return {
+            "latitudes": torch.from_numpy(np.ascontiguousarray(lats)),
+            "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
+        }
 
 
 class NativeGridDataset(GriddedDataReader):
@@ -354,6 +402,11 @@ class TrajectoryDataset(GriddedDataReader):
 def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
+    if "window" in dataset_config and "frequency" in dataset_config:
+        LOGGER.info("Creating ObservationDataReader...")
+        return ObservationDataReader(**dataset_config)
+
+
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating TrajectoryDataset...")
