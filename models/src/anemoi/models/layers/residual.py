@@ -19,9 +19,9 @@ from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform

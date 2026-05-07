@@ -14,8 +14,8 @@ from typing import Optional
 import einops
 import torch
 from hydra.utils import instantiate
-from torch import Tensor
 from omegaconf import DictConfig
+from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 

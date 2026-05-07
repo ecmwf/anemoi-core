@@ -16,13 +16,13 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.graphs.builders import _expand_smoother_config
 from anemoi.graphs.builders import build_smoother_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
