@@ -115,7 +115,7 @@ class BaseDiffusionTraining(BaseTrainingModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
         )
 
     def _compute_loss(
@@ -170,7 +170,7 @@ class BaseDiffusionTraining(BaseTrainingModule):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -531,7 +531,7 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
 
         x_ref = self.model.model.apply_reference_state_truncation(
             x,
-            self.grid_shard_shapes,
+            self.grid_shard_sizes,
             self.model_comm_group,
         )
         # x_ref is normalized model.input.prognostic (subset), aligned to output steps
