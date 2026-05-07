@@ -206,7 +206,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.data_indices = data_indices
 
-        self.save_hyperparameters()
+        # `task` and `data_readers` hold runtime objects (e.g. anemoi-datasets
+        # readers wrapping `lru.LRU` caches) that cannot be deepcopied by
+        # Lightning's `save_hyperparameters` and are not meaningful to persist
+        # in the checkpoint hyperparameters anyway.
+        self.save_hyperparameters(ignore=["task", "data_readers"])
 
         self.statistics_tendencies = statistics_tendencies
 

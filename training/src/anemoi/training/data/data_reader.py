@@ -346,6 +346,13 @@ class ObservationDataReader(BaseAnemoiReader):
         """Return whether the dataset has trajectories."""
         return False
 
+    def statistics_tendencies(
+        self,
+        *args,
+        **kwargs,
+    ) -> dict | None:
+        return None
+
     def get_coordinates(
         self,
         time_indices: TimeIndices | None = None,
