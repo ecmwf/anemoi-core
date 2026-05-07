@@ -1284,11 +1284,10 @@ def plot_ensemble_sample(
     """
     precip_and_related_fields = precip_and_related_fields if precip_and_related_fields is not None else []
     if vname in precip_and_related_fields:
-        # converting to mm from m
-        truth *= 1000.0
-        pred_ens *= 1000.0
-        cummulation_lvls = clevels
-        norm = BoundaryNorm(cummulation_lvls, len(cummulation_lvls) + 1)
+        # converting to mm from m (copy to avoid mutating caller's arrays)
+        truth = truth * 1000.0
+        pred_ens = pred_ens * 1000.0
+        norm = BoundaryNorm(clevels, len(clevels) + 1)
     else:
         combined_data = np.concatenate((truth.flatten(), pred_ens.flatten()))
         norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
@@ -1310,7 +1309,7 @@ def plot_ensemble_sample(
         truth,
         cmap=cmap,
         norm=norm,
-        title=f"{vname[0]} target",
+        title=f"{vname} target",
         datashader=datashader,
         transform=transform,
     )
@@ -1323,7 +1322,7 @@ def plot_ensemble_sample(
         ens_mean,
         cmap=cmap,
         norm=norm,
-        title=f"{vname[0]} pred mean",
+        title=f"{vname} pred mean",
         datashader=datashader,
         transform=transform,
     )
@@ -1336,7 +1335,7 @@ def plot_ensemble_sample(
         ens_mean - truth,
         cmap=error_cmap,
         norm=TwoSlopeNorm(vcenter=0.0),
-        title=f"{vname[0]} ens mean err",
+        title=f"{vname} ens mean err",
         datashader=datashader,
         transform=transform,
     )
@@ -1347,7 +1346,7 @@ def plot_ensemble_sample(
         pc_lon,
         pc_lat,
         ens_sd,
-        title=f"{vname[0]} ens sd",
+        title=f"{vname} ens sd",
         datashader=datashader,
         transform=transform,
     )
@@ -1363,7 +1362,7 @@ def plot_ensemble_sample(
             np.take(pred_ens, i_ens, axis=ens_dim) - ens_mean,
             cmap=error_cmap,
             norm=TwoSlopeNorm(vcenter=0.0),
-            title=f"{vname[0]}_{i_ens + 1} - mean",
+            title=f"{vname}_{i_ens + 1} - mean",
             datashader=datashader,
             transform=transform,
         )

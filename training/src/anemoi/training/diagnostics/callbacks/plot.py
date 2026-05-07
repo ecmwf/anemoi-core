@@ -944,7 +944,10 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
 
-        self.precip_and_related_fields = precip_and_related_fields
+        # Per-callback value takes priority; fall back to plotting_settings if not given.
+        self.precip_and_related_fields = precip_and_related_fields or (
+            self.plotting_settings.precip_and_related_fields if self.plotting_settings else None
+        )
         self.accumulation_levels_plot = accumulation_levels_plot
         self.per_sample = per_sample
         self.colormaps = colormaps
