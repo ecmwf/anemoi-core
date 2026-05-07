@@ -67,7 +67,7 @@ class DiffusionTransportObjective(TransportObjective):
             conditioned_target,
             condition,
             model_comm_group=self.module.model_comm_group,
-            grid_shard_shapes=self.module.grid_shard_shapes,
+            grid_shard_sizes=self.module.grid_shard_sizes,
         )
 
     def compute_loss(
@@ -97,7 +97,7 @@ class DiffusionTransportObjective(TransportObjective):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.module.grid_dim,
-                grid_shard_shapes=self.module.grid_shard_shapes[dataset_name],
+                grid_shard_sizes=self.module.grid_shard_sizes[dataset_name],
             )
 
         return loss(y_pred, y, **loss_kwargs)

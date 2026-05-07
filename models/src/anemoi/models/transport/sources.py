@@ -18,6 +18,8 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
 from anemoi.models.transport.random_fields import randn_with_grid_sharding
 from anemoi.models.transport.settings import TransportSourceSettings
@@ -60,15 +62,15 @@ class TransportSourceSpec:
     shape: tuple[int, ...]
     device: torch.device
     dtype: torch.dtype
-    grid_shard_shapes: list[int] | None = None
+    grid_shard_sizes: ShardSizes = None
 
     @classmethod
-    def from_tensor(cls, tensor: torch.Tensor, grid_shard_shapes: list[int] | None = None) -> TransportSourceSpec:
+    def from_tensor(cls, tensor: torch.Tensor, grid_shard_sizes: ShardSizes = None) -> TransportSourceSpec:
         return cls(
             shape=tuple(tensor.shape),
             device=tensor.device,
             dtype=tensor.dtype,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
 
@@ -77,7 +79,7 @@ def sampling_source_specs(
     *,
     n_step_output: int,
     num_output_channels: dict[str, int],
-    grid_shard_shapes: dict[str, Optional[list[int]]] | None = None,
+    grid_shard_sizes: DatasetShardSizes | None = None,
 ) -> dict[str, TransportSourceSpec]:
     """Infer source tensor shapes from the sampling input batch."""
     return {
@@ -91,7 +93,7 @@ def sampling_source_specs(
             ),
             device=x_data.device,
             dtype=x_data.dtype,
-            grid_shard_shapes=grid_shard_shapes.get(dataset_name) if grid_shard_shapes is not None else None,
+            grid_shard_sizes=grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None,
         )
         for dataset_name, x_data in x.items()
     }
@@ -124,7 +126,7 @@ class TransportSourceRequest:
         default_kind: str,
         source_factories: dict[str, TransportSourceFactory] | None = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list[int]]] | None = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         allowed_kinds: frozenset[str] | None = None,
         error_context: str = "transport source",
     ) -> TransportSourceRequest:
@@ -132,7 +134,7 @@ class TransportSourceRequest:
             specs={
                 name: TransportSourceSpec.from_tensor(
                     tensor,
-                    grid_shard_shapes=grid_shard_shapes.get(name) if grid_shard_shapes is not None else None,
+                    grid_shard_sizes=grid_shard_sizes.get(name) if grid_shard_sizes is not None else None,
                 )
                 for name, tensor in tensors.items()
             },
@@ -159,7 +161,7 @@ class TransportSourceRequest:
                 device=spec.device,
                 dtype=spec.dtype,
                 model_comm_group=model_comm_group,
-                grid_shard_shapes=spec.grid_shard_shapes,
+                grid_shard_sizes=spec.grid_shard_sizes,
             )
             for name, spec in specs.items()
         }
@@ -226,7 +228,7 @@ class TransportSourceBuilder:
                 * randn_like_with_grid_sharding(
                     source,
                     model_comm_group=request.model_comm_group,
-                    grid_shard_shapes=request.specs[name].grid_shard_shapes,
+                    grid_shard_sizes=request.specs[name].grid_shard_sizes,
                 )
                 for name, source in sources.items()
             }

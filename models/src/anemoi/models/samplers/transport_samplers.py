@@ -15,6 +15,7 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.transport.paths import karras_sigma_from_unit_time
 from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
 
@@ -24,7 +25,7 @@ TransportModelFunction = Callable[
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
         Optional[ProcessGroup],
-        dict[str, Optional[list]],
+        DatasetShardSizes | None,
     ],
     dict[str, torch.Tensor],
 ]
@@ -265,9 +266,9 @@ class DiffusionSampler(ABC):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Run diffusion sampling from the initial noisy field to a clean prediction.
 
         Parameters
@@ -283,14 +284,15 @@ class DiffusionSampler(ABC):
             Function that performs denoising
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training
-        grid_shard_shapes : dict[str, Optional[list]]
-            Grid shard shapes for distributed processing
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes for the grid dimension. ``None`` means the
+            corresponding dataset is replicated, not sharded.
         **kwargs
             Additional sampler-specific parameters
 
         Returns
         -------
-        torch.Tensor
+        dict[str, torch.Tensor]
             Sampled output with shape (batch, time, ensemble, grid, vars)
         """
         pass
@@ -323,7 +325,7 @@ class EDMHeunSampler(DiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         # Override instance defaults with any kwargs
@@ -353,14 +355,14 @@ class EDMHeunSampler(DiffusionSampler):
                 sigma_effective = sigma_i + gamma * sigma_i
 
                 for dataset_name in y_solver:
-                    dataset_grid_shard_shapes = (
-                        grid_shard_shapes.get(dataset_name) if grid_shard_shapes is not None else None
+                    dataset_grid_shard_sizes = (
+                        grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
                     )
                     epsilon = (
                         randn_like_with_grid_sharding(
                             y_solver[dataset_name],
                             model_comm_group=model_comm_group,
-                            grid_shard_shapes=dataset_grid_shard_shapes,
+                            grid_shard_sizes=dataset_grid_shard_sizes,
                         )
                         * S_noise
                     )
@@ -380,7 +382,7 @@ class EDMHeunSampler(DiffusionSampler):
                 y_model,
                 sigma_effective_expanded,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
             D1_solver = {dataset_name: den.to(dtype) for dataset_name, den in D1.items()}
 
@@ -407,7 +409,7 @@ class EDMHeunSampler(DiffusionSampler):
                     y_next_model,
                     sigma_next_expanded,
                     model_comm_group,
-                    grid_shard_shapes,
+                    grid_shard_sizes,
                 )
                 D2_solver = {dataset_name: den.to(dtype) for dataset_name, den in D2.items()}
 
@@ -445,7 +447,7 @@ class DPMpp2MSampler(DiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         dtype = kwargs.get("dtype", self.dtype)
@@ -466,7 +468,7 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma_next = sigmas[i + 1]
 
             sigma_expanded = _expand_scalar_condition(sigma, y)
-            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_shapes)
+            denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_sizes)
             denoised_solver = {dataset_name: den.to(dtype) for dataset_name, den in denoised.items()}
 
             if sigma_next == 0:
@@ -526,7 +528,7 @@ class VectorFieldSampler(ABC):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Move the field along the provided time grid."""
@@ -550,7 +552,7 @@ class VectorFieldEulerSampler(VectorFieldSampler):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         if vector_field_fn is None:
@@ -571,7 +573,7 @@ class VectorFieldEulerSampler(VectorFieldSampler):
                 y_model,
                 time_expanded,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
 
             for dataset_name in y_solver:
@@ -597,7 +599,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         if vector_field_fn is None:
@@ -618,7 +620,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 y_model,
                 time_i_expanded,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
 
             y_predictor = {
@@ -634,7 +636,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 y_next_model,
                 time_next_expanded,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
 
             for dataset_name in y_solver:
@@ -666,7 +668,7 @@ class StochasticInterpolantEulerMaruyamaSampler(VectorFieldSampler):
         times: torch.Tensor,
         vector_field_fn: DriftFunction = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         drift_fn = kwargs.pop("drift_fn", vector_field_fn)
@@ -700,7 +702,7 @@ class StochasticInterpolantEulerMaruyamaSampler(VectorFieldSampler):
                 y_model,
                 time_expanded,
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
             drift_solver = {dataset_name: drift_data.to(dtype) for dataset_name, drift_data in drift.items()}
 
@@ -712,13 +714,11 @@ class StochasticInterpolantEulerMaruyamaSampler(VectorFieldSampler):
             noise_std = noise_scale * sigma_i * torch.sqrt(dt)
 
             for dataset_name in y_solver:
-                dataset_grid_shard_shapes = (
-                    grid_shard_shapes.get(dataset_name) if grid_shard_shapes is not None else None
-                )
+                dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
                 noise = randn_like_with_grid_sharding(
                     y_solver[dataset_name],
                     model_comm_group=model_comm_group,
-                    grid_shard_shapes=dataset_grid_shard_shapes,
+                    grid_shard_sizes=dataset_grid_shard_sizes,
                 )
                 y_solver[dataset_name] = y_solver[dataset_name] + dt * drift_solver[dataset_name] + noise_std * noise
 

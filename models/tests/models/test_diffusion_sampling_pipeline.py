@@ -43,14 +43,14 @@ def test_before_sampling_non_sharded_returns_none_grid_shapes() -> None:
     batch = {"data": torch.randn(2, 4, 3, 2)}
     pre_processors = {"data": IdentityProcessor()}
 
-    (xs,), grid_shard_shapes = model._before_sampling(
+    (xs,), grid_shard_sizes = model._before_sampling(
         batch,
         pre_processors,
         n_step_input=3,
         model_comm_group=None,
     )
 
-    assert grid_shard_shapes is None
+    assert grid_shard_sizes is None
     assert xs["data"].shape == (2, 3, 1, 3, 2)
 
 
@@ -78,7 +78,7 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
         _post_processors,
         _before_sampling_data,
         _model_comm_group,
-        _grid_shard_shapes,
+        _grid_shard_sizes,
         _gather_out,
         **_kwargs,
     ):
@@ -123,10 +123,10 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
             sigmas: torch.Tensor,
             denoising_fn,
             model_comm_group=None,
-            grid_shard_shapes=None,
+            grid_shard_sizes=None,
             **kwargs,
         ):
-            del denoising_fn, model_comm_group, grid_shard_shapes, kwargs
+            del denoising_fn, model_comm_group, grid_shard_sizes, kwargs
             assert isinstance(sigmas, torch.Tensor)
             assert sigmas.shape == (5,)
             assert sigmas[-1] == 0.0
@@ -183,7 +183,7 @@ def test_sample_dispatches_stochastic_interpolant_to_euler_maruyama_sampler(
             times: torch.Tensor,
             vector_field_fn,
             model_comm_group=None,
-            grid_shard_shapes=None,
+            grid_shard_sizes=None,
             **kwargs,
         ):
             sigma_fn = kwargs["sigma_fn"]
@@ -198,7 +198,7 @@ def test_sample_dispatches_stochastic_interpolant_to_euler_maruyama_sampler(
                 y,
                 {"ds_a": torch.zeros(1, 1, 1, 1, 1)},
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
 
     model = _transport_model_stub()
@@ -247,7 +247,7 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
             times: torch.Tensor,
             vector_field_fn,
             model_comm_group=None,
-            grid_shard_shapes=None,
+            grid_shard_sizes=None,
             **kwargs,
         ):
             del kwargs
@@ -260,7 +260,7 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
                 y,
                 {"ds_a": torch.zeros(1, 1, 1, 1, 1)},
                 model_comm_group,
-                grid_shard_shapes,
+                grid_shard_sizes,
             )
 
     model = _transport_model_stub()
@@ -477,9 +477,9 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_shapes
+        del model_comm_group, grid_shard_sizes
         out = {}
         for dataset_name, target_data in conditioned_target.items():
             condition_data = condition[dataset_name]

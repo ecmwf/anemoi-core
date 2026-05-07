@@ -16,6 +16,7 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.samplers import transport_samplers
 from anemoi.models.transport.paths import stochastic_interpolant_sigma
 from anemoi.models.transport.paths import unit_time_grid
@@ -59,7 +60,7 @@ class TransportModelObjective:
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> dict[str, torch.Tensor]:
         raise NotImplementedError
 
@@ -68,7 +69,7 @@ class TransportModelObjective:
         model: Any,
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
@@ -86,7 +87,7 @@ class DiffusionModelObjective(TransportModelObjective):
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> dict[str, torch.Tensor]:
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
         pred = model.forward_network(
@@ -94,7 +95,7 @@ class DiffusionModelObjective(TransportModelObjective):
             {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
             c_noise,
             model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
         return {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
 
@@ -103,7 +104,7 @@ class DiffusionModelObjective(TransportModelObjective):
         model: Any,
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
@@ -127,7 +128,7 @@ class DiffusionModelObjective(TransportModelObjective):
         source = model.build_sampling_source(
             x,
             model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
             default_kind="gaussian",
         )
         sigmas, y_init = {}, {}
@@ -162,7 +163,7 @@ class DiffusionModelObjective(TransportModelObjective):
             y_arg: dict[str, torch.Tensor],
             sigma_arg: dict[str, torch.Tensor],
             comm_arg: Optional[ProcessGroup] = None,
-            shard_shapes_arg: dict[str, Optional[list]] | None = None,
+            shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
             return self.forward(
                 model,
@@ -170,7 +171,7 @@ class DiffusionModelObjective(TransportModelObjective):
                 y_arg,
                 sigma_arg,
                 model_comm_group=comm_arg,
-                grid_shard_shapes=shard_shapes_arg,
+                grid_shard_sizes=shard_sizes_arg,
             )
 
         return sampler_instance.sample(
@@ -179,7 +180,7 @@ class DiffusionModelObjective(TransportModelObjective):
             sigmas_ref,
             denoising_fn,
             model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
     @staticmethod
@@ -226,14 +227,14 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         interpolant_state: dict[str, torch.Tensor],
         time_level: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: Optional[dict[str, list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> dict[str, torch.Tensor]:
         return model.forward_network(
             x,
             interpolant_state,
             time_level,
             model_comm_group=model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
     def sample(
@@ -241,7 +242,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         model: Any,
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, Optional[list]] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
@@ -266,7 +267,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             source = model.build_sampling_source(
                 x,
                 model_comm_group=model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
+                grid_shard_sizes=grid_shard_sizes,
             )
         y_init = _expand_source_to_output_steps(source, model.n_step_output)
         y_init = {
@@ -280,7 +281,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             y_arg: dict[str, torch.Tensor],
             time_arg: dict[str, torch.Tensor],
             comm_arg: Optional[ProcessGroup] = None,
-            shard_shapes_arg: dict[str, Optional[list]] | None = None,
+            shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
             return self.forward(
                 model,
@@ -288,7 +289,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
                 y_arg,
                 time_arg,
                 model_comm_group=comm_arg,
-                grid_shard_shapes=shard_shapes_arg,
+                grid_shard_sizes=shard_sizes_arg,
             )
 
         def sigma_fn(time_arg: torch.Tensor) -> torch.Tensor:
@@ -308,7 +309,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
                 times,
                 transport_fn,
                 model_comm_group,
-                grid_shard_shapes=grid_shard_shapes,
+                grid_shard_sizes=grid_shard_sizes,
                 sigma_fn=sigma_fn,
             )
 
@@ -323,7 +324,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             times,
             transport_fn,
             model_comm_group,
-            grid_shard_shapes=grid_shard_shapes,
+            grid_shard_sizes=grid_shard_sizes,
         )
 
 

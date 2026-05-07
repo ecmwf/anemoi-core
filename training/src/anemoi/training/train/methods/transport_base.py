@@ -186,7 +186,7 @@ class TransportObjective:
             default_kind=default_kind,
             source_factories={"reference_state": reference_source_factory},
             model_comm_group=getattr(self.module, "model_comm_group", None),
-            grid_shard_shapes=getattr(self.module, "grid_shard_shapes", None),
+            grid_shard_sizes=getattr(self.module, "grid_shard_sizes", None),
             error_context="training",
         )
         return self.module.model.model.transport_source.build(request)

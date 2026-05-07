@@ -248,7 +248,7 @@ class TendencyPredictionMode(PredictionMode):
 
         x_ref = self.module.model.model.apply_reference_state_truncation(
             x,
-            self.module.grid_shard_shapes,
+            self.module.grid_shard_sizes,
             self.module.model_comm_group,
         )
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}

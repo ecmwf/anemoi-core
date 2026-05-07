@@ -43,7 +43,6 @@ _MULTISCALE_BASE = {
     "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
     "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
     "weights": [0.5, 0.5],
-    "keep_batch_sharded": False,
 }
 
 _ON_THE_FLY_MULTISCALE_CONFIG = {

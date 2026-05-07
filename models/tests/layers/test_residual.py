@@ -136,29 +136,36 @@ def test_forward_with_edges_name(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-def test_truncated_connection_shard_shapes_follow_grid_dimension(graph_data, monkeypatch):
+def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data, monkeypatch):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
         truncation_up_edges_name=("hidden", "to", "data"),
         edge_weight_attribute="edge_length",
     )
-    captured = {}
+    calls = []
 
-    def capture_to_channel_shards(x, shard_shapes=None, model_comm_group=None):
-        del model_comm_group
-        captured["x_shape"] = tuple(x.shape)
-        captured["shard_shapes"] = shard_shapes
+    def fake_all_to_all(x, scatter_dim, scatter_sizes, gather_dim, gather_sizes, group):
+        calls.append(
+            {
+                "scatter_dim": scatter_dim,
+                "scatter_sizes": scatter_sizes,
+                "gather_dim": gather_dim,
+                "gather_sizes": gather_sizes,
+            }
+        )
         return x
 
-    monkeypatch.setattr(mapper, "_to_channel_shards", capture_to_channel_shards)
-    monkeypatch.setattr(mapper, "_to_grid_shards", lambda x, shard_shapes=None, model_comm_group=None: x)
+    monkeypatch.setattr("anemoi.models.layers.residual.all_to_all_transpose", fake_all_to_all)
+    monkeypatch.setattr("anemoi.models.layers.residual.get_shard_sizes", lambda x, dim, group: [x.shape[dim]])
 
     x = torch.randn(3, 2, 1, 2, 3)  # (batch, dates, ensemble, grid, features)
-    mapper.forward(x, grid_shard_shapes=[1, 1])
+    mapper.forward(x, grid_shard_sizes=[1, 1])
 
-    assert captured["x_shape"] == (3, 2, 3)
-    assert captured["shard_shapes"] == [[3, 1, 3], [3, 1, 3]]
+    # Two all-to-all calls: grid->channel before projection, channel->grid after
+    assert len(calls) == 2
+    assert calls[0]["gather_sizes"] == [1, 1]  # grid_shard_sizes used as gather
+    assert calls[1]["scatter_sizes"] == [1, 1]  # grid_shard_sizes used as scatter
 
 
 def test_skipconnection(flat_data):

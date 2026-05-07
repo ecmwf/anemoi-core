@@ -19,10 +19,10 @@ def test_randn_with_grid_sharding_creates_full_grid_before_sharding(monkeypatch)
         values = torch.arange(math.prod(shape), device=device, dtype=dtype)
         return values.reshape(shape)
 
-    def fake_shard_tensor(input_, dim, shapes, mgroup):
-        calls["shapes"] = shapes
+    def fake_shard_tensor(input_, dim, sizes, mgroup):
+        calls["sizes"] = sizes
         calls["mgroup"] = mgroup
-        return input_.narrow(dim, 0, shapes[0][dim])
+        return input_.narrow(dim, 0, sizes[0])
 
     monkeypatch.setattr(torch, "randn", fake_randn)
     monkeypatch.setattr(random_fields, "shard_tensor", fake_shard_tensor)
@@ -33,11 +33,11 @@ def test_randn_with_grid_sharding_creates_full_grid_before_sharding(monkeypatch)
         device=torch.device("cpu"),
         dtype=torch.float32,
         model_comm_group=model_comm_group,
-        grid_shard_shapes=[3, 5],
+        grid_shard_sizes=[3, 5],
     )
 
     expected_full = torch.arange(1 * 2 * 1 * 8 * 4, dtype=torch.float32).reshape(1, 2, 1, 8, 4)
     torch.testing.assert_close(noise, expected_full.narrow(-2, 0, 3))
     assert calls["shape"] == (1, 2, 1, 8, 4)
-    assert calls["shapes"] == [[1, 2, 1, 3, 4], [1, 2, 1, 5, 4]]
+    assert calls["sizes"] == [3, 5]
     assert calls["mgroup"] is model_comm_group

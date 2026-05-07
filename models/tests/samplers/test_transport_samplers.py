@@ -64,9 +64,9 @@ class RecordingZeroDenoiser:
         y: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_shapes
+        del model_comm_group, grid_shard_sizes
         self.call_count += 1
         if self.validator is not None:
             self.validator(x, y, sigma)
@@ -258,9 +258,9 @@ def test_vector_field_samplers_integrate_constant_velocity(
         y: dict[str, torch.Tensor],
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_shapes
+        del model_comm_group, grid_shard_sizes
         time_expanded = time[DATASET_NAME]
         assert time_expanded.dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
         assert time_expanded.shape == (
@@ -289,9 +289,9 @@ def test_vector_field_heun_matches_linear_ode_predictor_corrector_step() -> None
         y: dict[str, torch.Tensor],
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del x, model_comm_group, grid_shard_shapes
+        del x, model_comm_group, grid_shard_sizes
         return {DATASET_NAME: 2.0 * y[DATASET_NAME] + time[DATASET_NAME]}
 
     sampler = VectorFieldHeunSampler(dtype=torch.float64)
@@ -315,9 +315,9 @@ def test_stochastic_interpolant_euler_maruyama_matches_drift_when_noise_disabled
         y: dict[str, torch.Tensor],
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_shapes
+        del model_comm_group, grid_shard_sizes
         assert time[DATASET_NAME].dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
         return {DATASET_NAME: torch.ones_like(y[DATASET_NAME])}
 
@@ -338,9 +338,9 @@ def test_stochastic_interpolant_euler_maruyama_adds_path_noise_with_fixed_seed()
         y: dict[str, torch.Tensor],
         time: dict[str, torch.Tensor],
         model_comm_group=None,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
     ) -> dict[str, torch.Tensor]:
-        del x, time, model_comm_group, grid_shard_shapes
+        del x, time, model_comm_group, grid_shard_sizes
         return {dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()}
 
     seed = 123

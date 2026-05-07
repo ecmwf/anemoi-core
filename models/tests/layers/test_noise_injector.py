@@ -54,7 +54,7 @@ def test_noise_conditioning_graph_projection_shape() -> None:
         batch_size=batch_size,
         ensemble_size=ensemble_size,
         grid_size=hidden_nodes,
-        shard_shapes_ref=[],
+        grid_shard_sizes=[],
     )
 
     assert noise is not None
