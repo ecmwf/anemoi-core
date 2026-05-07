@@ -34,7 +34,7 @@ ls -l "$GRAPH_BASE" "$GRAPH_DATA"
 
 # Set this to the run_id produced by d-2GPU-1hr-refc_value-no_refc_input-finer_graph_v1-202405.sh
 # before submitting this restart job.
-RUN_ID=REPLACE_WITH_RUN_ID
+RUN_ID=dfe60ea5-25f4-4c32-957a-81b58d203c26
 
 # Set the final epoch target for the resumed run.
 MAX_EPOCHS=800
