@@ -118,7 +118,6 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            keep_batch_sharded: false
             weights: [0.5, 0.25, 0.15, 0.1]   # num_scales + 1 entries
             multiscale_config:
                num_scales: 3                   # 3 smoothed + 1 full-res appended automatically
@@ -140,7 +139,6 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            keep_batch_sharded: false
             weights: [0.5, 0.25, 0.15, 0.1]   # must match number of loss_matrices entries
             multiscale_config:
                loss_matrices_path: /path/to/truncation-matrices
