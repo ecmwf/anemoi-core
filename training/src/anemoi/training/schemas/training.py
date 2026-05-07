@@ -287,12 +287,6 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
-<<<<<<< HEAD
-class MultiScaleLossSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
-    weights: list[float]
-=======
 class GraphLossMatrixSchema(BaseModel):
     """One graph-backed smoothing matrix definition for multiscale loss."""
 
@@ -307,7 +301,6 @@ class MultiscaleConfigDiskSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
->>>>>>> main
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None]
 
