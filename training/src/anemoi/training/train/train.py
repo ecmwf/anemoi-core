@@ -255,7 +255,6 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "task": self.task,
             "data_indices": self.data_indices,
-            "graph_config": self.config.graph,
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
