@@ -59,6 +59,8 @@ def register_gradient_scaling_hooks(
             continue
         if any(skip_name in name for skip_name in skip_grad_scaling):
             continue
+        if getattr(param, "_skip_grad_scaling", False):
+            continue
         param.register_hook(lambda grad: grad * float(model_comm_group_size))
 
 
