@@ -69,10 +69,11 @@ training:
         pl:
           is_pressure_level: True
 
-model:
-  encoder:
-    gradient_checkpointing: False
-  processor:
-    gradient_checkpointing: False
-  decoder:
-    gradient_checkpointing: False
+encoder:
+  gradient_checkpointing: False
+
+processor:
+  gradient_checkpointing: False
+
+decoder:
+  gradient_checkpointing: False
