@@ -77,6 +77,18 @@ class BaseGraphModel(nn.Module):
             )
 
         self._calculate_shapes_and_indices(data_indices)
+        for dataset_name in self._graph_data.keys():
+            LOGGER.info(
+                "Model runtime dims [%s]: num_channels=%d, n_step_input=%d, "
+                "model_input_vars=%d, raw_input_dim=%d, model_output_vars=%d, output_dim=%d",
+                dataset_name,
+                self.num_channels,
+                self.n_step_input,
+                self.num_input_channels[dataset_name],
+                self.input_dim[dataset_name],
+                self.num_output_channels[dataset_name],
+                self.output_dim[dataset_name],
+            )
         self._assert_matching_indices(data_indices)
         self._assert_consistent_hidden_graphs()
 

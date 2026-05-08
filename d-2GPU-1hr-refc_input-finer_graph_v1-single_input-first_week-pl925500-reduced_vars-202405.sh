@@ -31,6 +31,7 @@ if [[ ! -e "$GRAPH_DATA" ]]; then
   ln -s "$GRAPH_BASE" "$GRAPH_DATA"
 fi
 ls -l "$GRAPH_BASE" "$GRAPH_DATA"
+echo "Using reduced-vars config with model.num_channels=512"
 
 srun --gpu-bind=closest \
   --export=ALL,TRITON_CACHE_DIR=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/triton_cache/${SLURM_JOB_ID}/${SLURM_PROCID} \

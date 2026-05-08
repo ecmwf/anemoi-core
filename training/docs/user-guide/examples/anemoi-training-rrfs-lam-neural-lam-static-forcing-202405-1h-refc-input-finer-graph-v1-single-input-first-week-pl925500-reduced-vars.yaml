@@ -3,8 +3,9 @@ defaults:
   - _self_
 
 # First-week, single-input, finer-graph experiment with refc included in the
-# prognostic/input state. Pressure-level variables are restricted to 925 and
-# 500 hPa by dropping all 850 and 200 hPa fields from the dataset loader.
+# prognostic/input state. Non-hydrometeor pressure-level variables are
+# restricted to 925 and 500 hPa, while the hydrometeor variables
+# clmr/icmr/rwmr/snmr/grle are removed entirely.
 
 system:
   output:
@@ -14,6 +15,9 @@ data:
   datasets:
     data:
       diagnostic: []
+
+model:
+  num_channels: 512
 
 dataloader:
   training:
@@ -33,15 +37,25 @@ dataloader:
           - temp_200
           - sphum_850
           - sphum_200
+          - clmr_925
           - clmr_850
+          - clmr_500
           - clmr_200
+          - icmr_925
           - icmr_850
+          - icmr_500
           - icmr_200
+          - rwmr_925
           - rwmr_850
+          - rwmr_500
           - rwmr_200
+          - snmr_925
           - snmr_850
+          - snmr_500
           - snmr_200
+          - grle_925
           - grle_850
+          - grle_500
           - grle_200
   validation:
     datasets:
@@ -58,15 +72,25 @@ dataloader:
           - temp_200
           - sphum_850
           - sphum_200
+          - clmr_925
           - clmr_850
+          - clmr_500
           - clmr_200
+          - icmr_925
           - icmr_850
+          - icmr_500
           - icmr_200
+          - rwmr_925
           - rwmr_850
+          - rwmr_500
           - rwmr_200
+          - snmr_925
           - snmr_850
+          - snmr_500
           - snmr_200
+          - grle_925
           - grle_850
+          - grle_500
           - grle_200
   test:
     datasets:
@@ -83,13 +107,23 @@ dataloader:
           - temp_200
           - sphum_850
           - sphum_200
+          - clmr_925
           - clmr_850
+          - clmr_500
           - clmr_200
+          - icmr_925
           - icmr_850
+          - icmr_500
           - icmr_200
+          - rwmr_925
           - rwmr_850
+          - rwmr_500
           - rwmr_200
+          - snmr_925
           - snmr_850
+          - snmr_500
           - snmr_200
+          - grle_925
           - grle_850
+          - grle_500
           - grle_200
