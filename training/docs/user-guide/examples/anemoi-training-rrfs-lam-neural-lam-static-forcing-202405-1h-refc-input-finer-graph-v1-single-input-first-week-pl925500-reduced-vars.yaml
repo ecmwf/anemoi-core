@@ -19,6 +19,9 @@ data:
 model:
   num_channels: 512
 
+training:
+  max_epochs: 200
+
 dataloader:
   training:
     datasets:
