@@ -39,4 +39,8 @@ srun --gpu-bind=closest \
     --config-name anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1 \
     system.hardware.num_gpus_per_node=2 \
     system.hardware.num_nodes=1 \
-    system.hardware.num_gpus_per_model=1
+    system.hardware.num_gpus_per_model=1 \
+    model.encoder.gradient_checkpointing=False \
+    model.processor.gradient_checkpointing=False \
+    model.decoder.gradient_checkpointing=False \
+    model.compile=[]

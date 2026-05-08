@@ -68,12 +68,3 @@ training:
         default: sfc
         pl:
           is_pressure_level: True
-
-encoder:
-  gradient_checkpointing: False
-
-processor:
-  gradient_checkpointing: False
-
-decoder:
-  gradient_checkpointing: False
