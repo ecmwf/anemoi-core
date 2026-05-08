@@ -74,7 +74,7 @@ def _safe_copy_average_to_current(self: Any, pl_module: Any) -> None:
         current_buf.data.copy_(avg_buf.data)
 
 
-def _get_weight_averaging_callback(config: DictConfig) -> list[Callback]:
+def _get_weight_averaging_callback(weight_averaging_config: DictConfig | None) -> list[Callback]:
     """Get weight averaging callback from the config.
 
     Example config for EMA weight averaging:
@@ -84,17 +84,15 @@ def _get_weight_averaging_callback(config: DictConfig) -> list[Callback]:
 
     Parameters
     ----------
-    config : DictConfig
-        Job configuration
+    weight_averaging_config : DictConfig | None
+        Weight averaging configuration (``config.training.weight_averaging``),
+        or ``None`` if not configured.
 
     Returns
     -------
     list[Callback]
         List containing the weight averaging callback, or empty list if not configured.
     """
-    from anemoi.training.diagnostics.callbacks import nestedget
-
-    weight_averaging_config = nestedget(config, "training.weight_averaging", None)
     if weight_averaging_config is None:
         LOGGER.debug("No weight averaging configured. Skipping.")
         return []

@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import omegaconf
@@ -171,3 +172,19 @@ def test_mlflow_schema_backward_compatibility() -> None:
 
     assert schema.target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
     assert schema.save_dir is None
+
+
+def test_mlflow_schema_covers_logger_init_params() -> None:
+    """Assert every BaseAnemoiMLflowLogger __init__ param has a field in MlflowSchema.
+
+    run_id and fork_run_id are excluded because they are injected at runtime
+    by get_mlflow_logger, not read from the config schema.
+    """
+    # Parameters injected at runtime rather than sourced from config
+    runtime_params = {"self", "run_id", "fork_run_id"}
+
+    logger_params = set(inspect.signature(AnemoiMLflowLogger.__init__).parameters) - runtime_params
+    schema_fields = set(MlflowSchema.model_fields)
+
+    missing = logger_params - schema_fields
+    assert not missing, f"MlflowSchema is missing fields for logger params: {missing}"
