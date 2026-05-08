@@ -14,15 +14,17 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
-import omegaconf
 import pytest
 import torch
 
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
+from anemoi.training.diagnostics.callbacks.plot import PlotEnsSample
 from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
 from anemoi.training.diagnostics.callbacks.plot import PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
+from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.utils.masks import NoOutputMask
@@ -35,10 +37,8 @@ from anemoi.training.utils.masks import NoOutputMask
 
 
 def test_plot_histogram_instantiation():
-    """PlotHistogram can be instantiated with config and parameters."""
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
+    """PlotHistogram can be instantiated with parameters."""
     callback = PlotHistogram(
-        config=config,
         sample_idx=0,
         parameters=["t2m", "tp", "u10"],
         dataset_names=["data"],
@@ -49,10 +49,8 @@ def test_plot_histogram_instantiation():
 
 
 def test_plot_spectrum_instantiation():
-    """PlotSpectrum can be instantiated with config and parameters."""
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
+    """PlotSpectrum can be instantiated with parameters."""
     callback = PlotSpectrum(
-        config=config,
         sample_idx=0,
         parameters=["t2m", "tp"],
         dataset_names=["data"],
@@ -63,14 +61,12 @@ def test_plot_spectrum_instantiation():
 
 
 def test_plot_loss_instantiation():
-    """PlotLoss can be instantiated with config and optional parameter_groups."""
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
-    callback = PlotLoss(config=config, parameter_groups={})
+    """PlotLoss can be instantiated with optional parameter_groups."""
+    callback = PlotLoss(parameter_groups={})
     assert callback.parameter_groups == {}
     assert callback.dataset_names == ["data"]
 
     callback2 = PlotLoss(
-        config=config,
         parameter_groups={"group_a": ["t2m", "tp"], "group_b": ["u10", "v10"]},
         dataset_names=["data"],
     )
@@ -79,19 +75,7 @@ def test_plot_loss_instantiation():
 
 
 def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
-    config = omegaconf.OmegaConf.create(
-        {
-            "system": {"output": {"plots": None}},
-            "diagnostics": {
-                "plot": {
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"epoch": 1},
-                },
-            },
-        },
-    )
-    callback = GraphTrainableFeaturesPlot(config=config)
+    callback = GraphTrainableFeaturesPlot()
 
     class DummyModel:
         pass
@@ -112,19 +96,7 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
 
 
 def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
-    config = omegaconf.OmegaConf.create(
-        {
-            "system": {"output": {"plots": None}},
-            "diagnostics": {
-                "plot": {
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"epoch": 1},
-                },
-            },
-        },
-    )
-    callback = GraphTrainableFeaturesPlot(config=config)
+    callback = GraphTrainableFeaturesPlot()
 
     class NoOpGraphProvider:
         trainable = None
@@ -145,19 +117,7 @@ def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
 
 
 def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_map():
-    config = omegaconf.OmegaConf.create(
-        {
-            "system": {"output": {"plots": None}},
-            "diagnostics": {
-                "plot": {
-                    "datashader": False,
-                    "asynchronous": False,
-                    "frequency": {"epoch": 1},
-                },
-            },
-        },
-    )
-    callback = GraphTrainableFeaturesPlot(config=config)
+    callback = GraphTrainableFeaturesPlot()
 
     class TrainableTensor:
         trainable = object()
@@ -285,9 +245,7 @@ def _identity_post_processor() -> Callable[[torch.Tensor | Any], torch.Tensor | 
 
 def test_process_forecaster_output_shapes():
     """BasePlotAdditionalMetrics.process: forecaster task yields expected data and output_tensor shapes."""
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotSample(
-        config=config,
         sample_idx=0,
         parameters=["a", "b", "c"],
         accumulation_levels_plot=[0.5],
@@ -325,11 +283,9 @@ def test_process_forecaster_output_shapes():
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
 
 
-def test_process_temporal_downscaler_output_shapes():
-    """BasePlotAdditionalMetrics.process: temporal downscaler task yields expected shapes."""
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
+def test_process_time_interpolator_output_shapes():
+    """BasePlotAdditionalMetrics.process: time-interpolator task yields expected shapes."""
     callback = PlotSample(
-        config=config,
         sample_idx=0,
         parameters=["a", "b"],
         accumulation_levels_plot=[0.5],
@@ -361,9 +317,7 @@ def test_process_temporal_downscaler_output_shapes():
 
 def test_process_temporal_downscaler_multi_out_squeeze():
     """BasePlotAdditionalMetrics.process: temporal downscaler multi-out (ndim=5, shape[0]=1) squeezes to 4D."""
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotSample(
-        config=config,
         sample_idx=0,
         parameters=["a"],
         accumulation_levels_plot=[0.5],
@@ -411,8 +365,7 @@ _PLOT_LOSS_CONFIG = {
 
 def test_plot_loss_sort_and_color_by_parameter_group_small_list():
     """PlotLoss.sort_and_color_by_parameter_group: <=15 params returns identity sort and correct output shapes."""
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
-    callback = PlotLoss(config=config, parameter_groups={})
+    callback = PlotLoss(parameter_groups={})
     parameter_names = ["t2m", "tp", "u10", "v10"]
     sort_idx, colors, xticks, legend_patches = callback.sort_and_color_by_parameter_group(parameter_names)
 
@@ -427,9 +380,7 @@ def test_plot_loss_sort_and_color_by_parameter_group_small_list():
 
 def test_plot_loss_sort_and_color_by_parameter_group_with_groups():
     """PlotLoss.sort_and_color_by_parameter_group: with parameter_groups and >15 params returns grouped sort."""
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
     callback = PlotLoss(
-        config=config,
         parameter_groups={
             "pressure": ["tp", "sp"] + [f"p{i}" for i in range(6)],
             "wind": ["u10", "v10"] + [f"w{i}" for i in range(6)],
@@ -451,8 +402,7 @@ def test_plot_loss_temporal_downscaler():
 
     from anemoi.training.losses.mse import MSELoss
 
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
-    callback = PlotLoss(config=config, parameter_groups={}, dataset_names=["data"])
+    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -504,8 +454,7 @@ def test_plot_loss_diffusion():
 
     from anemoi.training.losses.mse import MSELoss
 
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
-    callback = PlotLoss(config=config, parameter_groups={}, dataset_names=["data"])
+    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -564,8 +513,7 @@ def test_plot_loss_forecaster():
 
     from anemoi.training.losses.mse import MSELoss
 
-    config = omegaconf.OmegaConf.create(_PLOT_LOSS_CONFIG)
-    callback = PlotLoss(config=config, parameter_groups={}, dataset_names=["data"])
+    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -627,9 +575,7 @@ def test_plot_spectrum_temporal_downscaler():
     """PlotSpectrum._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotSpectrum(
-        config=config,
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -671,9 +617,7 @@ def test_plot_spectrum_forecaster():
     """PlotSpectrum._plot produces one figure per (rollout_step, out_step) for forecaster."""
     from unittest.mock import patch
 
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotSpectrum(
-        config=config,
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -722,9 +666,7 @@ def test_plot_histogram_temporal_downscaler():
     """PlotHistogram._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotHistogram(
-        config=config,
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -766,9 +708,7 @@ def test_plot_histogram_forecaster():
     """PlotHistogram._plot produces one figure per (rollout_step, out_step) for forecaster."""
     from unittest.mock import patch
 
-    config = omegaconf.OmegaConf.create(_PLOT_PROCESS_CONFIG)
     callback = PlotHistogram(
-        config=config,
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -933,3 +873,127 @@ def test_plots_plot_predicted_multilevel_flat_sample_returns_figure():
     assert hasattr(fig, "savefig")
     fig.clear()
     plt.close(fig)
+
+
+# Ensemble plot tests
+
+
+NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
+
+default_config = """
+diagnostics:
+  callbacks: []
+
+  plot:
+    enabled: False
+    callbacks: []
+
+  debug:
+    # this will detect and trace back NaNs / Infs etc. but will slow down training
+    anomaly_detection: False
+
+  enable_checkpointing: False
+  checkpoint:
+
+  log: {}
+"""
+
+
+# Ensemble adapter tests
+def test_ensemble_plot_adapter_is_ensemble():
+    """Test EnsemblePlotAdapterWrapper.is_ensemble property."""
+    task = MagicMock()
+    inner = ForecasterPlotAdapter(task)
+    adapter = EnsemblePlotAdapterWrapper(inner)
+    assert adapter.is_ensemble is True
+    assert inner.is_ensemble is False
+
+
+def test_ensemble_plot_adapter_select_members():
+    """Test EnsemblePlotAdapterWrapper.select_members method."""
+    task = MagicMock()
+    inner = ForecasterPlotAdapter(task)
+    adapter = EnsemblePlotAdapterWrapper(inner)
+
+    tensor = torch.randn(2, 3, 4, 100, 5)  # (batch, steps, members, grid, vars)
+
+    # Select single member
+    result = adapter.select_members(tensor, members=0)
+    assert result.shape == (2, 3, 1, 100, 5)
+
+    # Select multiple members
+    result = adapter.select_members(tensor, members=[0, 2])
+    assert result.shape == (2, 3, 2, 100, 5)
+
+    # Select all members (None)
+    result = adapter.select_members(tensor, members=None)
+    assert result.shape == (2, 3, 4, 100, 5)
+    assert torch.equal(result, tensor)
+
+
+def test_ensemble_plot_adapter_prepare_loss_batch():
+    """Test EnsemblePlotAdapterWrapper.prepare_loss_batch squeezes to member 0."""
+    task = MagicMock()
+    inner = ForecasterPlotAdapter(task)
+    adapter = EnsemblePlotAdapterWrapper(inner)
+
+    batch = {"data": torch.randn(2, 5, 3, 100, 5)}  # (batch, time, members, grid, vars)
+    result = adapter.prepare_loss_batch(batch)
+
+    assert result["data"].shape == (2, 5, 100, 5)
+    assert torch.equal(result["data"], batch["data"][:, :, 0, :, :])
+
+
+def test_ensemble_plot_adapter_delegates_to_inner():
+    """Test that EnsemblePlotAdapterWrapper delegates iter_plot_samples and other methods to inner."""
+    task = MagicMock()
+    inner = MagicMock()
+    inner._task = task
+    inner.get_loss_plot_batch_start.return_value = 42
+    inner.prepare_plot_output_tensor.side_effect = lambda x: x
+
+    adapter = EnsemblePlotAdapterWrapper(inner)
+
+    assert adapter.get_loss_plot_batch_start(rollout_step=1) == 42
+    inner.get_loss_plot_batch_start.assert_called_once_with(rollout_step=1)
+
+    tensor = torch.randn(3, 4)
+    adapter.prepare_plot_output_tensor(tensor)
+    inner.prepare_plot_output_tensor.assert_called_once_with(tensor)
+
+    data = np.zeros((5, 100, 10))
+    output = np.zeros((3, 100, 10))
+    list(adapter.iter_plot_samples(data, output))
+    inner.iter_plot_samples.assert_called_once_with(data, output)
+
+
+def test_base_adapter_select_members_is_noop():
+    """Test that BasePlotAdapter.select_members is a no-op."""
+    task = MagicMock()
+    inner = ForecasterPlotAdapter(task)
+    tensor = torch.randn(2, 3, 100, 5)
+
+    result = inner.select_members(tensor, members=0)
+    assert torch.equal(result, tensor)
+
+
+def test_base_adapter_prepare_loss_batch_is_noop():
+    """Test that BasePlotAdapter.prepare_loss_batch is a no-op."""
+    task = MagicMock()
+    inner = ForecasterPlotAdapter(task)
+    batch = {"data": torch.randn(2, 5, 100, 5)}
+
+    result = inner.prepare_loss_batch(batch)
+    assert torch.equal(result["data"], batch["data"])
+
+
+def test_ensemble_plot_ens_sample_instantiation():
+    """Test that PlotEnsSample can be instantiated."""
+    plot_ens_sample = PlotEnsSample(
+        sample_idx=0,
+        parameters=["temperature", "pressure"],
+        accumulation_levels_plot=[0.1, 0.5, 0.9],
+        members=None,
+    )
+    assert plot_ens_sample is not None
+    assert plot_ens_sample.plot_members is None

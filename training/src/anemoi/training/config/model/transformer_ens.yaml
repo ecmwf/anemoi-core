@@ -15,6 +15,8 @@ noise_injector:
   noise_channels_dim: 4
   noise_mlp_hidden_dim: 32
   noise_matrix: null
+  noise_edges_name: null
+  edge_weight_attribute: null
   row_normalize_noise_matrix: false
   autocast: false
   layer_kernels:
@@ -95,9 +97,17 @@ decoder:
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
+# To use truncated connection, replace the above with one of:
+# Option A — build subgraph at runtime from config:
+#  _target_: anemoi.models.layers.residual.TruncatedConnection
+#  truncation_config:
+#    grid: o32
+#    num_nearest_neighbours: 32
+#    sigma: 0.18840
+# Option B — load pre-computed projection matrices from files:
 #  _target_: anemoi.models.layers.residual.TruncatedConnection
 #  truncation_up_file_path: ${system.input.truncation}
-#  truncation_down_file_path:  ${system.input.truncation_inv}
+#  truncation_down_file_path: ${system.input.truncation_inv}
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
