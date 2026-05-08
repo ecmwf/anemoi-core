@@ -1,0 +1,95 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-finer-graph-v1-single-input
+  - _self_
+
+# First-week, single-input, finer-graph experiment with refc included in the
+# prognostic/input state. Pressure-level variables are restricted to 925 and
+# 500 hPa by dropping all 850 and 200 hPa fields from the dataset loader.
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/finer_graph_v1_single_input_first_week_refc_input_pl925500/
+
+data:
+  datasets:
+    data:
+      diagnostic: []
+
+dataloader:
+  training:
+    datasets:
+      data:
+        start: "2024-05-02T09:00:00"
+        end: "2024-05-09T08:00:00"
+        drop:
+          - boundary_mask
+          - height_850
+          - height_200
+          - ugrd_850
+          - ugrd_200
+          - vgrd_850
+          - vgrd_200
+          - temp_850
+          - temp_200
+          - sphum_850
+          - sphum_200
+          - clmr_850
+          - clmr_200
+          - icmr_850
+          - icmr_200
+          - rwmr_850
+          - rwmr_200
+          - snmr_850
+          - snmr_200
+          - grle_850
+          - grle_200
+  validation:
+    datasets:
+      data:
+        drop:
+          - boundary_mask
+          - height_850
+          - height_200
+          - ugrd_850
+          - ugrd_200
+          - vgrd_850
+          - vgrd_200
+          - temp_850
+          - temp_200
+          - sphum_850
+          - sphum_200
+          - clmr_850
+          - clmr_200
+          - icmr_850
+          - icmr_200
+          - rwmr_850
+          - rwmr_200
+          - snmr_850
+          - snmr_200
+          - grle_850
+          - grle_200
+  test:
+    datasets:
+      data:
+        drop:
+          - boundary_mask
+          - height_850
+          - height_200
+          - ugrd_850
+          - ugrd_200
+          - vgrd_850
+          - vgrd_200
+          - temp_850
+          - temp_200
+          - sphum_850
+          - sphum_200
+          - clmr_850
+          - clmr_200
+          - icmr_850
+          - icmr_200
+          - rwmr_850
+          - rwmr_200
+          - snmr_850
+          - snmr_200
+          - grle_850
+          - grle_200
