@@ -184,6 +184,13 @@ class BaseTask(ABC):
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 
+    def extra_state_dict(self) -> dict:
+        """Return task runtime state for checkpoint persistence."""
+        return {}
+
+    def load_extra_state_dict(self, state: dict) -> None:  # noqa: B027
+        """Restore task runtime state from a checkpoint."""
+
     def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
 

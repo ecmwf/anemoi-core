@@ -7,6 +7,7 @@ import torch
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -349,3 +350,45 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     # Assert: compare_variables was called for ERA5
     assert len(era5_index.compare_called_with) == 1
     # Method completes without error (CERRA is silently ignored)
+
+
+# ── Rollout state persistence across checkpoint save / load ───────────────────
+
+
+def _make_module_with_forecaster_task(rollout_cfg: dict) -> DummyTrainingModule:
+    """Build a minimal DummyTrainingModule whose task is a Forecaster."""
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
+    torch.nn.Module.__init__(module)
+    module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
+    module.config = SimpleNamespace(
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
+    )
+    return module
+
+
+def test_get_extra_state_captures_rollout_step() -> None:
+    """get_extra_state returns the live rollout step, not the initial start value."""
+    module = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    module.task.on_train_epoch_end(0)
+    module.task.on_train_epoch_end(1)
+
+    assert module.get_extra_state() == {"rollout": {"step": 3}}
+
+
+def test_set_extra_state_restores_rollout_step() -> None:
+    """set_extra_state recovers rollout.step so resume continues from the right value."""
+    module = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    module.set_extra_state({"rollout": {"step": 3}})
+    assert module.task.rollout.step == 3
+
+
+def test_state_dict_round_trip_preserves_rollout_step() -> None:
+    """Rollout step survives a full state_dict() / load_state_dict() round-trip."""
+    source = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    source.task.on_train_epoch_end(0)
+    source.task.on_train_epoch_end(1)
+    assert source.task.rollout.step == 3
+
+    target = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    target.load_state_dict(source.state_dict(), strict=False)
+    assert target.task.rollout.step == 3

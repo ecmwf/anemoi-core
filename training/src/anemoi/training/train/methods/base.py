@@ -452,6 +452,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if full_key.startswith(processor_prefixes):
                 state_dict[full_key] = value
 
+    def get_extra_state(self) -> dict:
+        if hasattr(self, "task"):
+            return self.task.extra_state_dict()
+        return {}
+
+    def set_extra_state(self, state: dict) -> None:
+        if hasattr(self, "task"):
+            self.task.load_extra_state_dict(state)
+
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         self._update_checkpoint_state_dict_for_load(checkpoint)
 

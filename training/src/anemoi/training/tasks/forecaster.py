@@ -42,6 +42,14 @@ class RolloutConfig:
             self.step += 1
             LOGGER.info("Rollout window length has been increased to %d.", self.step)
 
+    def state_dict(self) -> dict:
+        """Return serialisable state."""
+        return {"step": self.step}
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore state from a dict produced by :meth:`state_dict`."""
+        self.step = state["step"]
+
 
 class Forecaster(BaseTask):
     """Forecasting task implementation.
@@ -216,6 +224,15 @@ class Forecaster(BaseTask):
             rank_zero_only=True,
             sync_dist=False,
         )
+
+    def extra_state_dict(self) -> dict:
+        """Return task runtime state for checkpoint persistence."""
+        return {"rollout": self.rollout.state_dict()}
+
+    def load_extra_state_dict(self, state: dict) -> None:
+        """Restore task runtime state from a checkpoint."""
+        if "rollout" in state:
+            self.rollout.load_state_dict(state["rollout"])
 
     def on_train_epoch_end(self, current_epoch: int) -> None:
         if self.rollout.should_increase(current_epoch):

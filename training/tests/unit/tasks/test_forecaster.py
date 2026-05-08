@@ -147,6 +147,66 @@ def test_forecaster_rollout_no_increment_when_zero() -> None:
     assert task.rollout.step == 1
 
 
+# ── RolloutConfig: state_dict / load_state_dict ───────────────────────────────
+
+
+def test_rollout_config_state_dict_captures_current_step() -> None:
+    """state_dict returns the live step, not the initial start value."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 5},
+    )
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.state_dict() == {"step": 3}
+
+
+def test_rollout_config_load_state_dict_restores_step() -> None:
+    """load_state_dict overwrites step regardless of current value."""
+    from anemoi.training.tasks.forecaster import RolloutConfig
+
+    cfg = RolloutConfig(start=1, epoch_increment=1, maximum=10)
+    cfg.load_state_dict({"step": 7})
+    assert cfg.step == 7
+
+
+# ── Forecaster: extra_state_dict / load_extra_state_dict ─────────────────────
+
+
+def test_forecaster_extra_state_dict_round_trip() -> None:
+    """Saving and loading extra state restores rollout.step exactly."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 10},
+    )
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+
+    saved = task.extra_state_dict()
+
+    fresh = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 10},
+    )
+    assert fresh.rollout.step == 1
+    fresh.load_extra_state_dict(saved)
+    assert fresh.rollout.step == 3
+
+
+def test_forecaster_load_extra_state_dict_missing_key_is_noop() -> None:
+    """load_extra_state_dict with an empty dict leaves rollout.step unchanged."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2})
+    task.load_extra_state_dict({})
+    assert task.rollout.step == 2
+
+
 # ── Forecaster: batch slicing ─────────────────────────────────────────────────
 
 

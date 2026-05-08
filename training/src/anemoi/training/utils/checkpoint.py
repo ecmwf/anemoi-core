@@ -97,7 +97,11 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     model_state_dict = model.state_dict()
 
     for key in state_dict.copy():
-        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+        if (
+            key in model_state_dict
+            and isinstance(state_dict[key], torch.Tensor)
+            and state_dict[key].shape != model_state_dict[key].shape
+        ):
             LOGGER.info("Skipping loading parameter: %s", key)
             LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
             LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
