@@ -18,12 +18,12 @@ import torch
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from training.src.anemoi.training.data.anemoidataset import AnemoiDataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.training.utils.time_indices import offset_time_indices
+from training.src.anemoi.training.data.anemoidataset import AnemoiDataset
 
 LOGGER = logging.getLogger(__name__)
 
