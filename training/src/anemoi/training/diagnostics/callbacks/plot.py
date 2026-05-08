@@ -232,7 +232,7 @@ class BasePlotCallback(Callback, ABC):
             self.loop_thread._delete()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
-        if hasattr(pl_module, "output_mask") and pl_module.otput_mask is not None:
+        if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
             # Fill with NaNs values where the mask is False
             data[:, :, :, ~pl_module.output_mask, :] = np.nan
         return data
@@ -249,15 +249,34 @@ class BasePlotCallback(Callback, ABC):
     ) -> None:
         """Plotting function to be implemented by subclasses."""
 
+    # Async function to run the plot function in the background thread
+    async def submit_plot(self, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
+        """Async function or coroutine to schedule the plot function."""
+        loop = asyncio.get_running_loop()
+        # run_in_executor doesn't support keyword arguments,
+        await loop.run_in_executor(
+            self._executor,
+            self._plot_with_error_catching,
+            trainer,
+            args,
+            kwargs,
+        )  # because loop.run_in_executor expects positional arguments, not keyword arguments
+
     @rank_zero_only
-    def plot(
+    def _async_plot(
         self,
         trainer: pl.Trainer,
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """Schedule the plot function via the executor (sync or async)."""
-        self._executor.schedule(self._plot_with_error_catching, trainer, *args, **kwargs)
+        """Run the plot function asynchronously.
+
+        This is the function that is called by the callback. It schedules the plot
+        function to run in the background thread. Since we have an event loop running in
+        the background thread, we need to schedule the plot function to run in that
+        loop.
+        """
+        asyncio.run_coroutine_threadsafe(self.submit_plot(trainer, *args, **kwargs), self.loop)
 
 
 class BasePerBatchPlotCallback(BasePlotCallback):
