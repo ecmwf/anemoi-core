@@ -37,7 +37,7 @@ ls -l "$GRAPH_BASE" "$GRAPH_DATA"
 RUN_ID=dfe60ea5-25f4-4c32-957a-81b58d203c26
 
 # Set the final epoch target for the resumed run.
-MAX_EPOCHS=800
+MAX_EPOCHS=1500
 
 CKPT=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/checkpoint/${RUN_ID}/last.ckpt
 echo "Resuming run_id=${RUN_ID}"
