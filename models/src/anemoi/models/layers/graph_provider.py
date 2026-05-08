@@ -31,6 +31,54 @@ from anemoi.models.layers.graph import TrainableTensor
 LOGGER = logging.getLogger(__name__)
 
 
+def normalize_projection_edges_name(
+    edges_name: tuple[str, str, str] | list[str] | None,
+) -> tuple[str, str, str] | None:
+    """Convert a projection edge name to a tuple."""
+    if edges_name is None:
+        return None
+    edges_name = tuple(edges_name)
+    if len(edges_name) != 3:
+        msg = "Projection edge name must contain source, relation, and target."
+        raise ValueError(msg)
+    return (edges_name[0], edges_name[1], edges_name[2])
+
+
+def create_projection_graph_provider(
+    *,
+    graph: HeteroData | None = None,
+    edges_name: tuple[str, str, str] | list[str] | None = None,
+    file_path: str | Path | None = None,
+    edge_weight_attribute: str | None = None,
+    src_node_weight_attribute: str | None = None,
+    row_normalize: bool = False,
+) -> "ProjectionGraphProvider":
+    """Create a projection graph provider from resolved inputs."""
+    edges_name = normalize_projection_edges_name(edges_name)
+    if file_path is not None:
+        if graph is not None or edges_name is not None:
+            msg = "Projection graph provider accepts either file_path or graph and edges_name."
+            raise ValueError(msg)
+        return ProjectionGraphProvider(
+            file_path=file_path,
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
+            row_normalize=row_normalize,
+        )
+
+    if graph is None or edges_name is None:
+        msg = "Projection graph provider requires either file_path or graph and edges_name."
+        raise ValueError(msg)
+
+    return ProjectionGraphProvider(
+        graph=graph,
+        edges_name=edges_name,
+        edge_weight_attribute=edge_weight_attribute,
+        src_node_weight_attribute=src_node_weight_attribute,
+        row_normalize=row_normalize,
+    )
+
+
 def create_graph_provider(
     graph: Optional[HeteroData] = None,
     edge_attributes: Optional[list[str]] = None,
@@ -456,11 +504,17 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
         if file_path is not None:
             if src_node_weight_attribute is not None:
-                msg = f"Building ProjectionGraphProvider from file, so src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+                msg = (
+                    "Building ProjectionGraphProvider from file, so "
+                    f"src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+                )
                 LOGGER.warning(msg)
 
             if edge_weight_attribute is not None:
-                msg = f"Building ProjectionGraphProvider from file, so edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+                msg = (
+                    "Building ProjectionGraphProvider from file, so "
+                    f"edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+                )
                 LOGGER.warning(msg)
             self._build_from_file(file_path, row_normalize)
         else:

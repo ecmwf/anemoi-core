@@ -19,11 +19,11 @@ from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import create_projection_graph_provider
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.sparse_projector import apply_sparse_projector_with_reshaping
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
@@ -181,15 +181,18 @@ class TruncatedConnection(BaseResidualConnection):
                 truncation_up_file_path = up_path
                 truncation_down_file_path = down_path
             else:
-                from anemoi.graphs.builders import build_truncation_subgraph
+                from anemoi.graphs.builders import build_node_to_node_projection_subgraph
 
-                graph = build_truncation_subgraph(graph, data_node_name, truncation_config)
+                graph = build_node_to_node_projection_subgraph(
+                    graph,
+                    data_node_name,
+                    "truncation",
+                    truncation_config,
+                    target_grid_keys=("grid", "truncation_grid"),
+                    reverse=True,
+                )
                 truncation_down_edges_name = (data_node_name, "to", "truncation")
                 truncation_up_edges_name = ("truncation", "to", data_node_name)
-
-        _edge_weight_attr = (
-            edge_weight_attribute if edge_weight_attribute is not None else DEFAULT_EDGE_WEIGHT_ATTRIBUTE
-        )
 
         up_edges, down_edges = self._resolve_edges(
             graph=graph,
@@ -199,8 +202,14 @@ class TruncatedConnection(BaseResidualConnection):
             truncation_down_edges_name=truncation_down_edges_name,
         )
 
-        self.provider_down = ProjectionGraphProvider(
-            graph=graph,
+        _edge_weight_attr = edge_weight_attribute
+        if _edge_weight_attr is None and truncation_up_file_path is None and truncation_down_file_path is None:
+            from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+
+            _edge_weight_attr = DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+
+        self.provider_down = create_projection_graph_provider(
+            graph=None if truncation_down_file_path is not None else graph,
             edges_name=down_edges,
             edge_weight_attribute=_edge_weight_attr,
             src_node_weight_attribute=src_node_weight_attribute,
@@ -208,8 +217,8 @@ class TruncatedConnection(BaseResidualConnection):
             row_normalize=row_normalize,
         )
 
-        self.provider_up = ProjectionGraphProvider(
-            graph=graph,
+        self.provider_up = create_projection_graph_provider(
+            graph=None if truncation_up_file_path is not None else graph,
             edges_name=up_edges,
             edge_weight_attribute=_edge_weight_attr,
             src_node_weight_attribute=src_node_weight_attribute,
@@ -284,8 +293,8 @@ class TruncatedConnection(BaseResidualConnection):
         channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
         if grid_shard_sizes is not None:  # grids sharding -> channel sharding
             x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
-        x = self.projector(x, self.provider_down.get_edges(device=x.device))
-        x = self.projector(x, self.provider_up.get_edges(device=x.device))
+        x = apply_sparse_projector_with_reshaping(self.projector, x, self.provider_down)
+        x = apply_sparse_projector_with_reshaping(self.projector, x, self.provider_up)
         if grid_shard_sizes is not None:  # channel sharding -> grid sharding
             x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
@@ -355,6 +364,16 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         Whether theta is a trainable parameter.
     regressors : list[str] | None
         Variable names to use as regressors.
+    graph : HeteroData | None
+        Graph data.
+    statistics : dict | None
+        Optional statistics used for theta initialization.
+    data_indices
+        Variable index metadata.
+    dataset_name : str | None
+        Dataset node name.
+    **_ : Any
+        Additional keyword arguments.
     """
 
     def __init__(
@@ -445,6 +464,16 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         ``truncate=True``).
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
+    graph : HeteroData | None
+        Graph data.
+    statistics : dict | None
+        Optional statistics used for theta initialization.
+    data_indices
+        Variable index metadata.
+    dataset_name : str | None
+        Dataset node name.
+    **_ : Any
+        Additional keyword arguments.
     """
 
     def __init__(

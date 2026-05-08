@@ -13,21 +13,32 @@ from pathlib import Path
 
 import einops
 import torch
+from omegaconf import OmegaConf
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.builders import _expand_smoother_config
-from anemoi.graphs.builders import build_smoother_subgraph
+from anemoi.graphs.builders import build_node_to_node_projection_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import create_projection_graph_provider
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.sparse_projector import apply_sparse_projector_with_reshaping
 from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _normalise_mapping(config: object | None) -> dict:
+    if config is None:
+        return {}
+    if OmegaConf.is_config(config):
+        return dict(OmegaConf.to_container(config, resolve=True))
+    return dict(config)
 
 
 class MultiscaleLossWrapper(BaseLoss):
@@ -157,13 +168,7 @@ class MultiscaleLossWrapper(BaseLoss):
             LOGGER.info("No multiscale_config specified, using single scale without smoothing")
             return [None]
 
-        from omegaconf import OmegaConf
-
-        cfg = (
-            OmegaConf.to_container(multiscale_config, resolve=True)
-            if OmegaConf.is_config(multiscale_config)
-            else dict(multiscale_config)
-        )
+        cfg = _normalise_mapping(multiscale_config)
 
         if "loss_matrices" in cfg:
             from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -198,12 +203,17 @@ class MultiscaleLossWrapper(BaseLoss):
 
         # Reverse order: coarsest scale first (highest smoothing)
         for smoother_name, smoother_cfg in reversed(list(smoothers.items())):
-            subgraph = build_smoother_subgraph(graph_data, data_node_name, smoother_cfg)
+            subgraph = build_node_to_node_projection_subgraph(
+                graph_data,
+                data_node_name,
+                data_node_name,
+                smoother_cfg,
+            )
             src_node_weight_attribute = (
                 smoother_cfg.get("src_node_weight_attribute") if isinstance(smoother_cfg, dict) else None
             )
             row_normalize = bool(smoother_cfg.get("row_normalize", False)) if isinstance(smoother_cfg, dict) else False
-            provider = ProjectionGraphProvider(
+            provider = create_projection_graph_provider(
                 graph=subgraph,
                 edges_name=edge_name,
                 edge_weight_attribute=DEFAULT_EDGE_WEIGHT_ATTRIBUTE,
@@ -235,7 +245,7 @@ class MultiscaleLossWrapper(BaseLoss):
                 continue
 
             file_path = Path(filename) if loss_matrices_path is None else Path(loss_matrices_path, filename)
-            provider = ProjectionGraphProvider(
+            provider = create_projection_graph_provider(
                 file_path=file_path,
                 row_normalize=False,
             )
@@ -295,11 +305,7 @@ class MultiscaleLossWrapper(BaseLoss):
 
     def _apply_projector(self, batch: torch.Tensor, provider: ProjectionGraphProvider) -> torch.Tensor:
         """Apply sparse projector to a batch, handling multi-dimensional inputs."""
-        input_shape = batch.shape
-        batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = provider.get_edges(device=batch.device)
-        batch = self.projector(batch, projection_matrix)
-        return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
+        return apply_sparse_projector_with_reshaping(self.projector, batch, provider)
 
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply smoothing matrix to predictions and targets for loss computation."""

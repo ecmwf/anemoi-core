@@ -358,6 +358,40 @@ class MultiScaleLossSchema(BaseModel):
         return self
 
 
+class SpectralProjectionConfigSchema(BaseModel):
+    """File, graph-edge, or on-the-fly graph config for spectral-loss projection."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    matrix_path: str | None = None
+    edges_name: tuple[str, str, str] | None = None
+    projection_node_name: str = "projection"
+    grid: str | None = None
+    target_grid: str | None = None
+    node_builder: dict[str, Any] | None = None
+    num_nearest_neighbours: PositiveInt = 3
+    sigma: float = 1.0
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+    @model_validator(mode="after")
+    def check_single_projection_mode(self) -> Self:
+        target_grid_fields = {"grid", "target_grid", "node_builder"}
+        modes = []
+        if self.matrix_path is not None:
+            modes.append("matrix_path")
+        if self.edges_name is not None:
+            modes.append("edges_name")
+        if any(getattr(self, field) is not None for field in target_grid_fields):
+            modes.append("target_grid")
+
+        if len(modes) != 1:
+            msg = "projection_config must specify exactly one of 'matrix_path', 'edges_name', or target grid fields."
+            raise ValueError(msg)
+        return self
+
+
 class HuberLossSchema(BaseLossSchema):
     delta: float = 1.0
     "Threshold for Huber loss."
@@ -366,8 +400,27 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht", "sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
+    nodes_slice: tuple[int, int | None] | None = None
+    projection_config: SpectralProjectionConfigSchema | None = None
+    projection_autocast: bool = False
+
+    @model_validator(mode="after")
+    def check_no_top_level_projection_config(self) -> Self:
+        unsupported_projection_keys = {
+            "projection_matrix",
+            "projection_edges_name",
+            "projection_edge_weight_attribute",
+            "projection_src_node_weight_attribute",
+            "projection_row_normalize",
+        }
+        extra = self.model_extra or {}
+        unsupported = sorted(set(extra) & unsupported_projection_keys)
+        if unsupported:
+            msg = f"Pass projection settings inside 'projection_config', not as top-level keys: {unsupported}."
+            raise ValueError(msg)
+        return self
 
     class Config(BaseModel.Config):
         """Override to allow extra parameters for spectral transforms."""

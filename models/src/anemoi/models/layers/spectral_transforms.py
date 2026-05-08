@@ -15,8 +15,6 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
-from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
@@ -62,7 +60,6 @@ class FFT2D(SpectralTransform):
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
         patch_padding: bool = False,
-        projection_matrix: str | None = None,
         **kwargs,
     ) -> None:
         """2D FFT Transform.
@@ -87,8 +84,6 @@ class FFT2D(SpectralTransform):
         patch_padding: bool
             If True, allow non-divisible `(y_dim, x_dim)` by zero-padding on the
             bottom/right edges before patch extraction.
-        projection_matrix: str | None
-            Optional path to a projection matrix for sparse projection.
         """
         super().__init__()
 
@@ -137,29 +132,11 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
-        if projection_matrix:
-            self.projection_matrix = ProjectionGraphProvider(file_path=projection_matrix)
-            self.projector = SparseProjector()
-        else:
-            self.projection_matrix = None
-
-    def _apply_projector(self, batch: torch.Tensor) -> torch.Tensor:
-        """Apply sparse projector to a batch, handling multi-dimensional inputs."""
-        input_shape = batch.shape
-        batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = self.projection_matrix.get_edges(device=batch.device)
-        batch = self.projector(batch, projection_matrix)
-        return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
-
     def prepare_for_fft(self, data: torch.Tensor):
-        """Prepare data for FFT: optionally apply sparse projection and reshape."""
+        """Prepare data for FFT by selecting nodes and reshaping."""
 
         # select nodes based on provided nodes_slice
         data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
-
-        # optionally apply sparse projection matrix
-        if self.projection_matrix:
-            data = self._apply_projector(data)
 
         # reshape to 2D
         var = data.shape[-1]
@@ -400,6 +377,8 @@ class InverseRegularSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    **kwargs : Any
+        Additional keyword arguments.
     """
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
@@ -424,6 +403,8 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    **kwargs : Any
+        Additional keyword arguments.
     """
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:

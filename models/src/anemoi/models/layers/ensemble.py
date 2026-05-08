@@ -15,9 +15,10 @@ from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import create_projection_graph_provider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.sparse_projector import apply_sparse_projector_with_reshaping
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -144,9 +145,9 @@ class NoiseConditioning(BaseNoiseInjector):
 
         if noise_edges_name is not None:
             assert graph_data is not None, "graph_data must be provided when using noise_edges_name."
-            self.noise_graph_provider = ProjectionGraphProvider(
+            self.noise_graph_provider = create_projection_graph_provider(
                 graph=graph_data,
-                edges_name=tuple(noise_edges_name),
+                edges_name=noise_edges_name,
                 edge_weight_attribute=edge_weight_attribute,
                 row_normalize=row_normalize_noise_matrix,
             )
@@ -154,7 +155,7 @@ class NoiseConditioning(BaseNoiseInjector):
             LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
 
         if noise_matrix is not None:
-            self.noise_graph_provider = ProjectionGraphProvider(
+            self.noise_graph_provider = create_projection_graph_provider(
                 file_path=noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
             )
@@ -192,8 +193,12 @@ class NoiseConditioning(BaseNoiseInjector):
                 noise, "batch ensemble grid vars -> (batch ensemble) grid vars"
             )  # batch and ensemble always 1 when sharded
 
-            projection_matrix = self.noise_graph_provider.get_edges(device=noise.device)
-            noise = self._sparse_projector(noise, projection_matrix)  # to shape of hidden grid
+            assert self._sparse_projector is not None
+            noise = apply_sparse_projector_with_reshaping(
+                self._sparse_projector,
+                noise,
+                self.noise_graph_provider,
+            )  # to shape of hidden grid
 
             noise = einops.rearrange(noise, "bse grid vars -> (bse grid) vars")  # shape of x
             noise = all_to_all_transpose(

@@ -12,6 +12,7 @@ import pytest
 import torch
 from omegaconf import DictConfig
 from pytest_mock import MockerFixture
+from torch_geometric.data import HeteroData
 
 from anemoi.training.losses import AlmostFairKernelCRPS
 from anemoi.training.losses import FourierCorrelationLoss
@@ -519,7 +520,8 @@ def test_spectral_crps_fft_and_dct() -> None:
         assert out_total.numel() == 1, f"{transform}: scalar CRPS expected"
 
 
-def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_spectral_crps_projection_from_file(transform: str, mocker: MockerFixture) -> None:
     from scipy.sparse import eye
 
     bs, ens, nvars = 2, 5, 3
@@ -539,19 +541,177 @@ def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
         DictConfig(
             {
                 "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
-                "transform": "fft2d",
+                "transform": transform,
                 "x_dim": x_dim,
                 "y_dim": y_dim,
-                "projection_matrix": "/path/to/projection_matrix.npz",
+                "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
                 "scalers": [],
             },
         ),
     )
 
     out = loss(pred, target, squash=False)
-    assert out.shape == (nvars,), "fft2d: per-variable CRPS expected"
+    assert out.shape == (nvars,), f"{transform}: per-variable CRPS expected"
     out_total = loss(pred, target, squash=True)
-    assert out_total.numel() == 1, "fft2d: scalar CRPS expected"
+    assert out_total.numel() == 1, f"{transform}: scalar CRPS expected"
+
+
+def test_spectral_crps_projection_applies_nodes_slice_before_projection(mocker: MockerFixture) -> None:
+    from scipy.sparse import eye
+
+    bs, ens, nvars = 2, 5, 3
+    x_dim, y_dim = 8, 6
+    projected_grid = x_dim * y_dim
+    source_grid = projected_grid * 2
+
+    pred = torch.randn(bs, 1, ens, source_grid, nvars)
+    target = torch.randn(bs, 1, 1, source_grid, nvars)
+
+    mocker.patch("scipy.sparse.load_npz", return_value=eye(projected_grid, format="csr"))
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
+                "transform": "fft2d",
+                "x_dim": x_dim,
+                "y_dim": y_dim,
+                "nodes_slice": (0, projected_grid),
+                "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
+                "scalers": [],
+            },
+        ),
+    )
+
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,)
+
+
+def test_spectral_crps_projection_from_graph_config() -> None:
+    bs, ens, nvars = 2, 5, 3
+    x_dim, y_dim = 2, 2
+    grid = x_dim * y_dim
+
+    graph = HeteroData()
+    graph["data"].x = torch.tensor(
+        [
+            [0.0, 0.0],
+            [0.0, 0.017453292],
+            [0.017453292, 0.0],
+            [0.017453292, 0.017453292],
+        ],
+        dtype=torch.float32,
+    )
+    graph["data"].num_nodes = grid
+
+    pred = torch.randn(bs, 1, ens, grid, nvars)
+    target = torch.randn(bs, 1, 1, grid, nvars)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
+                "transform": "fft2d",
+                "x_dim": x_dim,
+                "y_dim": y_dim,
+                "projection_config": {
+                    "node_builder": {
+                        "_target_": "anemoi.graphs.nodes.LatLonNodes",
+                        "latitudes": [0.0, 0.0, 1.0, 1.0],
+                        "longitudes": [0.0, 1.0, 0.0, 1.0],
+                    },
+                    "num_nearest_neighbours": 1,
+                    "sigma": 1.0,
+                    "row_normalize": False,
+                },
+                "scalers": [],
+            },
+        ),
+        graph_data=graph,
+        data_node_name="data",
+    )
+
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,)
+
+
+def test_spectral_crps_projection_from_existing_edges() -> None:
+    bs, ens, nvars = 2, 5, 3
+    x_dim, y_dim = 2, 2
+    grid = x_dim * y_dim
+    edges_name = ("data", "to", "projection")
+
+    graph = HeteroData()
+    graph["data"].num_nodes = grid
+    graph["projection"].num_nodes = grid
+    graph[edges_name].edge_index = torch.tensor(
+        [
+            [0, 1, 2, 3],
+            [0, 1, 2, 3],
+        ],
+        dtype=torch.long,
+    )
+    graph[edges_name].gauss_weight = torch.ones(grid)
+
+    pred = torch.randn(bs, 1, ens, grid, nvars)
+    target = torch.randn(bs, 1, 1, grid, nvars)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
+                "transform": "fft2d",
+                "x_dim": x_dim,
+                "y_dim": y_dim,
+                "projection_config": {
+                    "edges_name": edges_name,
+                    "edge_weight_attribute": "gauss_weight",
+                },
+                "scalers": [],
+            },
+        ),
+        graph_data=graph,
+        data_node_name="data",
+    )
+
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,)
+
+
+def test_spectral_crps_projection_uses_sharded_layout(mocker: MockerFixture) -> None:
+    from scipy.sparse import eye
+
+    bs, ens, nvars = 2, 5, 3
+    x_dim, y_dim = 8, 6
+    grid = x_dim * y_dim
+
+    pred = torch.randn(bs, 1, ens, grid, nvars)
+    target = torch.randn(bs, 1, 1, grid, nvars)
+    mocker.patch("scipy.sparse.load_npz", return_value=eye(grid, format="csr"))
+    mocker.patch("anemoi.training.losses.spectral.get_shard_sizes", side_effect=lambda x, dim, _group: [x.shape[dim]])
+    all_to_all = mocker.patch(
+        "anemoi.training.losses.spectral.all_to_all_transpose",
+        side_effect=lambda x, *_args: x,
+    )
+    mocker.patch("anemoi.training.losses.base.reduce_tensor", side_effect=lambda x, _group: x)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
+                "transform": "fft2d",
+                "x_dim": x_dim,
+                "y_dim": y_dim,
+                "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
+                "scalers": [],
+            },
+        ),
+    )
+
+    out = loss(pred, target, squash=False, grid_shard_sizes=[grid], group=object())
+
+    assert out.shape == (nvars,)
+    assert all_to_all.call_count == 4
 
 
 def test_spectral_crps_with_target_without_ensemble_dim() -> None:
