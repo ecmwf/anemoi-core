@@ -305,21 +305,6 @@ class MultiscaleConfigDiskSchema(BaseModel):
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner per_scale_loss)."
 
-    @field_validator("per_scale_loss", mode="before")
-    @classmethod
-    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
-        """Inject empty scalers for inner loss; scalers flow through the wrapper."""
-        if isinstance(v, dict) and "scalers" not in v:
-            v["scalers"] = []
-        else:
-            from omegaconf import DictConfig
-            from omegaconf.omegaconf import open_dict
-
-            if isinstance(v, DictConfig) and "scalers" not in v:
-                with open_dict(v):
-                    v["scalers"] = []
-        return v
-
 
 class MultiscaleConfigOnTheFlySchema(BaseModel):
     """On-the-fly multiscale config: smoothing subgraphs built from the main graph."""
@@ -359,6 +344,21 @@ class MultiScaleLossSchema(BaseModel):
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
+
+    @field_validator("per_scale_loss", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss; scalers flow through the wrapper."""
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
 
     @model_validator(mode="after")
     def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
