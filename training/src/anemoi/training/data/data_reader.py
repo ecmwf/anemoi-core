@@ -129,6 +129,11 @@ class BaseAnemoiReader(ABC):
         return self.data.dates
 
     @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return self.data.shape[0]
+
+    @property
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
@@ -183,47 +188,6 @@ class BaseAnemoiReader(ABC):
         """Return dataset resolution."""
         return self.data.resolution
 
-    # ------------------------------------------------------------- coordinates
-
-    @cached_property
-    def latitudes(self) -> np.ndarray:
-        """Return per-grid-point latitudes in **radians**.
-
-        Backed by ``self.data.latitudes`` (which is stored in degrees by
-        ``anemoi.datasets``); converted once and cached.
-        """
-        return np.deg2rad(np.asarray(self.data.latitudes))
-
-    @cached_property
-    def longitudes(self) -> np.ndarray:
-        """Return per-grid-point longitudes in **radians**."""
-        return np.deg2rad(np.asarray(self.data.longitudes))
-
-    @abstractmethod
-    def get_coordinates(
-        self,
-        time_indices: TimeIndices | None = None,
-        grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Return coordinate tensors for the requested time/grid slice."""
-        raise NotImplementedError("Subclasses must implement get_coordinates() method.")
-
-    def get_data(self, time_indices: TimeIndices, grid_shard_indices: np.ndarray | slice | None = None) -> torch.Tensor:
-        """Return data tensor for the requested time/grid slice."""
-        if isinstance(grid_shard_indices, slice):
-            # Load only shards into CPU memory
-            x = self.data[time_indices, :, :, grid_shard_indices]
-
-        else:
-            # Load full grid in CPU memory, select grid_shard after
-            # Note that anemoi-datasets currently doesn't support slicing + indexing
-            # in the same operation.
-            x = self.data[time_indices, :, :, :]
-            x = x[..., grid_shard_indices]  # select the grid shard
-
-        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-        return torch.from_numpy(x)
-
     @property
     @abstractmethod
     def has_trajectories(self) -> bool:
@@ -233,11 +197,9 @@ class BaseAnemoiReader(ABC):
         self,
         time_indices: TimeIndices,
         grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> torch.Tensor:
+    ) -> dict:
         """Get a sample from the dataset."""
-        data = self.get_data(time_indices, grid_shard_indices)
-        coords = self.get_coordinates(time_indices, grid_shard_indices)
-        return {"data": data, "coords": coords}
+        raise NotImplementedError("Subclasses must implement get_sample() method.")
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
@@ -262,10 +224,19 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         """Return dataset supporting_arrays."""
         return self.data.supporting_arrays()
 
-    @property
-    def grid_size(self) -> int:
-        """Return dataset grid size."""
-        return sum(self.data.grids)
+    @cached_property
+    def latitudes(self) -> np.ndarray:
+        """Return per-grid-point latitudes in **radians**.
+
+        Backed by ``self.data.latitudes`` (which is stored in degrees by
+        ``anemoi.datasets``); converted once and cached.
+        """
+        return np.deg2rad(np.asarray(self.data.latitudes))
+
+    @cached_property
+    def longitudes(self) -> np.ndarray:
+        """Return per-grid-point longitudes in **radians**."""
+        return np.deg2rad(np.asarray(self.data.longitudes))
 
     @property
     def has_trajectories(self) -> bool:
@@ -322,6 +293,37 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
             "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
         }
 
+    def get_data(self, time_indices: TimeIndices, grid_shard_indices: np.ndarray | slice | None = None) -> torch.Tensor:
+        """Return data tensor for the requested time/grid slice."""
+        if isinstance(grid_shard_indices, slice):
+            # Load only shards into CPU memory
+            x = self.data[time_indices, :, :, grid_shard_indices]
+
+        else:
+            # Load full grid in CPU memory, select grid_shard after
+            # Note that anemoi-datasets currently doesn't support slicing + indexing
+            # in the same operation.
+            x = self.data[time_indices, :, :, :]
+            x = x[..., grid_shard_indices]  # select the grid shard
+
+        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+        return torch.from_numpy(x)
+
+    def get_sample(
+        self,
+        time_indices: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> dict:
+        """Get a sample from the dataset."""
+        data = self.get_data(time_indices, grid_shard_indices)
+        coords = self.get_coordinates(time_indices, grid_shard_indices)
+        return {
+            "data": data,
+            "coords": coords, 
+            "grid_size": self.grid_size,
+            "grid_shard_indices": grid_shard_indices,
+        }
+
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
         tree.add(f"Resolution: {self.resolution}")
@@ -331,15 +333,17 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
 class ObservationDataReader(BaseAnemoiReader):
     """Observation dataset reader (e.g. from tabular-zarrs)."""
 
+    is_static_grid: bool = False
+
+    @property
+    def grid_size(self) -> None:
+        """Return None — observation datasets have no static grid."""
+        return None
+
     @property
     def supporting_arrays(self) -> dict:
         """Return dataset supporting_arrays."""
         return {}
-
-    @property
-    def grid_size(self) -> int:
-        """Return dataset grid size."""
-        raise NotImplementedError("ObservationDataReader does not implement grid_size since it does not have a static grid.")
 
     @property
     def has_trajectories(self) -> bool:
@@ -353,38 +357,21 @@ class ObservationDataReader(BaseAnemoiReader):
     ) -> dict | None:
         return None
 
-    def get_coordinates(
-        self,
-        time_indices: TimeIndices | None = None,
-        grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Return coordinate tensors for the requested time/grid slice.
-
-        For a static grid the ``time_indices`` argument is ignored and the
-        full grid is returned (sliced by ``grid_shard_indices`` when given).
-        Subclasses with dynamic grids must override.
-
-        Parameters
-        ----------
-        time_indices : TimeIndices, optional
-            Time indices; ignored on static grids.
-        grid_shard_indices : np.ndarray or slice, optional
-            Per-rank grid shard.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Mapping ``{"latitudes": tensor, "longitudes": tensor}`` in radians.
-        """
-        lats = self.latitudes[time_indices]
-        lons = self.longitudes[time_indices]
-        if grid_shard_indices is not None:
-            lats = lats[grid_shard_indices]
-            lons = lons[grid_shard_indices]
+    def get_sample(self, time_indices: TimeIndices, grid_shard_indices: np.ndarray | slice | None = None) -> torch.Tensor:
+        """Return data tensor for the requested time/grid slice."""
+        x = self.data[time_indices]
+        grid_size = x.shape[0]
+        x = x[grid_shard_indices]
 
         return {
-            "latitudes": torch.from_numpy(np.ascontiguousarray(lats)),
-            "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
+            "data": torch.from_numpy(rearrange(x, "gridpoints variables -> 1 1 gridpoints variables")),
+            "coords": {
+                "latitudes": torch.from_numpy(np.ascontiguousarray(x.latitudes)),
+                "longitudes": torch.from_numpy(np.ascontiguousarray(x.longitudes)),
+            },
+            "timedeltas": torch.from_numpy(np.ascontiguousarray(x.timedeltas)),
+            "grid_size": grid_size,
+            "grid_shard_indices": grid_shard_indices,
         }
 
     @property
@@ -392,9 +379,9 @@ class ObservationDataReader(BaseAnemoiReader):
         """Return dataset metadata."""
         return {}
 
+
 class TrajectoryDataset(GriddedDataReader):
     """Trajectory dataset."""
-
     def __init__(
         self,
         trajectory_start: datetime.datetime,

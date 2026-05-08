@@ -58,11 +58,28 @@ class Batch:
         * ``"static_coords"`` — :class:`frozenset` of dataset names whose
           coordinates are static. :meth:`to` and :meth:`pin_memory` will
           skip these entries.
+    grid_sizes : dict[str, int], optional
+        Per-dataset full grid sizes (number of grid points before any
+        distributed sharding). Populated during collation from sample
+        payloads. For static-grid datasets this equals
+        ``sum(dataset.grids)``; for observation datasets it equals the
+        grid dimension of the data tensor.
+    timedeltas : dict[str, torch.Tensor], optional
+        Per-dataset timedelta tensors (e.g. for observation datasets
+        where each point has an associated time offset). Keyed by
+        dataset name. Transferred to device alongside data.
+    grid_shard_indices : dict[str, Any], optional
+        Per-dataset grid shard indices (``np.ndarray``, ``slice``, or
+        ``None``). Describes which grid points are present in this
+        batch's shard. Not transferred to device.
     """
 
     data: dict[str, torch.Tensor]
     coords: dict[str, dict[str, torch.Tensor]] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    grid_sizes: dict[str, int] = field(default_factory=dict)
+    timedeltas: dict[str, torch.Tensor] = field(default_factory=dict)
+    grid_shard_indices: dict[str, Any] = field(default_factory=dict)
 
     # ---------------------------------------------------------------- access
 
@@ -89,6 +106,7 @@ class Batch:
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
             raise KeyError(msg)
+
         return self.data[dataset_name]
 
     def view(self, dataset_name: str) -> "DatasetView":
@@ -101,6 +119,8 @@ class Batch:
             data=self.data[dataset_name],
             coords=self.coords.get(dataset_name, {}),
             is_static=self.is_static_coords(dataset_name),
+            timedeltas=self.timedeltas.get(dataset_name),
+            grid_shard_indices=self.grid_shard_indices.get(dataset_name),
         )
 
     def __contains__(self, dataset_name: str) -> bool:
@@ -147,7 +167,18 @@ class Batch:
                 continue
             new_coords[name] = {key: tensor.to(device, non_blocking=non_blocking) for key, tensor in per_dataset.items()}
 
-        return Batch(data=new_data, coords=new_coords, metadata=self.metadata)
+        new_timedeltas = {
+            name: tensor.to(device, non_blocking=non_blocking) for name, tensor in self.timedeltas.items()
+        }
+
+        return Batch(
+            data=new_data,
+            coords=new_coords,
+            metadata=self.metadata,
+            grid_sizes=self.grid_sizes,
+            timedeltas=new_timedeltas,
+            grid_shard_indices=self.grid_shard_indices,
+        )
 
     def pin_memory(self) -> "Batch":
         """Pin host memory for non-static tensors. Static coords are left untouched."""
@@ -161,7 +192,16 @@ class Batch:
                 continue
             new_coords[name] = {key: tensor.pin_memory() for key, tensor in per_dataset.items()}
 
-        return Batch(data=new_data, coords=new_coords, metadata=self.metadata)
+        new_timedeltas = {name: tensor.pin_memory() for name, tensor in self.timedeltas.items()}
+
+        return Batch(
+            data=new_data,
+            coords=new_coords,
+            metadata=self.metadata,
+            grid_sizes=self.grid_sizes,
+            timedeltas=new_timedeltas,
+            grid_shard_indices=self.grid_shard_indices,
+        )
 
     # ------------------------------------------------------------- transform
 
@@ -191,7 +231,15 @@ class Batch:
                 f"(got {sorted(new_data)}, expected {sorted(self.data)})."
             )
             raise ValueError(msg)
-        return Batch(data=new_data, coords=self.coords, metadata=self.metadata)
+
+        return Batch(
+            data=new_data,
+            coords=self.coords,
+            metadata=self.metadata,
+            grid_sizes=self.grid_sizes,
+            timedeltas=self.timedeltas,
+            grid_shard_indices=self.grid_shard_indices,
+        )
 
     def node_coords(self, dataset_name: str) -> torch.Tensor | None:
         """Return per-node ``(num_nodes, 2)`` lat/lon coords for ``dataset_name``.
@@ -214,9 +262,10 @@ class Batch:
             return None
         latitudes = per_dataset.get("latitudes")
         longitudes = per_dataset.get("longitudes")
-        if latitudes is None or longitudes is None:
-            return None
-        return torch.stack([latitudes, longitudes], dim=-1)
+
+        node_coords = torch.stack([latitudes, longitudes], dim=-1)
+        #node_coords = torch.cat([torch.sin(node_coords), torch.cos(node_coords)], dim=-1)
+        return node_coords
 
     # ----------------------------------------------------------- construction
 
@@ -249,19 +298,24 @@ class Batch:
         first = samples[0]
         dataset_names = tuple(first.keys())
 
-        # Split each sample into a data dict and a coords dict.
+        # Split each sample into a data dict, coords dict, and timedeltas dict.
         per_sample_data: list[dict[str, torch.Tensor]] = []
         per_sample_coords: list[dict[str, dict[str, torch.Tensor]]] = []
+        per_sample_timedeltas: list[dict[str, torch.Tensor]] = []
         for sample in samples:
             sample_data: dict[str, torch.Tensor] = {}
             sample_coords: dict[str, dict[str, torch.Tensor]] = {}
+            sample_timedeltas: dict[str, torch.Tensor] = {}
             for name in dataset_names:
                 payload = sample[name]
                 sample_data[name] = payload["data"]
                 if "coords" in payload:
                     sample_coords[name] = payload["coords"]
+                if "timedeltas" in payload:
+                    sample_timedeltas[name] = payload["timedeltas"]
             per_sample_data.append(sample_data)
             per_sample_coords.append(sample_coords)
+            per_sample_timedeltas.append(sample_timedeltas)
 
         # Stack data tensors along the batch dim (default_collate preserves
         # dict-of-tensor structure).
@@ -277,13 +331,45 @@ class Batch:
                 # repeat across the batch dimension.
                 collated_coords[name] = per_sample_coords[0][name]
             else:
-                collated_coords[name] = default_collate([per_sample_coords[i][name] for i in range(len(samples))])
+                # TODO: Fix for batch_size > 1
+                # collated_coords[name] = default_collate([per_sample_coords[i][name] for i in range(len(samples))])
+                collated_coords[name] = per_sample_coords[0][name]
+
+        # Timedeltas: collate for datasets that have them.
+        collated_timedeltas: dict[str, torch.Tensor] = {}
+        if per_sample_timedeltas[0]:
+            for name in per_sample_timedeltas[0]:
+                collated_timedeltas[name] = default_collate(
+                    [per_sample_timedeltas[i][name] for i in range(len(samples))]
+                )
+
+        # Grid sizes: extract from sample payloads (all samples in a batch
+        # must agree since default_collate requires matching tensor shapes).
+        collated_grid_sizes: dict[str, int] = {}
+        for name in dataset_names:
+            payload = first[name]
+            if "grid_size" in payload:
+                collated_grid_sizes[name] = payload["grid_size"]
+
+        # Grid shard indices: same for all samples in a batch (same worker/shard).
+        collated_grid_shard_indices: dict[str, Any] = {}
+        for name in dataset_names:
+            payload = first[name]
+            if "grid_shard_indices" in payload:
+                collated_grid_shard_indices[name] = payload["grid_shard_indices"]
 
         metadata: dict[str, Any] = {}
         if static:
             metadata[STATIC_COORDS_META_KEY] = frozenset(static)
 
-        return Batch(data=collated_data, coords=collated_coords, metadata=metadata)
+        return Batch(
+            data=collated_data,
+            coords=collated_coords,
+            metadata=metadata,
+            grid_sizes=collated_grid_sizes,
+            timedeltas=collated_timedeltas,
+            grid_shard_indices=collated_grid_shard_indices,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,3 +380,11 @@ class DatasetView:
     data: torch.Tensor
     coords: dict[str, torch.Tensor]
     is_static: bool
+    timedeltas: torch.Tensor | None = None
+    grid_shard_indices: Any = None
+
+    @property
+    def latlons(self) -> torch.Tensor:
+        """Return latitudes and longitudes in radians, stacked along a trailing dim."""
+        latlons = torch.stack([self.coords["latitudes"], self.coords["longitudes"]], dim=-1)
+        return torch.cat([torch.sin(latlons), torch.cos(latlons)], dim=-1).to(torch.float32)

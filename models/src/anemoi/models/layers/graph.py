@@ -9,6 +9,7 @@
 
 
 from collections import defaultdict
+from types import NoneType
 
 import einops
 import torch
@@ -36,14 +37,11 @@ class TrainableTensor(nn.Module):
             trainable = None
         self.register_parameter("trainable", trainable)
 
-    def forward(self, x: Tensor, batch_size: int) -> Tensor:
-        latent = [einops.repeat(x, "e f -> (repeat e) f", repeat=batch_size)]
-        if self.trainable is not None:
-            latent.append(einops.repeat(self.trainable.to(x.device), "e f -> (repeat e) f", repeat=batch_size))
-        return torch.cat(
-            latent,
-            dim=-1,  # feature dimension
-        )
+    def forward(self, batch_size: int) -> Tensor | None:
+        if self.trainable is None:
+            return None
+
+        return einops.repeat(self.trainable, "e f -> (repeat e) f", repeat=batch_size)
 
 
 class NamedNodesAttributes(nn.Module):
@@ -62,8 +60,6 @@ class NamedNodesAttributes(nn.Module):
 
     Methods
     -------
-    get_coordinates(self, name: str) -> Tensor
-        Get the coordinates of a set of nodes.
     forward(self, name: str, batch_size: int, coords: Tensor | None = None) -> Tensor
         Get the node attributes to be passed trough the graph neural network.
         When ``coords`` is provided, sin/cos features are computed on the
@@ -85,7 +81,6 @@ class NamedNodesAttributes(nn.Module):
 
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
-            self.register_coordinates(nodes_name, nodes.x)
             self.register_tensor(nodes_name, trainable_parameters[nodes_name])
 
     def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
@@ -100,34 +95,11 @@ class NamedNodesAttributes(nn.Module):
             {nodes_name: trainable_parameters[nodes_name] for nodes_name in nodes_names}
         )
 
-    def register_coordinates(self, name: str, node_coords: Tensor) -> None:
-        """Register coordinates."""
-        sin_cos_coords = torch.cat([torch.sin(node_coords), torch.cos(node_coords)], dim=-1)
-        self.register_buffer(f"latlons_{name}", sin_cos_coords, persistent=True)
-
-    def get_coordinates(self, name: str) -> Tensor:
-        """Return original coordinates."""
-        sin_cos_coords = getattr(self, f"latlons_{name}")
-        ndim = sin_cos_coords.shape[1] // 2
-        sin_values = sin_cos_coords[:, :ndim]
-        cos_values = sin_cos_coords[:, ndim:]
-        return torch.atan2(sin_values, cos_values)
-
     def register_tensor(self, name: str, num_trainable_params: int) -> None:
         """Register a trainable tensor."""
         self.trainable_tensors[name] = TrainableTensor(self.num_nodes[name], num_trainable_params)
 
-    @staticmethod
-    def _sin_cos_features(coords: Tensor) -> Tensor:
-        """Return ``[sin(coords), cos(coords)]`` concatenated along the last dim.
-
-        Mirrors the encoding used at registration time
-        (see :meth:`register_coordinates`) so that on-the-fly per-batch
-        coordinates are featurised consistently with the static buffer.
-        """
-        return torch.cat([torch.sin(coords), torch.cos(coords)], dim=-1)
-
-    def forward(self, name: str, batch_size: int, coords: Tensor | None = None) -> Tensor:
+    def forward(self, name: str, batch_size: int) -> Tensor | None:
         """Returns the node attributes to be passed trough the graph neural network.
 
         It includes both the coordinates and the trainable parameters.
@@ -140,17 +112,8 @@ class NamedNodesAttributes(nn.Module):
             Batch size; the (per-node) coordinate features are repeated
             ``batch_size`` times along the leading axis to match the
             flattened ``(batch * grid)`` layout used by the encoder/decoder.
-        coords : Tensor, optional
-            Per-batch raw coordinates for ``name`` with shape
-            ``(num_nodes, ndim)``. When provided, sin/cos features are
-            computed on the fly and used in place of the registered
-            ``latlons_{name}`` buffer; this is the path used by dynamic
-            graph providers / variable-grid datasets. When ``None``
-            (default) the static buffer is used, preserving full
-            backward compatibility with existing checkpoints.
         """
-        if coords is None:
-            latlons = getattr(self, f"latlons_{name}")
-        else:
-            latlons = self._sin_cos_features(coords)
-        return self.trainable_tensors[name](latlons, batch_size)
+        if name not in self.trainable_tensors:
+            return None
+
+        return self.trainable_tensors[name](batch_size)

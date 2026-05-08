@@ -64,7 +64,7 @@ def create_graph_provider(
     BaseGraphProvider
         Appropriate graph provider instance
     """
-    if graph is None and edge_builders is not None:
+    if (graph == {} or graph is None) and edge_builders is not None:
         return DynamicGraphProvider(
             edge_builder_config=edge_builders,
             edge_attributes_configs=attributes,
@@ -215,7 +215,12 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[tuple[list, list]]]:
         """Implementation of get_edges."""
-        edge_attr = self.trainable(self.edge_attr, batch_size)
+        edge_trainable_params = self.trainable(batch_size)
+        if edge_trainable_params is not None:
+            edge_attr = torch.cat([self.edge_attr, edge_trainable_params], dim=1)
+        else:
+            edge_attr = self.edge_attr
+
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
 
         if shard_edges:
@@ -338,7 +343,7 @@ class DynamicGraphProvider(BaseGraphProvider):
             Expected dimension of edge attributes
         """
         super().__init__()
-        self.edge_builder = instantiate(edge_builder_config, source_name="-", target_name="-")
+        self.edge_builder = instantiate(edge_builder_config[0], source_name="-", target_name="-")
         self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
         self._edge_dim = edge_dim
         self.device = "cpu"
