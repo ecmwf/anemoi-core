@@ -101,7 +101,7 @@ class BaseDDPStrategy(DDPStrategy):
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
-        self.shard_shapes: dict | None = None
+        self.shard_sizes: dict | None = None
 
     @abstractmethod
     def _setup_communication_groups(self) -> int:
@@ -119,7 +119,7 @@ class BaseDDPStrategy(DDPStrategy):
 
         super().setup(trainer)
 
-        self.shard_shapes = self._setup_shard_shapes(trainer)
+        self.shard_sizes = self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
@@ -127,8 +127,8 @@ class BaseDDPStrategy(DDPStrategy):
         self.register_parameter_hooks()
         super().configure_ddp()
 
-    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard shapes for the dataloader.
+    def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard sizes for the dataloader.
 
         Parameters
         ----------
@@ -138,11 +138,11 @@ class BaseDDPStrategy(DDPStrategy):
         Returns
         -------
         dict
-            A dictionary containing the shard shapes for each dataset.
+            A dictionary containing the shard sizes for each dataset.
         """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
-        return shard_shapes
+        shard_sizes = trainer.model.module.shard_sizes
+        assert shard_sizes is not None, "Shard shapes should be set after setup"
+        return shard_sizes
 
     def register_parameter_hooks(self) -> None:
         """Register parameter hooks for gradient reduction."""
@@ -241,7 +241,7 @@ class DDPGroupStrategy(BaseDDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
-            self.shard_shapes,
+            self.shard_sizes,
         )
 
         return dataloader
@@ -406,7 +406,7 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
-            self.shard_shapes,
+            self.shard_sizes,
         )
 
         dataloader.dataset.set_ens_comm_group_info(
