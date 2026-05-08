@@ -25,11 +25,13 @@ from torch_geometric.utils import mask_to_index
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.graph import model_is_distributed
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.triton.utils import sort_edge_index_by_dst
 
 
 def get_k_hop_edges(
@@ -66,6 +68,30 @@ def get_k_hop_edges(
     )
 
     return edge_attr[mask_to_index(edge_mask_k)], edge_index_k
+
+
+def ensure_edges_are_dst_sorted(
+    edge_attr: Tensor,
+    edge_index: Adj,
+    *,
+    num_dst: int,
+    edges_are_sharded: bool,
+    model_comm_group: ProcessGroup | None = None,
+    edges_are_dst_sorted: bool = False,
+) -> tuple[Tensor, Adj]:
+    """Ensure edge tensors are dst-sorted before GraphTransformer attention."""
+    if edges_are_dst_sorted:
+        return edge_attr, edge_index
+
+    if edges_are_sharded and model_is_distributed(model_comm_group):
+        msg = (
+            "Edge-sharded GraphTransformer inputs must be dst-sorted before use. "
+            "Sorting an already distributed edge shard would require gathering edge_attr and edge_index together."
+        )
+        raise ValueError(msg)
+
+    edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=num_dst)
+    return edge_attr[perm], edge_index
 
 
 def sort_edges_1hop_sharding(
@@ -402,7 +428,7 @@ def shard_graph_to_local(
         Sharded (x_src_local, x_dst), edge_attr, edge_index, updated shard_info,
         cond subset (or None).
     """
-    if model_comm_group is None or model_comm_group.size() <= 1:
+    if not model_is_distributed(model_comm_group):
         return x, edge_attr, edge_index, shard_info, cond
 
     assert (
@@ -525,7 +551,7 @@ def build_graph_partition_from_shard_info(
     comm_size = model_comm_group.size() if model_comm_group is not None else 1
 
     edge_index_full = edge_index
-    if shard_info.edges_are_sharded():  # need full edge_index to build partitioning
+    if shard_info.edges_are_sharded() and model_is_distributed(model_comm_group):
         edge_index_full = _gather(edge_index, 1, shard_info.edges, model_comm_group)
 
     return build_graph_partition(edge_index_full, num_parts=comm_size, num_nodes=(n_src, n_dst))
