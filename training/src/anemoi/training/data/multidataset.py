@@ -10,6 +10,7 @@
 import logging
 import os
 import random
+from collections.abc import Generator
 
 import numpy as np
 import torch
@@ -143,7 +144,7 @@ class MultiDataset(AnemoiDataset):
 
         return x
 
-    def __iter__(self) -> dict[str, torch.Tensor]:
+    def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Return an iterator that yields dictionaries of synchronized samples.
 
         Returns

@@ -10,6 +10,7 @@
 import logging
 import os
 import random
+from collections.abc import Generator
 
 import numpy as np
 import torch
@@ -144,7 +145,7 @@ class MultiDomainDataset(AnemoiDataset):
 
         return {domain_name: self.data_readers[domain_name].get_sample(time_step, grid_indices)}
 
-    def __iter__(self) -> dict[str, torch.Tensor]:
+    def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Return an iterator that yields a tuple torch.Tensor and its corresponding domain name.
 
         Returns
