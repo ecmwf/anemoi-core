@@ -30,19 +30,18 @@ class ConcreteBaseMapper(BaseMapper):
         # Simple dummy processor
         self.proc = torch.nn.Identity()
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
-        shapes_src, shapes_dst = shard_shapes
+    def pre_process(self, x):
         x_src, x_dst = x
-        return x_src, x_dst, shapes_src, shapes_dst
+        return x_src, x_dst
 
     def post_process(self, x_dst, **kwargs):
         return x_dst
 
-    def forward(self, x, batch_size, shard_shapes, graph_provider, model_comm_group=None, **kwargs):
+    def forward(self, x, batch_size, shard_info, graph_provider, model_comm_group=None, **kwargs):
         """Simple forward implementation for testing."""
-        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
+        x_src, x_dst = self.pre_process(x)
         # Simple identity operation
-        result = self.post_process(x_dst, shapes_dst=shapes_dst)
+        result = self.post_process(x_dst)
         return result
 
 
@@ -119,20 +118,15 @@ class TestBaseMapper:
 
     def test_pre_process(self, mapper, pair_tensor):
         x = pair_tensor
-        shard_shapes = [list(x[0].shape), list(x[1].shape)]
 
-        x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(x, shard_shapes)
+        x_src, x_dst = mapper.pre_process(x)
         assert torch.equal(x_src, x[0])
         assert torch.equal(x_dst, x[1])
-        assert shapes_src == shard_shapes[0]
-        assert shapes_dst == shard_shapes[1]
 
     def test_post_process(self, mapper, pair_tensor):
         x_dst = pair_tensor[1]
-        shapes_dst = [list(x_dst.shape)]
 
         result = mapper.post_process(
             x_dst,
-            shapes_dst=shapes_dst,
         )
         assert torch.equal(result, x_dst)

@@ -35,6 +35,7 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
+from .tasks import TaskSchema
 from .training import TrainingSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -71,6 +72,36 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
 _DEPRECATED_TARGETS: dict[str, str] = {
     "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
         "This callback has been deprecated and removed, update your config to remove any references to it. "
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotEnsSample' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotHistogram' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotLoss' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotSpectrum' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotSample' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
+        "instead and update your config accordingly."
     ),
 }
 
@@ -137,6 +168,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Graph configuration."""
     model: ModelSchema
     """Model configuration."""
+    task: TaskSchema
+    """Task configuration."""
     training: TrainingSchema
     """Training configuration."""
     config_validation: bool = True
@@ -181,13 +214,15 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Graph configuration."""
     model: Any
     """Model configuration."""
+    task: Any
+    """Task configuration."""
     training: Any
     """Training configuration."""
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
 
-def convert_to_omegaconf(config: BaseSchema) -> dict:
+def convert_to_omegaconf(config: BaseSchema) -> DictConfig:
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
 

@@ -30,6 +30,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
+from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -99,6 +100,7 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
         raise KeyError("\n".join(errors))
 
 
+@skip_if_offline
 @typechecked
 def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
     BaseSchema(**aicon_config_with_tmp_dir)
@@ -117,7 +119,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     dataset_name = "data"
     assert_metadatakeys(
         trainer.metadata,
-        ("config", "data", "timestep"),
+        ("metadata_inference", dataset_name, "timesteps", "timestep"),
         ("config", "graph", "nodes", "data", "node_builder", "max_level"),
         ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
         ("config", "training", "precision"),

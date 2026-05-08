@@ -16,7 +16,6 @@ import traceback
 from abc import ABC
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,10 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
+from matplotlib.figure import Figure
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+from pydantic import BaseModel as PydanticBaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
@@ -42,44 +45,36 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
+from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass
-class PlottingSettings:
-    """Settings for plotting callbacks.
-
-    TODO: Move this to Pydantic schema and inject settings in each callback.
-
-    Parameters
-    ----------
-    datashader : bool
-        Whether to use datashader for plotting
-    projection_kind : str
-        Map projection kind (e.g., "equirectangular")
-    asynchronous : bool
-        Whether to plot asynchronously in background thread
-    save_basedir : str | None
-        Base directory for saving plot files
-    colormaps : dict | None
-        Color mappings for different variables and error types
-    precip_and_related_fields : list[str] | None
-        List of precipitation and related field names
-    focus_areas : dict | None
-        Spatial focus areas for plotting (lat/lon bounding boxes)
-    dataset_names : list[str] | None
-        Dataset names to plot from
-    """
+class PlottingSettings(PydanticBaseModel):
+    """Settings for plotting callbacks, shared across all plot callbacks in a run."""
 
     datashader: bool = True
     projection_kind: str = "equirectangular"
     asynchronous: bool = True
-    save_basedir: str | None = None
+    save_basedir: str | Path | None = None
     colormaps: dict | None = None
     precip_and_related_fields: list[str] | None = None
     focus_areas: dict | None = None
     dataset_names: list[str] | None = None
+
+    @classmethod
+    def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | Path | None) -> "PlottingSettings":
+        """Construct from a validated diagnostics.plot config node."""
+        return cls(
+            datashader=plot_cfg.datashader,
+            projection_kind=plot_cfg.projection_kind,
+            asynchronous=plot_cfg.asynchronous,
+            save_basedir=save_basedir,
+            colormaps=OmegaConf.select(plot_cfg, "colormaps", default=None),
+            precip_and_related_fields=OmegaConf.select(plot_cfg, "precip_and_related_fields", default=None),
+            focus_areas=OmegaConf.select(plot_cfg, "focus_areas", default=None),
+            dataset_names=OmegaConf.select(plot_cfg, "datasets_to_plot", default=None),
+        )
 
 
 class BasePlotExecutor(ABC):
@@ -750,14 +745,25 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            adapter = pl_module.plot_adapter
-            for rollout_step in range(adapter.loss_plot_times):
-                y_hat = outputs[1][rollout_step][dataset_name]
-                start = adapter.get_loss_plot_batch_start(rollout_step)
-                y_time = batch[dataset_name].narrow(1, start, pl_module.n_step_output)
-                var_idx = data_indices.data.output.full.to(device=batch[dataset_name].device)
-                y_true = y_time.index_select(-1, var_idx)
-                loss = reduce_to_last_dim(self.loss[dataset_name](y_hat, y_true, squash=False).detach().cpu().numpy())
+            for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+                y_hat = outputs[1][i][dataset_name]
+                y_true = pl_module.task.get_targets(
+                    batch={dataset_name: batch[dataset_name]},
+                    data_indices=pl_module.data_indices,
+                    **task_kwargs,
+                )[dataset_name]
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](
+                        y_hat,
+                        y_true,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_FULL,
+                        squash=False,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                )
 
                 sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
                     parameter_names,
@@ -765,12 +771,13 @@ class PlotLoss(BasePerBatchPlotCallback):
                 loss = loss[argsort_indices]
                 fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
+                metric_name = pl_module.task.get_metric_name(**task_kwargs)
                 self._output_figure(
                     logger,
                     fig,
                     epoch=epoch,
-                    tag=f"loss_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
-                    exp_log_tag=f"loss_sample_{dataset_name}_rstep{rollout_step:02d}_rank{pl_module.local_rank:01d}",
+                    tag=f"loss_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
                 )
 
     def on_validation_batch_end(
@@ -803,7 +810,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 trainer,
                 pl_module,
                 output,
-                batch,
+                pl_module.plot_adapter.prepare_loss_batch(batch),
                 batch_idx,
             )
 
@@ -850,6 +857,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
+        members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
@@ -861,12 +869,15 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             The name of the dataset to process
         outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
             The outputs from the model. The second element must be a list of dicts
-            (one per outer step). Tasks with a single step (e.g. diffusion, multi-out
-            interpolator) must return [y_pred] so that ``for x in outputs[1]``
+            (one per outer step). Tasks with a single step (e.g. diffusion,
+            temporal downscaling) must return [y_pred] so that ``for x in outputs[1]``
             iterates over steps; if they return the dict directly, iteration would
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
             The batch of data
+        members : int | list[int] | None, optional
+            Ensemble members to select. Only used when the plot adapter is ensemble-aware.
+            None returns all members. Default is 0 (first member).
 
         Returns
         -------
@@ -887,24 +898,19 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         ), "outputs[1] must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
-        total_targets = pl_module.plot_adapter.get_total_plot_targets()
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
 
-        input_tensor = (
-            batch[dataset_name][
-                :,
-                pl_module.n_step_input - 1 : pl_module.n_step_input + total_targets + 1,
-                ...,
-                pl_module.data_indices[dataset_name].data.output.full,
-            ]
-            .detach()
-            .cpu()
-        )
+        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
+
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                    self.sample_idx : self.sample_idx + 1
-                ]
+                pl_module.plot_adapter.select_members(
+                    self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                        self.sample_idx : self.sample_idx + 1
+                    ],
+                    members,
+                )
                 for x in outputs[1]
             ),
         )
@@ -931,7 +937,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         sample_idx: int,
         parameters: list[str],
         accumulation_levels_plot: list[float],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         colormaps: dict[str, Colormap] | None = None,
         per_sample: int = 6,
@@ -950,8 +955,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             Parameters to plot
         accumulation_levels_plot : list[float]
             Accumulation levels to plot
-        output_steps : int
-            Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
         colormaps : dict[str, Colormap] | None, optional
@@ -976,9 +979,11 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
 
-        self.precip_and_related_fields = precip_and_related_fields
+        # Per-callback value takes priority; fall back to plotting_settings if not given.
+        self.precip_and_related_fields = precip_and_related_fields or (
+            self.plotting_settings.precip_and_related_fields if self.plotting_settings else None
+        )
         self.accumulation_levels_plot = accumulation_levels_plot
-        self.output_steps = output_steps
         self.per_sample = per_sample
         self.colormaps = colormaps
 
@@ -1013,7 +1018,13 @@ class PlotSample(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            data, output_tensor = self.process(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                members=self._get_process_members(),
+            )
 
             local_rank = pl_module.local_rank
 
@@ -1025,30 +1036,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
-                fig = plot_predicted_multilevel_flat_sample(
-                    plot_parameters_dict,
-                    self.per_sample,
-                    latlons,
-                    self.accumulation_levels_plot,
-                    x,
-                    y_true,
-                    y_pred,
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                    projection_kind=self.projection_kind,
-                )
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+                fig = self._make_figure(plot_parameters_dict, latlons, x, y_true, y_pred)
 
                 self._output_figure(
                     logger,
@@ -1063,6 +1052,124 @@ class PlotSample(BasePlotAdditionalMetrics):
                     ),
                 )
 
+    def _get_process_members(self) -> int | list[int] | None:
+        """Return the ``members`` argument passed to ``process()``.
+
+        Default selects member 0 (deterministic view). Subclasses override
+        to pass a different selection (e.g. all members for ensemble plots).
+        """
+        return 0
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
+        return plot_predicted_multilevel_flat_sample(
+            plot_parameters_dict,
+            self.per_sample,
+            latlons,
+            self.accumulation_levels_plot,
+            x,
+            y_true,
+            y_pred,
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
+
+
+class PlotEnsSample(PlotSample):
+    """Plot ensemble mean, spread, and the difference of members to the mean for each variable."""
+
+    def __init__(
+        self,
+        sample_idx: int,
+        parameters: list[str],
+        accumulation_levels_plot: list[float],
+        precip_and_related_fields: list[str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
+        per_sample: int = 6,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        members: list[int] | int | None = None,
+        focus_area: list[dict] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+    ) -> None:
+        """Initialise the PlotEnsSample callback.
+
+        Parameters
+        ----------
+        sample_idx : int
+            Sample to plot
+        parameters : list[str]
+            Parameters to plot
+        accumulation_levels_plot : list[float]
+            Accumulation levels to plot
+        precip_and_related_fields : list[str] | None, optional
+            Precip variable names, by default None
+        colormaps : dict[str, Colormap] | None, optional
+            Dictionary of colormaps, by default None
+        per_sample : int, optional
+            Number of plots per sample, by default 6
+        every_n_batches : int | None, optional
+            Batch frequency to plot at, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        members : list[int] | int | None, optional
+            Ensemble members to plot. None plots all members, by default None.
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings | None, optional
+            Plotting configuration settings, by default None (uses defaults)
+        """
+        super().__init__(
+            sample_idx=sample_idx,
+            parameters=parameters,
+            accumulation_levels_plot=accumulation_levels_plot,
+            precip_and_related_fields=precip_and_related_fields,
+            colormaps=colormaps,
+            per_sample=per_sample,
+            every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
+            focus_area=focus_area,
+            plotting_settings=plotting_settings,
+        )
+        self.plot_members = members
+
+    def _get_process_members(self) -> list | None:
+        """Return configured ensemble members (None = all members)."""
+        return self.plot_members
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,  # noqa: ARG002
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create an ensemble figure with members, mean, spread and error."""
+        from anemoi.training.diagnostics.plots import plot_predicted_ensemble
+
+        return plot_predicted_ensemble(
+            parameters=plot_parameters_dict,
+            n_plots_per_sample=4,
+            latlons=latlons,
+            clevels=self.accumulation_levels_plot,
+            y_true=np.asarray(y_true).squeeze(),
+            y_pred=np.asarray(y_pred).squeeze(),
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
+
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
     """Plots TP related metric comparing target and prediction.
@@ -1076,7 +1183,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         min_delta: float | None = None,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
@@ -1091,8 +1197,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
             Sample to plot
         parameters : list[str]
             Parameters to plot
-        output_steps : int
-            Max number of output steps to plot per rollout in forecast mode
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         dataset_names : list[str] | None, optional
@@ -1110,7 +1214,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
-        self.output_steps = output_steps
         self.min_delta = min_delta
 
     @rank_zero_only
@@ -1138,9 +1241,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 output_tensor,
             )
 
-        for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
-
             # Build dictionary of indices and parameters to be plotted
             input_data = pl_module.data_indices[dataset_name].data.input.todict()
             index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
@@ -1153,17 +1253,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 fig = plot_power_spectrum(
                     plot_parameters_dict_spectrum,
                     latlons,
@@ -1197,7 +1287,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         self,
         sample_idx: int,
         parameters: list[str],
-        output_steps: int,
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         every_n_batches: int | None = None,
@@ -1213,8 +1302,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             Sample to plot
         parameters : list[str]
             Parameters to plot
-        output_steps : int
-            Max number of output steps to plot per rollout in forecast mode
         precip_and_related_fields : list[str] | None, optional
             Precip variable names, by default None
         log_scale : bool, optional
@@ -1237,7 +1324,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         )
         self.sample_idx = sample_idx
         self.parameters = parameters
-        self.output_steps = output_steps
         self.precip_and_related_fields = precip_and_related_fields
         self.log_scale = log_scale
 
@@ -1285,17 +1371,8 @@ class PlotHistogram(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            for item in pl_module.plot_adapter.iter_plot_samples(
-                data,
-                output_tensor,
-                pl_module.plot_adapter.output_times,
-                max_out_steps=self.output_steps,
-            ):
-                if len(item) == 3:
-                    x, y_pred, tag_suffix = item
-                    y_true = None
-                else:
-                    x, y_true, y_pred, tag_suffix = item
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+
                 fig = plot_histogram(
                     plot_parameters_dict_histogram,
                     x,

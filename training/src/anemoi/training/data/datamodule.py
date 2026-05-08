@@ -16,11 +16,13 @@ from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
-from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,17 +30,21 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema) -> None:
+    def __init__(self, config: BaseSchema, task: BaseTask) -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
         ----------
         config : BaseSchema
             Job configuration with multi-dataset specification
+        task : BaseTask
+            Task defining the problem to solve
         """
         super().__init__()
 
         self.config = config
+        self.task = task
+
         self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
         self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
         self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
@@ -63,11 +69,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        n_step_output = self.config.training.multistep_output
-        lead_times = [self._lead_time_for_step(step) for step in range(1, n_step_output + 1)]
+        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
         stats_by_dataset: dict[str, dict | None] = {}
-        for dataset_name, dataset in self.ds_train.datasets.items():
+        for dataset_name, dataset in self.ds_train.data_readers.items():
             stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
@@ -100,34 +105,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
-    def _lead_time_for_step(self, step: int) -> str:
-        timestep = frequency_to_timedelta(self.config.data.timestep)
-        return frequency_to_string(timestep * step)
-
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
-        """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
-
-        # Calculate indices using n_step_input, n_step_output and rollout
-        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
-
-        rollout_max = getattr(rollout_cfg, "max", None)
-        rollout_start = getattr(rollout_cfg, "start", 1)
-        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
-
-        rollout_value = rollout_start
-        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
-            rollout_value = rollout_max
-        else:
-            LOGGER.warning("Falling back rollout to: %s", rollout_value)
-
-        rollout = max(rollout_value, val_rollout)
-        n_step_input = self.config.training.multistep_input
-        n_step_output = self.config.training.multistep_output  # defaults to 1
-        time_range = n_step_input + rollout * n_step_output
-        return list(range(time_range))
-
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
@@ -136,12 +113,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
-        return self._get_dataset(
-            self.valid_dataloader_config,
-            shuffle=False,
-            val_rollout=self.config.dataloader.validation_rollout,
-            label="validation",
-        )
+        return self._get_dataset(self.valid_dataloader_config, shuffle=False, label="validation")
 
     @cached_property
     def ds_test(self) -> MultiDataset:
@@ -150,15 +122,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def _get_dataset(
         self,
-        datasets: dict[str, dict],
+        config: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
+        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+
         return MultiDataset(
-            data_readers=datasets,
-            relative_date_indices=self.relative_date_indices(val_rollout),
-            timestep=self.config.data.timestep,
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
             shuffle=shuffle,
             label=label,
         )
@@ -209,13 +182,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
-        timesteps = {
-            "relative_date_indices_training": self.relative_date_indices(),
-            "timestep": self.config.data.timestep,
-        }
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
-            metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,
