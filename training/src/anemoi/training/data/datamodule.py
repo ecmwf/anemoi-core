@@ -12,12 +12,14 @@ import logging
 from functools import cached_property
 
 import pytorch_lightning as pl
+from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.multidomain import MultiDomainDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
@@ -125,11 +127,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         config: dict[str, dict],
         shuffle: bool = True,
         label: str = "generic",
-    ) -> MultiDataset:
+    ) -> MultiDataset | MultiDomainDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
-        return MultiDataset(
+        return instantiate(
+            self.config.dataloader.stategy,
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
