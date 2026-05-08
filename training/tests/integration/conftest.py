@@ -278,7 +278,6 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
             resolved_path = str(Path(tmp_path_loss_matrices).parent)
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
 
-
             val_multiscale_cfg = cfg.training.validation_metrics.datasets[dataset_name].multiscale.multiscale_config
             OmegaConf.set_struct(val_multiscale_cfg, False)
             val_multiscale_cfg.loss_matrices_path = resolved_path

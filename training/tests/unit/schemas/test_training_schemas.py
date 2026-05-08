@@ -10,7 +10,6 @@
 import pytest
 from pydantic import ValidationError
 
-
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 
