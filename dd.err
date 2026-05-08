@@ -1,5 +1,5 @@
-2026-05-08 04:08:05 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
-2026-05-08 04:08:05 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+2026-05-08 11:14:07 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+2026-05-08 11:14:07 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
@@ -8,591 +8,107 @@
   warnings.warn(
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
-2026-05-08 04:09:49 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-05-08 04:09:49 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-05-08 04:09:49 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-05-08 04:09:49 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
-  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
-  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
-[W508 04:10:43.091829694 Utils.hpp:137] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
-[W508 04:10:43.091821864 Utils.hpp:137] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
-[rank0]:[W508 04:10:43.879520576 Utils.hpp:112] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
-[rank1]:[W508 04:10:43.879513715 Utils.hpp:112] Warning: Environment variable NCCL_ASYNC_ERROR_HANDLING is deprecated; use TORCH_NCCL_ASYNC_ERROR_HANDLING instead (function operator())
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `on_after_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-[rank1]:W0508 04:18:37.532000 116297 site-packages/torch/_dynamo/convert_frame.py:964] [0/32] torch._dynamo hit config.recompile_limit (32)
-[rank1]:W0508 04:18:37.532000 116297 site-packages/torch/_dynamo/convert_frame.py:964] [0/32]    function: 'forward' (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/models/src/anemoi/models/layers/normalization.py:75)
-[rank1]:W0508 04:18:37.532000 116297 site-packages/torch/_dynamo/convert_frame.py:964] [0/32]    last reason: 0/31: tensor 'x' size mismatch at index 0. expected 11633, actual 73624
-[rank1]:W0508 04:18:37.532000 116297 site-packages/torch/_dynamo/convert_frame.py:964] [0/32] To log all recompilation reasons, use TORCH_LOGS="recompiles".
-[rank1]:W0508 04:18:37.532000 116297 site-packages/torch/_dynamo/convert_frame.py:964] [0/32] To diagnose recompilation issues, see https://pytorch.org/docs/main/torch.compiler_troubleshooting.html.
-[rank0]:W0508 04:18:37.533000 116296 site-packages/torch/_dynamo/convert_frame.py:964] [0/32] torch._dynamo hit config.recompile_limit (32)
-[rank0]:W0508 04:18:37.533000 116296 site-packages/torch/_dynamo/convert_frame.py:964] [0/32]    function: 'forward' (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/models/src/anemoi/models/layers/normalization.py:75)
-[rank0]:W0508 04:18:37.533000 116296 site-packages/torch/_dynamo/convert_frame.py:964] [0/32]    last reason: 0/31: tensor 'x' size mismatch at index 0. expected 11633, actual 73624
-[rank0]:W0508 04:18:37.533000 116296 site-packages/torch/_dynamo/convert_frame.py:964] [0/32] To log all recompilation reasons, use TORCH_LOGS="recompiles".
-[rank0]:W0508 04:18:37.533000 116296 site-packages/torch/_dynamo/convert_frame.py:964] [0/32] To diagnose recompilation issues, see https://pytorch.org/docs/main/torch.compiler_troubleshooting.html.
+2026-05-08 11:14:26 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-05-08 11:14:26 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-05-08 11:14:26 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-05-08 11:14:26 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
-[rank1]: Traceback (most recent call last):
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
-[rank1]:     sys.exit(main())
-[rank1]:              ^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
-[rank1]:     cli_main(__version__, __doc__, COMMANDS)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-[rank1]:     cmd.run(args, unknown)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-[rank1]:     main()
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-[rank1]:     anemoi_train()
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-[rank1]:     _run_hydra(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-[rank1]:     _run_app(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-[rank1]:     run_and_report(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-[rank1]:     raise ex
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-[rank1]:     return func()
-[rank1]:            ^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-[rank1]:     lambda: hydra.run(
-[rank1]:             ^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-[rank1]:     _ = ret.return_value
-[rank1]:         ^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-[rank1]:     raise self._return_value
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-[rank1]:     ret.return_value = task_function(task_cfg)
-[rank1]:                        ^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
-[rank1]:     AnemoiTrainer(config).train()
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 669, in train
-[rank1]:     trainer.fit(**self.fit_parameters)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
-[rank1]:     call._call_and_handle_interrupt(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
-[rank1]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/launchers/subprocess_script.py", line 105, in launch
-[rank1]:     return function(*args, **kwargs)
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
-[rank1]:     self._run(model, ckpt_path=ckpt_path)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
-[rank1]:     results = self._run_stage()
-[rank1]:               ^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1056, in _run_stage
-[rank1]:     self.fit_loop.run()
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/fit_loop.py", line 216, in run
-[rank1]:     self.advance()
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/fit_loop.py", line 455, in advance
-[rank1]:     self.epoch_loop.run(self._data_fetcher)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 152, in run
-[rank1]:     self.advance(data_fetcher)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 344, in advance
-[rank1]:     batch_output = self.automatic_optimization.run(trainer.optimizers[0], batch_idx, kwargs)
-[rank1]:                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 192, in run
-[rank1]:     self._optimizer_step(batch_idx, closure)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 270, in _optimizer_step
-[rank1]:     call._call_lightning_module_hook(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
-[rank1]:     output = fn(*args, **kwargs)
-[rank1]:              ^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 1328, in optimizer_step
-[rank1]:     optimizer.step(closure=optimizer_closure)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/optimizer.py", line 154, in step
-[rank1]:     step_output = self._strategy.optimizer_step(self._optimizer, closure, **kwargs)
-[rank1]:                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/ddp.py", line 270, in optimizer_step
-[rank1]:     optimizer_output = super().optimizer_step(optimizer, closure, model, **kwargs)
-[rank1]:                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 239, in optimizer_step
-[rank1]:     return self.precision_plugin.optimizer_step(optimizer, model=model, closure=closure, **kwargs)
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/amp.py", line 76, in optimizer_step
-[rank1]:     return super().optimizer_step(optimizer, model=model, closure=closure, **kwargs)
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/precision.py", line 123, in optimizer_step
-[rank1]:     return optimizer.step(closure=closure, **kwargs)
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/optim/optimizer.py", line 485, in wrapper
-[rank1]:     out = func(*args, **kwargs)
-[rank1]:           ^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/optim/optimizer.py", line 79, in _use_grad
-[rank1]:     ret = func(self, *args, **kwargs)
-[rank1]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/optim/adam.py", line 225, in step
-[rank1]:     loss = closure()
-[rank1]:            ^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/precision.py", line 109, in _wrap_closure
-[rank1]:     closure_result = closure()
-[rank1]:                      ^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 146, in __call__
-[rank1]:     self._result = self.closure(*args, **kwargs)
-[rank1]:                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
-[rank1]:     return func(*args, **kwargs)
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 140, in closure
-[rank1]:     self._backward_fn(step_output.closure_loss)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 241, in backward_fn
-[rank1]:     call._call_strategy_hook(self.trainer, "backward", loss, optimizer)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
-[rank1]:     output = fn(*args, **kwargs)
-[rank1]:              ^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 213, in backward
-[rank1]:     self.precision_plugin.backward(closure_loss, self.lightning_module, optimizer, *args, **kwargs)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/precision.py", line 73, in backward
-[rank1]:     model.backward(tensor, *args, **kwargs)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 1097, in backward
-[rank1]:     loss.backward(*args, **kwargs)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/_tensor.py", line 648, in backward
-[rank1]:     torch.autograd.backward(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/autograd/__init__.py", line 353, in backward
-[rank1]:     _engine_run_backward(
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/autograd/graph.py", line 824, in _engine_run_backward
-[rank1]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/checkpoint.py", line 1128, in unpack_hook
-[rank1]:     frame.check_recomputed_tensors_match(gid)
-[rank1]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/checkpoint.py", line 902, in check_recomputed_tensors_match
-[rank1]:     raise CheckpointError(
-[rank1]: torch.utils.checkpoint.CheckpointError: torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.
-[rank1]: tensor at position 10:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 11:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 12:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 13:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 14:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 15:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 16:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 17:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 18:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 19:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 20:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 21:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 22:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 23:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 24:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 26:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 27:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 29:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 31:
-[rank1]: saved metadata: {'shape': torch.Size([164947, 11]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 32:
-[rank1]: saved metadata: {'shape': torch.Size([11, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 33:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 34:
-[rank1]: saved metadata: {'shape': torch.Size([64]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 35:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([164947, 11]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 36:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 37:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 39:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 40:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 41:
-[rank1]: saved metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 42:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([64]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 43:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 44:
-[rank1]: saved metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 45:
-[rank1]: saved metadata: {'shape': torch.Size([164947, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 47:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 48:
-[rank1]: saved metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 49:
-[rank1]: saved metadata: {'shape': torch.Size([11634]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([164947, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 50:
-[rank1]: saved metadata: {'shape': torch.Size([77917]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 51:
-[rank1]: saved metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 53:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11634]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 54:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([77917]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 55:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 56:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 58:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 59:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 60:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 61:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 62:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 63:
-[rank1]: saved metadata: {'shape': torch.Size([1024, 4096]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 64:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 4096]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 65:
-[rank1]: saved metadata: {'shape': torch.Size([11633, 4096]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=1)}
-[rank1]: tensor at position 66:
-[rank1]: saved metadata: {'shape': torch.Size([4096, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-[rank1]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=1)}
-
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for BaseSchema
+encoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+processor
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+decoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
 Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/bin/anemoi-training", line 8, in <module>
-[rank0]:     sys.exit(main())
-[rank0]:              ^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/__main__.py", line 23, in main
-[rank0]:     cli_main(__version__, __doc__, COMMANDS)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
-[rank0]:     cmd.run(args, unknown)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
-[rank0]:     main()
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
-[rank0]:     anemoi_train()
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
-[rank0]:     _run_hydra(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
-[rank0]:     _run_app(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
-[rank0]:     run_and_report(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
-[rank0]:     raise ex
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
-[rank0]:     return func()
-[rank0]:            ^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
-[rank0]:     lambda: hydra.run(
-[rank0]:             ^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
-[rank0]:     _ = ret.return_value
-[rank0]:         ^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
-[rank0]:     raise self._return_value
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
-[rank0]:     ret.return_value = task_function(task_cfg)
-[rank0]:                        ^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
-[rank0]:     AnemoiTrainer(config).train()
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 669, in train
-[rank0]:     trainer.fit(**self.fit_parameters)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
-[rank0]:     call._call_and_handle_interrupt(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
-[rank0]:     return trainer.strategy.launcher.launch(trainer_fn, *args, trainer=trainer, **kwargs)
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/launchers/subprocess_script.py", line 105, in launch
-[rank0]:     return function(*args, **kwargs)
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
-[rank0]:     self._run(model, ckpt_path=ckpt_path)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
-[rank0]:     results = self._run_stage()
-[rank0]:               ^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/trainer.py", line 1056, in _run_stage
-[rank0]:     self.fit_loop.run()
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/fit_loop.py", line 216, in run
-[rank0]:     self.advance()
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/fit_loop.py", line 455, in advance
-[rank0]:     self.epoch_loop.run(self._data_fetcher)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 152, in run
-[rank0]:     self.advance(data_fetcher)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 344, in advance
-[rank0]:     batch_output = self.automatic_optimization.run(trainer.optimizers[0], batch_idx, kwargs)
-[rank0]:                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 192, in run
-[rank0]:     self._optimizer_step(batch_idx, closure)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 270, in _optimizer_step
-[rank0]:     call._call_lightning_module_hook(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
-[rank0]:     output = fn(*args, **kwargs)
-[rank0]:              ^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 1328, in optimizer_step
-[rank0]:     optimizer.step(closure=optimizer_closure)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/optimizer.py", line 154, in step
-[rank0]:     step_output = self._strategy.optimizer_step(self._optimizer, closure, **kwargs)
-[rank0]:                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/ddp.py", line 270, in optimizer_step
-[rank0]:     optimizer_output = super().optimizer_step(optimizer, closure, model, **kwargs)
-[rank0]:                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 239, in optimizer_step
-[rank0]:     return self.precision_plugin.optimizer_step(optimizer, model=model, closure=closure, **kwargs)
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/amp.py", line 76, in optimizer_step
-[rank0]:     return super().optimizer_step(optimizer, model=model, closure=closure, **kwargs)
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/precision.py", line 123, in optimizer_step
-[rank0]:     return optimizer.step(closure=closure, **kwargs)
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/optim/optimizer.py", line 485, in wrapper
-[rank0]:     out = func(*args, **kwargs)
-[rank0]:           ^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/optim/optimizer.py", line 79, in _use_grad
-[rank0]:     ret = func(self, *args, **kwargs)
-[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/optim/adam.py", line 225, in step
-[rank0]:     loss = closure()
-[rank0]:            ^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/precision.py", line 109, in _wrap_closure
-[rank0]:     closure_result = closure()
-[rank0]:                      ^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 146, in __call__
-[rank0]:     self._result = self.closure(*args, **kwargs)
-[rank0]:                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
-[rank0]:     return func(*args, **kwargs)
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 140, in closure
-[rank0]:     self._backward_fn(step_output.closure_loss)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 241, in backward_fn
-[rank0]:     call._call_strategy_hook(self.trainer, "backward", loss, optimizer)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
-[rank0]:     output = fn(*args, **kwargs)
-[rank0]:              ^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/strategies/strategy.py", line 213, in backward
-[rank0]:     self.precision_plugin.backward(closure_loss, self.lightning_module, optimizer, *args, **kwargs)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/plugins/precision/precision.py", line 73, in backward
-[rank0]:     model.backward(tensor, *args, **kwargs)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/core/module.py", line 1097, in backward
-[rank0]:     loss.backward(*args, **kwargs)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/_tensor.py", line 648, in backward
-[rank0]:     torch.autograd.backward(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/autograd/__init__.py", line 353, in backward
-[rank0]:     _engine_run_backward(
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/autograd/graph.py", line 824, in _engine_run_backward
-[rank0]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/checkpoint.py", line 1128, in unpack_hook
-[rank0]:     frame.check_recomputed_tensors_match(gid)
-[rank0]:   File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/utils/checkpoint.py", line 902, in check_recomputed_tensors_match
-[rank0]:     raise CheckpointError(
-[rank0]: torch.utils.checkpoint.CheckpointError: torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.
-[rank0]: tensor at position 10:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 11:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 12:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 13:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 14:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 15:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 16:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 17:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 18:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 19:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 20:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 21:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 22:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 23:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 24:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 26:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 27:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 29:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 31:
-[rank0]: saved metadata: {'shape': torch.Size([164947, 11]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 32:
-[rank0]: saved metadata: {'shape': torch.Size([11, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 33:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 34:
-[rank0]: saved metadata: {'shape': torch.Size([64]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 35:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([164947, 11]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 36:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 37:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 39:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 40:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 41:
-[rank0]: saved metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 42:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([64]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 43:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 44:
-[rank0]: saved metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 16, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 45:
-[rank0]: saved metadata: {'shape': torch.Size([164947, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 47:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 48:
-[rank0]: saved metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77916, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 49:
-[rank0]: saved metadata: {'shape': torch.Size([11634]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([164947, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 50:
-[rank0]: saved metadata: {'shape': torch.Size([77917]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16, 64]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 51:
-[rank0]: saved metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 53:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11634]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 54:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([77917]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 55:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 56:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([164947]), 'dtype': torch.int64, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 58:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([1024, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 59:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 60:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 61:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 16]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 62:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([16, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 63:
-[rank0]: saved metadata: {'shape': torch.Size([1024, 4096]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 64:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 4096]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 65:
-[rank0]: saved metadata: {'shape': torch.Size([11633, 4096]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1]), 'dtype': torch.float32, 'device': device(type='cuda', index=0)}
-[rank0]: tensor at position 66:
-[rank0]: saved metadata: {'shape': torch.Size([4096, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-[rank0]: recomputed metadata: {'shape': torch.Size([11633, 1024]), 'dtype': torch.bfloat16, 'device': device(type='cuda', index=0)}
-
-srun: error: u22g05: tasks 0-1: Exited with exit code 1
-srun: Terminating StepId=13163695.0
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for BaseSchema
+encoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+processor
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+decoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+srun: error: u20g02: tasks 0-1: Exited with exit code 1
+srun: Terminating StepId=13177998.0
