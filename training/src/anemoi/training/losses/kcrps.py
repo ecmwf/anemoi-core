@@ -151,7 +151,6 @@ class AlmostFairKernelCRPS(BaseLoss):
 
         var = torch.abs(preds.unsqueeze(dim=-1) - preds.unsqueeze(dim=-2))
         diag = torch.eye(ens_size, dtype=torch.bool, device=preds.device)
-        import ipdb; ipdb.set_trace()
         err_r = einops.repeat(
             torch.abs(preds - targets.unsqueeze(dim=-1)),
             "batch t var latlon ens -> batch t var latlon n ens",
