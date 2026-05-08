@@ -21,6 +21,7 @@ from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
@@ -272,11 +273,13 @@ class BaseLossSchema(BaseModel):
 
 
 class KernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
     fair: bool = True
     "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
 
 
 class AlmostFairKernelCRPSSchema(BaseLossSchema):
+    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
     alpha: float = 1.0
     """Factor for linear combination of fair (unbiased, ensemble variance component
     weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
@@ -284,20 +287,75 @@ class AlmostFairKernelCRPSSchema(BaseLossSchema):
     "Deactivate autocast for the kernel CRPS calculation"
 
 
-class MultiScaleLossSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema
-    weights: list[float]
-    keep_batch_sharded: bool
+class GraphLossMatrixSchema(BaseModel):
+    """One graph-backed smoothing matrix definition for multiscale loss."""
+
+    edges_name: tuple[str, str, str]
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+
+class MultiscaleConfigDiskSchema(BaseModel):
+    """File-based multiscale config: smoothing matrices loaded from .npz files."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None]
 
-    @field_validator("weights")
-    @classmethod
-    def validate_weights_length(cls, v: list[float], info: Any) -> list[float]:
-        if "loss_matrices" in info.data:
-            assert len(v) == len(info.data["loss_matrices"]), "weights must have same length as loss_matrices"
-        return v
+
+class MultiscaleConfigOnTheFlySchema(BaseModel):
+    """On-the-fly multiscale config: smoothing subgraphs built from the main graph."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    num_scales: int | None = None
+    base_num_nearest_neighbours: int | None = None
+    base_sigma: float | None = None
+    scale_factor: int | None = None
+    smoothers: dict[str, dict] | None = None
+
+    @model_validator(mode="after")
+    def check_num_scales_or_smoothers(self) -> Self:
+        if self.smoothers is not None:
+            return self
+
+        if self.num_scales is None:
+            msg = "MultiscaleConfigOnTheFlySchema requires either 'num_scales' or 'smoothers'."
+            raise ValueError(msg)
+
+        missing = [name for name in ("base_num_nearest_neighbours", "base_sigma") if getattr(self, name) is None]
+        if missing:
+            msg = (
+                "MultiscaleConfigOnTheFlySchema with 'num_scales' requires "
+                f"{', '.join(repr(name) for name in missing)}."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class MultiScaleLossSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
+    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
+    weights: list[float]
+    multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    # Deprecated: pass inside multiscale_config instead.
+    loss_matrices_path: str | None = None
+    loss_matrices: list[str | None] | None = None
+
+    @model_validator(mode="after")
+    def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
+        if isinstance(self.multiscale_config, MultiscaleConfigOnTheFlySchema) and (
+            self.loss_matrices is not None or self.loss_matrices_path is not None
+        ):
+            msg = (
+                "Deprecated top-level 'loss_matrices'/'loss_matrices_path' must not be combined "
+                "with an on-the-fly 'multiscale_config'. Move file-based keys inside a disk-mode "
+                "multiscale_config, or remove the deprecated fields."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -318,7 +376,8 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
-    losses: list[BaseLossSchema | SpectralLossSchema] = Field(min_length=1)
+    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
+    losses: list[MultiScaleLossSchema | SpectralLossSchema | BaseLossSchema] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -326,12 +385,19 @@ class CombinedLossSchema(BaseLossSchema):
     @field_validator("losses", mode="before")
     @classmethod
     def add_empty_scalers(cls, losses: Any) -> Any:
-        """Add empty scalers to loss functions, as scalers can be set at top level."""
+        """Add empty scalers to loss functions that use them (not MultiscaleLossWrapper)."""
+        from omegaconf import OmegaConf
         from omegaconf.omegaconf import open_dict
 
         for loss in losses:
+            target = loss.get("_target_", "") if hasattr(loss, "get") else ""
+            if "MultiscaleLossWrapper" in str(target):
+                continue
             if "scalers" not in loss:
-                with open_dict(loss):
+                if OmegaConf.is_config(loss):
+                    with open_dict(loss):
+                        loss["scalers"] = []
+                else:
                     loss["scalers"] = []
         return losses
 
@@ -345,15 +411,39 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-LossSchemas = (
-    BaseLossSchema
-    | HuberLossSchema
-    | CombinedLossSchema
-    | AlmostFairKernelCRPSSchema
-    | KernelCRPSSchema
-    | SpectralLossSchema
-    | MultiScaleLossSchema
-)
+def _loss_discriminator(v: Any) -> str:
+    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
+    if target == "anemoi.training.losses.combined.CombinedLoss":
+        return "combined"
+    if target == "anemoi.training.losses.MultiscaleLossWrapper":
+        return "multiscale"
+    if target == "anemoi.training.losses.kcrps.AlmostFairKernelCRPS":
+        return "almost_fair"
+    if target == "anemoi.training.losses.kcrps.KernelCRPS":
+        return "kernel"
+    if target in {
+        "anemoi.training.losses.spectral.FourierCorrelationLoss",
+        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.LogFFT2Distance",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.SpectralL2Loss",
+    }:
+        return "spectral"
+    if target == "anemoi.training.losses.HuberLoss":
+        return "huber"
+    return "base"
+
+
+LossSchemas = Annotated[
+    Annotated[BaseLossSchema, Tag("base")]
+    | Annotated[HuberLossSchema, Tag("huber")]
+    | Annotated[CombinedLossSchema, Tag("combined")]
+    | Annotated[AlmostFairKernelCRPSSchema, Tag("almost_fair")]
+    | Annotated[KernelCRPSSchema, Tag("kernel")]
+    | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[MultiScaleLossSchema, Tag("multiscale")],
+    Discriminator(_loss_discriminator),
+]
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):

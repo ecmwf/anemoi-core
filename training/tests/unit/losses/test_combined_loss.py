@@ -9,11 +9,13 @@
 
 
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 import torch
 from hydra.errors import InstantiationException
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
@@ -121,6 +123,49 @@ def test_combined_loss_seperate_scalers() -> None:
     assert "test2" in loss.losses[1].scaler
 
 
+def test_combined_loss_forwards_graph_context_to_nested_multiscale_loss() -> None:
+    graph = HeteroData()
+    captured: dict[str, object] = {}
+
+    def fake_load_smoothing_matrices(
+        self: MultiscaleLossWrapper,
+        multiscale_config: dict[str, object],
+        graph_data: HeteroData | None,
+        data_node_name: str | None,
+    ) -> list[None]:
+        del self, multiscale_config
+        captured["graph_data"] = graph_data
+        captured["data_node_name"] = data_node_name
+        return [None]
+
+    with patch.object(MultiscaleLossWrapper, "_load_smoothing_matrices", fake_load_smoothing_matrices):
+        loss = get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.CombinedLoss",
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                            "weights": [1.0],
+                            "multiscale_config": {
+                                "num_scales": 1,
+                                "base_num_nearest_neighbours": 1,
+                                "base_sigma": 1.0,
+                            },
+                            "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss"},
+                        },
+                    ],
+                },
+            ),
+            scalers={},
+            graph_data=graph,
+            data_node_name="era5",
+        )
+
+    assert isinstance(loss, CombinedLoss)
+    assert captured == {"graph_data": graph, "data_node_name": "era5"}
+
+
 def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapping() -> None:
     """CombinedLoss correctly isolates per-subloss variable filtering and scaler remapping.
 
@@ -222,7 +267,6 @@ def test_combined_loss_propagates_needs_shard_layout_info() -> None:
         MultiscaleLossWrapper(
             per_scale_loss=MSELoss(),
             weights=[1.0],
-            keep_batch_sharded=True,
         ),
     )
 
@@ -232,18 +276,19 @@ def test_combined_loss_propagates_needs_shard_layout_info() -> None:
 def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     pred = torch.zeros((1, 1, 1, 2, 1))
     target = torch.zeros((1, 1, 2, 1))
-    grid_shard_shapes = [(1, 2, 1), (1, 2, 1)]
+    grid_shard_sizes = [1, 1]
+    channel_shard_sizes_pred = [1, 1]
+    channel_shard_sizes_y = [1, 1]
     weights = torch.ones((1, 1, 1, 1, 1))
     group = FakeGroup(size=2)
 
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=MSELoss(),
         weights=[1.0],
-        keep_batch_sharded=True,
     )
-    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_shapes, grid_shard_shapes))
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, channel_shard_sizes_pred, channel_shard_sizes_y))
     monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
-    monkeypatch.setattr("anemoi.training.losses.multiscale.gather_channels", lambda x, *_args: x)
+    monkeypatch.setattr("anemoi.training.losses.multiscale.all_to_all_transpose", lambda x, *_args: x)
     monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)
 
     loss = CombinedLoss(
@@ -251,17 +296,10 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
         WeightedMSELoss(),
     )
 
-    result = loss(
-        pred,
-        target,
-        weights=weights,
-        group=group,
-        grid_dim=-2,
-        grid_shard_shapes=grid_shard_shapes,
-    )
+    result = loss(pred, target, weights=weights, group=group, grid_shard_sizes=grid_shard_sizes, grid_dim=-2)
 
     assert result.shape == (1,)
-    prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
+    prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
 
 
 def test_iter_leaf_losses_combined() -> None:
