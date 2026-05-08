@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import mlflow
@@ -79,3 +80,19 @@ def test_azure_mlflow_schema() -> None:
     schema = AzureMlflowSchema(**config)
 
     assert schema.target_ == "anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"
+
+
+def test_azure_mlflow_schema_covers_logger_init_params() -> None:
+    """Assert every AnemoiAzureMLflowLogger __init__ param has a field in AzureMlflowSchema.
+
+    run_id and fork_run_id are excluded because they are injected at runtime
+    by get_mlflow_logger, not read from the config schema.
+    """
+    # Parameters injected at runtime rather than sourced from config
+    runtime_params = {"self", "run_id", "fork_run_id"}
+
+    logger_params = set(inspect.signature(AnemoiAzureMLflowLogger.__init__).parameters) - runtime_params
+    schema_fields = set(AzureMlflowSchema.model_fields)
+
+    missing = logger_params - schema_fields
+    assert not missing, f"AzureMlflowSchema is missing fields for logger params: {missing}"

@@ -28,7 +28,7 @@ class AnemoiDatasetNodeSchema(BaseModel):
         ..., alias="_target_"
     )
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
-    dataset: str | list | dict  # TODO(Helen): Discuss schema with Baudouin
+    dataset: str | list | dict | None  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
 

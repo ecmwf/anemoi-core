@@ -21,13 +21,12 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
-from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
 default_config = """
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.tasks.GraphEnsForecaster
   multistep_input : 1
 
 diagnostics:
@@ -60,7 +59,8 @@ def test_no_extra_callbacks_set():
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS  # ParentUUIDCallback, CheckVariableOrder, etc
@@ -69,12 +69,12 @@ def test_no_extra_callbacks_set():
 def test_add_config_enabled_callback():
     # Add logging callback (mlflow enabled triggers LearningRateMonitor)
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.log = {"mlflow": {"enabled": True}}
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=True,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
@@ -89,10 +89,46 @@ def test_add_callback():
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
+
+
+def test_rollout_eval_instantiated_via_hydra_interpolation():
+    """RolloutEval in diagnostics.callbacks is instantiated with values from the Hydra tree.
+
+    This verifies that callbacks receive config values via Hydra interpolation.
+    """
+    config = omegaconf.OmegaConf.create(
+        yaml.safe_load(
+            default_config + """
+task:
+  validation_rollout: 3
+""",
+        ),
+    )
+    config.diagnostics.callbacks.append(
+        {
+            "_target_": "anemoi.training.diagnostics.callbacks.evaluation.RolloutEval",
+            "rollout": ["${task.validation_rollout}"],
+            "every_n_batches": 1,
+        },
+    )
+    # Pass config.diagnostics — it keeps its parent reference to the root config,
+    # so ${task.validation_rollout} resolves correctly during instantiate().
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=False,
+    )
+    callbacks = get_callbacks(context)
+    rollout_evals = [cb for cb in callbacks if isinstance(cb, RolloutEval)]
+    assert len(rollout_evals) == 1
+    assert rollout_evals[0].rollout == [3]
 
 
 def test_add_plotting_callback(monkeypatch):
@@ -106,50 +142,20 @@ def test_add_plotting_callback(monkeypatch):
     monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
 
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.plot.enabled = True
     config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
         plots_output=None,
-        full_config=config,
+        wandb_enabled=False,
+        mlflow_enabled=False,
     )
     callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
-def test_rollout_eval_ens_handles_dict_batch():
-    """Test RolloutEvalEns._eval with a dict batch via on_validation_batch_end."""
-    callback = RolloutEvalEns(rollout=[1, 2], every_n_batches=1)
-
-    # Mock pl_module
-    pl_module = MagicMock()
-    pl_module.device = torch.device("cpu")
-    pl_module.n_step_input = 1
-    pl_module.n_step_output = 1
-    pl_module._rollout_step.return_value = [
-        (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None, None),
-        (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None, None),
-    ]
-
-    trainer = MagicMock()
-    trainer.precision = "16-mixed"
-
-    # Mock batch (bs, ms, nens_per_device, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, 4, 10, 5)}
-
-    with patch.object(callback, "_log") as mock_log:
-        callback.on_validation_batch_end(trainer, pl_module, outputs=[], batch=batch, batch_idx=0)
-
-        #  Check for output
-        mock_log.assert_called_once()
-        args = mock_log.call_args[0]
-        assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
-        assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
-        assert args[3] == 2  # batch size
-
-
-def test_rollout_eval_handles_dict_batch():
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_rollout_eval_handles_dict_batch(n_ensemble):
     """Test RolloutEval._eval with a dict batch (multi-dataset style)."""
     callback = RolloutEval(rollout=[1, 2], every_n_batches=1)
 
@@ -158,16 +164,18 @@ def test_rollout_eval_handles_dict_batch():
     pl_module.device = torch.device("cpu")
     pl_module.n_step_input = 1
     pl_module.n_step_output = 1
-    pl_module._rollout_step.return_value = [
-        (torch.tensor(0.1), {"metric1": torch.tensor(0.2)}, None),
-        (torch.tensor(0.15), {"metric1": torch.tensor(0.25)}, None),
-    ]
+    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
+    pl_module._step.return_value = (
+        torch.tensor(0.125),
+        {"metric1": torch.tensor(0.25)},
+        None,
+    )
 
     trainer = MagicMock()
     trainer.precision = "16-mixed"  # no autocast
 
     # Mock batch (bs, ms, ens, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, 1, 10, 5)}
+    batch = {"data": torch.randn(2, 4, n_ensemble, 10, 5)}
 
     with patch.object(callback, "_log") as mock_log:
 
@@ -181,10 +189,68 @@ def test_rollout_eval_handles_dict_batch():
         assert args[3] == 2  # batch size
 
 
+def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
+    from omegaconf import DictConfig
+
+    import anemoi.training.diagnostics.callbacks.plot as plot_mod
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.loss import get_loss_function
+
+    data_indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": []}), {"a": 0, "b": 1})
+    combined_loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["nan_mask_weights"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["nan_mask_weights"]},
+                ],
+                "loss_weights": [1.0, 1.0],
+                "scalers": ["*"],
+            },
+        ),
+        scalers={"nan_mask_weights": ((0, 3, 4), torch.ones(1, 3, 2))},
+        data_indices=data_indices,
+    )
+
+    callback = plot_mod.PlotLoss.__new__(plot_mod.PlotLoss)
+    callback.every_n_batches = 1
+    callback.dataset_names = ["data"]
+    callback.parameter_groups = {}
+
+    trainer = MagicMock()
+    pl_module = MagicMock()
+    pl_module.loss = {"data": combined_loss}
+    pl_module.grid_dim = -2
+    pl_module.grid_indices = {"data": MagicMock()}
+    pl_module.allgather_batch.side_effect = lambda tensor, *_args: tensor + 1.0
+
+    super_called = []
+
+    def _stub_super(self, *_args, **_kwargs) -> None:
+        del self
+        super_called.append(True)
+
+    monkeypatch.setattr(plot_mod.BasePerBatchPlotCallback, "on_validation_batch_end", _stub_super, raising=True)
+
+    callback.on_validation_batch_end(
+        trainer=trainer,
+        pl_module=pl_module,
+        output=(torch.tensor(0.0), []),
+        batch={"data": torch.zeros((1, 1, 1, 3, 2))},
+        batch_idx=0,
+    )
+
+    assert super_called == [True]
+    assert pl_module.allgather_batch.call_count == 2
+    for child_loss in callback.loss["data"].losses:
+        torch.testing.assert_close(child_loss.loss.scaler.nan_mask_weights, torch.full((1, 3, 2), 2.0))
+
+
 # Progress bar callback tests
 progress_bar_config = """
 training:
-  model_task: anemoi.training.train.tasks.GraphEnsForecaster
+  training_method: anemoi.training.train.tasks.GraphEnsForecaster
 
 diagnostics:
   callbacks: []
