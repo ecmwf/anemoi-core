@@ -34,10 +34,10 @@ ls -l "$GRAPH_BASE" "$GRAPH_DATA"
 
 # Set this to the run_id produced by d-2GPU-1hr-refc_value-no_refc_input-gnn-finer_graph_v1-202405.sh
 # before submitting this restart job.
-RUN_ID=REPLACE_WITH_RUN_ID
+RUN_ID=78b0940f-0d65-4a57-8f32-7b9d51a280ec
 
 # Set the final epoch target for the resumed run.
-MAX_EPOCHS=800
+MAX_EPOCHS=1500
 
 CKPT=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/gnn_finer_graph_v1/checkpoint/${RUN_ID}/last.ckpt
 echo "Resuming run_id=${RUN_ID}"
