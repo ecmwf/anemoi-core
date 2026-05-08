@@ -1,0 +1,12 @@
+module load Stages/2025  GCCcore/.13.3.0
+module load Python/3.12.3
+
+source  /e/data1/jureap-data/ecmwf/users/clare1/time_interpolator_env/bin/activate
+
+anemoi-training mlflow sync -r 71ac6f06f3c64f7da499a70ee1368ac2 -s /e/scratch/gkpdm/clare1/logs/mlflow/ -d https://mlflow.ecmwf.int -e time_interpolator -a
+anemoi-training mlflow sync -r 73f5c7576a0c47b2b58a7e734a806ecb -s /e/scratch/gkpdm/clare1/logs/mlflow/ -d https://mlflow.ecmwf.int -e time_interpolator -a
+anemoi-training mlflow sync -r 2aaff63510d64e0282323447104dc2c8 -s /e/scratch/gkpdm/clare1/logs/mlflow/ -d https://mlflow.ecmwf.int -e time_interpolator -a
+
+d4bce2ccbab54863afd2071b6011fbdf
+a01ff0a2f5674aff8de9e8114932519d
+fb7aed02802840339087e043f9f9a054

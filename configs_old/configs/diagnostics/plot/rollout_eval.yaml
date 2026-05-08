@@ -1,0 +1,78 @@
+asynchronous: True # Whether to plot asynchronously
+datashader: True # Choose which technique to use for plotting
+frequency: # Frequency of the plotting
+  batch: 750
+  epoch: 5
+
+# Parameters to plot
+parameters:
+- z_500
+- t_850
+- u_850
+- v_850
+- 2t
+- 10u
+- 10v
+- sp
+- tp
+- cp
+
+# Sample index
+sample_idx: 0
+
+# Precipitation and related fields
+precip_and_related_fields: [tp, cp]
+
+# select special colormap for precip fields
+colormaps:
+  precip:
+    _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+    clevels: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
+    variables: ${diagnostics.plot.precip_and_related_fields}
+
+callbacks:
+  # Add plot callbacks here
+  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+    every_n_epochs: 5
+  - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+    # group parameters by categories when visualizing contributions to the loss
+    # one-parameter groups are possible to highlight individual parameters
+    parameter_groups:
+      moisture: [tp, cp, tcw]
+      sfc_wind: [10u, 10v]
+  - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+    sample_idx: ${diagnostics.plot.sample_idx}
+    per_sample : 6
+    parameters: ${diagnostics.plot.parameters}
+    #Defining the accumulation levels for precipitation related fields and the colormap
+    accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+    precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+    colormaps: ${diagnostics.plot.colormaps}
+
+  - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+    # every_n_batches: 100 # Override for batch frequency
+    sample_idx: ${diagnostics.plot.sample_idx}
+    parameters:
+    - z_500
+    - tp
+    - 2t
+    - 10u
+    - 10v
+  - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+    sample_idx: ${diagnostics.plot.sample_idx}
+    precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
+    parameters:
+    - z_500
+    - tp
+    - 2t
+    - 10u
+    - 10v
+  - _target_:  anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots
+    # for rollout and video_rollout pick any integers below dataloader.validation_rollout
+    rollout:
+      - ${dataloader.validation_rollout}
+    video_rollout: ${dataloader.validation_rollout}
+    every_n_epochs: 20
+    sample_idx: ${diagnostics.plot.sample_idx}
+    parameters: ${diagnostics.plot.parameters}
+    colormaps: ${diagnostics.plot.colormaps}

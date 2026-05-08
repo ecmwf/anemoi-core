@@ -15,6 +15,7 @@ import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.normalization import ConditionalLayerNorm
 from anemoi.models.layers.utils import load_layer_kernels
@@ -138,10 +139,10 @@ def test_compile_layer_kernel() -> None:
     mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[2])
 
-    result = mhsa.forward(x, shapes, batch_size)
-    result_compiled = mhsa_compiled.forward(x, shapes, batch_size)
+    result = mhsa.forward(x, shard_info, batch_size)
+    result_compiled = mhsa_compiled.forward(x, shard_info, batch_size)
 
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)
@@ -195,9 +196,9 @@ def test_compile_load_checkpoint() -> None:
     mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[2])
 
-    result_compiled = mhsa_compiled.forward(x, shapes, batch_size)
+    result_compiled = mhsa_compiled.forward(x, shard_info, batch_size)
 
     torch.save(mhsa_compiled, "compiled.pt")
 
@@ -213,5 +214,5 @@ def test_compile_load_checkpoint() -> None:
     )
     new_mhsa.load_state_dict(checkpoint.state_dict(), assign=False)
 
-    result = new_mhsa.forward(x, shapes, batch_size)
+    result = new_mhsa.forward(x, shard_info, batch_size)
     assert torch.allclose(result, result_compiled)

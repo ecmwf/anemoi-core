@@ -1,0 +1,99 @@
+format: zarr
+resolution: n320
+# Time frequency requested from dataset
+frequency: 6h
+# Time step of model (must be multiple of frequency)
+timestep: 6h
+
+# features that are not part of the forecast state
+# but are used as forcing to generate the forecast state
+forcing:
+- "cos_latitude"
+- "cos_longitude"
+- "sin_latitude"
+- "sin_longitude"
+- "cos_julian_day"
+- "cos_local_time"
+- "sin_julian_day"
+- "sin_local_time"
+- "insolation"
+- "lsm"
+- "z"
+# features that are only part of the forecast state
+# but are not used as the input to the model
+diagnostic:
+- tp
+- cp
+- tcc
+- hcc
+- lcc
+- mcc
+- ssrd
+- strd
+
+normalizer:
+  default: "mean-std"
+
+  # Remap cp statistics to those of tp when using FractionBounding. This ensures
+  # that cp, as a fraction of tp, remains consistent with tp's scale and statistics.
+  # NOTE: This remap should only be applied if FractionBounding is enabled for cp.
+  # remap:
+  #   cp: tp
+
+  # Standardization applied to tp and cp variables. Ensure that if cp is bounded
+  # as a fraction of tp, both variables are normalized using these shared statistics.
+  # "Std" normalization is preferred here over "mean-std" to avoid shifting of the
+  # zero value in the normalized space.
+  remap:
+    cp: tp
+  std:
+    - "tp"
+    - "cp"
+    - "ssrd"
+    - "q_50"
+    - "q_100"
+    - "q_150"
+    - "q_200"
+    - "q_250"
+    - "q_300"
+    - "q_400"
+    - "q_500"
+    - "q_600"
+    - "q_700"
+    - "q_850"
+    - "q_925"
+    - "q_1000"
+  min-max:
+  max:
+    - "z"
+  none:
+    - "cos_latitude"
+    - "cos_longitude"
+    - "sin_latitude"
+    - "sin_longitude"
+    - "cos_julian_day"
+    - "cos_local_time"
+    - "sin_julian_day"
+    - "sin_local_time"
+    - "insolation"
+    - "lsm"
+    - "tcc"
+    - "mcc"
+    - "hcc"
+    - "lcc"
+
+# const_imputer:
+#   default: "none"
+#   0: []
+
+# processors including imputers and normalizers are applied in order of definition
+processors:
+  normalizer:
+    _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+    config: ${data.normalizer}
+  # const_imputer:
+  #   _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+  #   config: ${data.const_imputer}
+
+# Values set in the code
+num_features: null # number of features in the forecast state

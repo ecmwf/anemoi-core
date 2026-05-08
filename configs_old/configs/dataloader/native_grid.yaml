@@ -1,0 +1,76 @@
+prefetch_factor: 2
+pin_memory: True
+
+# ============
+# read_group_size:
+#   Form subgroups of model comm groups that read data together.
+#   Each reader in the group only reads 1/read_group_size of the data
+#   which is then all-gathered between the group.
+#   This can reduce CPU memory usage as well as increase dataloader throughput.
+#   The number of GPUs per model must be divisible by read_group_size.
+#   To disable, set to 1.
+# ============
+read_group_size: ${hardware.num_gpus_per_model}
+
+num_workers:
+  training: 8
+  validation: 8
+  test: 8
+batch_size:
+  training: 2
+  validation: 4
+  test: 4
+
+# ============
+# Default effective batch_size for training is 16
+# For the o96 resolution, default per-gpu batch_size is 2 (8 gpus required)
+# The global lr is calculated as:
+# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+# Assuming a constant effective batch_size, any change in the per_gpu batch_size
+# should come with a rescaling of the local_lr to keep a constant global_lr
+# ============
+
+# runs only N training batches [N = integer | null]
+# if null then we run through all the batches
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+
+# set a custom mask for grid points.
+# Useful for LAM (dropping unconnected nodes from forcing dataset)
+grid_indices:
+  _target_: anemoi.training.data.grid_indices.FullGrid
+  nodes_name: ${graph.data}
+
+# ============
+# Dataloader definitions
+# These follow the anemoi-datasets patterns
+# You can make these as complicated for merging as you like
+# See https://anemoi-datasets.readthedocs.io
+# ============
+
+dataset: ${hardware.paths.data}/${hardware.files.dataset}
+
+training:
+  dataset: ${dataloader.dataset}
+  start: null
+  end: 2020
+  frequency: ${data.frequency}
+  drop:  []
+
+validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
+
+validation:
+  dataset: ${dataloader.dataset}
+  start: 2021
+  end: 2021
+  frequency: ${data.frequency}
+  drop:  []
+
+test:
+  dataset: ${dataloader.dataset}
+  start: 2022
+  end: null
+  frequency: ${data.frequency}
+  drop:  []

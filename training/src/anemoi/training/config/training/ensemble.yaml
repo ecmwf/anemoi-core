@@ -69,11 +69,8 @@ validation_metrics:
       multiscale:
         _target_: anemoi.training.losses.MultiscaleLossWrapper
 
-        loss_matrices_path: ${system.input.loss_matrices_path}
-        loss_matrices: [null]
+        multiscale_config: null
         weights: [1.0]
-
-        keep_batch_sharded: ${model.keep_batch_sharded}
 
         per_scale_loss:
           _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS

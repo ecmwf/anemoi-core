@@ -1,0 +1,135 @@
+defaults:
+- data: zarr_interp
+- dataloader: native_grid_td
+- diagnostics: evaluation_ens
+- system: slurm
+- graph: n320
+- model: graphtransformer_ens
+- task: temporal_downscaler
+- training: ensemble
+- override training/training_loss: ensemble_combined
+- _self_
+
+config_validation: True
+
+diagnostics:
+  plot:
+    callbacks: []
+  callbacks: []
+  log:
+    interval: 100
+    mlflow:
+      enabled: True #True #True
+      offline: True #True
+      authentication: True
+      experiment_name: aifs
+      tracking_uri: https://mlflow.ecmwf.int
+      run_name: interpolator
+      system: True
+
+data:
+  frequency: 1h
+
+dataloader:
+  limit_batches:
+    training: 2000 #5000 #null
+    validation: 100 #10 #0 #null
+
+graph:
+  overwrite: false
+
+system:
+  input:
+    graph: graph.pt
+    dataset: /e/data1/jureap-data/ecmwf/gkpdm/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2024-1h-v2-with-era51.zarr
+  hardware:
+    accelerator: auto
+    num_gpus_per_ensemble: 2
+    num_gpus_per_model: 1
+
+model:
+  model:
+    _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+    hidden_nodes_name: "hidden"
+    latent_skip: False
+  num_channels: 1024
+  compile: []  # disable torch.compile (avoids triton dependency)
+  bounding:
+    - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+      variables:
+        - tp
+    - _target_: anemoi.models.layers.bounding.HardtanhBounding #[min_val, max_val]
+      variables:
+        - tcc
+        - hcc
+        - mcc
+        - lcc
+      min_val: 0
+      max_val: 1
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  processor:
+   num_chunks: 8
+   graph_attention_backend: "pyg"  
+  encoder:
+   num_chunks: 8
+   graph_attention_backend: "pyg"
+  decoder:
+   num_chunks: 8
+   graph_attention_backend: "pyg"  
+
+training:
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            q: 1
+            t: 1   #1
+            u: 1 #0.5
+            v: 1 #0.33
+            w: 0.1
+            z: 1  #1
+            sp: 1
+            msl: 1
+            10u: 1
+            10v: 1
+            2d: 1
+            tp: 0.025
+            cp: 0.0025
+  ensemble_size_per_device: 1
+  max_steps: 200000
+  #load_weights_only: True
+  optimization:
+    lr: 5.0e-5
+    lr_scheduler:
+      warmup_t: 1000
+      t_initial: 200000
+      lr_min: 3e-7
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.combined.CombinedLoss
+        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency']
+        ignore_nans: False
+        losses:
+          - _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency'] #	, 'time_steps']
+            ignore_nans: False
+            no_autocast: True
+            alpha: 0.95
+          - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+            time_aggregation_types: [mean, max, min, diff]
+            loss_fn:
+              _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+              scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency']
+              ignore_nans: False
+              no_autocast: True
+              alpha: 0.95
+

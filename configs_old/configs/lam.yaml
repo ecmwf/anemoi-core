@@ -1,0 +1,41 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- datamodule: single
+- diagnostics: evaluation
+- hardware: example
+- graph: limited_area
+- model: graphtransformer
+- training: lam
+- _self_
+
+config_validation: True
+
+### This file is for local experimentation.
+##  When you commit your changes, assign the new features and keywords
+##  to the correct defaults.
+# For example to change from default GPU count:
+# hardware:
+#   num_gpus_per_node: 1
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+        thinning: ???
+      - dataset: ${hardware.paths.data}/${hardware.files.forcing_dataset}
+    adjust: all
+    min_distance_km: 0
+  grid_indices:
+    _target_: anemoi.training.data.grid_indices.MaskedGrid
+    nodes_name: data
+    node_attribute_name: indices_connected_nodes
+model:
+  output_mask:
+    _target_: anemoi.training.utils.masks.Boolean1DMask
+    nodes_name: ${graph.data}
+    attribute_name: cutout_mask
+hardware:
+  files:
+    dataset: ???
+    forcing_dataset: ???

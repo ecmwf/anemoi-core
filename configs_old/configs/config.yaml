@@ -1,0 +1,14 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- datamodule: single
+- hardware: example
+- graph: multi_scale
+- model: gnn
+- training: default
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True

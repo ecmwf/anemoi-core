@@ -1,0 +1,13 @@
+data: /e/data1/jureap-data/ecmwf/gkpdm/datasets/
+output: /e/scratch/gkpdm/clare1/
+truncation: null
+logs:
+  base: ${hardware.paths.output}logs/
+  wandb: ${hardware.paths.logs.base}
+  mlflow: ${hardware.paths.logs.base}mlflow/
+  tensorboard: ${hardware.paths.logs.base}tensorboard/
+checkpoints: ${hardware.paths.output}checkpoint/
+plots: ${hardware.paths.output}plots/
+profiler: ${hardware.paths.output}profiler/
+graph: ${hardware.paths.output}graph/
+warm_start: null
