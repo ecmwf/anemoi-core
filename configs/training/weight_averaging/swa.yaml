@@ -1,2 +1,0 @@
-_target_: pytorch_lightning.callbacks.StochasticWeightAveraging
-swa_lrs: 1.e-4

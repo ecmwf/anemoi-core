@@ -1,5 +1,0 @@
----
-defaults:
-  - output: jupiter
-  - input: jupiter
-  - hardware: slurm
