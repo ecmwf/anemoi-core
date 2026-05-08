@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
 
@@ -18,7 +19,6 @@ from einops import rearrange
 from omegaconf import DictConfig
 from rich.console import Console
 from rich.tree import Tree
-from abc import ABC
 
 from anemoi.datasets import open_dataset
 from anemoi.training.utils.time_indices import TimeIndices
@@ -103,7 +103,7 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
 
 
 class BaseAnemoiReader(ABC):
-    """Anemoi data reader for native grid datasets."""
+    """Generic anemoi data reader."""
 
     def __init__(
         self,
@@ -149,8 +149,24 @@ class BaseAnemoiReader(ABC):
             return None
 
     @property
+    @abstractmethod
+    def is_static_grid(self) -> bool:
+        """Whether the reader exposes a single, time-invariant grid.
+
+        ``True`` for gridded datasets (one set of latitudes/longitudes shared
+        by every sample); ``False`` for sparse observation datasets where the
+        coordinates change at every sample. Used by
+        :class:`~anemoi.training.data.multidataset.MultiDataset` to decide
+        whether to share coordinate tensors by reference across the batch.
+        """
+
+    @property
     def is_tabular(self) -> bool:
-        """Return whether the dataset is tabular."""
+        """Return whether the dataset is tabular (2D backing array).
+
+        Kept for backward compatibility with consumers that branched on the
+        legacy flag; new code should use :attr:`is_static_grid` instead.
+        """
         return len(self.data.shape) == 2
 
     @property
@@ -199,45 +215,31 @@ class BaseAnemoiReader(ABC):
         """Return per-grid-point longitudes in **radians**."""
         return np.deg2rad(np.asarray(self.data.longitudes))
 
-    @abstractmethod
-    def get_coordinates(
-        self,
-        time_indices: TimeIndices | None = None,
-        grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Return coordinate tensors for the requested time/grid slice."""
-        raise NotImplementedError("Subclasses must implement get_coordinates() method.")
-
-    def get_data(self, time_indices: TimeIndices, grid_shard_indices: np.ndarray | slice | None = None) -> torch.Tensor:
-        """Return data tensor for the requested time/grid slice."""
-        if isinstance(grid_shard_indices, slice):
-            # Load only shards into CPU memory
-            x = self.data[time_indices, :, :, grid_shard_indices]
-
-        else:
-            # Load full grid in CPU memory, select grid_shard after
-            # Note that anemoi-datasets currently doesn't support slicing + indexing
-            # in the same operation.
-            x = self.data[time_indices, :, :, :]
-            x = x[..., grid_shard_indices]  # select the grid shard
-
-        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
-        return torch.from_numpy(x)
-
     @property
     @abstractmethod
     def has_trajectories(self) -> bool:
         """Return whether the dataset has trajectories."""
 
+    @abstractmethod
     def get_sample(
         self,
         time_indices: TimeIndices,
         grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> torch.Tensor:
-        """Get a sample from the dataset."""
-        data = self.get_data(time_indices, grid_shard_indices)
-        coords = self.get_coordinates(time_indices, grid_shard_indices)
-        return {"data": data, "coords": coords}
+    ) -> dict:
+        """Return a single per-sample payload.
+
+        Subclasses must return a dict with the unified contract:
+
+        * ``"data"`` — :class:`torch.Tensor`. For gridded datasets the shape
+          is ``(T, E, N, V)``; for sparse observation datasets the shape is
+          ``(E=1, N, V)`` (no leading time axis; per-time structure lives in
+          ``metadata["boundaries"]``).
+        * ``"coords"`` — ``dict[str, torch.Tensor]`` of coordinate tensors
+          in **radians** (e.g. ``"latitudes"``, ``"longitudes"``, and for
+          sparse readers also ``"timedeltas"``).
+        * ``"metadata"`` — ``dict[str, Any]`` of non-tensor per-sample
+          metadata (empty for gridded; carries ``"boundaries"`` for sparse).
+        """
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
@@ -256,6 +258,11 @@ class BaseAnemoiReader(ABC):
 
 class GriddedDataReader(BaseAnemoiReader, ABC):
     """Gridded dataset reader with static grid."""
+
+    @property
+    def is_static_grid(self) -> bool:
+        """Gridded readers expose a single, time-invariant grid."""
+        return True
 
     @property
     def supporting_arrays(self) -> dict:
@@ -286,6 +293,27 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def boundary_mask(self) -> np.ndarray:
         """Return boundary mask, defined as the complement of the cutout mask."""
         return ~self.cutout_mask
+
+    def get_data(
+        self,
+        time_indices: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        """Return data tensor for the requested time/grid slice.
+
+        Output shape: ``(dates, ensemble, gridpoints, variables)``.
+        """
+        if isinstance(grid_shard_indices, slice):
+            # Load only the shard into CPU memory.
+            x = self.data[time_indices, :, :, grid_shard_indices]
+        else:
+            # Load the full grid then select the shard, because anemoi-datasets
+            # currently doesn't support slicing + fancy indexing in the same op.
+            x = self.data[time_indices, ...]
+            x = x[..., grid_shard_indices]
+
+        x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+        return torch.from_numpy(x)
 
     def get_coordinates(
         self,
@@ -322,6 +350,18 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
             "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
         }
 
+    def get_sample(
+        self,
+        time_indices: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> dict:
+        """Return the per-sample payload in the unified contract."""
+        return {
+            "data": self.get_data(time_indices, grid_shard_indices),
+            "coords": self.get_coordinates(time_indices, grid_shard_indices),
+            "metadata": {},
+        }
+
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
         tree.add(f"Resolution: {self.resolution}")
@@ -329,21 +369,34 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
 
 
 class ObservationDataReader(BaseAnemoiReader):
-    """Observation dataset reader (e.g. from tabular-zarrs)."""
+    """Observation dataset reader (e.g. from tabular zarrs).
+
+    Each sample is built from a single round-trip ``self.data[time_indices, ...]``
+    that returns an object exposing ``data``, ``latitudes``, ``longitudes``,
+    ``timedeltas`` and ``boundaries``. The boundaries (``tuple[slice, ...]``)
+    encode the per-time split of the flat ``N`` axis and travel through
+    :attr:`Batch.metadata` rather than being moved to device.
+    """
+
+    @property
+    def is_static_grid(self) -> bool:
+        """Observation readers have a per-sample (dynamic) coordinate set."""
+        return False
 
     @property
     def supporting_arrays(self) -> dict:
-        """Return dataset supporting_arrays."""
+        """Observations do not have supporting_arrays."""
         return {}
 
     @property
     def grid_size(self) -> int:
-        """Return dataset grid size."""
-        raise NotImplementedError("ObservationDataReader does not implement grid_size since it does not have a static grid.")
+        """Observation datasets do not have a static grid."""
+        msg = "ObservationDataReader has no static grid_size; observations are not on a fixed grid."
+        raise NotImplementedError(msg)
 
     @property
     def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
+        """Observation datasets do not have trajectories."""
         return False
 
     def statistics_tendencies(
@@ -351,46 +404,70 @@ class ObservationDataReader(BaseAnemoiReader):
         *args,
         **kwargs,
     ) -> dict | None:
+        """Observation datasets do not have tendency statistics."""
+        del args, kwargs
         return None
-
-    def get_coordinates(
-        self,
-        time_indices: TimeIndices | None = None,
-        grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Return coordinate tensors for the requested time/grid slice.
-
-        For a static grid the ``time_indices`` argument is ignored and the
-        full grid is returned (sliced by ``grid_shard_indices`` when given).
-        Subclasses with dynamic grids must override.
-
-        Parameters
-        ----------
-        time_indices : TimeIndices, optional
-            Time indices; ignored on static grids.
-        grid_shard_indices : np.ndarray or slice, optional
-            Per-rank grid shard.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Mapping ``{"latitudes": tensor, "longitudes": tensor}`` in radians.
-        """
-        lats = self.latitudes[time_indices]
-        lons = self.longitudes[time_indices]
-        if grid_shard_indices is not None:
-            lats = lats[grid_shard_indices]
-            lons = lons[grid_shard_indices]
-
-        return {
-            "latitudes": torch.from_numpy(np.ascontiguousarray(lats)),
-            "longitudes": torch.from_numpy(np.ascontiguousarray(lons)),
-        }
 
     @property
     def metadata(self) -> dict:
         """Return dataset metadata."""
         return {}
+
+    def _unpack_sample(self, x) -> dict:
+        """Unpack one ``self.data[time_indices, ...]`` payload into the unified contract.
+
+        Parameters
+        ----------
+        x : object
+            Object yielded by ``self.data[...]`` exposing ``data``,
+            ``latitudes``, ``longitudes``, ``timedeltas`` (numpy arrays) and
+            ``boundaries`` (``tuple[slice, ...]``).
+
+        Returns
+        -------
+        dict
+            ``{"data": (1, N, V) tensor, "coords": {...}, "metadata": {"boundaries": ...}}``
+            with latitudes/longitudes in **radians** to match the gridded
+            reader convention.
+        """
+        # Introduce a dummy ensemble dimension to align with the (E, N, V)
+        # contract; the leading time axis is intentionally absent — per-time
+        # structure is recoverable through ``boundaries``.
+        data = torch.from_numpy(np.asarray(x.data)[None, ...])
+        latitudes = torch.from_numpy(np.deg2rad(np.asarray(x.latitudes)))
+        longitudes = torch.from_numpy(np.deg2rad(np.asarray(x.longitudes)))
+        timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
+
+        return {
+            "data": data,
+            "coords": {
+                "latitudes": latitudes,
+                "longitudes": longitudes,
+                "timedeltas": timedeltas,
+            },
+            "metadata": {"boundaries": x.boundaries},
+        }
+
+    def get_sample(
+        self,
+        time_indices: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> dict:
+        """Get a sample from the observation dataset.
+
+        ``grid_shard_indices`` is accepted for API compatibility with
+        :class:`GriddedDataReader` but ignored — sharding for sparse
+        observations is not yet implemented.
+        """
+        del grid_shard_indices  # TODO: figure out sharding for sparse obs
+        return self._unpack_sample(self.data[time_indices, ...])
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = super().tree(prefix)
+        if hasattr(self, "window"):
+            tree.add(f"Window: {self.window}")
+        return tree
+
 
 class TrajectoryDataset(GriddedDataReader):
     """Trajectory dataset."""
@@ -434,7 +511,7 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
 
     trajectory_config = dataset_config.pop("trajectory", {})
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
-        LOGGER.info("Creating TrajectoryDataset...")
+        LOGGER.info("Creating a TrajectoryDataset...")
         return TrajectoryDataset(
             **dataset_config,
             trajectory_start=trajectory_config["start"],
@@ -445,6 +522,5 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
         LOGGER.info("Creating ObservationDataReader...")
         return ObservationDataReader(**dataset_config)
 
-
-    LOGGER.info("Creating NativeGridDataset...")
+    LOGGER.info("Creating a GriddedDataReader...")
     return GriddedDataReader(**dataset_config)

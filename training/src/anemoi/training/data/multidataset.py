@@ -149,9 +149,9 @@ class MultiDataset(IterableDataset):
         return freq_ref
 
     @property
-    def is_dataset_static(self) -> dict[str, bool]:
-        """Return combined is_dataset_static from all data readers."""
-        return {name: not getattr(dataset, "is_tabular", False) for name, dataset in self.data_readers.items()}
+    def is_static_dataset(self) -> dict[str, bool]:
+        """Return whether each underlying reader exposes a static grid."""
+        return {name: bool(getattr(dataset, "is_static_grid", True)) for name, dataset in self.data_readers.items()}
 
     def set_comm_group_info(
         self,
@@ -326,7 +326,7 @@ class MultiDataset(IterableDataset):
 
         return x
 
-    def __iter__(self) -> dict[str, dict[str, torch.Tensor]]:
+    def __iter__(self):
         """Return an iterator that yields per-dataset coordinate-rich payloads.
 
         Returns

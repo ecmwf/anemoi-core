@@ -12,15 +12,27 @@
 A :class:`Batch` is the object that flows from the dataloader to the model.
 It bundles, per dataset:
 
-* ``data`` — the input tensor with shape ``(batch, time, ensemble, grid, vars)``.
-* ``coords`` — per-dataset coordinate tensors (e.g. ``latitudes``, ``longitudes``)
-  in **radians**.
-* ``metadata`` — extension point for per-sample information (masks, timestamps, ...).
+* ``data`` — either a stacked tensor with shape
+  ``(batch, time, ensemble, grid, vars)`` (gridded datasets) or a
+  ``list[torch.Tensor]`` of length ``batch`` with per-sample shape
+  ``(ensemble=1, grid_i, vars)`` (sparse observation datasets, where
+  ``grid_i`` varies per sample).
+* ``coords`` — per-dataset coordinate tensors (e.g. ``latitudes``,
+  ``longitudes``, and for sparse readers also ``timedeltas``) in **radians**.
+  For sparse datasets each coord key holds a ``list[torch.Tensor]`` of
+  length ``batch``, mirroring the structure of ``data``.
+* ``metadata`` — extension point for per-batch / per-dataset information
+  (masks, timestamps, sparse-obs ``boundaries``, ...).
 
 Coordinate tensors for static-grid datasets are shared by reference across
 the batch dimension to avoid per-worker / per-step copies. The set of static
 dataset names is stored under ``metadata["static_coords"]`` and consulted by
 :meth:`Batch.to` to skip redundant host-to-device transfers.
+
+Sparse observation datasets carry their per-time split information under
+``metadata[dataset_name]["boundaries"]`` as a ``list[tuple[slice, ...]]``
+(one entry per batch sample). These are Python ``slice`` objects and are
+intentionally **not** transferred to device by :meth:`Batch.to`.
 """
 
 from __future__ import annotations
@@ -37,6 +49,35 @@ from torch.utils.data import default_collate
 # static (allocated once, shared by reference, not transferred per step).
 STATIC_COORDS_META_KEY = "static_coords"
 
+# Reserved per-dataset metadata key carrying sparse-obs per-time boundaries
+# as a ``list[tuple[slice, ...]]`` (one entry per batch sample). Untouched by
+# device transfer / pinning since ``slice`` is not a tensor.
+BOUNDARIES_META_KEY = "boundaries"
+
+
+def _to_device(value, device, *, non_blocking: bool):
+    """Recursively move tensors to ``device``; pass non-tensors through.
+
+    Handles the union types that flow through a sparse-aware :class:`Batch`:
+    plain :class:`torch.Tensor`, ``list[torch.Tensor]`` (sparse per-sample
+    payloads), and any non-tensor leaf (e.g. ``slice`` objects in the
+    ``boundaries`` metadata) which is returned unchanged.
+    """
+    if isinstance(value, torch.Tensor):
+        return value.to(device, non_blocking=non_blocking)
+    if isinstance(value, list):
+        return [_to_device(v, device, non_blocking=non_blocking) for v in value]
+    return value
+
+
+def _pin_memory(value):
+    """Recursively pin tensors; pass non-tensors through. See :func:`_to_device`."""
+    if isinstance(value, torch.Tensor):
+        return value.pin_memory()
+    if isinstance(value, list):
+        return [_pin_memory(v) for v in value]
+    return value
+
 
 @dataclass(frozen=True, slots=True)
 class Batch:
@@ -44,24 +85,32 @@ class Batch:
 
     Parameters
     ----------
-    data : dict[str, torch.Tensor]
-        Per-dataset input tensor, shape ``(batch, time, ensemble, grid, vars)``.
-    coords : dict[str, dict[str, torch.Tensor]]
+    data : dict[str, torch.Tensor | list[torch.Tensor]]
+        Per-dataset input. For gridded datasets a single stacked tensor of
+        shape ``(batch, time, ensemble, grid, vars)``; for sparse
+        observation datasets a ``list[torch.Tensor]`` of length ``batch``,
+        one entry per sample with shape ``(ensemble=1, grid_i, vars)``.
+    coords : dict[str, dict[str, torch.Tensor | list[torch.Tensor]]]
         Per-dataset coordinate tensors keyed by name (e.g. ``"latitudes"``,
-        ``"longitudes"``) in **radians**. For static-grid datasets the
-        tensors are shared by reference across the batch dimension and have
-        shape ``(grid, ...)``; for dynamic-grid datasets they have a leading
-        batch (and optionally time) dimension.
+        ``"longitudes"``, ``"timedeltas"``) in **radians**. For static-grid
+        datasets the tensors are shared by reference across the batch
+        dimension and have shape ``(grid, ...)``; for dynamic-grid (gridded
+        non-static) datasets they have a leading batch (and optionally
+        time) dimension; for sparse datasets each value is a
+        ``list[torch.Tensor]`` of length ``batch``.
     metadata : dict[str, Any], optional
         Free-form per-batch metadata. Reserved keys:
 
         * ``"static_coords"`` — :class:`frozenset` of dataset names whose
           coordinates are static. :meth:`to` and :meth:`pin_memory` will
           skip these entries.
+        * ``<dataset_name>`` — for sparse datasets, a dict that may carry
+          ``"boundaries": list[tuple[slice, ...]]`` (one per batch sample).
+          Non-tensor leaves are passed through device transfer untouched.
     """
 
-    data: dict[str, torch.Tensor]
-    coords: dict[str, dict[str, torch.Tensor]] = field(default_factory=dict)
+    data: dict[str, torch.Tensor | list[torch.Tensor]]
+    coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # ---------------------------------------------------------------- access
@@ -80,11 +129,13 @@ class Batch:
         """Return whether ``dataset_name``'s coordinates are static."""
         return dataset_name in self.static_coord_datasets
 
-    def __getitem__(self, dataset_name: str) -> torch.Tensor:
-        """Return the data tensor for ``dataset_name`` (mapping behaviour).
+    def __getitem__(self, dataset_name: str) -> torch.Tensor | list[torch.Tensor]:
+        """Return the data payload for ``dataset_name`` (mapping behaviour).
 
-        For the richer per-dataset view that bundles data, coords and the
-        static flag, use :meth:`view`.
+        Returns a stacked :class:`torch.Tensor` for gridded datasets and a
+        ``list[torch.Tensor]`` of length ``batch`` for sparse observation
+        datasets. For the richer per-dataset view that bundles data,
+        coords and the static flag, use :meth:`view`.
         """
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
@@ -132,34 +183,36 @@ class Batch:
         Static coordinate tensors (those whose dataset name is listed in
         ``metadata["static_coords"]``) are skipped: they are expected to have
         been moved to the model device once, at training start, and never
-        transferred again.
+        transferred again. Non-tensor metadata leaves (e.g. ``boundaries``
+        ``slice`` objects for sparse observations) are passed through
+        untouched.
 
         Returns a new :class:`Batch`; the receiver is not mutated.
         """
-        new_data = {name: tensor.to(device, non_blocking=non_blocking) for name, tensor in self.data.items()}
+        new_data = {name: _to_device(tensor, device, non_blocking=non_blocking) for name, tensor in self.data.items()}
 
         static = self.static_coord_datasets
-        new_coords: dict[str, dict[str, torch.Tensor]] = {}
+        new_coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = {}
         for name, per_dataset in self.coords.items():
             if name in static:
                 # Skip the H2D transfer; the tensors are already on device.
                 new_coords[name] = per_dataset
                 continue
-            new_coords[name] = {key: tensor.to(device, non_blocking=non_blocking) for key, tensor in per_dataset.items()}
+            new_coords[name] = {key: _to_device(value, device, non_blocking=non_blocking) for key, value in per_dataset.items()}
 
         return Batch(data=new_data, coords=new_coords, metadata=self.metadata)
 
     def pin_memory(self) -> "Batch":
         """Pin host memory for non-static tensors. Static coords are left untouched."""
-        new_data = {name: tensor.pin_memory() for name, tensor in self.data.items()}
+        new_data = {name: _pin_memory(tensor) for name, tensor in self.data.items()}
 
         static = self.static_coord_datasets
-        new_coords: dict[str, dict[str, torch.Tensor]] = {}
+        new_coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = {}
         for name, per_dataset in self.coords.items():
             if name in static:
                 new_coords[name] = per_dataset
                 continue
-            new_coords[name] = {key: tensor.pin_memory() for key, tensor in per_dataset.items()}
+            new_coords[name] = {key: _pin_memory(value) for key, value in per_dataset.items()}
 
         return Batch(data=new_data, coords=new_coords, metadata=self.metadata)
 
@@ -229,15 +282,32 @@ class Batch:
         """Collate a list of per-sample dicts into a :class:`Batch`.
 
         Each sample must be a mapping ``{dataset_name: payload}`` where
-        ``payload`` is a mapping with a required ``"data"`` key and an
-        optional ``"coords"`` mapping.
+        ``payload`` is a mapping with a required ``"data"`` key, an
+        optional ``"coords"`` mapping and an optional ``"metadata"``
+        mapping.
 
-        For datasets listed in ``static_coord_datasets`` the coordinate
-        tensors of the **first** sample are reused by reference (no stacking,
-        no copy); the per-batch payload is therefore a single shared
-        reference across the batch dimension. For dynamic datasets the
-        coordinates are stacked along a new leading batch dimension via
-        :func:`torch.utils.data.default_collate`.
+        Two payload shapes are supported and dispatched on the presence of
+        ``BOUNDARIES_META_KEY`` (``"boundaries"``) inside
+        ``payload["metadata"]``:
+
+        * **Gridded** — no ``"boundaries"`` metadata. ``payload["data"]`` is
+          a :class:`torch.Tensor` of uniform shape across samples; data and
+          (non-static) coords are stacked along a new leading batch
+          dimension via :func:`torch.utils.data.default_collate`. Datasets
+          listed in ``static_coord_datasets`` reuse the first sample's
+          coords by reference (no stacking, no copy).
+        * **Sparse** — ``payload["metadata"]["boundaries"]`` is present (set
+          by :meth:`anemoi.training.data.data_reader.ObservationDataReader._unpack_sample`).
+          ``payload["data"]`` is a per-sample :class:`torch.Tensor` of
+          shape ``(E=1, N_i, V)`` whose ``N_i`` varies between samples.
+          ``data[name]`` becomes a ``list[torch.Tensor]`` of length ``B``;
+          each coord key becomes a ``list[torch.Tensor]`` of length ``B``;
+          per-sample ``payload["metadata"]`` is collected into
+          ``Batch.metadata[name]`` with each leaf gathered into a list of
+          length ``B`` (so ``"boundaries"`` becomes
+          ``list[tuple[slice, ...]]``). Sparse datasets must not appear in
+          ``static_coord_datasets`` — see
+          :attr:`anemoi.training.data.data_reader.BaseAnemoiReader.is_static_grid`.
         """
         if not samples:
             msg = "Cannot collate an empty list of samples."
@@ -249,39 +319,63 @@ class Batch:
         first = samples[0]
         dataset_names = tuple(first.keys())
 
-        # Split each sample into a data dict and a coords dict.
-        per_sample_data: list[dict[str, torch.Tensor]] = []
-        per_sample_coords: list[dict[str, dict[str, torch.Tensor]]] = []
-        for sample in samples:
-            sample_data: dict[str, torch.Tensor] = {}
-            sample_coords: dict[str, dict[str, torch.Tensor]] = {}
-            for name in dataset_names:
-                payload = sample[name]
-                sample_data[name] = payload["data"]
-                if "coords" in payload:
-                    sample_coords[name] = payload["coords"]
-            per_sample_data.append(sample_data)
-            per_sample_coords.append(sample_coords)
+        collated_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        collated_coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = {}
+        per_dataset_metadata: dict[str, dict[str, list[Any]]] = {}
 
-        # Stack data tensors along the batch dim (default_collate preserves
-        # dict-of-tensor structure).
-        collated_data: dict[str, torch.Tensor] = default_collate(per_sample_data)
-
-        # Coordinates: share by reference for static datasets, stack for the rest.
-        collated_coords: dict[str, dict[str, torch.Tensor]] = {}
         for name in dataset_names:
-            if name not in per_sample_coords[0]:
+            first_payload = first[name]
+            sample_meta = first_payload.get("metadata") or {}
+            # Sparse observation samples are tagged by the presence of the
+            # ``boundaries`` key in their per-sample metadata (set by
+            # ``ObservationDataReader._unpack_sample``). Gridded samples
+            # never carry it, so this is a self-describing dispatch.
+            is_sparse = BOUNDARIES_META_KEY in sample_meta
+
+            if is_sparse:
+                if name in static:
+                    msg = (
+                        f"Dataset {name!r} produced a sparse (boundaries-tagged) "
+                        "data payload but is listed in static_coord_datasets; "
+                        "sparse datasets must have is_static_grid=False."
+                    )
+                    raise ValueError(msg)
+
+                # data: list[Tensor] of length B, no stacking.
+                collated_data[name] = [sample[name]["data"] for sample in samples]
+
+                # coords: each key becomes list[Tensor] of length B.
+                if "coords" in first_payload:
+                    coord_keys = tuple(first_payload["coords"].keys())
+                    collated_coords[name] = {
+                        key: [sample[name]["coords"][key] for sample in samples] for key in coord_keys
+                    }
+
+                # metadata: each leaf becomes a list of length B (one per sample).
+                meta_keys = tuple(sample_meta.keys())
+                per_dataset_metadata[name] = {
+                    key: [sample[name].get("metadata", {}).get(key) for sample in samples] for key in meta_keys
+                }
+                continue
+
+            # Gridded path: stack data via default_collate.
+            collated_data[name] = default_collate([sample[name]["data"] for sample in samples])
+
+            if "coords" not in first_payload:
                 continue
             if name in static:
                 # Use the first sample's coords by reference; do NOT copy or
                 # repeat across the batch dimension.
-                collated_coords[name] = per_sample_coords[0][name]
+                collated_coords[name] = first_payload["coords"]
             else:
-                collated_coords[name] = default_collate([per_sample_coords[i][name] for i in range(len(samples))])
+                collated_coords[name] = default_collate(
+                    [sample[name]["coords"] for sample in samples],
+                )
 
         metadata: dict[str, Any] = {}
         if static:
             metadata[STATIC_COORDS_META_KEY] = frozenset(static)
+        metadata.update(per_dataset_metadata)
 
         return Batch(data=collated_data, coords=collated_coords, metadata=metadata)
 
@@ -291,6 +385,6 @@ class DatasetView:
     """Per-dataset view returned by :meth:`Batch.__getitem__`."""
 
     name: str
-    data: torch.Tensor
-    coords: dict[str, torch.Tensor]
+    data: torch.Tensor | list[torch.Tensor]
+    coords: dict[str, torch.Tensor | list[torch.Tensor]]
     is_static: bool
