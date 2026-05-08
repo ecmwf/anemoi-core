@@ -17,7 +17,6 @@ import torch
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.dataset import AnemoiDataset
 from anemoi.training.data.usable_indices import compute_valid_data_indices
