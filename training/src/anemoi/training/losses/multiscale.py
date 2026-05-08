@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import einops
@@ -133,6 +134,10 @@ class MultiscaleLossWrapper(BaseLossWrapper):
     @property
     def needs_shard_layout_info(self) -> bool:
         return True
+
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """MultiscaleLossWrapper is a leaf: it performs substantive computation."""
+        yield self
 
     def _load_smoothing_matrices(
         self,

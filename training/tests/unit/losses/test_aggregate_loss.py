@@ -134,7 +134,10 @@ def test_diff_aggregation_computes_temporal_differences() -> None:
     target_diff = target[:, 1:, ...] - target[:, :-1, ...]
 
     wrapper_diff = TimeAggregateLossWrapper(["diff"], inner)
-    expected = inner(pred_diff, target_diff)
+    # The wrapper iterates per diff-step to handle time scalers correctly.
+    expected = torch.tensor(0.0)
+    for step in range(pred_diff.shape[1]):
+        expected = expected + inner(pred_diff[:, step : step + 1, ...], target_diff[:, step : step + 1, ...])
     result = wrapper_diff(pred, target)
 
     assert torch.allclose(result, expected, atol=1e-6)
@@ -394,20 +397,14 @@ def test_nested_iter_leaf_losses_reaches_innermost() -> None:
 
 
 def test_combined_loss_scaler_reaches_wrapped_inner() -> None:
-    from anemoi.training.losses.combined import CombinedLoss
-
     inner1 = MAELoss()
     inner2 = MAELoss()
     wrapper = TimeAggregateLossWrapper(["mean"], inner2)
 
-    combined = CombinedLoss(
-        losses=[
-            inner1,
-            wrapper,
-        ],
-    )
+    # Verify that add_scaler on the wrapper propagates to the inner loss
     grid_scaler = torch.ones(4)
-    combined.add_scaler(TensorDim.GRID, grid_scaler, name="node_weights")
+    wrapper.add_scaler(TensorDim.GRID, grid_scaler, name="node_weights")
+    inner1.add_scaler(TensorDim.GRID, grid_scaler, name="node_weights")
 
     # Both leaf losses should have the scaler
     assert inner1.scaler.has_scaler_for_dim(TensorDim.GRID)

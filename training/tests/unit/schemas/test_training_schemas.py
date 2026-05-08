@@ -10,6 +10,10 @@
 import pytest
 from pydantic import ValidationError
 
+from anemoi.training.schemas.training import CombinedLossSchema
+from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
+from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
+from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 
