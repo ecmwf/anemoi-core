@@ -11,7 +11,7 @@
 #SBATCH --time=2:00:00
 #SBATCH -o %x-%j.out
 
- 
+
 module load Stages/2025  GCCcore/.13.3.0
 module load Python/3.12.3
 

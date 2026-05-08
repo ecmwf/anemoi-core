@@ -74,13 +74,13 @@ model:
     hidden2hidden: 0
   processor:
    num_chunks: 8
-   graph_attention_backend: "pyg"  
+   graph_attention_backend: "pyg"
   encoder:
    num_chunks: 8
    graph_attention_backend: "pyg"
   decoder:
    num_chunks: 8
-   graph_attention_backend: "pyg"  
+   graph_attention_backend: "pyg"
 
 training:
   scalers:
@@ -132,4 +132,3 @@ training:
               ignore_nans: False
               no_autocast: True
               alpha: 0.95
-

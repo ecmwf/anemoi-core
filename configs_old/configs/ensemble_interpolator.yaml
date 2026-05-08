@@ -47,4 +47,3 @@ training:
   use_all_targets: True #whether to use all interp targets or cycle through them, one each iteration.
 
   ensemble_size_per_device: 1
-

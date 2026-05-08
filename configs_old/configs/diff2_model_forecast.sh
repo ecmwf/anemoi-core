@@ -12,12 +12,12 @@
 #SBATCH -o %x-%j.out
 
 #source /e/data1/jureap-data/ecmwf/users/clare1/time_interpolator_env/bin/activate
- 
+
 module load Stages/2025  GCCcore/.13.3.0
 module load Python/3.12.3
 
 export PYTHONUNBUFFERED=1
 
-source /e/data1/jureap-data/ecmwf/users/clare1/time_interpolator_env/bin/activate 
+source /e/data1/jureap-data/ecmwf/users/clare1/time_interpolator_env/bin/activate
 
 srun anemoi-training train training.run_id=3fda52ea9cc747cd92be0bd41e9558fc model.processor.num_layers=8 training.load_weights_only=False training.transfer_learning=False diagnostics.log.mlflow.run_name="fine tune forecast agg 8" --config-name=fine_ensinterp_agg
