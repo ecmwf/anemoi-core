@@ -221,11 +221,18 @@ class BasePlotCallback(Callback, ABC):
         del trainer, pl_module, stage  # unused
         LOGGER.info("Teardown of the Plot Callback ...")
 
-        LOGGER.info("waiting and shutting down the executor ...")
-        self._executor.shutdown()
+        if self._executor is not None:
+            LOGGER.info("waiting and shutting down the executor ...")
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.loop_thread.join()
+            # Step 3: Close the asyncio event loop
+            self.loop_thread._stop()
+            self.loop_thread._delete()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
-        if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
+        if hasattr(pl_module, "output_mask") and pl_module.otput_mask is not None:
             # Fill with NaNs values where the mask is False
             data[:, :, :, ~pl_module.output_mask, :] = np.nan
         return data
