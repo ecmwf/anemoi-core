@@ -28,6 +28,7 @@ training:
   training_loss:
     datasets:
       data:
+        _target_: anemoi.training.losses.WeightedMSELoss
         scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_range_weight_factors']
 
   scalers:
@@ -67,3 +68,11 @@ training:
         default: sfc
         pl:
           is_pressure_level: True
+
+model:
+  encoder:
+    gradient_checkpointing: False
+  processor:
+    gradient_checkpointing: False
+  decoder:
+    gradient_checkpointing: False
