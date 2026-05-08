@@ -82,11 +82,11 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         # and apply time weights manually.
         without_time = without_scalers or []
         if TensorDim.TIME not in without_time and TensorDim.TIME.value not in without_time:
-            without_time = list(without_time) + [TensorDim.TIME.value]
+            without_time = [*list(without_time), TensorDim.TIME.value]
 
         # Extract time weights from the shared scaler (if present)
         time_weights = None
-        for _name, (dims, scaler) in self.loss.scaler.tensors.items():
+        for dims, scaler in self.loss.scaler.tensors.values():
             if isinstance(dims, int):
                 dims = (dims,)
             if TensorDim.TIME.value in dims or TensorDim.TIME in dims:
@@ -105,33 +105,48 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             shared_kwargs["squash_mode"] = squash_mode
 
         for agg_op in self.time_aggregation_types:
-            if agg_op == "diff":
-                pred_agg = pred[:, 1:, ...] - pred[:, :-1, ...]  # (bs, time-1, ens, latlon, nvar)
-                target_agg = target[:, 1:, ...] - target[:, :-1, ...]  # (bs, time-1, latlon, nvar)
-                # Compute loss per diff-step, weighted by time scaler
-                for step in range(pred_agg.shape[1]):
-                    step_loss = self.loss(
-                        pred_agg[:, step : step + 1, ...],
-                        target_agg[:, step : step + 1, ...],
-                        **shared_kwargs,
-                    )
-                    if time_weights is not None:
-                        step_loss = step_loss * time_weights[step]
-                    loss = loss + step_loss
-            elif agg_op == "mean":
-                pred_agg = torch.mean(pred, dim=1, keepdim=True)  # (bs, 1, ens, latlon, nvar)
-                target_agg = torch.mean(target, dim=1, keepdim=True)  # (bs, 1, latlon, nvar)
-                loss = loss + self.loss(pred_agg, target_agg, **shared_kwargs)
-            elif agg_op == "min":
-                pred_agg = torch.amin(pred, dim=1, keepdim=True)  # (bs, 1, ens, latlon, nvar)
-                target_agg = torch.amin(target, dim=1, keepdim=True)  # (bs, 1, latlon, nvar)
-                loss = loss + self.loss(pred_agg, target_agg, **shared_kwargs)
-            elif agg_op == "max":
-                pred_agg = torch.amax(pred, dim=1, keepdim=True)  # (bs, 1, ens, latlon, nvar)
-                target_agg = torch.amax(target, dim=1, keepdim=True)  # (bs, 1, latlon, nvar)
-                loss = loss + self.loss(pred_agg, target_agg, **shared_kwargs)
-            else:
-                msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
-                raise ValueError(msg)
+            loss = loss + self._compute_agg_loss(agg_op, pred, target, time_weights, shared_kwargs)
 
+        return loss
+
+    def _compute_agg_loss(
+        self,
+        agg_op: str,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        time_weights: torch.Tensor | None,
+        shared_kwargs: dict,
+    ) -> torch.Tensor:
+        """Compute loss for a single aggregation operation."""
+        if agg_op == "diff":
+            return self._compute_diff_loss(pred, target, time_weights, shared_kwargs)
+        agg_fns = {"mean": torch.mean, "min": torch.amin, "max": torch.amax}
+        if agg_op not in agg_fns:
+            msg = f"Unknown aggregation type '{agg_op}'. Supported: 'diff', 'mean', 'min', 'max'."
+            raise ValueError(msg)
+        fn = agg_fns[agg_op]
+        pred_agg = fn(pred, dim=1, keepdim=True)
+        target_agg = fn(target, dim=1, keepdim=True)
+        return self.loss(pred_agg, target_agg, **shared_kwargs)
+
+    def _compute_diff_loss(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        time_weights: torch.Tensor | None,
+        shared_kwargs: dict,
+    ) -> torch.Tensor:
+        """Compute per-step diff loss, optionally weighted by time scaler."""
+        pred_agg = pred[:, 1:, ...] - pred[:, :-1, ...]  # (bs, time-1, ens, latlon, nvar)
+        target_agg = target[:, 1:, ...] - target[:, :-1, ...]  # (bs, time-1, latlon, nvar)
+        loss = torch.tensor(0.0, dtype=pred.dtype, device=pred.device, requires_grad=False)
+        for step in range(pred_agg.shape[1]):
+            step_loss = self.loss(
+                pred_agg[:, step : step + 1, ...],
+                target_agg[:, step : step + 1, ...],
+                **shared_kwargs,
+            )
+            if time_weights is not None:
+                step_loss = step_loss * time_weights[step]
+            loss = loss + step_loss
         return loss
