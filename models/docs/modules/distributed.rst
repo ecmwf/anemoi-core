@@ -50,15 +50,6 @@
    :no-undoc-members:
    :show-inheritance:
 
-*************
- transformer
-*************
-
-.. automodule:: anemoi.models.distributed.transformer
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
 *******
  utils
 *******
