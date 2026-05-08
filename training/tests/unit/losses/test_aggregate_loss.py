@@ -267,3 +267,162 @@ def test_default_no_ignore_nans() -> None:
     wrapper = TimeAggregateLossWrapper(["mean"], _make_loss())
     assert wrapper.avg_function is torch.mean
     assert wrapper.sum_function is torch.sum
+
+
+# ---------------------------------------------------------------------------
+# Transparent wrapper: scaler delegation
+# ---------------------------------------------------------------------------
+
+
+def test_scaler_is_shared_with_inner_loss() -> None:
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.scaler is inner.scaler
+
+
+def test_add_scaler_reaches_inner_loss() -> None:
+    inner = MAELoss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    scaler = torch.ones(NVAR)
+    wrapper.add_scaler(TensorDim.VARIABLE, scaler, name="var_scaler")
+    assert inner.scaler.has_scaler_for_dim(TensorDim.VARIABLE)
+
+
+def test_update_scaler_delegates_to_inner_loss() -> None:
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    new_grid = torch.ones(4) * 2.0
+    wrapper.update_scaler("unit_grid", new_grid, override=True)
+    assert torch.allclose(inner.scaler.unit_grid, new_grid)
+
+
+def test_has_scaler_for_dim_delegates() -> None:
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.has_scaler_for_dim(TensorDim.GRID) is True
+    assert wrapper.has_scaler_for_dim(TensorDim.VARIABLE) is False
+
+
+# ---------------------------------------------------------------------------
+# Transparent wrapper: metadata delegation
+# ---------------------------------------------------------------------------
+
+
+def test_supports_sharding_matches_inner() -> None:
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.supports_sharding == inner.supports_sharding
+
+
+def test_supports_sharding_propagates_false() -> None:
+    inner = _make_loss()
+    inner.supports_sharding = False
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.supports_sharding is False
+
+
+def test_needs_shard_layout_info_default_false() -> None:
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.needs_shard_layout_info is False
+
+
+def test_iter_leaf_losses_yields_inner_leaves() -> None:
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    leaves = list(wrapper.iter_leaf_losses())
+    assert leaves == [inner]
+    assert wrapper not in leaves
+
+
+# ---------------------------------------------------------------------------
+# Nested composition: TimeAggregateLossWrapper(MultiscaleLossWrapper(...))
+# ---------------------------------------------------------------------------
+
+
+def _make_multiscale_wrapper(inner: BaseLoss | None = None) -> "MultiscaleLossWrapper":
+    """Build a single-scale MultiscaleLossWrapper (no smoothing matrices)."""
+    from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+
+    if inner is None:
+        inner = _make_loss()
+    return MultiscaleLossWrapper(
+        per_scale_loss=inner,
+        weights=[1.0],
+        keep_batch_sharded=True,
+    )
+
+
+def test_nested_needs_shard_layout_info_propagates() -> None:
+    ms = _make_multiscale_wrapper()
+    wrapper = TimeAggregateLossWrapper(["mean"], ms)
+    # MultiscaleLossWrapper with keep_batch_sharded=True -> needs_shard_layout_info=True
+    assert wrapper.needs_shard_layout_info is True
+
+
+def test_nested_scaler_shared_through_chain() -> None:
+    leaf = _make_loss()
+    ms = _make_multiscale_wrapper(leaf)
+    wrapper = TimeAggregateLossWrapper(["mean"], ms)
+    # All three should share the same scaler
+    assert wrapper.scaler is ms.scaler
+    assert ms.scaler is leaf.scaler
+
+
+def test_nested_add_scaler_reaches_leaf() -> None:
+    leaf = MAELoss()
+    ms = _make_multiscale_wrapper(leaf)
+    wrapper = TimeAggregateLossWrapper(["mean"], ms)
+    wrapper.add_scaler(TensorDim.GRID, torch.ones(4), name="grid_w")
+    assert leaf.scaler.has_scaler_for_dim(TensorDim.GRID)
+
+
+def test_nested_iter_leaf_losses_reaches_innermost() -> None:
+    leaf = _make_loss()
+    ms = _make_multiscale_wrapper(leaf)
+    wrapper = TimeAggregateLossWrapper(["mean"], ms)
+    # MultiscaleLossWrapper inherits default iter_leaf_losses (yields self),
+    # so the leaf list should be [ms], not [wrapper]
+    leaves = list(wrapper.iter_leaf_losses())
+    assert wrapper not in leaves
+    assert ms in leaves
+
+
+# ---------------------------------------------------------------------------
+# CombinedLoss integration
+# ---------------------------------------------------------------------------
+
+
+def test_combined_loss_scaler_reaches_wrapped_inner() -> None:
+    from anemoi.training.losses.combined import CombinedLoss
+
+    inner1 = MAELoss()
+    inner2 = MAELoss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner2)
+
+    combined = CombinedLoss(
+        losses=[
+            inner1,
+            wrapper,
+        ],
+    )
+    grid_scaler = torch.ones(4)
+    combined.add_scaler(TensorDim.GRID, grid_scaler, name="node_weights")
+
+    # Both leaf losses should have the scaler
+    assert inner1.scaler.has_scaler_for_dim(TensorDim.GRID)
+    assert inner2.scaler.has_scaler_for_dim(TensorDim.GRID)
+
+
+def test_combined_loss_iter_leaf_losses_includes_wrapped() -> None:
+    from anemoi.training.losses.combined import CombinedLoss
+
+    inner1 = _make_loss()
+    inner2 = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner2)
+
+    combined = CombinedLoss(losses=[inner1, wrapper])
+    leaves = list(combined.iter_leaf_losses())
+    assert inner1 in leaves
+    assert inner2 in leaves
+    assert wrapper not in leaves
