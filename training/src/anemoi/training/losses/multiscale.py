@@ -293,19 +293,11 @@ class MultiscaleLossWrapper(BaseLoss):
 
         return y_pred_ens_interp, y_interp, channel_shard_sizes_pred, channel_shard_sizes_y
 
-    def _apply_projector(self, batch: torch.Tensor, provider: ProjectionGraphProvider) -> torch.Tensor:
-        """Apply sparse projector to a batch, handling multi-dimensional inputs."""
-        input_shape = batch.shape
-        batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = provider.get_edges(device=batch.device)
-        batch = self.projector(batch, projection_matrix)
-        return batch.reshape(*input_shape[:-2] + batch.shape[-2:])
-
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply smoothing matrix to predictions and targets for loss computation."""
         if self.smoothing_matrices[i] is not None:
-            x = self._apply_projector(x, self.smoothing_matrices[i])
-            y = self._apply_projector(y, self.smoothing_matrices[i])
+            x = self.projector.apply_with_provider(x, self.smoothing_matrices[i])
+            y = self.projector.apply_with_provider(y, self.smoothing_matrices[i])
         return x, y
 
     def forward(

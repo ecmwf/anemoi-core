@@ -29,6 +29,9 @@ from typing import Literal
 import einops
 import torch
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
@@ -40,6 +43,7 @@ from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
+    from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +67,7 @@ class SpectralLoss(BaseLoss):
     """Base class for spectral losses."""
 
     transform: SpectralTransform
+    needs_graph_data: bool = True
 
     def __init__(
         self,
@@ -73,6 +78,10 @@ class SpectralLoss(BaseLoss):
             "dct2d",
         ] = "fft2d",
         *,
+        nodes_slice: tuple[int, int | None] | None = None,
+        projection_config: object | None = None,
+        graph_data: HeteroData | None = None,
+        data_node_name: str = DEFAULT_DATASET_NAME,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -83,6 +92,19 @@ class SpectralLoss(BaseLoss):
         ----------
         transform
             Spectral transform type.
+        nodes_slice
+            Optional ``(start, end)`` slice to select a subset of nodes before
+            the transform. ``end`` may be ``None`` to select to the last node.
+        projection_config
+            Optional config for a sparse projection applied after the node
+            slice and before the spectral transform.  See
+            :meth:`~anemoi.models.layers.graph_provider.ProjectionGraphProvider.from_config`
+            for supported modes.
+        graph_data
+            Full model graph; required when *projection_config* uses edge or
+            target-grid mode.
+        data_node_name
+            Node type in *graph_data* holding data-grid coordinates.
         ignore_nans
             Whether to ignore NaNs in the loss computation.
         scalers
@@ -100,6 +122,15 @@ class SpectralLoss(BaseLoss):
         # Sharding over grid dimension is not supported for spectral transforms.
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
+
+        self.nodes_slice = slice(*(nodes_slice or (0, None)))
+        self.projection_provider = ProjectionGraphProvider.from_config(
+            projection_config,
+            graph_data=graph_data,
+            data_node_name=data_node_name,
+        )
+        if self.projection_provider is not None:
+            self.projector = SparseProjector()
 
         if transform == "fft2d":
             LOGGER.info("Using FFT2D spectral transform in spectral loss.")
@@ -121,8 +152,18 @@ class SpectralLoss(BaseLoss):
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
 
+    def _apply_nodes_slice(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.index_select(x, -2, torch.arange(*self.nodes_slice.indices(x.size(-2)), device=x.device))
+
+    def _prepare_spatial(self, x: torch.Tensor) -> torch.Tensor:
+        x = self._apply_nodes_slice(x)
+        if self.projection_provider is not None:
+            x = self.projector.apply_with_provider(x, self.projection_provider)
+        return x
+
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
+        x = self._prepare_spatial(x)
         x_spec = self.transform.forward(x)
         # flatten only transformed spatial/spectral dims into one "mode" axis
         spatial_start_dim = x.ndim - 2

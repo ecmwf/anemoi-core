@@ -86,6 +86,75 @@ def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
     return smoothers
 
 
+def build_node_to_node_projection_subgraph(
+    graph_data: HeteroData,
+    source_node_name: str,
+    target_node_name: str,
+    config: Mapping | Any,
+) -> HeteroData:
+    """Build a subgraph with KNN edges from source to target nodes.
+
+    If ``source_node_name == target_node_name``, builds self-loop edges.
+    If ``target_node_name`` is already in *graph_data*, its coordinates are
+    copied by reference. Otherwise target nodes are built from
+    ``config['node_builder']`` or ``config['grid']``.
+
+    Parameters
+    ----------
+    graph_data:
+        Main graph; source (and optionally target) node coordinates are read
+        from here.
+    source_node_name:
+        Node type for the source (and KNN query) side.
+    target_node_name:
+        Node type for the target side.
+    config:
+        Mapping with keys: ``num_nearest_neighbours`` (int), ``sigma`` (float),
+        and optionally ``node_builder`` or ``grid`` when the target nodes must
+        be created rather than copied from *graph_data*.
+
+    Returns
+    -------
+    HeteroData
+        Subgraph with source (and target) node coordinates and KNN edges.
+    """
+    from anemoi.graphs.create import GraphCreator
+
+    if OmegaConf.is_config(config):
+        config = OmegaConf.to_container(config, resolve=True)
+
+    num_nearest_neighbours = config["num_nearest_neighbours"]
+    sigma = config["sigma"]
+
+    subgraph = HeteroData()
+    subgraph[source_node_name].x = graph_data[source_node_name].x
+    subgraph[source_node_name].num_nodes = graph_data[source_node_name].num_nodes
+
+    graph_config: dict = {
+        "nodes": {},
+        "edges": [_knn_edge_cfg(source_node_name, target_node_name, num_nearest_neighbours, sigma)],
+    }
+
+    if source_node_name == target_node_name:
+        pass  # self-loop: target node data already set above
+    elif target_node_name in graph_data.node_types:
+        subgraph[target_node_name].x = graph_data[target_node_name].x
+        subgraph[target_node_name].num_nodes = graph_data[target_node_name].num_nodes
+    else:
+        node_builder_cfg = config.get("node_builder")
+        if node_builder_cfg is None:
+            grid = config.get("grid")
+            if grid is None:
+                msg = (
+                    f"Target node '{target_node_name}' not in graph_data; config must provide 'node_builder' or 'grid'."
+                )
+                raise ValueError(msg)
+            node_builder_cfg = {"_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes", "grid": grid}
+        graph_config["nodes"][target_node_name] = {"node_builder": node_builder_cfg}
+
+    return GraphCreator(OmegaConf.create(graph_config)).update_graph(subgraph)
+
+
 def build_truncation_subgraph(
     graph_data: HeteroData,
     data_node_name: str,
@@ -94,8 +163,8 @@ def build_truncation_subgraph(
     """Build a new subgraph containing data nodes and a coarser truncation grid.
 
     To avoid copying data-node coordinates, this creates a fresh ``HeteroData``
-    but shares data-node coordinates with *graph_data* by reference and
-    adds KNN edges to a new ``truncation`` node group.
+    but shares data-node coordinates with *graph_data* by reference and adds
+    KNN edges to a new ``truncation`` node group.
 
     Parameters
     ----------
@@ -169,6 +238,11 @@ def build_smoother_subgraph(
         Single-smoother mapping with keys: ``num_nearest_neighbours`` and
         ``sigma``. Edge weights use ``gauss_weight`` with ``l1``-normalised
         Gaussian distances.
+
+    Returns
+    -------
+    HeteroData
+        Subgraph with self-loop KNN smoother edges over *data_node_name*.
     """
     from anemoi.graphs.create import GraphCreator
 

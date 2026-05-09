@@ -363,11 +363,73 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class SpectralProjectionConfigSchema(BaseModel):
+    """Configuration for sparse projection applied before the spectral transform.
+
+    Exactly one mode must be configured:
+
+    - **File mode**: provide ``matrix_path``.
+    - **Edge mode**: provide ``edges_name``.
+    - **Target-grid mode**: provide ``num_nearest_neighbours`` and ``sigma``
+      together with either ``grid`` or ``node_builder``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # --- file mode ---
+    matrix_path: str | None = None
+
+    # --- edge mode ---
+    edges_name: str | tuple[str, str, str] | None = None
+
+    # --- target-grid mode ---
+    num_nearest_neighbours: int | None = None
+    sigma: float | None = None
+    grid: str | None = None
+    node_builder: dict | None = None
+    target_node_name: str = "target_grid"
+
+    # --- shared (edge and target-grid modes) ---
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+    @model_validator(mode="after")
+    def check_mode(self) -> Self:
+        has_matrix = self.matrix_path is not None
+        has_edges = self.edges_name is not None
+        has_target_grid = self.num_nearest_neighbours is not None
+
+        if has_matrix and has_edges:
+            msg = "projection_config: 'matrix_path' and 'edges_name' are mutually exclusive"
+            raise ValueError(msg)
+        if has_matrix and has_target_grid:
+            msg = "projection_config: 'matrix_path' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if has_edges and has_target_grid:
+            msg = "projection_config: 'edges_name' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if not (has_matrix or has_edges or has_target_grid):
+            msg = "projection_config must specify 'matrix_path', 'edges_name', or target-grid keys"
+            raise ValueError(msg)
+        if has_target_grid and self.sigma is None:
+            msg = "projection_config: target-grid mode requires 'sigma'"
+            raise ValueError(msg)
+        if has_target_grid and self.grid is None and self.node_builder is None:
+            msg = "projection_config: target-grid mode requires 'grid' or 'node_builder'"
+            raise ValueError(msg)
+        return self
+
+
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
+    nodes_slice: tuple[int, int | None] | None = None
+    """Optional ``(start, end)`` slice to select a subset of nodes before the transform."""
+    projection_config: SpectralProjectionConfigSchema | None = None
+    """Optional sparse projection applied to the data before the spectral transform."""
 
     class Config(BaseModel.Config):
         """Override to allow extra parameters for spectral transforms."""
