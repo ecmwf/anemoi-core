@@ -1,0 +1,26 @@
+-rw-r--r-- 1 Ting.Lei fv3-cam 43440728 May  3 00:29 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1.pt
+lrwxrwxrwx 1 Ting.Lei fv3-cam       99 May  5 21:02 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1_data.pt -> /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1.pt
+[2026-05-08 11:14:26,829][anemoi.utils.cli][ERROR] - 
+💣 3 validation errors for BaseSchema
+encoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+processor
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+decoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+[2026-05-08 11:14:26,830][anemoi.utils.cli][ERROR] - 💣 Exiting
+[2026-05-08 11:14:27,003][anemoi.utils.cli][ERROR] - 
+💣 3 validation errors for BaseSchema
+encoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+processor
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+decoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'gradient_checkpointing': False}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+[2026-05-08 11:14:27,003][anemoi.utils.cli][ERROR] - 💣 Exiting
