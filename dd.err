@@ -1,1440 +1,144 @@
-DEBUG_CONFIG_NAME: anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1
-DEBUG_VERIFY_ROOT: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/
-DEBUG_DATASET_PATH: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/tmp/rrfs-monthly/rrfs-conus-3km-202405-bcmask-time-s.zarr
-DEBUG_DATASET_LEN: 624
-DEBUG_DATASET_START: 2024-05-05T00:00:00
-DEBUG_DATASET_END: 2024-05-30T23:00:00
-DEBUG_CONFIG_SAVED: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tmp-verify-resolved-1h-refc-value-no-refc-input-diffusion-finer-graph-v1.yaml
-[2026-05-09 14:23:35,971][anemoi.training.train.train][INFO] - Config validated.
-[2026-05-09 14:23:35,999][anemoi.training.train.train][INFO] - Starting from checkpoint: True
-[2026-05-09 14:23:36,000][anemoi.training.train.train][INFO] - Run id: 0d73d869-3b4d-4805-9d37-3ff5515ea327
-[2026-05-09 14:23:36,000][anemoi.training.train.train][INFO] - Checkpoints path: {'root': PosixPath('/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327'), 'every_n_epochs': 'anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}', 'every_n_train_steps': 'anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}', 'every_n_minutes': 'anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}'}
-[2026-05-09 14:23:36,000][anemoi.training.train.train][INFO] - Plots path: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/plots/0d73d869-3b4d-4805-9d37-3ff5515ea327
-[2026-05-09 14:23:36,000][anemoi.training.train.train][INFO] - Creating graph for dataset 'data'
-[2026-05-09 14:23:44,015][anemoi.training.train.train][INFO] - Loading graph data from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphs/rrfs-3km-lam-graph-finer_graph_v1_data.pt
-[2026-05-09 14:23:44,581][anemoi.training.data.datamodule][INFO] - Initializing multi-dataset module with datasets: ['data']
-[2026-05-09 14:23:44,582][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-05-09 14:23:44,583][anemoi.training.data.grid_indices][INFO] - The graph attribute indices_connected_nodes of the data nodes will be used to masking the spatial dimension.
-[2026-05-09 14:23:44,592][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-05-09 14:23:44,634][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-05-09 14:23:44,634][anemoi.training.data.multidataset][INFO] - Dataset 'data' has 622 valid indices
-[2026-05-09 14:23:44,634][anemoi.training.data.multidataset][INFO] - MultiDataset has 622 valid indices after intersection.
-[2026-05-09 14:23:44,634][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 622 valid indices each
-[2026-05-09 14:23:44,634][anemoi.training.train.train][INFO] - Dataset 'data' - Number of variables: 45
-[2026-05-09 14:23:44,635][anemoi.training.train.train][INFO] - Dataset 'data' - Variables: ['clmr_200', 'clmr_500', 'clmr_850', 'clmr_925', 'grle_200', 'grle_500', 'grle_850', 'grle_925', 'height_200', 'height_500', 'height_850', 'height_925', 'icmr_200', 'icmr_500', 'icmr_850', 'icmr_925', 'landcover', 'orography', 'pres_0g', 'refc', 'rwmr_200', 'rwmr_500', 'rwmr_850', 'rwmr_925', 'snmr_200', 'snmr_500', 'snmr_850', 'snmr_925', 'sphum_200', 'sphum_500', 'sphum_850', 'sphum_925', 'swdown', 'temp_200', 'temp_500', 'temp_850', 'temp_925', 'ugrd_200', 'ugrd_500', 'ugrd_850', 'ugrd_925', 'vgrd_200', 'vgrd_500', 'vgrd_850', 'vgrd_925']
-[2026-05-09 14:23:44,636][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of prognostic variables: 42
-[2026-05-09 14:23:44,636][anemoi.training.train.train][INFO] - Dataset 'data' - Total number of auxiliary variables: 3
-[2026-05-09 14:23:44,636][anemoi.training.train.train][INFO] - Total GPU count / model group size: 1 - NB: the learning rate will be scaled by this factor!
-[2026-05-09 14:23:44,637][anemoi.training.train.train][INFO] - Effective learning rate: 6.250e-05
-[2026-05-09 14:23:44,637][anemoi.training.train.train][INFO] - Training limits: max_epochs=1, max_steps=1. Training will stop when either limit is reached first. Learning rate scheduler will run for 1 steps.
-[2026-05-09 14:23:45,588][anemoi.training.diagnostics.plots][WARNING] - Datashader unavailable (Numba needs NumPy 2.2 or less. Got NumPy 2.4.). Falling back to matplotlib plots.
-[2026-05-09 14:23:45,687][anemoi.training.diagnostics.callbacks.plot][INFO] - Using defined accumulation colormap for fields: []
-[2026-05-09 14:23:45,688][anemoi.training.diagnostics.callbacks][INFO] - Using progress bar: <class 'pytorch_lightning.callbacks.progress.tqdm_progress.TQDMProgressBar'>
-[2026-05-09 14:23:45,939][anemoi.models.migrations.migrator][INFO] - Loading migration 1755530253_initial
-[2026-05-09 14:23:45,939][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857427_deprecate_eda
-[2026-05-09 14:23:45,939][anemoi.models.migrations.migrator][INFO] - Loading migration 1762857428_chunking_fix
-[2026-05-09 14:23:45,939][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479917_hardware_schema_update
-[2026-05-09 14:23:45,939][anemoi.models.migrations.migrator][INFO] - Loading migration 1763479918_refactor_mapper
-[2026-05-09 14:23:45,939][anemoi.models.migrations.migrator][INFO] - Loading migration 1767108147_move_to_multiple_datasets
-[2026-05-09 14:23:46,025][pytorch_lightning.utilities.rank_zero][INFO] - Using 16bit Automatic Mixed Precision (AMP)
-[2026-05-09 14:23:46,059][pytorch_lightning.utilities.rank_zero][INFO] - GPU available: True (cuda), used: True
-[2026-05-09 14:23:46,059][pytorch_lightning.utilities.rank_zero][INFO] - TPU available: False, using: 0 TPU cores
-[2026-05-09 14:23:46,059][pytorch_lightning.utilities.rank_zero][INFO] - HPU available: False, using: 0 HPUs
-[2026-05-09 14:23:46,060][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer(limit_train_batches=1)` was configured so 1 batch per epoch will be used.
-[2026-05-09 14:23:46,060][lightning_fabric.utilities.seed][INFO] - [rank: 0] Seed set to 12345
-[2026-05-09 14:23:46,230][anemoi.training.train.train][INFO] - Initial seed: Rank 0, initial seed 12345, running with random seed: 12345
-[2026-05-09 14:26:59,712][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-05-09 14:27:00,089][anemoi.training.train.train][INFO] - Resuming training from last checkpoint: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/diffusion_finer_graph_v1/checkpoint/0a6da218-b610-4b5a-bf8c-3f2d2b3540cd/inference-last.ckpt
-[2026-05-09 14:27:01,650][anemoi.training.train.train][INFO] - Checkpoint role debug: checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/diffusion_finer_graph_v1/checkpoint/0a6da218-b610-4b5a-bf8c-3f2d2b3540cd/inference-last.ckpt is not a dict; skipping role inspection.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_850 is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: icmr_925 is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: landcover is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: orography is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: refc is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_850 is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: snmr_925 is not normalized.
-[2026-05-09 14:27:01,697][anemoi.models.preprocessing.normalizer][INFO] - Normalizing: swdown is not normalized.
-[2026-05-09 14:27:01,744][anemoi.models.models.base][INFO] - Model runtime dims [data]: num_channels=1024, n_step_input=2, model_input_vars=44, raw_input_dim=142, model_output_vars=42, output_dim=42
-[2026-05-09 14:27:01,751][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-05-09 14:27:01,752][anemoi.models.layers.utils][INFO] - LayerNorm kernel: anemoi.models.layers.normalization.ConditionalLayerNorm.
-[2026-05-09 14:27:01,753][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-05-09 14:27:01,753][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-05-09 14:27:01,754][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-05-09 14:27:01,804][anemoi.models.layers.block][INFO] - GraphTransformerMapperBlock using triton graph attention backend.
-[2026-05-09 14:27:01,810][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-05-09 14:27:01,811][anemoi.models.layers.utils][INFO] - LayerNorm kernel: anemoi.models.layers.normalization.ConditionalLayerNorm.
-[2026-05-09 14:27:01,811][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-05-09 14:27:01,812][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-05-09 14:27:01,812][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-05-09 14:27:01,858][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:01,904][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:01,950][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:01,996][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,042][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,098][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,160][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,224][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,287][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,349][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,413][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,476][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,539][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,603][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,666][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,729][anemoi.models.layers.block][INFO] - GraphTransformerProcessorBlock using triton graph attention backend.
-[2026-05-09 14:27:02,750][anemoi.models.layers.utils][INFO] - Linear kernel: torch.nn.Linear.
-[2026-05-09 14:27:02,751][anemoi.models.layers.utils][INFO] - LayerNorm kernel: anemoi.models.layers.normalization.ConditionalLayerNorm.
-[2026-05-09 14:27:02,751][anemoi.models.layers.utils][INFO] - Activation kernel: torch.nn.GELU.
-[2026-05-09 14:27:02,752][anemoi.models.layers.utils][INFO] - QueryNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-05-09 14:27:02,752][anemoi.models.layers.utils][INFO] - KeyNorm kernel: anemoi.models.layers.normalization.AutocastLayerNorm.
-[2026-05-09 14:27:02,815][anemoi.models.layers.block][INFO] - GraphTransformerMapperBlock using triton graph attention backend.
-[2026-05-09 14:27:02,890][anemoi.training.losses.scalers.variable_level][INFO] - Variable Level Scaling: Applying ReluVariableLevelScaler scaling to pl variables ({'param': ['q', 't', 'u', 'v', 'w', 'z']})
-[2026-05-09 14:27:02,891][anemoi.training.losses.scalers.variable_level][INFO] - with slope = 0.001 and y-intercept/minimum = 0.2.
-[2026-05-09 14:27:02,939][anemoi.training.losses.scalers.value_range][INFO] - TargetValueRangeScaler configured for variable=refc normalization=min-max thresholds=[0.0, 20.0, 40.0] range_weight_factors=[0.1, 10.0, 40.0, 80.0] apply_to=self
-[2026-05-09 14:27:02,944][anemoi.training.train.tasks.base][INFO] - GraphModule with n_step_input=2 and n_step_output=1
-[2026-05-09 14:27:02,944][anemoi.training.data.grid_indices][INFO] - The graph attribute indices_connected_nodes of the data nodes will be used to masking the spatial dimension.
-[2026-05-09 14:27:02,951][anemoi.training.train.train][INFO] - Restoring only model weights from /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/diffusion_finer_graph_v1/checkpoint/0a6da218-b610-4b5a-bf8c-3f2d2b3540cd/inference-last.ckpt
-[2026-05-09 14:27:03,434][anemoi.training.train.train][INFO] - Warm start ckpt type: AnemoiModelInterface
-[2026-05-09 14:27:03,438][anemoi.models.data_indices.collection][INFO] - No variable order to compare. Skipping variable order check.
-[2026-05-09 14:27:03,438][anemoi.training.train.train][INFO] - The following submodules will NOT be trained: []
-[2026-05-09 14:27:12,491][anemoi.models.utils.compile][INFO] - The following modules will be compiled: ['anemoi.models.layers.normalization.ConditionalLayerNorm']
-[2026-05-09 14:27:12,491][anemoi.training.train.train][INFO] - Recompile limit set to 32
-[2026-05-09 14:27:34,681][lightning_fabric.utilities.distributed][INFO] - Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/1
-[2026-05-09 14:27:34,685][pytorch_lightning.utilities.rank_zero][INFO] - ----------------------------------------------------------------------------------------------------
-distributed_backend=nccl
-All distributed processes registered. Starting with 1 processes
-----------------------------------------------------------------------------------------------------
-
-[2026-05-09 14:27:35,045][pytorch_lightning.accelerators.cuda][INFO] - LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
-[2026-05-09 14:27:35,218][anemoi.training.train.tasks.base][INFO] - Optimizer initialized: AdamW
-[2026-05-09 14:27:35,219][anemoi.training.train.tasks.base][INFO] - Optimizer settings: {'lr': 6.25e-05, 'betas': [0.9, 0.95], 'eps': 1e-08, 'weight_decay': 0.01, 'amsgrad': False, 'maximize': False, 'foreach': None, 'capturable': False, 'differentiable': False, 'fused': None, 'decoupled_weight_decay': True}
-[2026-05-09 14:27:35,219][timm.scheduler.cosine_lr][WARNING] - Cosine annealing scheduler will have no effect on the learning rate since t_initial = t_mul = eta_mul = 1.
-[2026-05-09 14:27:35,544][lightning_fabric.utilities.seed][INFO] - [rank: 0] Seed set to 12345
-[2026-05-09 14:27:35,592][pytorch_lightning.callbacks.model_summary][INFO] - 
-  | Name    | Type                 | Params | Mode 
----------------------------------------------------------
-0 | model   | AnemoiModelInterface | 264 M  | train
-1 | loss    | ModuleDict           | 0      | train
-2 | metrics | ModuleDict           | 0      | train
----------------------------------------------------------
-264 M     Trainable params
-0         Non-trainable params
-264 M     Total params
-1,059.196 Total estimated model params size (MB)
-462       Modules in train mode
-0         Modules in eval mode
-[2026-05-09 14:27:35,593][pytorch_lightning.trainer.connectors.signal_connector][INFO] - SLURM auto-requeueing enabled. Setting signal handlers.
-[2026-05-09 14:27:35,615][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
-[2026-05-09 14:27:35,804][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 219416, global_rank 0, model comm group 0)  has low/high range 0 / 156
-[2026-05-09 14:27:35,804][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 219419, global_rank 0, model comm group 0)  has low/high range 467 / 622
-[2026-05-09 14:27:35,804][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 219417, global_rank 0, model comm group 0)  has low/high range 156 / 312
-[2026-05-09 14:27:35,804][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 219418, global_rank 0, model comm group 0)  has low/high range 312 / 467
-[2026-05-09 14:27:35,820][anemoi.training.data.datamodule][WARNING] - Falling back rollout to: 1
-[2026-05-09 14:27:35,822][anemoi.training.data.dataset][INFO] - Creating NativeGridDataset...
-[2026-05-09 14:27:35,828][anemoi.training.data.multidataset][INFO] - Timeincrement set to 1 for data with frequency, 3600, and timestep, 3600
-[2026-05-09 14:27:35,829][anemoi.training.data.multidataset][INFO] - Dataset 'data' has 622 valid indices
-[2026-05-09 14:27:35,829][anemoi.training.data.multidataset][INFO] - MultiDataset has 622 valid indices after intersection.
-[2026-05-09 14:27:35,829][anemoi.training.data.multidataset][INFO] - MultiDataset initialized with 1 datasets (data), 622 valid indices each
-[2026-05-09 14:27:35,830][anemoi.training.data.multidataset][INFO] - NativeGridDataset.set_group_info(): global_rank 0, model_comm_group_id 0, model_comm_group_rank 0, model_comm_num_groups 1, reader_group_rank 0, sample_comm_group_id 0, sample_comm_num_groups 1
-Training: |          | 0/? [00:00<?, ?it/s][2026-05-09 14:27:35,831][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-[2026-05-09 14:27:35,842][anemoi.training.data.multidataset][INFO] - Worker 3 (training, pid 219419, base_seed 12345, sanity rnd 0.227336)
-[2026-05-09 14:27:35,842][anemoi.training.data.multidataset][INFO] - Worker 0 (training, pid 219416, base_seed 12345, sanity rnd 0.227336)
-[2026-05-09 14:27:35,842][anemoi.training.data.multidataset][INFO] - Worker 1 (training, pid 219417, base_seed 12345, sanity rnd 0.227336)
-[2026-05-09 14:27:35,842][anemoi.training.data.multidataset][INFO] - Worker 2 (training, pid 219418, base_seed 12345, sanity rnd 0.227336)
-Training:   0%|          | 0/1 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s] [2026-05-09 14:27:39,249][anemoi.training.losses.scalers.value_range][INFO] - TargetValueRangeScaler applied for variable=refc dataset=data raw_target_range=[-1804.556, 5547.141] unique_range_weights=[0.10000000149011612, 10.0, 40.0, 80.0] bucket_counts={'0.1': 302391, '10.0': 133, '40.0': 106, '80.0': 7611} total_count=310241
-Epoch 0: 100%|██████████| 1/1 [01:00<00:00,  0.02it/s]Epoch 0: 100%|██████████| 1/1 [01:00<00:00,  0.02it/s, train_multi_dataset_loss_step=7.240][2026-05-09 14:28:40,176][anemoi.training.data.multidataset][INFO] - Worker 1 (pid 219834, global_rank 0, model comm group 0)  has low/high range 156 / 312
-[2026-05-09 14:28:40,176][anemoi.training.data.multidataset][INFO] - Worker 0 (pid 219833, global_rank 0, model comm group 0)  has low/high range 0 / 156
-[2026-05-09 14:28:40,179][anemoi.training.data.multidataset][INFO] - Worker 1 (validation, pid 219834, base_seed 12345, sanity rnd 0.227336)
-[2026-05-09 14:28:40,180][anemoi.training.data.multidataset][INFO] - Worker 0 (validation, pid 219833, base_seed 12345, sanity rnd 0.227336)
-[2026-05-09 14:28:40,180][anemoi.training.data.multidataset][INFO] - Worker 2 (pid 219835, global_rank 0, model comm group 0)  has low/high range 312 / 467
-[2026-05-09 14:28:40,182][anemoi.training.data.multidataset][INFO] - Worker 2 (validation, pid 219835, base_seed 12345, sanity rnd 0.227336)
-[2026-05-09 14:28:40,214][anemoi.training.data.multidataset][INFO] - Worker 3 (pid 219836, global_rank 0, model comm group 0)  has low/high range 467 / 622
-[2026-05-09 14:28:40,217][anemoi.training.data.multidataset][INFO] - Worker 3 (validation, pid 219836, base_seed 12345, sanity rnd 0.227336)
-
-Validation: |          | 0/? [00:00<?, ?it/s][A[2026-05-09 14:28:41,943][anemoi.models.data_indices.collection][INFO] - The order of the variables in the model matches the order in the data.
-
-Validation: |          | 0/? [00:00<?, ?it/s][A
-Validation DataLoader 0: |          | 0/? [00:00<?, ?it/s][A[2026-05-09 14:28:46,483][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 1/? [00:04<00:00,  0.25it/s][A[2026-05-09 14:28:46,897][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 2/? [00:04<00:00,  0.45it/s][A[2026-05-09 14:28:47,285][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 3/? [00:04<00:00,  0.62it/s][A[2026-05-09 14:28:47,663][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 4/? [00:05<00:00,  0.77it/s][A[2026-05-09 14:28:48,041][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 5/? [00:05<00:00,  0.90it/s][A[2026-05-09 14:28:48,421][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 6/? [00:05<00:00,  1.01it/s][A[2026-05-09 14:28:48,802][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 7/? [00:06<00:00,  1.11it/s][A[2026-05-09 14:28:49,182][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 8/? [00:06<00:00,  1.19it/s][A[2026-05-09 14:28:49,560][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 9/? [00:07<00:00,  1.27it/s][A[2026-05-09 14:28:49,940][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 10/? [00:07<00:00,  1.34it/s][A[2026-05-09 14:28:50,319][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 11/? [00:07<00:00,  1.40it/s][A[2026-05-09 14:28:50,700][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 12/? [00:08<00:00,  1.46it/s][A[2026-05-09 14:28:51,079][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 13/? [00:08<00:00,  1.51it/s][A[2026-05-09 14:28:51,460][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 14/? [00:08<00:00,  1.56it/s][A[2026-05-09 14:28:51,839][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 15/? [00:09<00:00,  1.60it/s][A[2026-05-09 14:28:52,220][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 16/? [00:09<00:00,  1.64it/s][A[2026-05-09 14:28:52,601][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 17/? [00:10<00:00,  1.68it/s][A[2026-05-09 14:28:52,981][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 18/? [00:10<00:00,  1.71it/s][A[2026-05-09 14:28:53,388][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 19/? [00:10<00:00,  1.74it/s][A[2026-05-09 14:28:53,840][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 20/? [00:11<00:00,  1.76it/s][A[2026-05-09 14:28:54,224][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 21/? [00:11<00:00,  1.79it/s][A[2026-05-09 14:28:54,618][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 22/? [00:12<00:00,  1.81it/s][A[2026-05-09 14:28:54,999][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 23/? [00:12<00:00,  1.84it/s][A[2026-05-09 14:28:55,380][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 24/? [00:12<00:00,  1.86it/s][A[2026-05-09 14:28:55,770][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 25/? [00:13<00:00,  1.88it/s][A[2026-05-09 14:28:56,159][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 26/? [00:13<00:00,  1.90it/s][A[2026-05-09 14:28:56,538][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 27/? [00:14<00:00,  1.92it/s][A[2026-05-09 14:28:56,916][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 28/? [00:14<00:00,  1.94it/s][A[2026-05-09 14:28:57,295][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 29/? [00:14<00:00,  1.96it/s][A[2026-05-09 14:28:57,675][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 30/? [00:15<00:00,  1.97it/s][A[2026-05-09 14:28:58,063][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 31/? [00:15<00:00,  1.99it/s][A[2026-05-09 14:28:58,480][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 32/? [00:15<00:00,  2.00it/s][A[2026-05-09 14:28:58,861][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 33/? [00:16<00:00,  2.01it/s][A[2026-05-09 14:28:59,281][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 34/? [00:16<00:00,  2.02it/s][A[2026-05-09 14:28:59,676][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 35/? [00:17<00:00,  2.04it/s][A[2026-05-09 14:29:00,057][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 36/? [00:17<00:00,  2.05it/s][A[2026-05-09 14:29:00,438][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 37/? [00:17<00:00,  2.06it/s][A[2026-05-09 14:29:00,822][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 38/? [00:18<00:00,  2.07it/s][A[2026-05-09 14:29:01,241][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 39/? [00:18<00:00,  2.08it/s][A[2026-05-09 14:29:01,653][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 40/? [00:19<00:00,  2.09it/s][A[2026-05-09 14:29:02,045][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 41/? [00:19<00:00,  2.10it/s][A[2026-05-09 14:29:02,459][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 42/? [00:19<00:00,  2.10it/s][A[2026-05-09 14:29:02,841][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 43/? [00:20<00:00,  2.11it/s][A[2026-05-09 14:29:03,221][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 44/? [00:20<00:00,  2.12it/s][A[2026-05-09 14:29:03,602][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 45/? [00:21<00:00,  2.13it/s][A[2026-05-09 14:29:03,989][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 46/? [00:21<00:00,  2.14it/s][A[2026-05-09 14:29:04,369][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 47/? [00:21<00:00,  2.15it/s][A[2026-05-09 14:29:04,750][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 48/? [00:22<00:00,  2.16it/s][A[2026-05-09 14:29:05,151][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 49/? [00:22<00:00,  2.16it/s][A[2026-05-09 14:29:05,558][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 50/? [00:23<00:00,  2.17it/s][A[2026-05-09 14:29:05,962][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 51/? [00:23<00:00,  2.17it/s][A[2026-05-09 14:29:06,343][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 52/? [00:23<00:00,  2.18it/s][A[2026-05-09 14:29:06,762][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 53/? [00:24<00:00,  2.18it/s][A[2026-05-09 14:29:07,150][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 54/? [00:24<00:00,  2.19it/s][A[2026-05-09 14:29:07,531][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 55/? [00:25<00:00,  2.20it/s][A[2026-05-09 14:29:07,913][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 56/? [00:25<00:00,  2.20it/s][A[2026-05-09 14:29:08,295][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 57/? [00:25<00:00,  2.21it/s][A[2026-05-09 14:29:08,674][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 58/? [00:26<00:00,  2.21it/s][A[2026-05-09 14:29:09,056][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 59/? [00:26<00:00,  2.22it/s][A[2026-05-09 14:29:09,436][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 60/? [00:26<00:00,  2.23it/s][A[2026-05-09 14:29:09,843][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 61/? [00:27<00:00,  2.23it/s][A[2026-05-09 14:29:10,251][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 62/? [00:27<00:00,  2.23it/s][A[2026-05-09 14:29:10,651][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 63/? [00:28<00:00,  2.24it/s][A[2026-05-09 14:29:11,031][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 64/? [00:28<00:00,  2.24it/s][A[2026-05-09 14:29:11,451][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 65/? [00:28<00:00,  2.24it/s][A[2026-05-09 14:29:11,841][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 66/? [00:29<00:00,  2.25it/s][A[2026-05-09 14:29:12,221][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 67/? [00:29<00:00,  2.25it/s][A[2026-05-09 14:29:12,602][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 68/? [00:30<00:00,  2.26it/s][A[2026-05-09 14:29:12,985][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 69/? [00:30<00:00,  2.26it/s][A[2026-05-09 14:29:13,365][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 70/? [00:30<00:00,  2.27it/s][A[2026-05-09 14:29:13,745][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 71/? [00:31<00:00,  2.27it/s][A[2026-05-09 14:29:14,123][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 72/? [00:31<00:00,  2.28it/s][A[2026-05-09 14:29:14,505][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 73/? [00:32<00:00,  2.28it/s][A[2026-05-09 14:29:14,886][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 74/? [00:32<00:00,  2.28it/s][A[2026-05-09 14:29:15,286][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 75/? [00:32<00:00,  2.29it/s][A[2026-05-09 14:29:15,676][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 76/? [00:33<00:00,  2.29it/s][A[2026-05-09 14:29:16,086][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 77/? [00:33<00:00,  2.29it/s][A[2026-05-09 14:29:16,488][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 78/? [00:34<00:00,  2.29it/s][A[2026-05-09 14:29:16,868][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 79/? [00:34<00:00,  2.30it/s][A[2026-05-09 14:29:17,265][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 80/? [00:34<00:00,  2.30it/s][A[2026-05-09 14:29:17,651][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 81/? [00:35<00:00,  2.30it/s][A[2026-05-09 14:29:18,031][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 82/? [00:35<00:00,  2.31it/s][A[2026-05-09 14:29:18,414][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 83/? [00:35<00:00,  2.31it/s][A[2026-05-09 14:29:18,796][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 84/? [00:36<00:00,  2.31it/s][A[2026-05-09 14:29:19,180][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 85/? [00:36<00:00,  2.32it/s][A[2026-05-09 14:29:19,577][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 86/? [00:37<00:00,  2.32it/s][A[2026-05-09 14:29:19,961][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 87/? [00:37<00:00,  2.32it/s][A[2026-05-09 14:29:20,343][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 88/? [00:37<00:00,  2.32it/s][A[2026-05-09 14:29:20,740][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 89/? [00:38<00:00,  2.33it/s][A[2026-05-09 14:29:21,122][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 90/? [00:38<00:00,  2.33it/s][A[2026-05-09 14:29:21,502][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 91/? [00:39<00:00,  2.33it/s][A[2026-05-09 14:29:21,898][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 92/? [00:39<00:00,  2.33it/s][A[2026-05-09 14:29:22,308][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 93/? [00:39<00:00,  2.34it/s][A[2026-05-09 14:29:22,689][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 94/? [00:40<00:00,  2.34it/s][A[2026-05-09 14:29:23,115][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 95/? [00:40<00:00,  2.34it/s][A[2026-05-09 14:29:23,505][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 96/? [00:41<00:00,  2.34it/s][A[2026-05-09 14:29:23,896][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 97/? [00:41<00:00,  2.34it/s][A[2026-05-09 14:29:24,294][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 98/? [00:41<00:00,  2.34it/s][A[2026-05-09 14:29:24,678][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 99/? [00:42<00:00,  2.35it/s][A[2026-05-09 14:29:25,058][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 100/? [00:42<00:00,  2.35it/s][A[2026-05-09 14:29:25,456][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 101/? [00:42<00:00,  2.35it/s][A[2026-05-09 14:29:25,843][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 102/? [00:43<00:00,  2.35it/s][A[2026-05-09 14:29:26,222][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 103/? [00:43<00:00,  2.35it/s][A[2026-05-09 14:29:26,602][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 104/? [00:44<00:00,  2.36it/s][A[2026-05-09 14:29:26,982][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 105/? [00:44<00:00,  2.36it/s][A[2026-05-09 14:29:27,363][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 106/? [00:44<00:00,  2.36it/s][A[2026-05-09 14:29:27,759][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 107/? [00:45<00:00,  2.36it/s][A[2026-05-09 14:29:28,141][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 108/? [00:45<00:00,  2.37it/s][A[2026-05-09 14:29:28,521][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 109/? [00:46<00:00,  2.37it/s][A[2026-05-09 14:29:28,902][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 110/? [00:46<00:00,  2.37it/s][A[2026-05-09 14:29:29,282][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 111/? [00:46<00:00,  2.37it/s][A[2026-05-09 14:29:29,661][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 112/? [00:47<00:00,  2.37it/s][A[2026-05-09 14:29:30,058][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 113/? [00:47<00:00,  2.38it/s][A[2026-05-09 14:29:30,468][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 114/? [00:47<00:00,  2.38it/s][A[2026-05-09 14:29:30,846][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 115/? [00:48<00:00,  2.38it/s][A[2026-05-09 14:29:31,279][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 116/? [00:48<00:00,  2.38it/s][A[2026-05-09 14:29:31,673][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 117/? [00:49<00:00,  2.38it/s][A[2026-05-09 14:29:32,054][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 118/? [00:49<00:00,  2.38it/s][A[2026-05-09 14:29:32,468][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 119/? [00:49<00:00,  2.38it/s][A[2026-05-09 14:29:32,851][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 120/? [00:50<00:00,  2.38it/s][A[2026-05-09 14:29:33,230][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 121/? [00:50<00:00,  2.38it/s][A[2026-05-09 14:29:33,628][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 122/? [00:51<00:00,  2.39it/s][A[2026-05-09 14:29:34,012][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 123/? [00:51<00:00,  2.39it/s][A[2026-05-09 14:29:34,394][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 124/? [00:51<00:00,  2.39it/s][A[2026-05-09 14:29:34,812][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 125/? [00:52<00:00,  2.39it/s][A[2026-05-09 14:29:35,199][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 126/? [00:52<00:00,  2.39it/s][A[2026-05-09 14:29:35,583][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 127/? [00:53<00:00,  2.39it/s][A[2026-05-09 14:29:36,001][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 128/? [00:53<00:00,  2.39it/s][A[2026-05-09 14:29:36,385][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 129/? [00:53<00:00,  2.39it/s][A[2026-05-09 14:29:36,768][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 130/? [00:54<00:00,  2.39it/s][A[2026-05-09 14:29:37,184][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 131/? [00:54<00:00,  2.39it/s][A[2026-05-09 14:29:37,573][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 132/? [00:55<00:00,  2.40it/s][A[2026-05-09 14:29:37,954][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 133/? [00:55<00:00,  2.40it/s][A[2026-05-09 14:29:38,388][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 134/? [00:55<00:00,  2.40it/s][A[2026-05-09 14:29:38,777][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 135/? [00:56<00:00,  2.40it/s][A[2026-05-09 14:29:39,157][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 136/? [00:56<00:00,  2.40it/s][A[2026-05-09 14:29:39,576][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 137/? [00:57<00:00,  2.40it/s][A[2026-05-09 14:29:39,973][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 138/? [00:57<00:00,  2.40it/s][A[2026-05-09 14:29:40,394][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 139/? [00:57<00:00,  2.40it/s][A[2026-05-09 14:29:40,812][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 140/? [00:58<00:00,  2.40it/s][A[2026-05-09 14:29:41,210][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 141/? [00:58<00:00,  2.40it/s][A[2026-05-09 14:29:41,592][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 142/? [00:59<00:00,  2.40it/s][A[2026-05-09 14:29:42,015][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 143/? [00:59<00:00,  2.40it/s][A[2026-05-09 14:29:42,398][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 144/? [00:59<00:00,  2.40it/s][A[2026-05-09 14:29:42,782][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 145/? [01:00<00:00,  2.40it/s][A[2026-05-09 14:29:43,217][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 146/? [01:00<00:00,  2.40it/s][A[2026-05-09 14:29:43,608][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 147/? [01:01<00:00,  2.40it/s][A[2026-05-09 14:29:43,991][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 148/? [01:01<00:00,  2.41it/s][A[2026-05-09 14:29:44,407][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 149/? [01:01<00:00,  2.41it/s][A[2026-05-09 14:29:44,792][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 150/? [01:02<00:00,  2.41it/s][A[2026-05-09 14:29:45,176][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 151/? [01:02<00:00,  2.41it/s][A[2026-05-09 14:29:45,595][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 152/? [01:03<00:00,  2.41it/s][A[2026-05-09 14:29:45,985][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 153/? [01:03<00:00,  2.41it/s][A[2026-05-09 14:29:46,368][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 154/? [01:03<00:00,  2.41it/s][A[2026-05-09 14:29:46,783][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 155/? [01:04<00:00,  2.41it/s][A[2026-05-09 14:29:47,169][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 156/? [01:04<00:00,  2.41it/s][A[2026-05-09 14:29:47,552][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 157/? [01:05<00:00,  2.41it/s][A[2026-05-09 14:29:47,984][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 158/? [01:05<00:00,  2.41it/s][A[2026-05-09 14:29:48,374][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 159/? [01:05<00:00,  2.41it/s][A[2026-05-09 14:29:48,755][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 160/? [01:06<00:00,  2.41it/s][A[2026-05-09 14:29:49,172][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 161/? [01:06<00:00,  2.41it/s][A[2026-05-09 14:29:49,559][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 162/? [01:07<00:00,  2.42it/s][A[2026-05-09 14:29:49,941][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 163/? [01:07<00:00,  2.42it/s][A[2026-05-09 14:29:50,375][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 164/? [01:07<00:00,  2.42it/s][A[2026-05-09 14:29:50,765][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 165/? [01:08<00:00,  2.42it/s][A[2026-05-09 14:29:51,153][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 166/? [01:08<00:00,  2.42it/s][A[2026-05-09 14:29:51,580][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 167/? [01:09<00:00,  2.42it/s][A[2026-05-09 14:29:51,983][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 168/? [01:09<00:00,  2.42it/s][A[2026-05-09 14:29:52,385][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 169/? [01:09<00:00,  2.42it/s][A[2026-05-09 14:29:52,809][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 170/? [01:10<00:00,  2.42it/s][A[2026-05-09 14:29:53,205][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 171/? [01:10<00:00,  2.42it/s][A[2026-05-09 14:29:53,585][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 172/? [01:11<00:00,  2.42it/s][A[2026-05-09 14:29:53,981][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 173/? [01:11<00:00,  2.42it/s][A[2026-05-09 14:29:54,366][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 174/? [01:11<00:00,  2.42it/s][A[2026-05-09 14:29:54,745][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 175/? [01:12<00:00,  2.42it/s][A[2026-05-09 14:29:55,159][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 176/? [01:12<00:00,  2.42it/s][A[2026-05-09 14:29:55,544][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 177/? [01:13<00:00,  2.42it/s][A[2026-05-09 14:29:55,925][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 178/? [01:13<00:00,  2.42it/s][A[2026-05-09 14:29:56,360][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 179/? [01:13<00:00,  2.42it/s][A[2026-05-09 14:29:56,743][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 180/? [01:14<00:00,  2.42it/s][A[2026-05-09 14:29:57,125][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 181/? [01:14<00:00,  2.42it/s][A[2026-05-09 14:29:57,521][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 182/? [01:15<00:00,  2.43it/s][A[2026-05-09 14:29:57,905][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 183/? [01:15<00:00,  2.43it/s][A[2026-05-09 14:29:58,286][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 184/? [01:15<00:00,  2.43it/s][A[2026-05-09 14:29:58,681][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 185/? [01:16<00:00,  2.43it/s][A[2026-05-09 14:29:59,065][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 186/? [01:16<00:00,  2.43it/s][A[2026-05-09 14:29:59,446][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 187/? [01:16<00:00,  2.43it/s][A[2026-05-09 14:29:59,842][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 188/? [01:17<00:00,  2.43it/s][A[2026-05-09 14:30:00,226][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 189/? [01:17<00:00,  2.43it/s][A[2026-05-09 14:30:00,608][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 190/? [01:18<00:00,  2.43it/s][A[2026-05-09 14:30:00,990][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 191/? [01:18<00:00,  2.43it/s][A[2026-05-09 14:30:01,371][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 192/? [01:18<00:00,  2.43it/s][A[2026-05-09 14:30:01,753][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 193/? [01:19<00:00,  2.43it/s][A[2026-05-09 14:30:02,150][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 194/? [01:19<00:00,  2.44it/s][A[2026-05-09 14:30:02,535][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 195/? [01:20<00:00,  2.44it/s][A[2026-05-09 14:30:02,918][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 196/? [01:20<00:00,  2.44it/s][A[2026-05-09 14:30:03,314][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 197/? [01:20<00:00,  2.44it/s][A[2026-05-09 14:30:03,700][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 198/? [01:21<00:00,  2.44it/s][A[2026-05-09 14:30:04,101][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 199/? [01:21<00:00,  2.44it/s][A[2026-05-09 14:30:04,520][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 200/? [01:22<00:00,  2.44it/s][A[2026-05-09 14:30:04,912][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 201/? [01:22<00:00,  2.44it/s][A[2026-05-09 14:30:05,303][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 202/? [01:22<00:00,  2.44it/s][A[2026-05-09 14:30:05,703][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 203/? [01:23<00:00,  2.44it/s][A[2026-05-09 14:30:06,095][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 204/? [01:23<00:00,  2.44it/s][A[2026-05-09 14:30:06,476][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 205/? [01:23<00:00,  2.44it/s][A[2026-05-09 14:30:06,934][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 206/? [01:24<00:00,  2.44it/s][A[2026-05-09 14:30:07,331][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 207/? [01:24<00:00,  2.44it/s][A[2026-05-09 14:30:07,713][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 208/? [01:25<00:00,  2.44it/s][A[2026-05-09 14:30:08,096][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 209/? [01:25<00:00,  2.44it/s][A[2026-05-09 14:30:08,482][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 210/? [01:25<00:00,  2.44it/s][A[2026-05-09 14:30:08,864][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 211/? [01:26<00:00,  2.44it/s][A[2026-05-09 14:30:09,281][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 212/? [01:26<00:00,  2.44it/s][A[2026-05-09 14:30:09,668][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 213/? [01:27<00:00,  2.44it/s][A[2026-05-09 14:30:10,051][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 214/? [01:27<00:00,  2.44it/s][A[2026-05-09 14:30:10,449][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 215/? [01:27<00:00,  2.44it/s][A[2026-05-09 14:30:10,835][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 216/? [01:28<00:00,  2.44it/s][A[2026-05-09 14:30:11,216][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 217/? [01:28<00:00,  2.45it/s][A[2026-05-09 14:30:11,602][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 218/? [01:29<00:00,  2.45it/s][A[2026-05-09 14:30:11,985][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 219/? [01:29<00:00,  2.45it/s][A[2026-05-09 14:30:12,365][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 220/? [01:29<00:00,  2.45it/s][A[2026-05-09 14:30:12,762][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 221/? [01:30<00:00,  2.45it/s][A[2026-05-09 14:30:13,146][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 222/? [01:30<00:00,  2.45it/s][A[2026-05-09 14:30:13,527][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 223/? [01:31<00:00,  2.45it/s][A[2026-05-09 14:30:13,913][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 224/? [01:31<00:00,  2.45it/s][A[2026-05-09 14:30:14,295][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 225/? [01:31<00:00,  2.45it/s][A[2026-05-09 14:30:14,677][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 226/? [01:32<00:00,  2.45it/s][A[2026-05-09 14:30:15,075][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 227/? [01:32<00:00,  2.45it/s][A[2026-05-09 14:30:15,459][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 228/? [01:32<00:00,  2.45it/s][A[2026-05-09 14:30:15,841][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 229/? [01:33<00:00,  2.45it/s][A[2026-05-09 14:30:16,299][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 230/? [01:33<00:00,  2.45it/s][A[2026-05-09 14:30:16,682][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 231/? [01:34<00:00,  2.45it/s][A[2026-05-09 14:30:17,063][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 232/? [01:34<00:00,  2.45it/s][A[2026-05-09 14:30:17,461][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 233/? [01:34<00:00,  2.45it/s][A[2026-05-09 14:30:17,847][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 234/? [01:35<00:00,  2.45it/s][A[2026-05-09 14:30:18,227][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 235/? [01:35<00:00,  2.45it/s][A[2026-05-09 14:30:18,634][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 236/? [01:36<00:00,  2.45it/s][A[2026-05-09 14:30:19,019][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 237/? [01:36<00:00,  2.46it/s][A[2026-05-09 14:30:19,402][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 238/? [01:36<00:00,  2.46it/s][A[2026-05-09 14:30:19,802][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 239/? [01:37<00:00,  2.46it/s][A[2026-05-09 14:30:20,185][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 240/? [01:37<00:00,  2.46it/s][A[2026-05-09 14:30:20,602][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 241/? [01:38<00:00,  2.46it/s][A[2026-05-09 14:30:20,995][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 242/? [01:38<00:00,  2.46it/s][A[2026-05-09 14:30:21,376][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 243/? [01:38<00:00,  2.46it/s][A[2026-05-09 14:30:21,801][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 244/? [01:39<00:00,  2.46it/s][A[2026-05-09 14:30:22,200][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 245/? [01:39<00:00,  2.46it/s][A[2026-05-09 14:30:22,584][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 246/? [01:40<00:00,  2.46it/s][A[2026-05-09 14:30:22,982][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 247/? [01:40<00:00,  2.46it/s][A[2026-05-09 14:30:23,376][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 248/? [01:40<00:00,  2.46it/s][A[2026-05-09 14:30:23,760][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 249/? [01:41<00:00,  2.46it/s][A[2026-05-09 14:30:24,157][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 250/? [01:41<00:00,  2.46it/s][A[2026-05-09 14:30:24,542][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 251/? [01:42<00:00,  2.46it/s][A[2026-05-09 14:30:24,925][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 252/? [01:42<00:00,  2.46it/s][A[2026-05-09 14:30:25,323][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 253/? [01:42<00:00,  2.46it/s][A[2026-05-09 14:30:25,707][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 254/? [01:43<00:00,  2.46it/s][A[2026-05-09 14:30:26,091][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 255/? [01:43<00:00,  2.46it/s][A[2026-05-09 14:30:26,472][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 256/? [01:43<00:00,  2.46it/s][A[2026-05-09 14:30:26,854][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 257/? [01:44<00:00,  2.46it/s][A[2026-05-09 14:30:27,238][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 258/? [01:44<00:00,  2.46it/s][A[2026-05-09 14:30:27,639][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 259/? [01:45<00:00,  2.46it/s][A[2026-05-09 14:30:28,023][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 260/? [01:45<00:00,  2.46it/s][A[2026-05-09 14:30:28,404][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 261/? [01:45<00:00,  2.46it/s][A[2026-05-09 14:30:28,801][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 262/? [01:46<00:00,  2.46it/s][A[2026-05-09 14:30:29,187][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 263/? [01:46<00:00,  2.46it/s][A[2026-05-09 14:30:29,569][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 264/? [01:47<00:00,  2.47it/s][A[2026-05-09 14:30:29,966][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 265/? [01:47<00:00,  2.47it/s][A[2026-05-09 14:30:30,351][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 266/? [01:47<00:00,  2.47it/s][A[2026-05-09 14:30:30,734][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 267/? [01:48<00:00,  2.47it/s][A[2026-05-09 14:30:31,124][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 268/? [01:48<00:00,  2.47it/s][A[2026-05-09 14:30:31,506][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 269/? [01:49<00:00,  2.47it/s][A[2026-05-09 14:30:31,887][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 270/? [01:49<00:00,  2.47it/s][A[2026-05-09 14:30:32,285][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 271/? [01:49<00:00,  2.47it/s][A[2026-05-09 14:30:32,672][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 272/? [01:50<00:00,  2.47it/s][A[2026-05-09 14:30:33,054][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 273/? [01:50<00:00,  2.47it/s][A[2026-05-09 14:30:33,435][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 274/? [01:50<00:00,  2.47it/s][A[2026-05-09 14:30:33,817][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 275/? [01:51<00:00,  2.47it/s][A[2026-05-09 14:30:34,197][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 276/? [01:51<00:00,  2.47it/s][A[2026-05-09 14:30:34,597][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 277/? [01:52<00:00,  2.47it/s][A[2026-05-09 14:30:34,982][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 278/? [01:52<00:00,  2.47it/s][A[2026-05-09 14:30:35,364][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 279/? [01:52<00:00,  2.47it/s][A[2026-05-09 14:30:35,745][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 280/? [01:53<00:00,  2.47it/s][A[2026-05-09 14:30:36,126][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 281/? [01:53<00:00,  2.47it/s][A[2026-05-09 14:30:36,509][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 282/? [01:54<00:00,  2.47it/s][A[2026-05-09 14:30:36,908][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 283/? [01:54<00:00,  2.47it/s][A[2026-05-09 14:30:37,322][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 284/? [01:54<00:00,  2.47it/s][A[2026-05-09 14:30:37,704][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 285/? [01:55<00:00,  2.47it/s][A[2026-05-09 14:30:38,102][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 286/? [01:55<00:00,  2.47it/s][A[2026-05-09 14:30:38,486][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 287/? [01:56<00:00,  2.47it/s][A[2026-05-09 14:30:38,880][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 288/? [01:56<00:00,  2.47it/s][A[2026-05-09 14:30:39,280][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 289/? [01:56<00:00,  2.47it/s][A[2026-05-09 14:30:39,663][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 290/? [01:57<00:00,  2.47it/s][A[2026-05-09 14:30:40,046][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 291/? [01:57<00:00,  2.48it/s][A[2026-05-09 14:30:40,438][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 292/? [01:57<00:00,  2.48it/s][A[2026-05-09 14:30:40,822][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 293/? [01:58<00:00,  2.48it/s][A[2026-05-09 14:30:41,204][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 294/? [01:58<00:00,  2.48it/s][A[2026-05-09 14:30:41,602][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 295/? [01:59<00:00,  2.48it/s][A[2026-05-09 14:30:41,998][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 296/? [01:59<00:00,  2.48it/s][A[2026-05-09 14:30:42,391][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 297/? [01:59<00:00,  2.48it/s][A[2026-05-09 14:30:42,772][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 298/? [02:00<00:00,  2.48it/s][A[2026-05-09 14:30:43,157][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 299/? [02:00<00:00,  2.48it/s][A[2026-05-09 14:30:43,541][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 300/? [02:01<00:00,  2.48it/s][A[2026-05-09 14:30:43,922][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 301/? [02:01<00:00,  2.48it/s][A[2026-05-09 14:30:44,305][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 302/? [02:01<00:00,  2.48it/s][A[2026-05-09 14:30:44,686][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 303/? [02:02<00:00,  2.48it/s][A[2026-05-09 14:30:45,144][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 304/? [02:02<00:00,  2.48it/s][A[2026-05-09 14:30:45,536][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 305/? [02:03<00:00,  2.48it/s][A[2026-05-09 14:30:45,918][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 306/? [02:03<00:00,  2.48it/s][A[2026-05-09 14:30:46,302][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 307/? [02:03<00:00,  2.48it/s][A[2026-05-09 14:30:46,685][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 308/? [02:04<00:00,  2.48it/s][A[2026-05-09 14:30:47,067][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 309/? [02:04<00:00,  2.48it/s][A[2026-05-09 14:30:47,448][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 310/? [02:04<00:00,  2.48it/s][A[2026-05-09 14:30:47,833][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 311/? [02:05<00:00,  2.48it/s][A[2026-05-09 14:30:48,214][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 312/? [02:05<00:00,  2.48it/s][A[2026-05-09 14:30:48,636][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 313/? [02:06<00:00,  2.48it/s][A[2026-05-09 14:30:49,018][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 314/? [02:06<00:00,  2.48it/s][A[2026-05-09 14:30:49,400][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 315/? [02:06<00:00,  2.48it/s][A[2026-05-09 14:30:49,797][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 316/? [02:07<00:00,  2.48it/s][A[2026-05-09 14:30:50,200][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 317/? [02:07<00:00,  2.48it/s][A[2026-05-09 14:30:50,582][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 318/? [02:08<00:00,  2.48it/s][A[2026-05-09 14:30:50,963][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 319/? [02:08<00:00,  2.48it/s][A[2026-05-09 14:30:51,345][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 320/? [02:08<00:00,  2.48it/s][A[2026-05-09 14:30:51,727][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 321/? [02:09<00:00,  2.48it/s][A[2026-05-09 14:30:52,124][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 322/? [02:09<00:00,  2.48it/s][A[2026-05-09 14:30:52,508][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 323/? [02:10<00:00,  2.48it/s][A[2026-05-09 14:30:52,889][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 324/? [02:10<00:00,  2.48it/s][A[2026-05-09 14:30:53,288][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 325/? [02:10<00:00,  2.48it/s][A[2026-05-09 14:30:53,673][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 326/? [02:11<00:00,  2.48it/s][A[2026-05-09 14:30:54,055][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 327/? [02:11<00:00,  2.49it/s][A[2026-05-09 14:30:54,451][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 328/? [02:11<00:00,  2.49it/s][A[2026-05-09 14:30:54,836][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 329/? [02:12<00:00,  2.49it/s][A[2026-05-09 14:30:55,222][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 330/? [02:12<00:00,  2.49it/s][A[2026-05-09 14:30:55,619][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 331/? [02:13<00:00,  2.49it/s][A[2026-05-09 14:30:56,004][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 332/? [02:13<00:00,  2.49it/s][A[2026-05-09 14:30:56,386][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 333/? [02:13<00:00,  2.49it/s][A[2026-05-09 14:30:56,767][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 334/? [02:14<00:00,  2.49it/s][A[2026-05-09 14:30:57,175][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 335/? [02:14<00:00,  2.49it/s][A[2026-05-09 14:30:57,557][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 336/? [02:15<00:00,  2.49it/s][A[2026-05-09 14:30:57,940][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 337/? [02:15<00:00,  2.49it/s][A[2026-05-09 14:30:58,324][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 338/? [02:15<00:00,  2.49it/s][A[2026-05-09 14:30:58,709][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 339/? [02:16<00:00,  2.49it/s][A[2026-05-09 14:30:59,136][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 340/? [02:16<00:00,  2.49it/s][A[2026-05-09 14:30:59,523][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 341/? [02:17<00:00,  2.49it/s][A[2026-05-09 14:30:59,905][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 342/? [02:17<00:00,  2.49it/s][A[2026-05-09 14:31:00,287][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 343/? [02:17<00:00,  2.49it/s][A[2026-05-09 14:31:00,670][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 344/? [02:18<00:00,  2.49it/s][A[2026-05-09 14:31:01,064][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 345/? [02:18<00:00,  2.49it/s][A[2026-05-09 14:31:01,486][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 346/? [02:19<00:00,  2.49it/s][A[2026-05-09 14:31:01,867][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 347/? [02:19<00:00,  2.49it/s][A[2026-05-09 14:31:02,267][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 348/? [02:19<00:00,  2.49it/s][A[2026-05-09 14:31:02,649][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 349/? [02:20<00:00,  2.49it/s][A[2026-05-09 14:31:03,033][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 350/? [02:20<00:00,  2.49it/s][A[2026-05-09 14:31:03,415][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 351/? [02:20<00:00,  2.49it/s][A[2026-05-09 14:31:03,812][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 352/? [02:21<00:00,  2.49it/s][A[2026-05-09 14:31:04,205][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 353/? [02:21<00:00,  2.49it/s][A[2026-05-09 14:31:04,587][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 354/? [02:22<00:00,  2.49it/s][A[2026-05-09 14:31:04,969][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 355/? [02:22<00:00,  2.49it/s][A[2026-05-09 14:31:05,351][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 356/? [02:22<00:00,  2.49it/s][A[2026-05-09 14:31:05,735][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 357/? [02:23<00:00,  2.49it/s][A[2026-05-09 14:31:06,131][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 358/? [02:23<00:00,  2.49it/s][A[2026-05-09 14:31:06,515][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 359/? [02:24<00:00,  2.49it/s][A[2026-05-09 14:31:06,896][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 360/? [02:24<00:00,  2.49it/s][A[2026-05-09 14:31:07,279][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 361/? [02:24<00:00,  2.49it/s][A[2026-05-09 14:31:07,661][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 362/? [02:25<00:00,  2.49it/s][A[2026-05-09 14:31:08,044][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 363/? [02:25<00:00,  2.49it/s][A[2026-05-09 14:31:08,423][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 364/? [02:25<00:00,  2.49it/s][A[2026-05-09 14:31:08,806][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 365/? [02:26<00:00,  2.49it/s][A[2026-05-09 14:31:09,187][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 366/? [02:26<00:00,  2.49it/s][A[2026-05-09 14:31:09,569][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 367/? [02:27<00:00,  2.50it/s][A[2026-05-09 14:31:09,952][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 368/? [02:27<00:00,  2.50it/s][A[2026-05-09 14:31:10,375][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 369/? [02:27<00:00,  2.50it/s][A[2026-05-09 14:31:10,759][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 370/? [02:28<00:00,  2.50it/s][A[2026-05-09 14:31:11,142][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 371/? [02:28<00:00,  2.50it/s][A[2026-05-09 14:31:11,569][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 372/? [02:29<00:00,  2.50it/s][A[2026-05-09 14:31:11,964][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 373/? [02:29<00:00,  2.50it/s][A[2026-05-09 14:31:12,345][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 374/? [02:29<00:00,  2.50it/s][A[2026-05-09 14:31:12,742][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 375/? [02:30<00:00,  2.50it/s][A[2026-05-09 14:31:13,127][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 376/? [02:30<00:00,  2.50it/s][A[2026-05-09 14:31:13,516][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 377/? [02:31<00:00,  2.50it/s][A[2026-05-09 14:31:13,916][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 378/? [02:31<00:00,  2.50it/s][A[2026-05-09 14:31:14,299][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 379/? [02:31<00:00,  2.50it/s][A[2026-05-09 14:31:14,682][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 380/? [02:32<00:00,  2.50it/s][A[2026-05-09 14:31:15,083][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 381/? [02:32<00:00,  2.50it/s][A[2026-05-09 14:31:15,464][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 382/? [02:32<00:00,  2.50it/s][A[2026-05-09 14:31:15,846][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 383/? [02:33<00:00,  2.50it/s][A[2026-05-09 14:31:16,260][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 384/? [02:33<00:00,  2.50it/s][A[2026-05-09 14:31:16,645][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 385/? [02:34<00:00,  2.50it/s][A[2026-05-09 14:31:17,032][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 386/? [02:34<00:00,  2.50it/s][A[2026-05-09 14:31:17,430][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 387/? [02:34<00:00,  2.50it/s][A[2026-05-09 14:31:17,824][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 388/? [02:35<00:00,  2.50it/s][A[2026-05-09 14:31:18,210][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 389/? [02:35<00:00,  2.50it/s][A[2026-05-09 14:31:18,608][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 390/? [02:36<00:00,  2.50it/s][A[2026-05-09 14:31:19,005][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 391/? [02:36<00:00,  2.50it/s][A[2026-05-09 14:31:19,386][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 392/? [02:36<00:00,  2.50it/s][A[2026-05-09 14:31:19,767][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 393/? [02:37<00:00,  2.50it/s][A[2026-05-09 14:31:20,149][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 394/? [02:37<00:00,  2.50it/s][A[2026-05-09 14:31:20,529][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 395/? [02:38<00:00,  2.50it/s][A[2026-05-09 14:31:20,913][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 396/? [02:38<00:00,  2.50it/s][A[2026-05-09 14:31:21,296][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 397/? [02:38<00:00,  2.50it/s][A[2026-05-09 14:31:21,678][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 398/? [02:39<00:00,  2.50it/s][A[2026-05-09 14:31:22,060][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 399/? [02:39<00:00,  2.50it/s][A[2026-05-09 14:31:22,444][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 400/? [02:39<00:00,  2.50it/s][A[2026-05-09 14:31:22,830][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 401/? [02:40<00:00,  2.50it/s][A[2026-05-09 14:31:23,211][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 402/? [02:40<00:00,  2.50it/s][A[2026-05-09 14:31:23,593][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 403/? [02:41<00:00,  2.50it/s][A[2026-05-09 14:31:23,975][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 404/? [02:41<00:00,  2.50it/s][A[2026-05-09 14:31:24,358][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 405/? [02:41<00:00,  2.50it/s][A[2026-05-09 14:31:24,743][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 406/? [02:42<00:00,  2.50it/s][A[2026-05-09 14:31:25,433][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 407/? [02:42<00:00,  2.50it/s][A[2026-05-09 14:31:25,819][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 408/? [02:43<00:00,  2.50it/s][A[2026-05-09 14:31:26,201][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 409/? [02:43<00:00,  2.50it/s][A[2026-05-09 14:31:26,588][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 410/? [02:44<00:00,  2.50it/s][A[2026-05-09 14:31:26,984][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 411/? [02:44<00:00,  2.50it/s][A[2026-05-09 14:31:27,372][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 412/? [02:44<00:00,  2.50it/s][A[2026-05-09 14:31:27,753][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 413/? [02:45<00:00,  2.50it/s][A[2026-05-09 14:31:28,171][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 414/? [02:45<00:00,  2.50it/s][A[2026-05-09 14:31:28,557][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 415/? [02:46<00:00,  2.50it/s][A[2026-05-09 14:31:28,939][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 416/? [02:46<00:00,  2.50it/s][A[2026-05-09 14:31:29,321][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 417/? [02:46<00:00,  2.50it/s][A[2026-05-09 14:31:29,712][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 418/? [02:47<00:00,  2.50it/s][A[2026-05-09 14:31:30,095][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 419/? [02:47<00:00,  2.50it/s][A[2026-05-09 14:31:30,492][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 420/? [02:48<00:00,  2.50it/s][A[2026-05-09 14:31:30,876][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 421/? [02:48<00:00,  2.50it/s][A[2026-05-09 14:31:31,257][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 422/? [02:48<00:00,  2.50it/s][A[2026-05-09 14:31:31,653][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 423/? [02:49<00:00,  2.50it/s][A[2026-05-09 14:31:32,038][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 424/? [02:49<00:00,  2.50it/s][A[2026-05-09 14:31:32,422][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 425/? [02:49<00:00,  2.50it/s][A[2026-05-09 14:31:32,803][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 426/? [02:50<00:00,  2.50it/s][A[2026-05-09 14:31:33,185][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 427/? [02:50<00:00,  2.50it/s][A[2026-05-09 14:31:33,567][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 428/? [02:51<00:00,  2.50it/s][A[2026-05-09 14:31:33,947][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 429/? [02:51<00:00,  2.50it/s][A[2026-05-09 14:31:34,350][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 430/? [02:51<00:00,  2.50it/s][A[2026-05-09 14:31:34,733][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 431/? [02:52<00:00,  2.50it/s][A[2026-05-09 14:31:35,116][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 432/? [02:52<00:00,  2.50it/s][A[2026-05-09 14:31:35,499][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 433/? [02:53<00:00,  2.50it/s][A[2026-05-09 14:31:35,898][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 434/? [02:53<00:00,  2.50it/s][A[2026-05-09 14:31:36,343][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 435/? [02:53<00:00,  2.50it/s][A[2026-05-09 14:31:36,733][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 436/? [02:54<00:00,  2.50it/s][A[2026-05-09 14:31:37,117][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 437/? [02:54<00:00,  2.50it/s][A[2026-05-09 14:31:37,509][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 438/? [02:55<00:00,  2.50it/s][A[2026-05-09 14:31:37,892][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 439/? [02:55<00:00,  2.50it/s][A[2026-05-09 14:31:38,284][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 440/? [02:55<00:00,  2.50it/s][A[2026-05-09 14:31:38,666][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 441/? [02:56<00:00,  2.50it/s][A[2026-05-09 14:31:39,047][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 442/? [02:56<00:00,  2.50it/s][A[2026-05-09 14:31:39,439][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 443/? [02:56<00:00,  2.50it/s][A[2026-05-09 14:31:39,821][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 444/? [02:57<00:00,  2.50it/s][A[2026-05-09 14:31:40,215][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 445/? [02:57<00:00,  2.50it/s][A[2026-05-09 14:31:40,598][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 446/? [02:58<00:00,  2.50it/s][A[2026-05-09 14:31:40,980][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 447/? [02:58<00:00,  2.50it/s][A[2026-05-09 14:31:41,363][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 448/? [02:58<00:00,  2.50it/s][A[2026-05-09 14:31:41,744][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 449/? [02:59<00:00,  2.50it/s][A[2026-05-09 14:31:42,125][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 450/? [02:59<00:00,  2.50it/s][A[2026-05-09 14:31:42,505][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 451/? [03:00<00:00,  2.51it/s][A[2026-05-09 14:31:42,887][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 452/? [03:00<00:00,  2.51it/s][A[2026-05-09 14:31:43,270][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 453/? [03:00<00:00,  2.51it/s][A[2026-05-09 14:31:43,654][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 454/? [03:01<00:00,  2.51it/s][A[2026-05-09 14:31:44,035][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 455/? [03:01<00:00,  2.51it/s][A[2026-05-09 14:31:44,430][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 456/? [03:01<00:00,  2.51it/s][A[2026-05-09 14:31:44,815][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 457/? [03:02<00:00,  2.51it/s][A[2026-05-09 14:31:45,196][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 458/? [03:02<00:00,  2.51it/s][A[2026-05-09 14:31:45,577][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 459/? [03:03<00:00,  2.51it/s][A[2026-05-09 14:31:45,959][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 460/? [03:03<00:00,  2.51it/s][A[2026-05-09 14:31:46,346][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 461/? [03:03<00:00,  2.51it/s][A[2026-05-09 14:31:46,740][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 462/? [03:04<00:00,  2.51it/s][A[2026-05-09 14:31:47,125][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 463/? [03:04<00:00,  2.51it/s][A[2026-05-09 14:31:47,506][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 464/? [03:05<00:00,  2.51it/s][A[2026-05-09 14:31:47,904][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 465/? [03:05<00:00,  2.51it/s][A[2026-05-09 14:31:48,289][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 466/? [03:05<00:00,  2.51it/s][A[2026-05-09 14:31:48,672][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 467/? [03:06<00:00,  2.51it/s][A[2026-05-09 14:31:49,054][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 468/? [03:06<00:00,  2.51it/s][A[2026-05-09 14:31:49,436][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 469/? [03:06<00:00,  2.51it/s][A[2026-05-09 14:31:49,817][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 470/? [03:07<00:00,  2.51it/s][A[2026-05-09 14:31:50,198][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 471/? [03:07<00:00,  2.51it/s][A[2026-05-09 14:31:50,600][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 472/? [03:08<00:00,  2.51it/s][A[2026-05-09 14:31:50,983][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 473/? [03:08<00:00,  2.51it/s][A[2026-05-09 14:31:51,377][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 474/? [03:08<00:00,  2.51it/s][A[2026-05-09 14:31:51,763][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 475/? [03:09<00:00,  2.51it/s][A[2026-05-09 14:31:52,145][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 476/? [03:09<00:00,  2.51it/s][A[2026-05-09 14:31:52,568][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 477/? [03:10<00:00,  2.51it/s][A[2026-05-09 14:31:52,954][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 478/? [03:10<00:00,  2.51it/s][A[2026-05-09 14:31:53,336][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 479/? [03:10<00:00,  2.51it/s][A[2026-05-09 14:31:53,730][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 480/? [03:11<00:00,  2.51it/s][A[2026-05-09 14:31:54,125][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 481/? [03:11<00:00,  2.51it/s][A[2026-05-09 14:31:54,508][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 482/? [03:12<00:00,  2.51it/s][A[2026-05-09 14:31:54,888][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 483/? [03:12<00:00,  2.51it/s][A[2026-05-09 14:31:55,272][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 484/? [03:12<00:00,  2.51it/s][A[2026-05-09 14:31:55,653][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 485/? [03:13<00:00,  2.51it/s][A[2026-05-09 14:31:56,074][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 486/? [03:13<00:00,  2.51it/s][A[2026-05-09 14:31:56,477][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 487/? [03:13<00:00,  2.51it/s][A[2026-05-09 14:31:56,858][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 488/? [03:14<00:00,  2.51it/s][A[2026-05-09 14:31:57,256][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 489/? [03:14<00:00,  2.51it/s][A[2026-05-09 14:31:57,643][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 490/? [03:15<00:00,  2.51it/s][A[2026-05-09 14:31:58,028][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 491/? [03:15<00:00,  2.51it/s][A[2026-05-09 14:31:58,410][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 492/? [03:15<00:00,  2.51it/s][A[2026-05-09 14:31:58,793][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 493/? [03:16<00:00,  2.51it/s][A[2026-05-09 14:31:59,177][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 494/? [03:16<00:00,  2.51it/s][A[2026-05-09 14:31:59,557][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 495/? [03:17<00:00,  2.51it/s][A[2026-05-09 14:31:59,941][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 496/? [03:17<00:00,  2.51it/s][A[2026-05-09 14:32:00,323][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 497/? [03:17<00:00,  2.51it/s][A[2026-05-09 14:32:00,705][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 498/? [03:18<00:00,  2.51it/s][A[2026-05-09 14:32:01,085][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 499/? [03:18<00:00,  2.51it/s][A[2026-05-09 14:32:01,468][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 500/? [03:18<00:00,  2.51it/s][A[2026-05-09 14:32:01,850][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 501/? [03:19<00:00,  2.51it/s][A[2026-05-09 14:32:02,232][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 502/? [03:19<00:00,  2.51it/s][A[2026-05-09 14:32:02,628][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 503/? [03:20<00:00,  2.51it/s][A[2026-05-09 14:32:03,013][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 504/? [03:20<00:00,  2.51it/s][A[2026-05-09 14:32:03,397][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 505/? [03:20<00:00,  2.51it/s][A[2026-05-09 14:32:03,795][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 506/? [03:21<00:00,  2.51it/s][A[2026-05-09 14:32:04,179][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 507/? [03:21<00:00,  2.51it/s][A[2026-05-09 14:32:04,561][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 508/? [03:22<00:00,  2.51it/s][A[2026-05-09 14:32:04,943][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 509/? [03:22<00:00,  2.51it/s][A[2026-05-09 14:32:05,325][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 510/? [03:22<00:00,  2.51it/s][A[2026-05-09 14:32:05,705][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 511/? [03:23<00:00,  2.51it/s][A[2026-05-09 14:32:06,086][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 512/? [03:23<00:00,  2.51it/s][A[2026-05-09 14:32:06,469][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 513/? [03:23<00:00,  2.51it/s][A[2026-05-09 14:32:06,850][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 514/? [03:24<00:00,  2.52it/s][A[2026-05-09 14:32:07,231][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 515/? [03:24<00:00,  2.52it/s][A[2026-05-09 14:32:07,613][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 516/? [03:25<00:00,  2.52it/s][A[2026-05-09 14:32:07,996][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 517/? [03:25<00:00,  2.52it/s][A[2026-05-09 14:32:08,396][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 518/? [03:25<00:00,  2.52it/s][A[2026-05-09 14:32:08,780][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 519/? [03:26<00:00,  2.52it/s][A[2026-05-09 14:32:09,162][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 520/? [03:26<00:00,  2.52it/s][A[2026-05-09 14:32:09,558][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 521/? [03:27<00:00,  2.52it/s][A[2026-05-09 14:32:09,943][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 522/? [03:27<00:00,  2.52it/s][A[2026-05-09 14:32:10,324][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 523/? [03:27<00:00,  2.52it/s][A[2026-05-09 14:32:10,706][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 524/? [03:28<00:00,  2.52it/s][A[2026-05-09 14:32:11,087][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 525/? [03:28<00:00,  2.52it/s][A[2026-05-09 14:32:11,467][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 526/? [03:28<00:00,  2.52it/s][A[2026-05-09 14:32:11,847][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 527/? [03:29<00:00,  2.52it/s][A[2026-05-09 14:32:12,229][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 528/? [03:29<00:00,  2.52it/s][A[2026-05-09 14:32:12,615][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 529/? [03:30<00:00,  2.52it/s][A[2026-05-09 14:32:13,012][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 530/? [03:30<00:00,  2.52it/s][A[2026-05-09 14:32:13,397][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 531/? [03:30<00:00,  2.52it/s][A[2026-05-09 14:32:13,778][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 532/? [03:31<00:00,  2.52it/s][A[2026-05-09 14:32:14,160][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 533/? [03:31<00:00,  2.52it/s][A[2026-05-09 14:32:14,556][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 534/? [03:32<00:00,  2.52it/s][A[2026-05-09 14:32:14,951][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 535/? [03:32<00:00,  2.52it/s][A[2026-05-09 14:32:15,372][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 536/? [03:32<00:00,  2.52it/s][A[2026-05-09 14:32:15,760][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 537/? [03:33<00:00,  2.52it/s][A[2026-05-09 14:32:16,140][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 538/? [03:33<00:00,  2.52it/s][A[2026-05-09 14:32:16,542][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 539/? [03:34<00:00,  2.52it/s][A[2026-05-09 14:32:16,924][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 540/? [03:34<00:00,  2.52it/s][A[2026-05-09 14:32:17,313][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 541/? [03:34<00:00,  2.52it/s][A[2026-05-09 14:32:17,694][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 542/? [03:35<00:00,  2.52it/s][A[2026-05-09 14:32:18,087][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 543/? [03:35<00:00,  2.52it/s][A[2026-05-09 14:32:18,468][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 544/? [03:35<00:00,  2.52it/s][A[2026-05-09 14:32:18,849][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 545/? [03:36<00:00,  2.52it/s][A[2026-05-09 14:32:19,234][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 546/? [03:36<00:00,  2.52it/s][A[2026-05-09 14:32:19,616][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 547/? [03:37<00:00,  2.52it/s][A[2026-05-09 14:32:20,007][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 548/? [03:37<00:00,  2.52it/s][A[2026-05-09 14:32:20,397][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 549/? [03:37<00:00,  2.52it/s][A[2026-05-09 14:32:20,778][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 550/? [03:38<00:00,  2.52it/s][A[2026-05-09 14:32:21,159][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 551/? [03:38<00:00,  2.52it/s][A[2026-05-09 14:32:21,541][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 552/? [03:39<00:00,  2.52it/s][A[2026-05-09 14:32:21,924][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 553/? [03:39<00:00,  2.52it/s][A[2026-05-09 14:32:22,303][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 554/? [03:39<00:00,  2.52it/s][A[2026-05-09 14:32:22,684][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 555/? [03:40<00:00,  2.52it/s][A[2026-05-09 14:32:23,064][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 556/? [03:40<00:00,  2.52it/s][A[2026-05-09 14:32:23,460][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 557/? [03:40<00:00,  2.52it/s][A[2026-05-09 14:32:23,846][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 558/? [03:41<00:00,  2.52it/s][A[2026-05-09 14:32:24,226][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 559/? [03:41<00:00,  2.52it/s][A[2026-05-09 14:32:24,607][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 560/? [03:42<00:00,  2.52it/s][A[2026-05-09 14:32:24,989][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 561/? [03:42<00:00,  2.52it/s][A[2026-05-09 14:32:25,370][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 562/? [03:42<00:00,  2.52it/s][A[2026-05-09 14:32:25,751][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 563/? [03:43<00:00,  2.52it/s][A[2026-05-09 14:32:26,134][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 564/? [03:43<00:00,  2.52it/s][A[2026-05-09 14:32:26,515][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 565/? [03:44<00:00,  2.52it/s][A[2026-05-09 14:32:26,912][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 566/? [03:44<00:00,  2.52it/s][A[2026-05-09 14:32:27,298][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 567/? [03:44<00:00,  2.52it/s][A[2026-05-09 14:32:27,679][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 568/? [03:45<00:00,  2.52it/s][A[2026-05-09 14:32:28,099][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 569/? [03:45<00:00,  2.52it/s][A[2026-05-09 14:32:28,486][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 570/? [03:46<00:00,  2.52it/s][A[2026-05-09 14:32:28,867][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 571/? [03:46<00:00,  2.52it/s][A[2026-05-09 14:32:29,263][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 572/? [03:46<00:00,  2.52it/s][A[2026-05-09 14:32:29,646][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 573/? [03:47<00:00,  2.52it/s][A[2026-05-09 14:32:30,026][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 574/? [03:47<00:00,  2.52it/s][A[2026-05-09 14:32:30,423][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 575/? [03:47<00:00,  2.52it/s][A[2026-05-09 14:32:30,807][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 576/? [03:48<00:00,  2.52it/s][A[2026-05-09 14:32:31,188][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 577/? [03:48<00:00,  2.52it/s][A[2026-05-09 14:32:31,569][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 578/? [03:49<00:00,  2.52it/s][A[2026-05-09 14:32:31,948][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 579/? [03:49<00:00,  2.52it/s][A[2026-05-09 14:32:32,329][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 580/? [03:49<00:00,  2.52it/s][A[2026-05-09 14:32:32,709][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 581/? [03:50<00:00,  2.52it/s][A[2026-05-09 14:32:33,093][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 582/? [03:50<00:00,  2.52it/s][A[2026-05-09 14:32:33,474][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 583/? [03:50<00:00,  2.52it/s][A[2026-05-09 14:32:33,854][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 584/? [03:51<00:00,  2.52it/s][A[2026-05-09 14:32:34,236][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 585/? [03:51<00:00,  2.52it/s][A[2026-05-09 14:32:34,621][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 586/? [03:52<00:00,  2.52it/s][A[2026-05-09 14:32:35,003][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 587/? [03:52<00:00,  2.52it/s][A[2026-05-09 14:32:35,386][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 588/? [03:52<00:00,  2.52it/s][A[2026-05-09 14:32:35,765][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 589/? [03:53<00:00,  2.52it/s][A[2026-05-09 14:32:36,148][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 590/? [03:53<00:00,  2.52it/s][A[2026-05-09 14:32:36,551][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 591/? [03:54<00:00,  2.52it/s][A[2026-05-09 14:32:36,936][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 592/? [03:54<00:00,  2.53it/s][A[2026-05-09 14:32:37,316][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 593/? [03:54<00:00,  2.53it/s][A[2026-05-09 14:32:37,698][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 594/? [03:55<00:00,  2.53it/s][A[2026-05-09 14:32:38,077][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 595/? [03:55<00:00,  2.53it/s][A[2026-05-09 14:32:38,500][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 596/? [03:56<00:00,  2.53it/s][A[2026-05-09 14:32:38,884][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 597/? [03:56<00:00,  2.53it/s][A[2026-05-09 14:32:39,266][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 598/? [03:56<00:00,  2.53it/s][A[2026-05-09 14:32:39,645][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 599/? [03:57<00:00,  2.53it/s][A[2026-05-09 14:32:40,026][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 600/? [03:57<00:00,  2.53it/s][A[2026-05-09 14:32:40,405][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 601/? [03:57<00:00,  2.53it/s][A[2026-05-09 14:32:40,802][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 602/? [03:58<00:00,  2.53it/s][A[2026-05-09 14:32:41,194][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 603/? [03:58<00:00,  2.53it/s][A[2026-05-09 14:32:41,576][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 604/? [03:59<00:00,  2.53it/s][A[2026-05-09 14:32:41,973][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 605/? [03:59<00:00,  2.53it/s][A[2026-05-09 14:32:42,377][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 606/? [03:59<00:00,  2.53it/s][A[2026-05-09 14:32:42,756][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 607/? [04:00<00:00,  2.53it/s][A[2026-05-09 14:32:43,138][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 608/? [04:00<00:00,  2.53it/s][A[2026-05-09 14:32:43,524][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 609/? [04:01<00:00,  2.53it/s][A[2026-05-09 14:32:43,908][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 610/? [04:01<00:00,  2.53it/s][A[2026-05-09 14:32:44,328][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 611/? [04:01<00:00,  2.53it/s][A[2026-05-09 14:32:44,712][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 612/? [04:02<00:00,  2.53it/s][A[2026-05-09 14:32:45,095][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 613/? [04:02<00:00,  2.53it/s][A[2026-05-09 14:32:45,475][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 614/? [04:02<00:00,  2.53it/s][A[2026-05-09 14:32:45,856][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 615/? [04:03<00:00,  2.53it/s][A[2026-05-09 14:32:46,252][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 616/? [04:03<00:00,  2.53it/s][A[2026-05-09 14:32:46,635][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 617/? [04:04<00:00,  2.53it/s][A[2026-05-09 14:32:47,016][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 618/? [04:04<00:00,  2.53it/s][A[2026-05-09 14:32:47,397][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 619/? [04:04<00:00,  2.53it/s][A[2026-05-09 14:32:47,779][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 620/? [04:05<00:00,  2.53it/s][A[2026-05-09 14:32:48,161][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 621/? [04:05<00:00,  2.53it/s][A[2026-05-09 14:32:48,559][anemoi.training.diagnostics.callbacks.export_predictions][WARNING] - No rollout steps available to export.
-
-Validation DataLoader 0: |          | 622/? [04:06<00:00,  2.53it/s][A
-                                                                    [AEpoch 0: 100%|██████████| 1/1 [05:09<00:00,  0.00it/s, train_multi_dataset_loss_step=7.240, val_multi_dataset_loss_step=0.00876, val_multi_dataset_loss_epoch=4.09e+3][2026-05-09 14:32:50,313][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327/inference-last.ckpt
-[2026-05-09 14:32:50,313][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/anemoi.json
-[2026-05-09 14:32:50,315][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:50,318][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:50,322][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-last/anemoi-metadata/data/grid_indices.numpy (shape=(310241,), dtype=int64)
-[2026-05-09 14:32:50,325][anemoi.utils.checkpoints][INFO] - Saving supporting array `output_mask` to inference-last/anemoi-metadata/data/output_mask.numpy (shape=(310241,), dtype=bool)
-[2026-05-09 14:32:53,400][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327/last.ckpt
-[2026-05-09 14:32:53,401][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/anemoi.json
-[2026-05-09 14:32:53,402][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:53,405][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:53,429][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(310241,), dtype=int64)
-[2026-05-09 14:32:53,454][anemoi.utils.checkpoints][INFO] - Saving supporting array `output_mask` to archive/anemoi-metadata/data/output_mask.numpy (shape=(310241,), dtype=bool)
-[2026-05-09 14:32:55,052][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327/inference-anemoi-by_epoch-epoch_000-step_000001.ckpt
-[2026-05-09 14:32:55,052][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/anemoi.json
-[2026-05-09 14:32:55,053][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:55,057][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:55,060][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/grid_indices.numpy (shape=(310241,), dtype=int64)
-[2026-05-09 14:32:55,063][anemoi.utils.checkpoints][INFO] - Saving supporting array `output_mask` to inference-anemoi-by_epoch-epoch_000-step_000001/anemoi-metadata/data/output_mask.numpy (shape=(310241,), dtype=bool)
-[2026-05-09 14:32:58,079][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327/anemoi-by_epoch-epoch_000-step_000001.ckpt
-[2026-05-09 14:32:58,079][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/anemoi.json
-[2026-05-09 14:32:58,081][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:58,084][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:58,111][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(310241,), dtype=int64)
-[2026-05-09 14:32:58,131][anemoi.utils.checkpoints][INFO] - Saving supporting array `output_mask` to archive/anemoi-metadata/data/output_mask.numpy (shape=(310241,), dtype=bool)
-[2026-05-09 14:32:59,479][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327/inference-last.ckpt
-[2026-05-09 14:32:59,479][anemoi.utils.checkpoints][INFO] - Saving metadata to inference-last/anemoi-metadata/anemoi.json
-[2026-05-09 14:32:59,480][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to inference-last/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:59,483][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to inference-last/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:32:59,487][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to inference-last/anemoi-metadata/data/grid_indices.numpy (shape=(310241,), dtype=int64)
-[2026-05-09 14:32:59,490][anemoi.utils.checkpoints][INFO] - Saving supporting array `output_mask` to inference-last/anemoi-metadata/data/output_mask.numpy (shape=(310241,), dtype=bool)
-[2026-05-09 14:33:02,223][anemoi.utils.checkpoints][INFO] - Adding extra information to checkpoint /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/checkpoint/0d73d869-3b4d-4805-9d37-3ff5515ea327/last.ckpt
-[2026-05-09 14:33:02,223][anemoi.utils.checkpoints][INFO] - Saving metadata to archive/anemoi-metadata/anemoi.json
-[2026-05-09 14:33:02,225][anemoi.utils.checkpoints][INFO] - Saving supporting array `latitudes` to archive/anemoi-metadata/data/latitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:33:02,228][anemoi.utils.checkpoints][INFO] - Saving supporting array `longitudes` to archive/anemoi-metadata/data/longitudes.numpy (shape=(310249,), dtype=float64)
-[2026-05-09 14:33:02,254][anemoi.utils.checkpoints][INFO] - Saving supporting array `grid_indices` to archive/anemoi-metadata/data/grid_indices.numpy (shape=(310241,), dtype=int64)
-[2026-05-09 14:33:02,282][anemoi.utils.checkpoints][INFO] - Saving supporting array `output_mask` to archive/anemoi-metadata/data/output_mask.numpy (shape=(310241,), dtype=bool)
-Epoch 0: 100%|██████████| 1/1 [05:23<00:00,  0.00it/s, train_multi_dataset_loss_step=7.240, val_multi_dataset_loss_step=0.00876, val_multi_dataset_loss_epoch=4.09e+3, train_multi_dataset_loss_epoch=7.240][2026-05-09 14:33:02,288][pytorch_lightning.utilities.rank_zero][INFO] - `Trainer.fit` stopped: `max_steps=1` reached.
-Epoch 0: 100%|██████████| 1/1 [05:23<00:00,  0.00it/s, train_multi_dataset_loss_step=7.240, val_multi_dataset_loss_step=0.00876, val_multi_dataset_loss_epoch=4.09e+3, train_multi_dataset_loss_epoch=7.240]
-[2026-05-09 14:33:03,061][anemoi.training.diagnostics.callbacks.plot][INFO] - Teardown of the Plot Callback ...
+2026-05-09 15:09:46 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-transformer-finer-graph-v1-single-input-first-week-pl925500-reduced-vars', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+2026-05-09 15:09:46 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-transformer-finer-graph-v1-single-input-first-week-pl925500-reduced-vars', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+2026-05-09 15:11:38 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-05-09 15:11:38 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-05-09 15:11:38 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-05-09 15:11:38 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 8 validation errors for BaseSchema
+model.BaseModelSchema.processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.EnsModelSchema.processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.EnsModelSchema.noise_injector
+  Field required [type=missing, input_value={'num_channels': 512, 'cp..., 'variables': ['tp']}]}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+model.HierarchicalModelSchema.processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+pydantic_core._pydantic_core.ValidationError: 8 validation errors for BaseSchema
+model.BaseModelSchema.processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.EnsModelSchema.processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.EnsModelSchema.noise_injector
+  Field required [type=missing, input_value={'num_channels': 512, 'cp..., 'variables': ['tp']}]}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+model.HierarchicalModelSchema.processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].processor.`anemoi.models.layers.processor.TransformerProcessor`
+  Value error, Extra field 'sub_graph_edge_attributes' is not allowed. Allowed fields are: ['use_rotary_embeddings', 'gradient_checkpointing']. [type=value_error, input_value={'_target_': 'anemoi.mode...rNorm', 'bias': False}}}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+srun: error: u23g09: tasks 0-1: Exited with exit code 1
+srun: Terminating StepId=13246302.0
