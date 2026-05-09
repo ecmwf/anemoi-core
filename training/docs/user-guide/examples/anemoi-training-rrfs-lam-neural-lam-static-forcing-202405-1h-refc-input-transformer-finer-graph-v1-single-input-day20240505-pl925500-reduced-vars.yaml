@@ -12,6 +12,9 @@ system:
   output:
     root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/transformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/
 
+training:
+  max_epochs: 100
+
 dataloader:
   training:
     datasets:
