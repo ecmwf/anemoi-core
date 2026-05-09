@@ -1,0 +1,21 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-input-finer-graph-v1-single-input-first-week-pl925500-reduced-vars
+  - override /model: transformer_transformermapper
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with:
+#   anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-transformer-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars
+#
+# This matches the one-day reduced-variable Transformer layout:
+#   - refc is part of the prognostic/input state
+#   - multistep_input = 1
+#   - model.num_channels = 512
+#   - hydrometeors removed entirely
+#   - only 925/500 kept for non-hydrometeor pressure-level variables
+#   - model family = transformer_transformermapper
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/transformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/
