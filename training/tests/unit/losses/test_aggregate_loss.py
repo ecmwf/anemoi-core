@@ -14,8 +14,8 @@ from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
 from anemoi.training.losses.mae import MAELoss
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.utils.enums import TensorDim
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -346,7 +346,6 @@ def test_iter_leaf_losses_yields_inner_leaves() -> None:
 
 def _make_multiscale_wrapper(inner: BaseLoss | None = None) -> "MultiscaleLossWrapper":
     """Build a single-scale MultiscaleLossWrapper (no smoothing matrices)."""
-
     if inner is None:
         inner = _make_loss()
     return MultiscaleLossWrapper(
