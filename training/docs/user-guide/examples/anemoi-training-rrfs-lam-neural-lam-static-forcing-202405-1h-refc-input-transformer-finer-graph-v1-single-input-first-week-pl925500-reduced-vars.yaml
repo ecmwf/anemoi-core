@@ -1,11 +1,12 @@
 defaults:
   - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-finer-graph-v1-single-input-first-week-pl925500-reduced-vars
-  - override /model: transformer
+  - override /model: transformer_transformermapper
   - _self_
 
 # Reduced-variable first-week/single-input/refc-input experiment, but using the
-# Transformer model family instead of the default GraphTransformer while
-# keeping the same finer graph, variable set, and 512-channel hidden width.
+# closest valid local Transformer path instead of the default GraphTransformer.
+# This uses the repo's transformer+transformer-mapper configuration rather than
+# the plain transformer override, which failed for this RRFS graph setup.
 
 system:
   output:
