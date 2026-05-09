@@ -18,6 +18,17 @@ data:
   datasets:
     data:
       diagnostic: []
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std: []
+            min-max:
+              - refc
+            max: []
+            none:
+              - landcover
+              - orography
 
 model:
   num_channels: 512
