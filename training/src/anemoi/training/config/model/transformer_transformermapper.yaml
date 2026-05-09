@@ -24,6 +24,7 @@ layer_kernels:
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
   _convert_: all
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
@@ -42,6 +43,7 @@ processor:
 encoder:
   _target_: anemoi.models.layers.mapper.TransformerForwardMapper
   _convert_: all
+  sub_graph_edge_attributes: ${model.attributes.edges}
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   num_chunks: 2
@@ -60,6 +62,7 @@ encoder:
 decoder:
   _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
   _convert_: all
+  sub_graph_edge_attributes: ${model.attributes.edges}
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   num_chunks: 2
