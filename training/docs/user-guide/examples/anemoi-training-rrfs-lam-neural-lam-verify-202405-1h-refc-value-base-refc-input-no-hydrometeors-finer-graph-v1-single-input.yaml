@@ -1,0 +1,166 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-value-loss-no-refc-input-finer-graph-v1
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with:
+#   anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-base-refc-input-no-hydrometeors-finer-graph-v1-single-input
+#
+# This matches the base GraphTransformer layout:
+#   - refc is part of the prognostic/input state
+#   - multistep_input = 1
+#   - hydrometeors removed entirely
+#   - results stored under the same experiment root
+
+data:
+  datasets:
+    data:
+      diagnostic: []
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std: []
+            min-max:
+              - refc
+            max: []
+            none:
+              - landcover
+              - orography
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_refc_input_no_hydrometeors/verify/
+
+dataloader:
+  training:
+    datasets:
+      data:
+        drop:
+          - boundary_mask
+          - clmr_925
+          - clmr_850
+          - clmr_500
+          - clmr_200
+          - icmr_925
+          - icmr_850
+          - icmr_500
+          - icmr_200
+          - rwmr_925
+          - rwmr_850
+          - rwmr_500
+          - rwmr_200
+          - snmr_925
+          - snmr_850
+          - snmr_500
+          - snmr_200
+          - grle_925
+          - grle_850
+          - grle_500
+          - grle_200
+  validation:
+    datasets:
+      data:
+        drop:
+          - boundary_mask
+          - clmr_925
+          - clmr_850
+          - clmr_500
+          - clmr_200
+          - icmr_925
+          - icmr_850
+          - icmr_500
+          - icmr_200
+          - rwmr_925
+          - rwmr_850
+          - rwmr_500
+          - rwmr_200
+          - snmr_925
+          - snmr_850
+          - snmr_500
+          - snmr_200
+          - grle_925
+          - grle_850
+          - grle_500
+          - grle_200
+  test:
+    datasets:
+      data:
+        drop:
+          - boundary_mask
+          - clmr_925
+          - clmr_850
+          - clmr_500
+          - clmr_200
+          - icmr_925
+          - icmr_850
+          - icmr_500
+          - icmr_200
+          - rwmr_925
+          - rwmr_850
+          - rwmr_500
+          - rwmr_200
+          - snmr_925
+          - snmr_850
+          - snmr_500
+          - snmr_200
+          - grle_925
+          - grle_850
+          - grle_500
+          - grle_200
+
+diagnostics:
+  plot:
+    diagnostic_input_reference_fields: []
+    parameters:
+      - refc
+      - pres_0g
+      - height_925
+      - height_850
+      - height_500
+      - height_200
+      - temp_925
+      - temp_850
+      - temp_500
+      - temp_200
+      - sphum_925
+      - sphum_850
+      - sphum_500
+      - sphum_200
+      - ugrd_925
+      - ugrd_850
+      - ugrd_500
+      - ugrd_200
+      - vgrd_925
+      - vgrd_850
+      - vgrd_500
+      - vgrd_200
+  export_predictions:
+    parameters:
+      - refc
+      - pres_0g
+      - height_925
+      - height_850
+      - height_500
+      - height_200
+      - temp_925
+      - temp_850
+      - temp_500
+      - temp_200
+      - sphum_925
+      - sphum_850
+      - sphum_500
+      - sphum_200
+      - ugrd_925
+      - ugrd_850
+      - ugrd_500
+      - ugrd_200
+      - vgrd_925
+      - vgrd_850
+      - vgrd_500
+      - vgrd_200
+
+training:
+  multistep_input: 1
+  multistep_output: 1

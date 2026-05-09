@@ -319,3 +319,19 @@ When you say "use `docs/session-context.md` as our project context file," I'll r
 - 2026-05-09: diffusion 1h verify produced no plots because callbacks inferred forecast length from pl_module.rollout, but GraphDiffusionForecaster has no rollout attribute. Patched training/src/anemoi/training/diagnostics/callbacks/export_predictions.py and plot.py to infer rollout length from validation outputs[1] when rollout is absent.
 
 - 2026-05-09: added diffusion diagnostics compatibility on feature branch by setting self.rollout = 1 in training/src/anemoi/training/train/tasks/diffusionforecaster.py so existing plot/export callbacks do not skip diffusion verification outputs.
+- 2026-05-09: added a `base` single-input finer-graph GraphTransformer variant with `refc` in both input and output and all hydrometeor variables removed from both input and output:
+  - training config:
+    `training/docs/user-guide/examples/anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-base-refc-input-no-hydrometeors-finer-graph-v1-single-input.yaml`
+  - training script:
+    `d-2GPU-1hr-refc_value-base-refc_input-no_hydrometeors-finer_graph_v1-single_input-202405.sh`
+  - experiment root:
+    `/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_refc_input_no_hydrometeors/`
+  - matching 1-hour verification path:
+    - config:
+      `training/docs/user-guide/examples/anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-value-base-refc-input-no-hydrometeors-finer-graph-v1-single-input.yaml`
+    - wrapper:
+      `training/docs/user-guide/examples/run_rrfs_verify_export_1h_refc_value_base_refc_input_no_hydrometeors_finer_graph_v1_single_input.sh`
+    - sbatch:
+      `dd-verify-1hr_leadtime-1month-1hr_refc_value-base-refc_input-no_hydrometeors-finer_graph_v1-single_input.sh`
+    - verify root:
+      `/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_refc_input_no_hydrometeors/verify/`
