@@ -105,7 +105,7 @@ def test_empty_aggregation_returns_zero(pred: torch.Tensor, target: torch.Tensor
 
 
 def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tensor) -> None:
-    """Combined wrapper loss equals sum of individual wrapper losses."""
+    """Combined wrapper loss equals average of individual wrapper losses."""
     inner = _make_loss()
 
     wrapper_mean = TimeAggregateLossWrapper(["mean"], inner)
@@ -116,7 +116,7 @@ def test_loss_accumulates_across_agg_ops(pred: torch.Tensor, target: torch.Tenso
     loss_diff = wrapper_diff(pred, target)
     loss_both = wrapper_both(pred, target)
 
-    assert torch.allclose(loss_both, loss_mean + loss_diff, atol=1e-6)
+    assert torch.allclose(loss_both, (loss_mean + loss_diff) / 2, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def test_crps_multiple_agg_ops_return_scalar() -> None:
 
 
 def test_crps_loss_accumulates_across_agg_ops() -> None:
-    """Combined CRPS wrapper loss equals sum of individual wrapper losses."""
+    """Combined CRPS wrapper loss equals average of individual wrapper losses."""
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
@@ -206,7 +206,7 @@ def test_crps_loss_accumulates_across_agg_ops() -> None:
     loss_diff = TimeAggregateLossWrapper(["diff"], inner)(pred, target)
     loss_both = TimeAggregateLossWrapper(["mean", "diff"], inner)(pred, target)
 
-    assert torch.allclose(loss_both, loss_mean + loss_diff, atol=1e-6)
+    assert torch.allclose(loss_both, (loss_mean + loss_diff) / 2, atol=1e-6)
 
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max"])

@@ -109,8 +109,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
 
         # Average over the number of aggregation types, matching the old per-term
         # normalisation (old code: loss /= num_interp_steps + num_aggregate_ops).
-        loss = loss / len(self.time_aggregation_types)
-
+        if self.time_aggregation_types:
+            loss = loss / len(self.time_aggregation_types)
         return loss
 
     def _compute_agg_loss(
