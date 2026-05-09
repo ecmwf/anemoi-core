@@ -1,0 +1,22 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-finer-graph-v1-single-input-first-week-pl925500-reduced-vars
+  - _self_
+
+# Single-day, single-input, finer-graph GraphTransformer experiment with refc
+# included in the prognostic/input state. This keeps the reduced-variable setup
+# from the first-week pl925500 config and restricts training samples to
+# 2024-05-05 only.
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/graphtransformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/
+
+training:
+  max_epochs: 100
+
+dataloader:
+  training:
+    datasets:
+      data:
+        start: "2024-05-05T00:00:00"
+        end: "2024-05-05T23:00:00"
