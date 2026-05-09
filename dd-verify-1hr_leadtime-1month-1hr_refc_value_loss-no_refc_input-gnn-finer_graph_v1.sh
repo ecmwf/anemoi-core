@@ -17,7 +17,7 @@ set -euo pipefail
 source /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/bin/activate anemoi-training-env-python3.12
 cd /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core
 
-run_id="REPLACE_WITH_RUN_ID"
+run_id="78b0940f-0d65-4a57-8f32-7b9d51a280ec"
 training/docs/user-guide/examples/run_rrfs_verify_export_1h_refc_value_no_refc_input_gnn_finer_graph_v1.sh \
   /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/gnn_finer_graph_v1/checkpoint/${run_id}/inference-last.ckpt \
   2024-05-05T00:00:00 2024-05-30T23:00:00 1h
