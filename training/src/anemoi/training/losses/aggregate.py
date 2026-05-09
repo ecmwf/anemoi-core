@@ -107,6 +107,10 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         for agg_op in self.time_aggregation_types:
             loss = loss + self._compute_agg_loss(agg_op, pred, target, time_weights, shared_kwargs)
 
+        # Average over the number of aggregation types, matching the old per-term
+        # normalisation (old code: loss /= num_interp_steps + num_aggregate_ops).
+        loss = loss / len(self.time_aggregation_types)
+
         return loss
 
     def _compute_agg_loss(
