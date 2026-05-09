@@ -1,7 +1,6 @@
 defaults:
   - anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-value-loss-no-refc-input-finer-graph-v1
   - override /model: graphtransformer_diffusion
-  - override /training: diffusion
   - _self_
 
 config_validation: True
@@ -10,17 +9,22 @@ config_validation: True
 #   anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1
 #
 # This preserves the no-refc-input role split and finer_graph_v1 graph, but
-# uses the diffusion model/training path so the checkpoint architecture matches.
+# uses the diffusion model path while keeping the lightweight verification
+# semantics from the base verify config.
 
 system:
   output:
     root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/diffusion_finer_graph_v1_1h_refc_value_no_refc_input/
 
 training:
+  load_weights_only: True
+  update_ds_stats_on_ckpt_load:
+    states: False
+    tendencies: True
+  model_task: anemoi.training.train.tasks.GraphDiffusionForecaster
   multistep_input: 2
   multistep_output: 1
   rollout:
     start: 1
     epoch_increment: 0
     max: 1
-
