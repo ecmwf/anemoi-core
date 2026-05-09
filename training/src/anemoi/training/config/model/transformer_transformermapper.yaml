@@ -47,7 +47,7 @@ encoder:
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  window_size: -1
+  window_size: null
   dropout_p: 0.0
   attention_implementation: flash_attention  # Possible values: scaled_dot_product_attention, flash_attention
   softcap: 0.0 # Transformer only
@@ -65,7 +65,7 @@ decoder:
   num_chunks: 2
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  window_size: -1
+  window_size: null
   dropout_p: 0.0
   attention_implementation: flash_attention # Possible values: scaled_dot_product_attention, flash_attention
   softcap: 0.0 # Transformer only
