@@ -1,0 +1,12 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-finer-graph-v1-single-input-first-week-pl925500-reduced-vars
+  - override /model: transformer
+  - _self_
+
+# Reduced-variable first-week/single-input/refc-input experiment, but using the
+# Transformer model family instead of the default GraphTransformer while
+# keeping the same finer graph, variable set, and 512-channel hidden width.
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/transformer_finer_graph_v1_single_input_first_week_refc_input_pl925500_reduced_vars/
