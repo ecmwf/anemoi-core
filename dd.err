@@ -1,20 +1,189 @@
-2026-05-09 13:28:46 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/diffusion_finer_graph_v1/checkpoint/0a6da218-b610-4b5a-bf8c-3f2d2b3540cd/inference-last.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-30T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-30T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-30T23:00:00', 'data.frequency=1h', 'dataloader.training.datasets.data.frequency=1h', 'dataloader.validation.datasets.data.frequency=1h', 'dataloader.test.datasets.data.frequency=1h', 'training.num_sanity_val_steps=0', '--cfg', 'job']
+2026-05-09 13:59:01 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-transformer-finer-graph-v1-single-input-first-week-pl925500-reduced-vars', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+2026-05-09 13:59:01 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-transformer-finer-graph-v1-single-input-first-week-pl925500-reduced-vars', 'system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
-2026-05-09 13:28:53 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-05-09 13:28:53 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-2026-05-09 13:28:55 INFO Running anemoi training command with overrides: ['--config-path', '/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples', '--config-name', 'anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-value-loss-no-refc-input-diffusion-finer-graph-v1', 'system.input.warm_start=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/diffusion_finer_graph_v1/checkpoint/0a6da218-b610-4b5a-bf8c-3f2d2b3540cd/inference-last.ckpt', 'dataloader.training.datasets.data.start=2024-05-05T00:00:00', 'dataloader.training.datasets.data.end=2024-05-30T23:00:00', 'dataloader.validation.datasets.data.start=2024-05-05T00:00:00', 'dataloader.validation.datasets.data.end=2024-05-30T23:00:00', 'dataloader.test.datasets.data.start=2024-05-05T00:00:00', 'dataloader.test.datasets.data.end=2024-05-30T23:00:00', 'data.frequency=1h', 'dataloader.training.datasets.data.frequency=1h', 'dataloader.validation.datasets.data.frequency=1h', 'dataloader.test.datasets.data.frequency=1h', 'training.num_sanity_val_steps=0']
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
 /scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
   warnings.warn(
-2026-05-09 13:29:02 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
-2026-05-09 13:29:02 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/losses/scalers/variable_tendency.py:77: UserWarning: Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?
-  warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:4631: UserWarning: No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. 
-  warnings.warn(  # warn only once
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
-/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:369: You have overridden `on_after_batch_transfer` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
+2026-05-09 13:59:09 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-05-09 13:59:09 INFO Prepending current user directory (/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core) to the search path.
+2026-05-09 13:59:09 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+2026-05-09 13:59:09 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core, provider=hydra, path=pkg://hydra.conf, provider=main, path=/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/docs/user-guide/examples, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 15 validation errors for BaseSchema
+model.BaseModelSchema.encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.BaseModelSchema.decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.EnsModelSchema.encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.EnsModelSchema.decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.EnsModelSchema.noise_injector
+  Field required [type=missing, input_value={'num_channels': 512, 'cp..., 'variables': ['tp']}]}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+model.HierarchicalModelSchema.encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.HierarchicalModelSchema.decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+encoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'window_size': None}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+decoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'window_size': None}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+Error executing job with overrides: ['system.hardware.num_gpus_per_node=2', 'system.hardware.num_nodes=1', 'system.hardware.num_gpus_per_model=1']
+Traceback (most recent call last):
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/anemoi/utils/cli.py", line 264, in cli_main
+    cmd.run(args, unknown)
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 80, in run
+    main()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/commands/train.py", line 91, in main
+    anemoi_train()
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+        ^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 679, in main
+    AnemoiTrainer(config).train()
+    ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-anemoi-core/anemoi-core/training/src/anemoi/training/train/train.py", line 71, in __init__
+    self.config = BaseSchema(**config)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/scratch3/NCEPDEV/fv3-cam/Ting.Lei/dr-miniconda3/envs/anemoi-training-env-python3.12/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 15 validation errors for BaseSchema
+model.BaseModelSchema.encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.BaseModelSchema.decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.EnsModelSchema.encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.EnsModelSchema.decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.EnsModelSchema.noise_injector
+  Field required [type=missing, input_value={'num_channels': 512, 'cp..., 'variables': ['tp']}]}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+model.HierarchicalModelSchema.encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.HierarchicalModelSchema.decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionModelSchema].decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].model.diffusion
+  Input should be a valid dictionary or instance of DiffusionSchema [type=model_type, input_value=None, input_type=NoneType]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].encoder.`anemoi.models.layers.mapper.TransformerForwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+model.function-after[validate_no_bounding_for_diffusion(), DiffusionTendModelSchema].decoder.`anemoi.models.layers.mapper.TransformerBackwardMapper`.window_size
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.12/v/greater_than_equal
+encoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'window_size': None}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+decoder
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'window_size': None}, input_type=DictConfig]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+srun: error: u23g09: task 1: Exited with exit code 1
+srun: Terminating StepId=13244112.0
+[2026-05-09T13:59:11.320] error: *** STEP 13244112.0 ON u23g09 CANCELLED AT 2026-05-09T13:59:11 DUE TO TASK FAILURE ***
+srun: error: u23g09: task 0: Terminated
+srun: Force Terminated StepId=13244112.0
