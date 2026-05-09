@@ -8,6 +8,12 @@ defaults:
 # This uses the repo's transformer+transformer-mapper configuration rather than
 # the plain transformer override, which failed for this RRFS graph setup.
 
+encoder:
+  window_size: null
+
+decoder:
+  window_size: null
+
 system:
   output:
     root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/transformer_finer_graph_v1_single_input_first_week_refc_input_pl925500_reduced_vars/
