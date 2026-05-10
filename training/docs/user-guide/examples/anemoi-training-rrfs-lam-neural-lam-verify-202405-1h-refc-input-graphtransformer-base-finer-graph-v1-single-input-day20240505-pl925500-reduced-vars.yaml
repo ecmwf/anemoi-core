@@ -1,0 +1,52 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-input-graphtransformer-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with:
+#   anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-graphtransformer-base-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars
+#
+# This matches the one-day reduced-variable GraphTransformer layout and the
+# lighter "base" refc loss weighting:
+#   - refc is part of the prognostic/input state
+#   - multistep_input = 1
+#   - model.num_channels = 512
+#   - hydrometeors removed entirely
+#   - only 925/500 kept for non-hydrometeor pressure-level variables
+#   - general_variable.weights.refc = 20
+#   - refc_range_weight_factors = [1, 2, 2, 4]
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/verify/
+
+training:
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_range_weight_factors']
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          weights:
+            default: 1
+            sphum: 0.6
+            temp: 6
+            ugrd: 5
+            vgrd: 5
+            height: 12
+            pres_0g: 10
+            refc: 20
+            clmr: 1
+            icmr: 1
+            rwmr: 1
+            snmr: 1
+            grle: 1
+        refc_range_weight_factors:
+          _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
+          variable: refc
+          normalization: min-max
+          thresholds: [0.0, 20.0, 40.0]
+          range_weight_factors: [1, 2, 2, 4]

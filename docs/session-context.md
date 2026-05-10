@@ -315,6 +315,26 @@ When you say "use `docs/session-context.md` as our project context file," I'll r
         `dd-verify-1hr_leadtime-1month-1hr_refc_input-graphtransformer-finer_graph_v1-single_input-day20240505-pl925500-reduced_vars.sh`
       - verify root:
         `/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/verify/graphtransformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/`
+  - added a base-weight one-day GraphTransformer pl925500 reduced-vars variant:
+    - config:
+      `training/docs/user-guide/examples/anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-graphtransformer-base-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars.yaml`
+    - script:
+      `d-2GPU-1hr-refc_input-graphtransformer-base-finer_graph_v1-single_input-day20240505-pl925500-reduced_vars-202405.sh`
+    - output root:
+      `/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/`
+    - this keeps the existing one-day GraphTransformer reduced-vars setup but
+      replaces the refc loss weighting with the base settings:
+      `general_variable.weights.refc = 20`
+      `refc_range_weight_factors = [1, 2, 2, 4]`
+    - matching 1-hour verification path:
+      - config:
+        `training/docs/user-guide/examples/anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-input-graphtransformer-base-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars.yaml`
+      - wrapper:
+        `training/docs/user-guide/examples/run_rrfs_verify_export_1h_refc_input_graphtransformer_base_finer_graph_v1_single_input_day20240505_pl925500_reduced_vars.sh`
+      - sbatch:
+        `dd-verify-1hr_leadtime-1month-1hr_refc_input-graphtransformer-base-finer_graph_v1-single_input-day20240505-pl925500-reduced_vars.sh`
+      - verify root:
+        `/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/verify/`
 
 - 2026-05-09: diffusion 1h verify produced no plots because callbacks inferred forecast length from pl_module.rollout, but GraphDiffusionForecaster has no rollout attribute. Patched training/src/anemoi/training/diagnostics/callbacks/export_predictions.py and plot.py to infer rollout length from validation outputs[1] when rollout is absent.
 
