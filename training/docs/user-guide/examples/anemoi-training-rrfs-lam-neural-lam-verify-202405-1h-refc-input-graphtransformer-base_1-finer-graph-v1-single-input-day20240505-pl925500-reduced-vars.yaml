@@ -1,0 +1,34 @@
+defaults:
+  - anemoi-training-rrfs-lam-neural-lam-verify-202405-1h-refc-input-graphtransformer-base-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars
+  - _self_
+
+config_validation: True
+
+# Verification variant for checkpoints trained with:
+#   anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-input-graphtransformer-base_1-finer-graph-v1-single-input-day20240505-pl925500-reduced-vars
+#
+# This matches the one-day reduced-variable GraphTransformer layout, the base
+# refc weighting, and Eagle-style forcing/static normalization:
+#   - landcover: none
+#   - orography: max
+#   - swdown: none
+
+data:
+  datasets:
+    data:
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std: []
+            min-max:
+              - refc
+            max:
+              - orography
+            none:
+              - landcover
+              - swdown
+
+system:
+  output:
+    root: /scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_1_graphtransformer_finer_graph_v1_single_input_day20240505_refc_input_pl925500_reduced_vars/verify/
