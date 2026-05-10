@@ -359,6 +359,17 @@ When you say "use `docs/session-context.md` as our project context file," I'll r
 - 2026-05-09: diffusion 1h verify produced no plots because callbacks inferred forecast length from pl_module.rollout, but GraphDiffusionForecaster has no rollout attribute. Patched training/src/anemoi/training/diagnostics/callbacks/export_predictions.py and plot.py to infer rollout length from validation outputs[1] when rollout is absent.
 
 - 2026-05-09: added diffusion diagnostics compatibility on feature branch by setting self.rollout = 1 in training/src/anemoi/training/train/tasks/diffusionforecaster.py so existing plot/export callbacks do not skip diffusion verification outputs.
+- 2026-05-10: patched the loss-weighting path after a strict review:
+  - `training/src/anemoi/training/losses/scalers/value_range.py`
+    - infer/validate the scaler normalization mode against the active normalizer config instead of trusting an unchecked manual string
+    - added support for `max` normalization when converting back to raw units
+    - reject `ensemble > 1` explicitly instead of silently using ensemble index 0
+  - `training/src/anemoi/training/losses/scalers/variable.py`
+    - initialize per-variable scaling with the configured default weight instead of leaving non-model-output positions uninitialized
+  - `training/src/anemoi/training/losses/loss.py`
+    - cleaned up the malformed scaler existence check
+  - added focused unit tests in:
+    `training/tests/unit/losses/test_value_range_scaler.py`
 - 2026-05-09: added a `base` single-input finer-graph GraphTransformer variant with `refc` in both input and output and all hydrometeor variables removed from both input and output:
   - training config:
     `training/docs/user-guide/examples/anemoi-training-rrfs-lam-neural-lam-static-forcing-202405-1h-refc-value-base-refc-input-no-hydrometeors-finer-graph-v1-single-input.yaml`
@@ -379,3 +390,8 @@ When you say "use `docs/session-context.md` as our project context file," I'll r
     - `general_variable.weights.refc: 20` (was 80)
     - `refc_range_weight_factors.range_weight_factors: [1, 2, 2, 4]` (was `[0.1, 10, 40, 80]`)
     - matching verification config updated so configured-loss reporting stays aligned with training
+  - recorded the current standing issue in `docs/graph-finer_graph_v1.md`:
+    - optimization/loss curves look reasonable, but forecast skill remains poor
+    - persistence often beats the trained model on the same sample
+    - a repeated lower-right ocean-side artifact appears across samples and sometimes across variables
+    - this is now the main debugging focus until resolved

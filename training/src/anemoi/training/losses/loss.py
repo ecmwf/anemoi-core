@@ -95,7 +95,7 @@ def _apply_scalers(
 ) -> None:
     """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
-        if key not in scalers or []:
+        if key not in scalers:
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
             raise ValueError(error_msg)
         if key in ["stdev_tendency", "var_tendency"]:

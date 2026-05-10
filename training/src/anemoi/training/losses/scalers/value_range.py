@@ -10,6 +10,7 @@
 import logging
 
 import torch
+from omegaconf import OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.interface import AnemoiModelInterface
@@ -50,7 +51,7 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         statistics: dict,
         range_weight_factors: list[float] | None = None,
         apply_to: str | list[str] = "self",
-        normalization: str = "mean-std",
+        normalization: str | None = None,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -74,11 +75,11 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
         self.range_weight_factors = [float(x) for x in range_weight_factors]
         self.data_indices = data_indices
         self.statistics = statistics
-        self.normalization = normalization
         self.apply_to = apply_to
 
         self.full_var_idx = int(self.data_indices.data.input.name_to_index[variable])
         self.output_var_indices = self._resolve_output_indices(apply_to)
+        self.normalization = self._resolve_normalization(normalization)
         self._logged_first_batch = False
 
         LOGGER.info(
@@ -90,6 +91,38 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
             self.range_weight_factors,
             self.apply_to,
         )
+
+    def _resolve_normalization(self, normalization: str | None) -> str:
+        """Infer or validate the normalization mode against the active data config."""
+        processor_cfg = ((self.data_indices.config or {}).get("processors") or {}).get("normalizer") or {}
+        normalizer_cfg = processor_cfg.get("config", {})
+
+        if isinstance(normalizer_cfg, str):
+            inferred = normalizer_cfg
+        else:
+            inferred = OmegaConf.to_container(normalizer_cfg, resolve=True) if normalizer_cfg else {}
+            default_method = inferred.get("default", "none") if isinstance(inferred, dict) else "none"
+            variable_method = default_method
+            if isinstance(inferred, dict):
+                for method, variables in inferred.items():
+                    if method in {"default", "remap", "normalizer"} or variables is None:
+                        continue
+                    if isinstance(variables, list) and self.variable in variables:
+                        variable_method = method
+                        break
+            inferred = variable_method
+
+        if normalization is None:
+            return inferred
+
+        if inferred and normalization != inferred:
+            msg = (
+                f"{self.__class__.__name__} normalization mismatch for variable {self.variable!r}: "
+                f"scaler config says {normalization!r}, but active normalizer config says {inferred!r}."
+            )
+            raise ValueError(msg)
+
+        return normalization
 
     def _resolve_output_indices(self, apply_to: str | list[str]) -> list[int]:
         """Resolve which model-output variables should receive the range-based factors."""
@@ -128,6 +161,8 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
             return values * stdev
         if self.normalization == "min-max":
             return values * (maximum - minimum) + minimum
+        if self.normalization == "max":
+            return values * maximum
 
         msg = f"Unsupported normalization mode for {self.__class__.__name__}: {self.normalization}"
         raise ValueError(msg)
@@ -162,6 +197,12 @@ class TargetValueRangeScaler(BaseUpdatingScaler):
                 tuple(dataset_batch.shape),
             )
             return None
+        if dataset_batch.shape[2] != 1:
+            msg = (
+                f"{self.__class__.__name__} currently supports only ensemble size 1 because its scaler tensor "
+                f"does not carry an ensemble dimension. Got ensemble size {dataset_batch.shape[2]}."
+            )
+            raise ValueError(msg)
 
         n_step_input = int(getattr(model, "n_step_input"))
         n_step_output = int(getattr(model.config.training, "multistep_output", 1))
@@ -238,6 +279,12 @@ class TargetTendencyRangeScaler(TargetValueRangeScaler):
                 tuple(dataset_batch.shape),
             )
             return None
+        if dataset_batch.shape[2] != 1:
+            msg = (
+                f"{self.__class__.__name__} currently supports only ensemble size 1 because its scaler tensor "
+                f"does not carry an ensemble dimension. Got ensemble size {dataset_batch.shape[2]}."
+            )
+            raise ValueError(msg)
 
         n_step_input = int(getattr(model, "n_step_input"))
         n_step_output = int(getattr(model.config.training, "multistep_output", 1))
