@@ -33,6 +33,7 @@ import numpy as np
 import torch
 from hydra import compose
 from hydra import initialize_config_dir
+from einops import rearrange
 from omegaconf import OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -69,6 +70,34 @@ def _compose_config(config_dir: Path, config_name: str):
         cfg = compose(config_name=config_name)
     OmegaConf.resolve(cfg)
     return cfg
+
+
+def _load_sample_tensor(reader: NativeGridDataset) -> torch.Tensor:
+    """Load a full sample tensor and normalize known dataset shape variants.
+
+    Expected training reader layout is usually:
+      [dates, variables, ensemble, gridpoints]
+
+    Some RRFS datasets expose a trailing singleton dimension:
+      [dates, variables, ensemble, gridpoints, 1]
+
+    This helper removes only the extra singleton axis and returns the usual
+    training layout converted to:
+      [dates, ensemble, gridpoints, variables]
+    """
+    x = np.asarray(reader.data[slice(None), :, :, :])
+
+    if x.ndim == 5 and x.shape[-1] == 1:
+        x = np.squeeze(x, axis=-1)
+    elif x.ndim == 3:
+        # Fallback for datasets without an explicit ensemble axis.
+        x = x[:, :, None, :]
+
+    if x.ndim != 4:
+        raise ValueError(f"Unsupported dataset sample shape {x.shape}; expected 4D after normalization.")
+
+    x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
+    return torch.from_numpy(x)
 
 
 def main() -> None:
@@ -120,7 +149,7 @@ def main() -> None:
     normalizer_cfg = data_cfg.processors.normalizer.config
     normalizer = InputNormalizer(config=normalizer_cfg, data_indices=data_indices, statistics=reader.statistics)
 
-    sample = reader.get_sample(slice(None), None).float()
+    sample = _load_sample_tensor(reader).float()
     normalized = normalizer.transform(sample.clone(), in_place=True)
 
     print(f"SAMPLE_SHAPE: {tuple(sample.shape)}  # [time, ensemble, grid, variables]")
