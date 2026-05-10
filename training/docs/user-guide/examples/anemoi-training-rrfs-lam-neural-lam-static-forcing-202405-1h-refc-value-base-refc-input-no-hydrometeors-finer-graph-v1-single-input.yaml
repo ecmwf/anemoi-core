@@ -16,6 +16,36 @@ data:
     data:
       diagnostic: []
 
+training:
+  training_loss:
+    datasets:
+      data:
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps', 'refc_range_weight_factors']
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          weights:
+            default: 1
+            sphum: 0.6
+            temp: 6
+            ugrd: 5
+            vgrd: 5
+            height: 12
+            pres_0g: 10
+            refc: 20
+            clmr: 1
+            icmr: 1
+            rwmr: 1
+            snmr: 1
+            grle: 1
+        refc_range_weight_factors:
+          _target_: anemoi.training.losses.scalers.TargetValueRangeScaler
+          variable: refc
+          normalization: min-max
+          thresholds: [0.0, 20.0, 40.0]
+          range_weight_factors: [1, 2, 2, 4]
+
 dataloader:
   training:
     datasets:

@@ -335,3 +335,7 @@ When you say "use `docs/session-context.md` as our project context file," I'll r
       `dd-verify-1hr_leadtime-1month-1hr_refc_value-base-refc_input-no_hydrometeors-finer_graph_v1-single_input.sh`
     - verify root:
       `/scratch3/NCEPDEV/fv3-cam/Ting.Lei/tlei-anemoi-training/base_graphtransformer_finer_graph_v1_single_input_refc_input_no_hydrometeors/verify/`
+  - retuned `base` refc weighting:
+    - `general_variable.weights.refc: 20` (was 80)
+    - `refc_range_weight_factors.range_weight_factors: [1, 2, 2, 4]` (was `[0.1, 10, 40, 80]`)
+    - matching verification config updated so configured-loss reporting stays aligned with training
