@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Annotated
 from typing import Literal
 from typing import Self
@@ -80,6 +81,13 @@ class ScalarOrnsteinConnectionSchema(BaseModel):
     )
 
 
+class SpectralOrnsteinSupportedGrids(str, Enum):
+    """Supported grid types for SpectralOrnsteinConnection."""
+
+    REGULAR = "regular"
+    OCTAHEDRAL = "octahedral"
+
+
 class SpectralOrnsteinConnectionSchema(BaseModel):
     """Schema for spectral Ornstein residual connections."""
 
@@ -88,8 +96,8 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
         2,
         description="Maximum spherical harmonic degree for the theta/mu coefficients.",
     )
-    grid: str = Field(
-        "regular",
+    grid: SpectralOrnsteinSupportedGrids = Field(
+        SpectralOrnsteinSupportedGrids.REGULAR,
         description='Grid type: "regular" for regular lat-lon, "octahedral" for octahedral reduced grids.',
     )
     theta_init: float = Field(
