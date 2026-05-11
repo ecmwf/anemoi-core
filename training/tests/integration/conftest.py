@@ -250,12 +250,18 @@ def lam_config_with_graph(
     return cfg, urls
 
 
-def _get_loss_cfgs_with_matrices(training_loss_cfg: DictConfig) -> list[DictConfig]:
-    """Extract loss configs that have loss_matrices, handling both direct and CombinedLoss cases."""
-    if "loss_matrices" in training_loss_cfg:
-        return [training_loss_cfg]
+def _get_multiscale_cfgs(training_loss_cfg: DictConfig) -> list[DictConfig]:
+    """Extract multiscale_config dicts that contain loss_matrices."""
+    multiscale_cfg = training_loss_cfg.get("multiscale_config")
+    if multiscale_cfg is not None and "loss_matrices" in multiscale_cfg:
+        return [multiscale_cfg]
     if "losses" in training_loss_cfg:
-        return [sub_loss for sub_loss in training_loss_cfg.losses if "loss_matrices" in sub_loss]
+        results = []
+        for sub_loss in training_loss_cfg.losses:
+            mc = sub_loss.get("multiscale_config")
+            if mc is not None and "loss_matrices" in mc:
+                results.append(mc)
+        return results
     return []
 
 
@@ -265,14 +271,15 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
 
     training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
     for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        loss_cfgs_to_check = _get_loss_cfgs_with_matrices(training_loss_cfg)
+        multiscale_cfgs = _get_multiscale_cfgs(training_loss_cfg)
 
-        for loss_cfg in loss_cfgs_to_check:
-            for file in loss_cfg.loss_matrices:
+        for multiscale_cfg in multiscale_cfgs:
+            for file in multiscale_cfg.get("loss_matrices") or []:
                 if file is not None:
                     tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
             if tmp_path_loss_matrices is not None:
-                loss_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+                OmegaConf.set_struct(multiscale_cfg, False)
+                multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
 
         if tmp_path_loss_matrices is not None:
             resolved_path = str(Path(tmp_path_loss_matrices).parent)
