@@ -676,8 +676,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         if not config:
             return None
 
-        has_matrix = "matrix_path" in config
-        has_edges = "edges_name" in config
+        has_matrix = "matrix_path" in config and config["matrix_path"] is not None
+        has_edges = "edges_name" in config and config["edges_name"] is not None
 
         if has_matrix and has_edges:
             raise ValueError("projection config must specify at most one of 'matrix_path' or 'edges_name', not both")
