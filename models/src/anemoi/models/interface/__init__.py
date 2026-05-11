@@ -12,12 +12,12 @@ from typing import Optional
 
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.utils.config import DotDict
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -28,7 +28,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
     Attributes
     ----------
-    config : DotDict
+    config : DictConfig
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
@@ -55,7 +55,7 @@ class AnemoiModelInterface(torch.nn.Module):
     def __init__(
         self,
         *,
-        config: DotDict,
+        config: DictConfig,
         n_step_input: int,
         n_step_output: int,
         statistics: dict,
@@ -184,7 +184,7 @@ class AnemoiModelInterface(torch.nn.Module):
         # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
         model_instantiate_config = {
             "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "all"),
+            "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
         self.model = instantiate(
             model_instantiate_config,

@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.data.batch import Batch
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.utils.index_space import IndexSpace
 
 from .base import BaseTrainingModule
@@ -61,6 +62,13 @@ class BaseDiffusionTraining(BaseTrainingModule):
         )
 
         self.rho = config.model.model.diffusion.rho
+
+    @property
+    def plot_adapter(self) -> EnsemblePlotAdapterWrapper:
+        """Wrap the task's plot adapter with ensemble handling."""
+        if not hasattr(self, "_ensemble_plot_adapter"):
+            self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
+        return self._ensemble_plot_adapter
 
     def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Project full targets into data-output variable space."""
@@ -109,7 +117,7 @@ class BaseDiffusionTraining(BaseTrainingModule):
             y_noised,
             sigma,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
         )
 
     def _compute_loss(
@@ -164,7 +172,7 @@ class BaseDiffusionTraining(BaseTrainingModule):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -525,7 +533,7 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
 
         x_ref = self.model.model.apply_reference_state_truncation(
             x,
-            self.grid_shard_shapes,
+            self.grid_shard_sizes,
             self.model_comm_group,
         )
         # x_ref is normalized model.input.prognostic (subset), aligned to output steps

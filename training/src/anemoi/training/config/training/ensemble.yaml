@@ -58,11 +58,10 @@ training_loss:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       _target_: anemoi.training.losses.MultiscaleLossWrapper
-      loss_matrices_path: ${system.input.loss_matrices_path}
-      loss_matrices: [null]
+      # Disk mode:   multiscale_config: {loss_matrices_path: /path, loss_matrices: ["file.npz", null]}
+      # On-the-fly:  multiscale_config: {num_scales: 4, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
+      multiscale_config: null  # null = single scale, no smoothing
       weights: [1.0]
-
-      keep_batch_sharded: ${model.keep_batch_sharded}
 
       per_scale_loss:
         _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
@@ -97,11 +96,8 @@ validation_metrics:
       multiscale:
         _target_: anemoi.training.losses.MultiscaleLossWrapper
 
-        loss_matrices_path: ${system.input.loss_matrices_path}
-        loss_matrices: [null]
+        multiscale_config: null
         weights: [1.0]
-
-        keep_batch_sharded: ${model.keep_batch_sharded}
 
         per_scale_loss:
           _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS

@@ -11,8 +11,7 @@
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-DEFAULT_DATASET_NAME = "data"
-COORDS_DIM = 4 # cosine and sine of latitude and longitude 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 
 
 # This function retrieves the configuration for multiple datasets, supporting both new and old config formats.

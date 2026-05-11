@@ -26,6 +26,7 @@ from torch_geometric.typing import Adj
 from hydra.utils import instantiate
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
@@ -97,7 +98,7 @@ class BaseGraphProvider(nn.Module, ABC):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-    ) -> Union[tuple[Tensor, Adj, Optional[tuple[list, list]]], Tensor]:
+    ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
         """Get edge information.
 
         Parameters
@@ -115,8 +116,8 @@ class BaseGraphProvider(nn.Module, ABC):
 
         Returns
         -------
-        Union[tuple[Tensor, Adj, Optional[tuple[list, list]]], Tensor]
-            For standard providers: (edge_attr, edge_index, edge_shard_shapes) tuple
+        Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]
+            For standard providers: (edge_attr, edge_index, edge_shard_sizes) tuple
             For sparse providers: sparse projection matrix
         """
         pass
@@ -213,7 +214,7 @@ class StaticGraphProvider(BaseGraphProvider):
         batch_size: int,
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, Adj, Optional[tuple[list, list]]]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges."""
         edge_trainable_params = self.trainable(batch_size)
         if edge_trainable_params is not None:
@@ -239,7 +240,7 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
-    ) -> tuple[Tensor, Adj, Optional[tuple[list, list]]]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edge attributes and expanded edge index for static graph.
 
         Parameters
@@ -259,9 +260,9 @@ class StaticGraphProvider(BaseGraphProvider):
 
         Returns
         -------
-        tuple[Tensor, Adj, Optional[tuple[list, list]]]
-            Edge attributes, expanded edge index, and optional edge_shard_shapes.
-            edge_shard_shapes is (shapes_edge_attr, shapes_edge_idx) when shard_edges=True,
+        tuple[Tensor, Adj, Optional[ShardSizes]]
+            Edge attributes, expanded edge index, and optional edge_shard_sizes.
+            edge_shard_sizes is a list of per-rank partition sizes when shard_edges=True,
             otherwise None.
         """
         if act_checkpoint:
@@ -293,7 +294,7 @@ class NoOpGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
     ) -> tuple[None, None, None]:
-        """Return None for edge attributes, edge index, and edge_shard_shapes.
+        """Return None for edge attributes, edge index, and edge_shard_sizes.
 
         Parameters
         ----------
@@ -391,7 +392,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_coords: Tensor,
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, Adj, Optional[tuple[list, list]]]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges, separated for checkpointing."""
         # Build graph from coordinates
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
@@ -409,7 +410,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
-    ) -> tuple[Tensor, Adj, Optional[tuple[list, list]]]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get dynamic edges constructed from node coordinates.
 
         Calls build_graph() to construct edges on-the-fly using k-NN, radius graphs, etc.
@@ -431,8 +432,8 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         Returns
         -------
-        tuple[Tensor, Adj, Optional[tuple[list, list]]]
-            Edge attributes, edge index, and optional edge_shard_shapes
+        tuple[Tensor, Adj, Optional[ShardSizes]]
+            Edge attributes, edge index, and optional edge_shard_sizes
 
         Raises
         ------
@@ -554,6 +555,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         row_normalize: bool,
     ) -> None:
         """Create sparse projection matrix."""
+        row_index = edge_index[0].long()
+        edge_index = torch.stack([row_index, edge_index[1].long()])
 
         if row_normalize:
             weights = self._row_normalize_weights(edge_index, weights, src_size)
@@ -567,10 +570,11 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
         self._edge_dim = self.projection_matrix.shape[1]
 
-        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, edge_index[0], weights)
+        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, row_index, weights)
         if not torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5):
             LOGGER.warning(
                 "Projection matrix rows do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
+                "This is unexpected; please check your matrix. "
                 "Consider using row_normalize=True or pre-normalized weights.",
                 row_sums.min().item(),
                 row_sums.max().item(),
@@ -581,9 +585,10 @@ class ProjectionGraphProvider(BaseGraphProvider):
     def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_rows: int) -> Tensor:
         """Normalize weights per row (target node) so each row sums to 1."""
         total = torch.zeros(num_rows, device=weights.device)
+        row_index = edge_index[0].long()
         # edge_index[0] contains row indices (targets) for COO tensor format
-        norm = total.scatter_add_(0, edge_index[0].long(), weights)
-        norm = norm[edge_index[0]]
+        norm = total.scatter_add_(0, row_index, weights)
+        norm = norm[row_index]
         return weights / (norm + 1e-8)
 
     @property

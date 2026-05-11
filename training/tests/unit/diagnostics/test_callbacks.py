@@ -17,10 +17,10 @@ import pytest
 import torch
 import yaml
 
+from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
-from anemoi.training.diagnostics.callbacks.evaluation import RolloutEvalEns
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
@@ -34,6 +34,9 @@ diagnostics:
 
   plot:
     enabled: False
+    datashader: True
+    projection_kind: equirectangular
+    asynchronous: True
     focus_areas: null
     callbacks: []
 
@@ -52,25 +55,80 @@ diagnostics:
 def test_no_extra_callbacks_set():
     # No extra callbacks set
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    callbacks = get_callbacks(config)
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=False,
+    )
+    callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS  # ParentUUIDCallback, CheckVariableOrder, etc
 
 
 def test_add_config_enabled_callback():
-    # Add logging callback
-    config = omegaconf.OmegaConf.create(default_config)
-    config.diagnostics.callbacks.append({"log": {"mlflow": {"enabled": True}}})
-    callbacks = get_callbacks(config)
+    # Add logging callback (mlflow enabled triggers LearningRateMonitor)
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=True,
+    )
+    callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
 def test_add_callback():
-    config = omegaconf.OmegaConf.create(default_config)
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     config.diagnostics.callbacks.append(
         {"_target_": "anemoi.training.diagnostics.callbacks.provenance.ParentUUIDCallback"},
     )
-    callbacks = get_callbacks(config)
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=False,
+    )
+    callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
+
+
+def test_rollout_eval_instantiated_via_hydra_interpolation():
+    """RolloutEval in diagnostics.callbacks is instantiated with values from the Hydra tree.
+
+    This verifies that callbacks receive config values via Hydra interpolation.
+    """
+    config = omegaconf.OmegaConf.create(
+        yaml.safe_load(
+            default_config + """
+task:
+  validation_rollout: 3
+""",
+        ),
+    )
+    config.diagnostics.callbacks.append(
+        {
+            "_target_": "anemoi.training.diagnostics.callbacks.evaluation.RolloutEval",
+            "rollout": ["${task.validation_rollout}"],
+            "every_n_batches": 1,
+        },
+    )
+    # Pass config.diagnostics — it keeps its parent reference to the root config,
+    # so ${task.validation_rollout} resolves correctly during instantiate().
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=False,
+    )
+    callbacks = get_callbacks(context)
+    rollout_evals = [cb for cb in callbacks if isinstance(cb, RolloutEval)]
+    assert len(rollout_evals) == 1
+    assert rollout_evals[0].rollout == [3]
 
 
 def test_add_plotting_callback(monkeypatch):
@@ -78,56 +136,28 @@ def test_add_plotting_callback(monkeypatch):
     import anemoi.training.diagnostics.callbacks.plot as plot
 
     class PlotLoss:
-        def __init__(self, config: omegaconf.DictConfig):
+        def __init__(self, plotting_settings=None):
             pass
 
     monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
 
-    config = omegaconf.OmegaConf.create(default_config)
-    config.diagnostics.plot.enabled = True
+    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
     config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
-    callbacks = get_callbacks(config)
+    context = CallbacksContext(
+        diagnostics=config.diagnostics,
+        checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
+        plots_output=None,
+        wandb_enabled=False,
+        mlflow_enabled=False,
+    )
+    callbacks = get_callbacks(context)
     assert len(callbacks) == NUM_FIXED_CALLBACKS + 1
 
 
-def test_rollout_eval_ens_handles_dict_batch():
-    """Test RolloutEvalEns._eval with a dict batch via on_validation_batch_end."""
-    config = omegaconf.OmegaConf.create({})
-    callback = RolloutEvalEns(config, rollout=[1, 2], every_n_batches=1)
-
-    # Mock pl_module
-    pl_module = MagicMock()
-    pl_module.device = torch.device("cpu")
-    pl_module.n_step_input = 1
-    pl_module.n_step_output = 1
-    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
-    pl_module._step.return_value = (
-        torch.tensor(0.125),
-        {"metric1": torch.tensor(0.25)},
-        None,
-    )
-
-    trainer = MagicMock()
-    trainer.precision = "16-mixed"
-
-    # Mock batch (bs, ms, nens_per_device, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, 4, 10, 5)}
-
-    with patch.object(callback, "_log") as mock_log:
-        callback.on_validation_batch_end(trainer, pl_module, outputs=[], batch=batch, batch_idx=0)
-
-        #  Check for output
-        mock_log.assert_called_once()
-        args = mock_log.call_args[0]
-        assert args[1].item() == pytest.approx(0.125)  # (0.1 + 0.15) / 2
-        assert args[2]["metric1"].item() == pytest.approx(0.25)  # Last metric value
-        assert args[3] == 2  # batch size
-
-
-def test_rollout_eval_handles_dict_batch():
+@pytest.mark.parametrize("n_ensemble", [1, 3])
+def test_rollout_eval_handles_dict_batch(n_ensemble):
     """Test RolloutEval._eval with a dict batch (multi-dataset style)."""
-    config = omegaconf.OmegaConf.create({})
-    callback = RolloutEval(config, rollout=[1, 2], every_n_batches=1)
+    callback = RolloutEval(rollout=[1, 2], every_n_batches=1)
 
     # Mock pl_module
     pl_module = MagicMock()
@@ -145,7 +175,7 @@ def test_rollout_eval_handles_dict_batch():
     trainer.precision = "16-mixed"  # no autocast
 
     # Mock batch (bs, ms, ens, latlon, nvar)
-    batch = {"data": torch.randn(2, 4, 1, 10, 5)}
+    batch = {"data": torch.randn(2, 4, n_ensemble, 10, 5)}
 
     with patch.object(callback, "_log") as mock_log:
 
@@ -249,7 +279,7 @@ def test_progress_bar_disabled():
     config = omegaconf.OmegaConf.create(yaml.safe_load(progress_bar_config))
     config.diagnostics.enable_progress_bar = False
 
-    callbacks = _get_progress_bar_callback(config)
+    callbacks = _get_progress_bar_callback(config.diagnostics)
     assert len(callbacks) == 0
 
 
@@ -260,7 +290,7 @@ def test_progress_bar_default():
     config = omegaconf.OmegaConf.create(yaml.safe_load(progress_bar_config))
     config.diagnostics.progress_bar = None  # No _target_ specified
 
-    callbacks = _get_progress_bar_callback(config)
+    callbacks = _get_progress_bar_callback(config.diagnostics)
 
     assert len(callbacks) == 1
     assert isinstance(callbacks[0], TQDMProgressBar)
@@ -275,7 +305,7 @@ def test_progress_bar_custom():
         "_target_": "pytorch_lightning.callbacks.RichProgressBar",
     }
 
-    callbacks = _get_progress_bar_callback(config)
+    callbacks = _get_progress_bar_callback(config.diagnostics)
 
     assert len(callbacks) == 1
     assert isinstance(callbacks[0], RichProgressBar)

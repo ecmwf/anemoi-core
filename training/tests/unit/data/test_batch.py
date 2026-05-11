@@ -166,8 +166,11 @@ def test_to_moves_dynamic_coordinates() -> None:
 
     moved = batch.to("cpu")
 
-    # Dynamic coords go through .to(); a fresh tensor object is produced.
-    assert moved.coordinates["a"] is not coords
+    # Dynamic coords are routed through ``.to()`` (no static-coord
+    # short-circuit). Identity is not asserted: ``Tensor.to`` is a no-op
+    # when the tensor already lives on the requested device, so the same
+    # object may be returned.
+    assert moved.coordinates["a"].device.type == "cpu"
     assert torch.equal(moved.coordinates["a"], coords)
 
 
