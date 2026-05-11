@@ -205,7 +205,8 @@ between 0 and 1 give the almost fair CRPS formulation. By default,
 ``alpha: 0.95`` gives a 5% standard CRPS and 95% fair CRPS combination.
 The ``backend`` parameter selects how the score is computed:
 
-- ``naive``: simple loop over unordered ensemble-member pairs.
+- ``naive``: simple loop over unordered ensemble-member pairs, avoiding
+  materialization of the full pairwise tensor.
 - ``stable``: materializes pairwise tensors and uses the numerically stable
   all-pairs formulation.
 

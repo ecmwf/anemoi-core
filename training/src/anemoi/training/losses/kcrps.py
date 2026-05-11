@@ -46,8 +46,8 @@ class CRPS(BaseLoss):
             and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
         backend : {"naive", "stable"}
             Backend used for the point-wise CRPS calculation. The naive backend uses a simple loop over unordered
-            ensemble-member pairs. The stable backend materializes pairwise tensors and uses the numerically stable
-            all-pairs formulation.
+            ensemble-member pairs and avoids materializing the full pairwise tensor. The stable backend materializes
+            pairwise tensors and uses the numerically stable all-pairs formulation.
         no_autocast : bool, optional
             Deactivate autocast for the kernel CRPS calculation
         ignore_nans : bool, optional

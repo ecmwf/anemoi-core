@@ -395,8 +395,9 @@ For ensemble training, the following loss functions are available:
    CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
    The default ``alpha: 0.95`` combines 5% standard CRPS with 95% fair
    CRPS. The ``naive`` backend uses a simple loop over unordered
-   ensemble-member pairs. The ``stable`` backend materializes pairwise
-   tensors and uses the numerically stable all-pairs formulation.
+   ensemble-member pairs and avoids materializing the full pairwise tensor.
+   The ``stable`` backend materializes pairwise tensors and uses the
+   numerically stable all-pairs formulation.
 
 .. _loss-function-scaling:
 

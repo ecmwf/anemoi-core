@@ -69,7 +69,8 @@ The following probabilistic loss functions are available by default:
    combines 5% standard CRPS with 95% fair CRPS.
    The ``backend`` option can be set to:
 
-   - ``naive``: simple loop over unordered ensemble-member pairs.
+   - ``naive``: simple loop over unordered ensemble-member pairs, avoiding
+     materialization of the full pairwise tensor.
    - ``stable``: materializes pairwise tensors and uses the numerically
      stable all-pairs formulation.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
