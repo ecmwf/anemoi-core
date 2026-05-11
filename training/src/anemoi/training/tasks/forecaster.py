@@ -225,12 +225,17 @@ class Forecaster(BaseTask):
             sync_dist=False,
         )
 
-    def extra_state_dict(self) -> dict:
-        """Return task runtime state for checkpoint persistence."""
+    def training_runtime_state_dict(self) -> dict:
+        """Return training runtime state to be persisted in the training checkpoint.
+
+        Captures the current rollout curriculum step so that job resume
+        continues the schedule from where it left off rather than restarting
+        from ``rollout.start``.
+        """
         return {"rollout": self.rollout.state_dict()}
 
-    def load_extra_state_dict(self, state: dict) -> None:
-        """Restore task runtime state from a checkpoint."""
+    def load_training_runtime_state_dict(self, state: dict) -> None:
+        """Restore training runtime state from a training checkpoint."""
         if "rollout" in state:
             self.rollout.load_state_dict(state["rollout"])
 

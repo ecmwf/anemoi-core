@@ -452,22 +452,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if full_key.startswith(processor_prefixes):
                 state_dict[full_key] = value
 
-    def get_extra_state(self) -> dict:
-        if hasattr(self, "task"):
-            return self.task.extra_state_dict()
-        return {}
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
-    def set_extra_state(self, state: dict) -> None:
-        if hasattr(self, "task"):
-            self.task.load_extra_state_dict(state)
-
-    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+    def on_load_checkpoint(self, checkpoint: dict) -> None:
         self._update_checkpoint_state_dict_for_load(checkpoint)
 
         self._ckpt_model_name_to_index = {
             dataset_name: data_indices.name_to_index
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
+
+        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
     def _update_scaler_for_dataset(
         self,

@@ -184,12 +184,18 @@ class BaseTask(ABC):
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 
-    def extra_state_dict(self) -> dict:
-        """Return task runtime state for checkpoint persistence."""
+    def training_runtime_state_dict(self) -> dict:
+        """Return training runtime state to be persisted in the training checkpoint.
+
+        Override in subclasses to include any mutable state that accumulates
+        during training and must survive a job resume (e.g. curriculum counters).
+        This state is stored at the training checkpoint level, not in the model
+        state_dict, so that it is invisible to inference code.
+        """
         return {}
 
-    def load_extra_state_dict(self, state: dict) -> None:  # noqa: B027
-        """Restore task runtime state from a checkpoint."""
+    def load_training_runtime_state_dict(self, state: dict) -> None:  # noqa: B027
+        """Restore training runtime state from a training checkpoint."""
 
     def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""

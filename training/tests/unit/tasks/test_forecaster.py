@@ -172,10 +172,10 @@ def test_rollout_config_load_state_dict_restores_step() -> None:
     assert cfg.step == 7
 
 
-# ── Forecaster: extra_state_dict / load_extra_state_dict ─────────────────────
+# ── Forecaster: training_runtime_state_dict / load_training_runtime_state_dict ─────────────────────
 
 
-def test_forecaster_extra_state_dict_round_trip() -> None:
+def test_forecaster_training_runtime_state_dict_round_trip() -> None:
     """Saving and loading extra state restores rollout.step exactly."""
     task = Forecaster(
         multistep_input=1,
@@ -187,7 +187,7 @@ def test_forecaster_extra_state_dict_round_trip() -> None:
     task.on_train_epoch_end(1)
     assert task.rollout.step == 3
 
-    saved = task.extra_state_dict()
+    saved = task.training_runtime_state_dict()
 
     fresh = Forecaster(
         multistep_input=1,
@@ -196,14 +196,14 @@ def test_forecaster_extra_state_dict_round_trip() -> None:
         rollout={"start": 1, "epoch_increment": 1, "maximum": 10},
     )
     assert fresh.rollout.step == 1
-    fresh.load_extra_state_dict(saved)
+    fresh.load_training_runtime_state_dict(saved)
     assert fresh.rollout.step == 3
 
 
-def test_forecaster_load_extra_state_dict_missing_key_is_noop() -> None:
-    """load_extra_state_dict with an empty dict leaves rollout.step unchanged."""
+def test_forecaster_load_training_runtime_state_dict_missing_key_is_noop() -> None:
+    """load_training_runtime_state_dict with an empty dict leaves rollout.step unchanged."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2})
-    task.load_extra_state_dict({})
+    task.load_training_runtime_state_dict({})
     assert task.rollout.step == 2
 
 

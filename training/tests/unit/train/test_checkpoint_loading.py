@@ -77,6 +77,7 @@ def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
 def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
+    module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.model = model
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
@@ -98,12 +99,7 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyTrainingModule.__new__(DummyTrainingModule)
-    torch.nn.Module.__init__(module)
-    module.model = new_model
-    module.config = SimpleNamespace(
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, True)),
-    )
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
@@ -131,12 +127,7 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyTrainingModule.__new__(DummyTrainingModule)
-    torch.nn.Module.__init__(module)
-    module.model = new_model
-    module.config = SimpleNamespace(
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
-    )
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
@@ -355,40 +346,53 @@ def test_validate_transfer_learning_remove_dataset() -> None:
 # ── Rollout state persistence across checkpoint save / load ───────────────────
 
 
-def _make_module_with_forecaster_task(rollout_cfg: dict) -> DummyTrainingModule:
+def _make_module_with_forecaster_task(rollout_cfg: dict) -> tuple[DummyTrainingModule, Forecaster]:
     """Build a minimal DummyTrainingModule whose task is a Forecaster."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
-    module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
-    module.config = SimpleNamespace(
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
+    module.task = task
+    module.config = SimpleNamespace(  # type: ignore[assignment]
         training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
     )
-    return module
+    return module, task
 
 
-def test_get_extra_state_captures_rollout_step() -> None:
-    """get_extra_state returns the live rollout step, not the initial start value."""
-    module = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    module.task.on_train_epoch_end(0)
-    module.task.on_train_epoch_end(1)
+def test_on_save_checkpoint_persists_rollout_step() -> None:
+    """on_save_checkpoint writes the current rollout step into the checkpoint dict."""
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
 
-    assert module.get_extra_state() == {"rollout": {"step": 3}}
+    checkpoint: dict = {}
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
 
-
-def test_set_extra_state_restores_rollout_step() -> None:
-    """set_extra_state recovers rollout.step so resume continues from the right value."""
-    module = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    module.set_extra_state({"rollout": {"step": 3}})
-    assert module.task.rollout.step == 3
+    assert checkpoint["task_state"]["rollout"]["step"] == 3
 
 
-def test_state_dict_round_trip_preserves_rollout_step() -> None:
-    """Rollout step survives a full state_dict() / load_state_dict() round-trip."""
-    source = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    source.task.on_train_epoch_end(0)
-    source.task.on_train_epoch_end(1)
-    assert source.task.rollout.step == 3
+def test_on_load_checkpoint_restores_rollout_step() -> None:
+    """on_load_checkpoint recovers rollout.step so resume continues from the right value."""
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
 
-    target = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    target.load_state_dict(source.state_dict(), strict=False)
-    assert target.task.rollout.step == 3
+    checkpoint = {
+        "task_state": {"rollout": {"step": 3}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert task.rollout.step == 3
+
+
+def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None:
+    """Checkpoints from before this fix (no task_state key) load without error."""
+    module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 1, "maximum": 5})
+
+    checkpoint = {
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert task.rollout.step == 2
