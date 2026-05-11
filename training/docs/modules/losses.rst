@@ -136,8 +136,8 @@ be listed there.
    meaningful for single-step tasks.
 
 We strongly recommend using the time aggregate loss when training any
-temporal downscaler. The pre-built config variants ``single_combined``
-and ``ensemble_combined`` combine it with the primary loss inside a
+temporal downscaler. The pre-built config variants ``single_composite``
+and ``ensemble_composite`` combine it with the primary loss inside a
 :class:`~anemoi.training.losses.combined.CombinedLoss`.
 
 ***************************
