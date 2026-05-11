@@ -351,16 +351,7 @@ def _make_multiscale_wrapper(inner: BaseLoss | None = None) -> "MultiscaleLossWr
     return MultiscaleLossWrapper(
         per_scale_loss=inner,
         weights=[1.0],
-        keep_batch_sharded=True,
     )
-
-
-def test_nested_needs_shard_layout_info_propagates() -> None:
-    ms = _make_multiscale_wrapper()
-    wrapper = TimeAggregateLossWrapper(["mean"], ms)
-    # MultiscaleLossWrapper with keep_batch_sharded=True -> needs_shard_layout_info=True
-    assert wrapper.needs_shard_layout_info is True
-
 
 def test_nested_scaler_shared_through_chain() -> None:
     leaf = _make_loss()
