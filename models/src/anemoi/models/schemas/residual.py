@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Annotated
 from typing import Literal
 from typing import Self
@@ -74,6 +75,17 @@ class ScalarOrnsteinConnectionSchema(BaseModel):
         True,
         description="Whether theta is a trainable parameter.",
     )
+    regressors: list[str] | None = Field(
+        None,
+        description="Variable names to use as regressors.",
+    )
+
+
+class SpectralOrnsteinSupportedGrids(str, Enum):
+    """Supported grid types for SpectralOrnsteinConnection."""
+
+    REGULAR = "regular"
+    OCTAHEDRAL = "octahedral"
 
 
 class SpectralOrnsteinConnectionSchema(BaseModel):
@@ -84,9 +96,9 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
         2,
         description="Maximum spherical harmonic degree for the theta/mu coefficients.",
     )
-    grid: str = Field(
-        "legendre-gauss",
-        description='Grid type: "legendre-gauss" for regular lat-lon, "octahedral" for octahedral reduced grids.',
+    grid: SpectralOrnsteinSupportedGrids = Field(
+        SpectralOrnsteinSupportedGrids.REGULAR,
+        description='Grid type: "regular" for regular lat-lon, "octahedral" for octahedral reduced grids.',
     )
     theta_init: float = Field(
         0.0,
@@ -96,7 +108,7 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
         0.0,
         description="Lower bound buffer for theta.",
     )
-    zmean_term: bool = Field(
+    use_mean: bool = Field(
         True,
         description="Whether to include a zonal mean (mu) term.",
     )
