@@ -21,10 +21,12 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.models.data.batch import TensorLayout
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
+
 
 
 def _as_dict(value: str | dict | DictConfig) -> str | dict:
@@ -362,6 +364,7 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         """Return the per-sample payload in the unified contract."""
         return {
             "data": self.get_data(time_indices, grid_shard_indices),
+            "layout": TensorLayout(time=0, variables=2, ensemble=1, grid=3),
             "coordinates": self.get_coordinates(time_indices, grid_shard_indices),
             "metadata": {},
             "grid_size": self.grid_size,
@@ -454,6 +457,7 @@ class ObservationDataReader(BaseAnemoiReader):
 
         return {
             "data": data,
+            "layout": TensorLayout(grid=0, variables=1, time_in_grid=True),
             "coordinates": coordinates,
             "timedeltas": timedeltas,
             "metadata": {"boundaries": x.boundaries},

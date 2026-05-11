@@ -61,6 +61,54 @@ STATIC_COORDS_META_KEY = "static_coords"
 BOUNDARIES_META_KEY = "boundaries"
 
 
+@dataclass(frozen=True, slots=True)
+class TensorLayout:
+    """Maps logical axes to physical dimension positions.
+
+    Describes the semantic meaning of each dimension in a per-dataset data
+    tensor so that downstream code (tasks, losses, metrics) can index axes
+    by name rather than by hard-coded position.
+
+    Parameters
+    ----------
+    batch : int or None
+        Position of the batch dimension (``None`` before collation).
+    time : int or None
+        Position of the explicit time dimension. ``None`` when time is
+        folded into the grid axis (sparse observation datasets).
+    ensemble : int or None
+        Position of the ensemble dimension (``None`` when absent).
+    grid : int
+        Position of the grid / spatial-points dimension.
+    variables : int
+        Position of the variable (channel) dimension.
+    time_in_grid : bool
+        ``True`` when the time axis is encoded within the grid dimension
+        via ``boundaries`` metadata (sparse observations). ``False`` for
+        gridded datasets that carry an explicit time axis.
+    """
+
+    batch: int | None = None
+    time: int | None = None
+    ensemble: int | None = None
+    grid: int = -2
+    variables: int = -1
+    time_in_grid: bool = False
+
+    def with_batch_dim(self) -> "TensorLayout":
+        """Return a new layout shifted by +1 to account for a leading batch dim."""
+        if self.batch is not None:
+            return self
+        return TensorLayout(
+            batch=0,
+            time=self.time + 1 if self.time is not None else None,
+            ensemble=self.ensemble + 1 if self.ensemble is not None else None,
+            grid=self.grid + 1 if self.grid >= 0 else self.grid,
+            variables=self.variables + 1 if self.variables >= 0 else self.variables,
+            time_in_grid=self.time_in_grid,
+        )
+
+
 def _to_device(value, device, *, non_blocking: bool):
     """Recursively move tensors to ``device``; pass non-tensors through.
 
@@ -130,6 +178,10 @@ class Batch:
         Per-dataset grid shard indices (``np.ndarray``, ``slice``, or
         ``None``). Describes which grid points are present in this
         batch's shard. Not transferred to device.
+    layouts : dict[str, TensorLayout], optional
+        Per-dataset :class:`TensorLayout` descriptors mapping logical
+        axes (time, ensemble, grid, variables) to physical dimension
+        positions. Not transferred to device.
     """
 
     data: dict[str, torch.Tensor | list[torch.Tensor]]
@@ -138,6 +190,7 @@ class Batch:
     grid_sizes: dict[str, int] = field(default_factory=dict)
     timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = field(default_factory=dict)
     grid_shard_indices: dict[str, Any] = field(default_factory=dict)
+    layouts: dict[str, TensorLayout] = field(default_factory=dict)
 
     # ---------------------------------------------------------------- access
 
@@ -181,6 +234,7 @@ class Batch:
             is_static=self.is_static_coords(dataset_name),
             timedeltas=self.timedeltas.get(dataset_name),
             grid_shard_indices=self.grid_shard_indices.get(dataset_name),
+            layout=self.layouts.get(dataset_name),
         )
 
     def __contains__(self, dataset_name: str) -> bool:
@@ -241,6 +295,7 @@ class Batch:
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
             grid_shard_indices=self.grid_shard_indices,
+            layouts=self.layouts,
         )
 
     def pin_memory(self) -> "Batch":
@@ -264,6 +319,7 @@ class Batch:
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
             grid_shard_indices=self.grid_shard_indices,
+            layouts=self.layouts,
         )
 
     # ------------------------------------------------------------- transform
@@ -303,6 +359,7 @@ class Batch:
             grid_sizes=self.grid_sizes,
             timedeltas=self.timedeltas,
             grid_shard_indices=self.grid_shard_indices,
+            layouts=self.layouts,
         )
 
     def node_coords(self, dataset_name: str) -> torch.Tensor | None:
@@ -456,6 +513,14 @@ class Batch:
             if "grid_shard_indices" in payload:
                 collated_grid_shard_indices[name] = payload["grid_shard_indices"]
 
+        # Layouts: per-dataset TensorLayout from sample payloads, shifted to
+        # include the new leading batch dimension added by collation.
+        collated_layouts: dict[str, TensorLayout] = {}
+        for name in dataset_names:
+            payload = first[name]
+            if "layout" in payload:
+                collated_layouts[name] = payload["layout"].with_batch_dim()
+
         metadata: dict[str, Any] = {}
         if static:
             metadata[STATIC_COORDS_META_KEY] = frozenset(static)
@@ -468,6 +533,7 @@ class Batch:
             grid_sizes=collated_grid_sizes,
             timedeltas=collated_timedeltas,
             grid_shard_indices=collated_grid_shard_indices,
+            layouts=collated_layouts,
         )
 
 
@@ -481,6 +547,7 @@ class DatasetView:
     is_static: bool
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     grid_shard_indices: Any = None
+    layout: TensorLayout | None = None
 
     @property
     def latlons(self) -> torch.Tensor:
