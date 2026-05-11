@@ -161,7 +161,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
-        shard_shapes: dict[str, list[int]],
+        shard_shapes: dict[str, list[int] | None],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -179,8 +179,9 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
-        shard_shapes : dict[str, list[int]]
-            Shard shapes for all data readers
+        shard_shapes : dict[str, list[int] | None]
+            Shard shapes for all data readers. None for datasets without
+            a static grid (e.g. observation readers).
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -288,17 +289,27 @@ class MultiDataset(IterableDataset):
         )
 
     @cached_property
-    def shard_shapes(self) -> dict[str, list]:
-        """Return shard shapes for all data readers."""
+    def shard_shapes(self) -> dict[str, list | None]:
+        """Return shard shapes for all data readers.
+
+        Datasets without a static grid (e.g. observation readers) get ``None``
+        since they cannot be read-time-sharded across ranks.
+        """
         shard_shapes = {}
         for name, dataset in self.data_readers.items():
-            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
+            if dataset.grid_size is None:
+                shard_shapes[name] = None
+            else:
+                shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
         return shard_shapes
 
     def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
         """Get the grid shard slice according to the reader rank."""
+        shapes = self.shard_shapes[dataset_name]
+        if shapes is None:
+            return slice(None)
         start, end = get_partition_range(
-            partition_sizes=self.shard_shapes[dataset_name],
+            partition_sizes=shapes,
             partition_id=reader_group_rank,
         )
         return slice(start, end)
@@ -306,9 +317,11 @@ class MultiDataset(IterableDataset):
     def get_sample(self, index: int) -> dict[str, dict]:
         """Return per-dataset samples for ``index``.
 
-        Each value is a dict ``{"data": tensor, "coords": {"latitudes": ...,
-        "longitudes": ...}}`` so that the dataloader's collate function can
-        build a :class:`anemoi.training.data.batch.Batch`.
+        Each value is a dict ``{"data": tensor, "coordinates": (N, 2) tensor,
+        ...}`` so that the dataloader's collate function can build a
+        :class:`anemoi.training.data.batch.Batch`. Sparse observation
+        readers additionally include a ``"timedeltas"`` tensor and a
+        ``"metadata": {"boundaries": ...}`` entry.
         """
         x: dict[str, dict[str, torch.Tensor]] = {}
         for name, dataset in self.data_readers.items():
@@ -332,8 +345,8 @@ class MultiDataset(IterableDataset):
         Returns
         -------
         dict[str, dict[str, torch.Tensor]]
-            Mapping ``{name: {"data": tensor, "coords": {...}}}`` for each
-            synchronized sample.
+            Mapping ``{name: {"data": tensor, "coordinates": tensor, ...}}``
+            for each synchronized sample.
         """
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization

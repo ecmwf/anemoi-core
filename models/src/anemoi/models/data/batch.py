@@ -17,10 +17,16 @@ It bundles, per dataset:
   ``list[torch.Tensor]`` of length ``batch`` with per-sample shape
   ``(ensemble=1, grid_i, vars)`` (sparse observation datasets, where
   ``grid_i`` varies per sample).
-* ``coords`` — per-dataset coordinate tensors (e.g. ``latitudes``,
-  ``longitudes``, and for sparse readers also ``timedeltas``) in **radians**.
-  For sparse datasets each coord key holds a ``list[torch.Tensor]`` of
-  length ``batch``, mirroring the structure of ``data``.
+* ``coordinates`` — per-dataset ``(N, 2)`` tensor stacking
+  ``(latitude, longitude)`` along the trailing dimension, in **radians**.
+  For static-grid datasets the tensor is shared by reference across the
+  batch dimension; for dynamic-grid (gridded non-static) datasets it has
+  a leading batch dimension; for sparse datasets the value is a
+  ``list[torch.Tensor]`` of length ``batch``.
+* ``timedeltas`` — *(sparse only)* per-dataset ``(N,)`` tensor (or
+  ``list[torch.Tensor]`` of length ``batch``) holding the per-point time
+  offset in seconds. Stored separately from ``coordinates`` so consumers
+  can route the spatial and temporal axes independently.
 * ``metadata`` — extension point for per-batch / per-dataset information
   (masks, timestamps, sparse-obs ``boundaries``, ...).
 
@@ -90,14 +96,14 @@ class Batch:
         shape ``(batch, time, ensemble, grid, vars)``; for sparse
         observation datasets a ``list[torch.Tensor]`` of length ``batch``,
         one entry per sample with shape ``(ensemble=1, grid_i, vars)``.
-    coords : dict[str, dict[str, torch.Tensor | list[torch.Tensor]]]
-        Per-dataset coordinate tensors keyed by name (e.g. ``"latitudes"``,
-        ``"longitudes"``, ``"timedeltas"``) in **radians**. For static-grid
-        datasets the tensors are shared by reference across the batch
-        dimension and have shape ``(grid, ...)``; for dynamic-grid (gridded
-        non-static) datasets they have a leading batch (and optionally
-        time) dimension; for sparse datasets each value is a
-        ``list[torch.Tensor]`` of length ``batch``.
+    coordinates : dict[str, torch.Tensor | list[torch.Tensor]]
+        Per-dataset ``(N, 2)`` coordinate tensor stacking
+        ``(latitudes, longitudes)`` in **radians**. For static-grid
+        datasets the tensor is shared by reference across the batch
+        dimension and has shape ``(grid, 2)``; for dynamic-grid (gridded
+        non-static) datasets it has shape ``(batch, grid, 2)``; for
+        sparse datasets it is a ``list[torch.Tensor]`` of length ``batch``
+        with per-sample shape ``(grid_i, 2)``.
     metadata : dict[str, Any], optional
         Free-form per-batch metadata. Reserved keys:
 
@@ -107,11 +113,31 @@ class Batch:
         * ``<dataset_name>`` — for sparse datasets, a dict that may carry
           ``"boundaries": list[tuple[slice, ...]]`` (one per batch sample).
           Non-tensor leaves are passed through device transfer untouched.
+    grid_sizes : dict[str, int], optional
+        Per-dataset full grid sizes (number of grid points before any
+        distributed sharding). Populated during collation from sample
+        payloads. For static-grid datasets this equals
+        ``sum(dataset.grids)``; for observation datasets it equals the
+        grid dimension of the data tensor.
+    timedeltas : dict[str, torch.Tensor | list[torch.Tensor]], optional
+        Per-dataset per-point time-offset tensors (sparse observation
+        datasets only) of shape ``(N,)``. Stored separately from
+        :attr:`coordinates` so the spatial and temporal axes can be
+        consumed independently. For sparse datasets the value is a
+        ``list[torch.Tensor]`` of length ``batch``. Transferred to
+        device alongside data.
+    grid_shard_indices : dict[str, Any], optional
+        Per-dataset grid shard indices (``np.ndarray``, ``slice``, or
+        ``None``). Describes which grid points are present in this
+        batch's shard. Not transferred to device.
     """
 
     data: dict[str, torch.Tensor | list[torch.Tensor]]
-    coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = field(default_factory=dict)
+    coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    grid_sizes: dict[str, int] = field(default_factory=dict)
+    timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = field(default_factory=dict)
+    grid_shard_indices: dict[str, Any] = field(default_factory=dict)
 
     # ---------------------------------------------------------------- access
 
@@ -140,18 +166,21 @@ class Batch:
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
             raise KeyError(msg)
+
         return self.data[dataset_name]
 
     def view(self, dataset_name: str) -> "DatasetView":
-        """Return a per-dataset view bundling data, coords and the static flag."""
+        """Return a per-dataset view bundling data, coordinates and the static flag."""
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
             raise KeyError(msg)
         return DatasetView(
             name=dataset_name,
             data=self.data[dataset_name],
-            coords=self.coords.get(dataset_name, {}),
+            coordinates=self.coordinates.get(dataset_name),
             is_static=self.is_static_coords(dataset_name),
+            timedeltas=self.timedeltas.get(dataset_name),
+            grid_shard_indices=self.grid_shard_indices.get(dataset_name),
         )
 
     def __contains__(self, dataset_name: str) -> bool:
@@ -192,39 +221,61 @@ class Batch:
         new_data = {name: _to_device(tensor, device, non_blocking=non_blocking) for name, tensor in self.data.items()}
 
         static = self.static_coord_datasets
-        new_coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = {}
-        for name, per_dataset in self.coords.items():
+        new_coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        for name, value in self.coordinates.items():
             if name in static:
                 # Skip the H2D transfer; the tensors are already on device.
-                new_coords[name] = per_dataset
+                new_coordinates[name] = value
                 continue
-            new_coords[name] = {key: _to_device(value, device, non_blocking=non_blocking) for key, value in per_dataset.items()}
+            new_coordinates[name] = _to_device(value, device, non_blocking=non_blocking)
 
-        return Batch(data=new_data, coords=new_coords, metadata=self.metadata)
+        new_timedeltas = {
+            name: _to_device(value, device, non_blocking=non_blocking)
+            for name, value in self.timedeltas.items()
+        }
+
+        return Batch(
+            data=new_data,
+            coordinates=new_coordinates,
+            metadata=self.metadata,
+            grid_sizes=self.grid_sizes,
+            timedeltas=new_timedeltas,
+            grid_shard_indices=self.grid_shard_indices,
+        )
 
     def pin_memory(self) -> "Batch":
         """Pin host memory for non-static tensors. Static coords are left untouched."""
         new_data = {name: _pin_memory(tensor) for name, tensor in self.data.items()}
 
         static = self.static_coord_datasets
-        new_coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = {}
-        for name, per_dataset in self.coords.items():
+        new_coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        for name, value in self.coordinates.items():
             if name in static:
-                new_coords[name] = per_dataset
+                new_coordinates[name] = value
                 continue
-            new_coords[name] = {key: _pin_memory(value) for key, value in per_dataset.items()}
+            new_coordinates[name] = _pin_memory(value)
 
-        return Batch(data=new_data, coords=new_coords, metadata=self.metadata)
+        new_timedeltas = {name: _pin_memory(value) for name, value in self.timedeltas.items()}
+
+        return Batch(
+            data=new_data,
+            coordinates=new_coordinates,
+            metadata=self.metadata,
+            grid_sizes=self.grid_sizes,
+            timedeltas=new_timedeltas,
+            grid_shard_indices=self.grid_shard_indices,
+        )
 
     # ------------------------------------------------------------- transform
 
     def with_data(self, new_data: dict[str, torch.Tensor]) -> "Batch":
         """Return a new :class:`Batch` with ``data`` replaced by ``new_data``.
 
-        ``coords`` and ``metadata`` are shared by reference with the
-        receiver. This preserves static-coord identity (no extra H2D, no
-        copy) and is the recommended way for tasks to slice or transform
-        the data tensors while keeping the coordinate envelope intact.
+        ``coordinates``, ``timedeltas`` and ``metadata`` are shared by
+        reference with the receiver. This preserves static-coord identity
+        (no extra H2D, no copy) and is the recommended way for tasks to
+        slice or transform the data tensors while keeping the coordinate
+        envelope intact.
 
         Parameters
         ----------
@@ -235,8 +286,8 @@ class Batch:
         Returns
         -------
         Batch
-            A new frozen :class:`Batch` sharing ``self.coords`` and
-            ``self.metadata`` by reference.
+            A new frozen :class:`Batch` sharing ``self.coordinates``,
+            ``self.timedeltas`` and ``self.metadata`` by reference.
         """
         if set(new_data.keys()) != set(self.data.keys()):
             msg = (
@@ -244,32 +295,36 @@ class Batch:
                 f"(got {sorted(new_data)}, expected {sorted(self.data)})."
             )
             raise ValueError(msg)
-        return Batch(data=new_data, coords=self.coords, metadata=self.metadata)
+
+        return Batch(
+            data=new_data,
+            coordinates=self.coordinates,
+            metadata=self.metadata,
+            grid_sizes=self.grid_sizes,
+            timedeltas=self.timedeltas,
+            grid_shard_indices=self.grid_shard_indices,
+        )
 
     def node_coords(self, dataset_name: str) -> torch.Tensor | None:
-        """Return per-node ``(num_nodes, 2)`` lat/lon coords for ``dataset_name``.
+        """Return per-node ``(num_nodes, 2)`` lat/lon coordinates for ``dataset_name``.
 
-        Stacks ``coords[dataset_name]["latitudes"]`` and ``["longitudes"]``
-        along a trailing dimension. Coordinates are expected in **radians**
-        (see the module docstring) and to share the layout used at graph
-        registration time, so the result can be fed directly to
-        :meth:`anemoi.models.layers.graph.NamedNodesAttributes.forward`
-        via the ``coords=`` kwarg.
+        Returns the dataset's ``coordinates`` tensor as stored on the
+        batch — already shaped ``(N, 2)`` (or ``(B, N, 2)`` for dynamic
+        gridded datasets) with ``(latitude, longitude)`` along the
+        trailing dimension, in **radians**.
 
-        Returns ``None`` when the dataset has no ``coords`` entry or is
-        missing one of ``latitudes``/``longitudes`` — the model layer
-        then falls back to its registered static buffer (preserving
-        full backward compatibility with checkpoints trained before
-        the typed-batch refactor).
+        Returns ``None`` when the dataset has no entry in
+        :attr:`coordinates` — the model layer then falls back to its
+        registered static buffer (preserving full backward compatibility
+        with checkpoints trained before the typed-batch refactor). Sparse
+        datasets (``coordinates`` stored as ``list[torch.Tensor]``) also
+        return ``None`` here; consumers should use :meth:`view` to access
+        the per-sample list directly.
         """
-        per_dataset = self.coords.get(dataset_name)
-        if not per_dataset:
+        value = self.coordinates.get(dataset_name)
+        if value is None or isinstance(value, list):
             return None
-        latitudes = per_dataset.get("latitudes")
-        longitudes = per_dataset.get("longitudes")
-        if latitudes is None or longitudes is None:
-            return None
-        return torch.stack([latitudes, longitudes], dim=-1)
+        return value
 
     # ----------------------------------------------------------- construction
 
@@ -283,8 +338,9 @@ class Batch:
 
         Each sample must be a mapping ``{dataset_name: payload}`` where
         ``payload`` is a mapping with a required ``"data"`` key, an
-        optional ``"coords"`` mapping and an optional ``"metadata"``
-        mapping.
+        optional ``"coordinates"`` tensor (shape ``(N, 2)`` stacking
+        latitudes and longitudes in radians), an optional ``"timedeltas"``
+        tensor (sparse only) and an optional ``"metadata"`` mapping.
 
         Two payload shapes are supported and dispatched on the presence of
         ``BOUNDARIES_META_KEY`` (``"boundaries"``) inside
@@ -292,16 +348,16 @@ class Batch:
 
         * **Gridded** — no ``"boundaries"`` metadata. ``payload["data"]`` is
           a :class:`torch.Tensor` of uniform shape across samples; data and
-          (non-static) coords are stacked along a new leading batch
+          (non-static) coordinates are stacked along a new leading batch
           dimension via :func:`torch.utils.data.default_collate`. Datasets
           listed in ``static_coord_datasets`` reuse the first sample's
-          coords by reference (no stacking, no copy).
+          ``coordinates`` tensor by reference (no stacking, no copy).
         * **Sparse** — ``payload["metadata"]["boundaries"]`` is present (set
           by :meth:`anemoi.training.data.data_reader.ObservationDataReader._unpack_sample`).
           ``payload["data"]`` is a per-sample :class:`torch.Tensor` of
           shape ``(E=1, N_i, V)`` whose ``N_i`` varies between samples.
-          ``data[name]`` becomes a ``list[torch.Tensor]`` of length ``B``;
-          each coord key becomes a ``list[torch.Tensor]`` of length ``B``;
+          ``data[name]``, ``coordinates[name]`` and ``timedeltas[name]``
+          each become a ``list[torch.Tensor]`` of length ``B``;
           per-sample ``payload["metadata"]`` is collected into
           ``Batch.metadata[name]`` with each leaf gathered into a list of
           length ``B`` (so ``"boundaries"`` becomes
@@ -320,7 +376,8 @@ class Batch:
         dataset_names = tuple(first.keys())
 
         collated_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
-        collated_coords: dict[str, dict[str, torch.Tensor | list[torch.Tensor]]] = {}
+        collated_coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        collated_timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         per_dataset_metadata: dict[str, dict[str, list[Any]]] = {}
 
         for name in dataset_names:
@@ -341,50 +398,98 @@ class Batch:
                     )
                     raise ValueError(msg)
 
-                # data: list[Tensor] of length B, no stacking.
+                # data / coordinates / timedeltas: list[Tensor] of length B,
+                # no stacking — sparse samples have varying N_i.
                 collated_data[name] = [sample[name]["data"] for sample in samples]
 
-                # coords: each key becomes list[Tensor] of length B.
-                if "coords" in first_payload:
-                    coord_keys = tuple(first_payload["coords"].keys())
-                    collated_coords[name] = {
-                        key: [sample[name]["coords"][key] for sample in samples] for key in coord_keys
-                    }
+                if "coordinates" in first_payload:
+                    collated_coordinates[name] = [
+                        sample[name]["coordinates"] for sample in samples
+                    ]
+
+                if "timedeltas" in first_payload:
+                    collated_timedeltas[name] = [
+                        sample[name]["timedeltas"] for sample in samples
+                    ]
 
                 # metadata: each leaf becomes a list of length B (one per sample).
                 meta_keys = tuple(sample_meta.keys())
                 per_dataset_metadata[name] = {
-                    key: [sample[name].get("metadata", {}).get(key) for sample in samples] for key in meta_keys
+                    key: [sample[name].get("metadata", {}).get(key) for sample in samples]
+                    for key in meta_keys
                 }
                 continue
 
             # Gridded path: stack data via default_collate.
             collated_data[name] = default_collate([sample[name]["data"] for sample in samples])
 
-            if "coords" not in first_payload:
-                continue
-            if name in static:
-                # Use the first sample's coords by reference; do NOT copy or
-                # repeat across the batch dimension.
-                collated_coords[name] = first_payload["coords"]
-            else:
-                collated_coords[name] = default_collate(
-                    [sample[name]["coords"] for sample in samples],
+            if "coordinates" in first_payload:
+                if name in static:
+                    # Use the first sample's coordinates tensor by reference;
+                    # do NOT copy or repeat across the batch dimension.
+                    collated_coordinates[name] = first_payload["coordinates"]
+                else:
+                    collated_coordinates[name] = default_collate(
+                        [sample[name]["coordinates"] for sample in samples],
+                    )
+
+            if "timedeltas" in first_payload:
+                # Gridded datasets normally don't carry ``timedeltas``; if
+                # they do, stack them along a new batch dimension just like
+                # the other tensors.
+                collated_timedeltas[name] = default_collate(
+                    [sample[name]["timedeltas"] for sample in samples],
                 )
+
+        # Grid sizes: extract from sample payloads (all samples in a batch
+        # must agree since default_collate requires matching tensor shapes).
+        collated_grid_sizes: dict[str, int] = {}
+        for name in dataset_names:
+            payload = first[name]
+            if "grid_size" in payload:
+                collated_grid_sizes[name] = payload["grid_size"]
+
+        # Grid shard indices: same for all samples in a batch (same worker/shard).
+        collated_grid_shard_indices: dict[str, Any] = {}
+        for name in dataset_names:
+            payload = first[name]
+            if "grid_shard_indices" in payload:
+                collated_grid_shard_indices[name] = payload["grid_shard_indices"]
 
         metadata: dict[str, Any] = {}
         if static:
             metadata[STATIC_COORDS_META_KEY] = frozenset(static)
         metadata.update(per_dataset_metadata)
 
-        return Batch(data=collated_data, coords=collated_coords, metadata=metadata)
+        return Batch(
+            data=collated_data,
+            coordinates=collated_coordinates,
+            metadata=metadata,
+            grid_sizes=collated_grid_sizes,
+            timedeltas=collated_timedeltas,
+            grid_shard_indices=collated_grid_shard_indices,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetView:
-    """Per-dataset view returned by :meth:`Batch.__getitem__`."""
+    """Per-dataset view returned by :meth:`Batch.view`."""
 
     name: str
     data: torch.Tensor | list[torch.Tensor]
-    coords: dict[str, torch.Tensor | list[torch.Tensor]]
+    coordinates: torch.Tensor | list[torch.Tensor] | None
     is_static: bool
+    timedeltas: torch.Tensor | list[torch.Tensor] | None = None
+    grid_shard_indices: Any = None
+
+    @property
+    def latlons(self) -> torch.Tensor:
+        """Return ``[sin(lat), sin(lon), cos(lat), cos(lon)]`` along a trailing dim.
+
+        Computed from the stored ``(..., N, 2)`` ``coordinates`` tensor;
+        only valid for non-sparse (single-tensor) views.
+        """
+        if not isinstance(self.coordinates, torch.Tensor):
+            msg = "DatasetView.latlons requires a single coordinates tensor (gridded datasets only)."
+            raise TypeError(msg)
+        return torch.cat([torch.sin(self.coordinates), torch.cos(self.coordinates)], dim=-1).to(torch.float32)

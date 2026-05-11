@@ -298,14 +298,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_shapes, self.grid_sizes = {}, {}
-        for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = data_readers[dataset_name].grid_size
-            self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
-                self.grid_sizes[dataset_name],
-                reader_group_size,
-            )
-
         self.grid_dim = -2
 
         # check sharding support
@@ -845,17 +837,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_slice = {}
 
         for dataset_name in self.dataset_names:
+            grid_size = batch.grid_sizes.get(dataset_name)
+            if grid_size is None:
+                # Observation datasets: no sharding, no allgather needed.
+                self.grid_shard_shapes[dataset_name] = None
+                self.grid_shard_slice[dataset_name] = None
+                continue
+
+            shard_shapes = get_balanced_partition_sizes(grid_size, self.reader_group_size)
+
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_shapes[dataset_name] = self.shard_shapes[dataset_name]
+                self.grid_shard_shapes[dataset_name] = shard_shapes
                 start, end = get_partition_range(
-                    partition_sizes=self.grid_shard_shapes[dataset_name],
+                    partition_sizes=shard_shapes,
                     partition_id=self.reader_group_rank,
                 )
                 self.grid_shard_slice[dataset_name] = slice(start, end)
             else:
                 self.grid_shard_shapes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
-                batch.data[dataset_name] = self.allgather_batch(batch.data[dataset_name], dataset_name)
+                batch.data[dataset_name] = self.allgather_batch(
+                    batch.data[dataset_name], grid_size, shard_shapes
+                )
         return batch
 
     def transfer_batch_to_device(
@@ -903,29 +906,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
         pass
 
-    def allgather_batch(self, batch: torch.Tensor, dataset_name: str) -> torch.Tensor:
+    def allgather_batch(self, batch: torch.Tensor, grid_size: int, shard_shapes: list[int]) -> torch.Tensor:
         """Allgather the batch-shards across the reader group.
 
         Parameters
         ----------
         batch : torch.Tensor
             Batch-shard of current reader rank
-        dataset_name : str
-            Dataset name
+        grid_size : int
+            Full (unsharded) grid size for this dataset
+        shard_shapes : list[int]
+            Per-rank partition sizes
 
         Returns
         -------
         torch.Tensor
             Allgathered (full) batch
         """
-        grid_size = self.grid_sizes[dataset_name]
-        grid_shard_shapes = self.shard_shapes[dataset_name]
-
         if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
-        tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
+        dim_shard_shapes = apply_shard_shapes(batch, self.grid_dim, shard_shapes)
+        tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in dim_shard_shapes]
 
         torch.distributed.all_gather(
             tensor_list,

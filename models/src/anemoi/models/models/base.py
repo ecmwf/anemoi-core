@@ -153,6 +153,9 @@ class BaseGraphModel(nn.Module):
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
 
+    def _hidden_latlons(self) -> torch.Tensor:
+        return self._graph_data[self._graph_name_hidden].x
+
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property
         self.num_input_channels = {}
@@ -304,7 +307,7 @@ class BaseGraphModel(nn.Module):
         batch : Batch
             Typed batch envelope carrying ``data`` (per-dataset input tensors)
             and ``coords`` (per-dataset coordinate tensors). Concrete model
-            implementations unpack ``batch.data`` and ``batch.coords`` at the
+            implementations unpack ``batch.data`` and ``batch.coordinates`` at the
             top of the method.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None

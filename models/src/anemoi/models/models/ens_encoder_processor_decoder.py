@@ -168,7 +168,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ----------
         batch : Batch
             Typed batch envelope. ``batch.data`` carries the per-dataset input
-            tensors (shape ``(bs, m, e, n, f)``); ``batch.coords`` carries the
+            tensors (shape ``(bs, m, e, n, f)``); ``batch.coordinates`` carries the
             per-dataset coordinate tensors used by dynamic graph providers.
         fcstep : int
             Forecast step

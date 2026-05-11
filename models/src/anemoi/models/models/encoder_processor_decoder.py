@@ -102,37 +102,40 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
+        x: "DatasetView",
         batch_size: int,
         grid_shard_shapes: dict | None,
         model_comm_group=None,
         dataset_name: str = None,
     ) -> tuple[torch.Tensor, torch.Tensor, Optional[list]]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
         grid_shard_shapes = grid_shard_shapes[dataset_name] if grid_shard_shapes is not None else None
 
         x_skip = self.residual[dataset_name](
-            x,
+            x.data,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
             n_step_output=self.n_step_output,
         )
 
-        if grid_shard_shapes is not None:
-            shard_shapes_nodes = get_or_apply_shard_shapes(
-                node_attributes_data, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
-            )
-            node_attributes_data = shard_tensor(node_attributes_data, 0, shard_shapes_nodes, model_comm_group)
+        inputs = [
+            einops.rearrange(x.data, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+            einops.repeat(x.latlons.to(x.data.device), "grid latlon -> (batch grid) latlon", batch=batch_size),
+        ]
 
-        # normalize and add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
-        )
+        trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
+        if trainable_parameters is not None:
+            trainable_parameters = trainable_parameters.to(x.data.device)
+            if grid_shard_shapes is not None:
+                shard_shapes_nodes = get_or_apply_shard_shapes(
+                    trainable_parameters, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+                )
+                trainable_parameters = shard_tensor(trainable_parameters, 0, shard_shapes_nodes, model_comm_group)
+            
+            inputs.append(trainable_parameters)
+
+        x_data_latent = torch.cat(inputs, dim=-1)  # feature dimension
+        
         shard_shapes_data = get_or_apply_shard_shapes(
             x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
         )
@@ -207,7 +210,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ----------
         batch : Batch
             Typed batch envelope. ``batch.data`` carries the per-dataset input
-            tensors; ``batch.coords`` carries the per-dataset coordinate
+            tensors; ``batch.coordinates`` carries the per-dataset coordinate
             tensors used by dynamic graph providers / node attributes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
@@ -219,12 +222,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
-        x = batch.data
-        dataset_names = list(x.keys())
+        dataset_names = list(batch.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
+        batch_size = self._get_consistent_dim(batch, 0)
+        ensemble_size = self._get_consistent_dim(batch, 2)
 
         in_out_sharded = self._resolve_in_out_sharded(
             dataset_names=dataset_names,
@@ -239,12 +241,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_data_latent_dict = {}
         shard_shapes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        # prepare hidden latent
+        x_hidden_latent = torch.cat([torch.sin(self._hidden_latlons()), torch.cos(self._hidden_latlons())], dim=-1)
+        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        if hidden_trainable_parameters is not None:
+            hidden_trainable_parameters = hidden_trainable_parameters.to(x_hidden_latent.device)
+            x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
         shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
 
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-                x[dataset_name],
+                batch.view(dataset_name),
                 batch_size=batch_size,
                 grid_shard_shapes=grid_shard_shapes,
                 model_comm_group=model_comm_group,
@@ -258,7 +265,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ].get_edges(
                 batch_size=batch_size,
                 src_coords=batch.node_coords(dataset_name),
-                dst_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
+                dst_coords=self._hidden_latlons(),
                 model_comm_group=model_comm_group,
             )
             encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)
@@ -285,8 +292,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_shapes = self.processor_graph_provider.get_edges(
-            src_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
-            dst_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
+            src_coords=self._hidden_latlons(),
+            dst_coords=self._hidden_latlons(),
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
@@ -315,7 +322,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
-                src_coords=self.node_attributes.get_coordinates(self._graph_name_hidden),
+                src_coords=self._hidden_latlons(),
                 dst_coords=batch.node_coords(dataset_name),
                 model_comm_group=model_comm_group,
             )
@@ -336,7 +343,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
+                x_out,
+                x_skip_dict[dataset_name],
+                batch_size=batch_size,
+                ensemble_size=ensemble_size,
+                dtype=x_out.dtype, 
+                dataset_name=dataset_name,
             )
 
         return x_out_dict

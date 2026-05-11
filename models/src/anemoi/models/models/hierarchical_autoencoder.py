@@ -242,7 +242,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         ----------
         batch : Batch
             Typed batch envelope. ``batch.data`` carries the per-dataset input
-            tensors; ``batch.coords`` carries the per-dataset coordinate
+            tensors; ``batch.coordinates`` carries the per-dataset coordinate
             tensors used by dynamic graph providers / node attributes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None

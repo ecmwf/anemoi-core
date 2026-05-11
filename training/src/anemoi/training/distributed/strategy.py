@@ -130,6 +130,9 @@ class BaseDDPStrategy(DDPStrategy):
     def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
         """Set up shard shapes for the dataloader.
 
+        Computes shard shapes from the training dataset's data readers.
+        Datasets without a static grid (e.g. observation readers) get None.
+
         Parameters
         ----------
         trainer : pl.Trainer
@@ -140,9 +143,8 @@ class BaseDDPStrategy(DDPStrategy):
         dict
             A dictionary containing the shard shapes for each dataset.
         """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
-        return shard_shapes
+        ds_train = trainer.datamodule.ds_train
+        return ds_train.shard_shapes
 
     def register_parameter_hooks(self) -> None:
         """Register parameter hooks for gradient reduction."""

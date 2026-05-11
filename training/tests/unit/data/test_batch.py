@@ -22,11 +22,12 @@ def _make_data_tensor(grid: int = 4, vars_: int = 2) -> torch.Tensor:
     return torch.arange(1 * 1 * grid * vars_, dtype=torch.float32).reshape(1, 1, grid, vars_)
 
 
-def _make_coords(grid: int = 4) -> dict[str, torch.Tensor]:
-    return {
-        "latitudes": torch.linspace(-1.0, 1.0, grid),
-        "longitudes": torch.linspace(0.0, 6.0, grid),
-    }
+def _make_coordinates(grid: int = 4) -> torch.Tensor:
+    """Return a stacked ``(N, 2)`` tensor of (latitudes, longitudes)."""
+    return torch.stack(
+        [torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)],
+        dim=-1,
+    )
 
 
 # ---------------------------------------------------------------- construction
@@ -34,8 +35,8 @@ def _make_coords(grid: int = 4) -> dict[str, torch.Tensor]:
 
 def test_batch_basic_construction_and_access() -> None:
     data = {"a": torch.zeros(2, 1, 1, 4, 2)}
-    coords = {"a": _make_coords()}
-    batch = Batch(data=data, coords=coords, metadata={STATIC_COORDS_META_KEY: frozenset({"a"})})
+    coordinates = {"a": _make_coordinates()}
+    batch = Batch(data=data, coordinates=coordinates, metadata={STATIC_COORDS_META_KEY: frozenset({"a"})})
 
     assert batch.dataset_names == ("a",)
     assert "a" in batch
@@ -54,7 +55,7 @@ def test_batch_basic_construction_and_access() -> None:
     assert isinstance(view, DatasetView)
     assert view.name == "a"
     assert view.data is data["a"]
-    assert view.coords is coords["a"]
+    assert view.coordinates is coordinates["a"]
     assert view.is_static is True
 
 
@@ -75,8 +76,8 @@ def test_batch_is_immutable() -> None:
 
 def test_collate_stacks_data_along_batch_dim() -> None:
     samples = [
-        {"a": {"data": _make_data_tensor(), "coords": _make_coords()}},
-        {"a": {"data": _make_data_tensor() + 100, "coords": _make_coords()}},
+        {"a": {"data": _make_data_tensor(), "coordinates": _make_coordinates()}},
+        {"a": {"data": _make_data_tensor() + 100, "coordinates": _make_coordinates()}},
     ]
     batch = Batch.collate(samples, static_coord_datasets=["a"])
 
@@ -87,20 +88,18 @@ def test_collate_stacks_data_along_batch_dim() -> None:
 
 def test_collate_static_coords_share_reference() -> None:
     """The performance-critical invariant: static coords are NOT stacked or copied."""
-    coords_ref = _make_coords()
+    coords_ref = _make_coordinates()
     samples = [
-        {"a": {"data": _make_data_tensor(), "coords": coords_ref}},
-        {"a": {"data": _make_data_tensor() + 1, "coords": coords_ref}},
+        {"a": {"data": _make_data_tensor(), "coordinates": coords_ref}},
+        {"a": {"data": _make_data_tensor() + 1, "coordinates": coords_ref}},
     ]
     batch = Batch.collate(samples, static_coord_datasets=["a"])
 
-    # Same object identity as the first sample's coords dict and tensors.
-    assert batch.coords["a"] is samples[0]["a"]["coords"]
-    assert batch.coords["a"]["latitudes"] is coords_ref["latitudes"]
-    assert batch.coords["a"]["longitudes"] is coords_ref["longitudes"]
+    # Same object identity as the first sample's coordinates tensor.
+    assert batch.coordinates["a"] is coords_ref
 
     # Shape unchanged: no leading batch dimension was added.
-    assert batch.coords["a"]["latitudes"].shape == coords_ref["latitudes"].shape
+    assert batch.coordinates["a"].shape == coords_ref.shape
 
     # Metadata records the static set.
     assert batch.static_coord_datasets == frozenset({"a"})
@@ -108,14 +107,13 @@ def test_collate_static_coords_share_reference() -> None:
 
 def test_collate_dynamic_coords_are_stacked() -> None:
     samples = [
-        {"a": {"data": _make_data_tensor(), "coords": _make_coords()}},
-        {"a": {"data": _make_data_tensor() + 1, "coords": _make_coords()}},
+        {"a": {"data": _make_data_tensor(), "coordinates": _make_coordinates()}},
+        {"a": {"data": _make_data_tensor() + 1, "coordinates": _make_coordinates()}},
     ]
     batch = Batch.collate(samples, static_coord_datasets=())
 
     # Dynamic path: a leading batch dimension is added.
-    assert batch.coords["a"]["latitudes"].shape == (2, 4)
-    assert batch.coords["a"]["longitudes"].shape == (2, 4)
+    assert batch.coordinates["a"].shape == (2, 4, 2)
     assert batch.static_coord_datasets == frozenset()
 
 
@@ -127,30 +125,30 @@ def test_collate_empty_samples_raises() -> None:
 def test_collate_supports_multiple_datasets() -> None:
     samples = [
         {
-            "a": {"data": _make_data_tensor(grid=4), "coords": _make_coords(grid=4)},
-            "b": {"data": _make_data_tensor(grid=2), "coords": _make_coords(grid=2)},
+            "a": {"data": _make_data_tensor(grid=4), "coordinates": _make_coordinates(grid=4)},
+            "b": {"data": _make_data_tensor(grid=2), "coordinates": _make_coordinates(grid=2)},
         },
         {
-            "a": {"data": _make_data_tensor(grid=4) + 1, "coords": _make_coords(grid=4)},
-            "b": {"data": _make_data_tensor(grid=2) + 1, "coords": _make_coords(grid=2)},
+            "a": {"data": _make_data_tensor(grid=4) + 1, "coordinates": _make_coordinates(grid=4)},
+            "b": {"data": _make_data_tensor(grid=2) + 1, "coordinates": _make_coordinates(grid=2)},
         },
     ]
     batch = Batch.collate(samples, static_coord_datasets=["a"])
     assert batch.dataset_names == ("a", "b")
     # "a" is static -> shared reference
-    assert batch.coords["a"]["latitudes"] is samples[0]["a"]["coords"]["latitudes"]
+    assert batch.coordinates["a"] is samples[0]["a"]["coordinates"]
     # "b" is dynamic -> stacked
-    assert batch.coords["b"]["latitudes"].shape == (2, 2)
+    assert batch.coordinates["b"].shape == (2, 2, 2)
 
 
 # --------------------------------------------------------------- device / pin
 
 
 def test_to_skips_static_coordinates() -> None:
-    coords_ref = _make_coords()
+    coords_ref = _make_coordinates()
     batch = Batch(
         data={"a": torch.zeros(2, 1, 1, 4, 2)},
-        coords={"a": coords_ref},
+        coordinates={"a": coords_ref},
         metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
     )
 
@@ -159,43 +157,42 @@ def test_to_skips_static_coordinates() -> None:
     # Data is always moved (even CPU-to-CPU may produce a new tensor object via .to()).
     assert moved.data["a"].device.type == "cpu"
     # Static coords are passed by reference, untouched.
-    assert moved.coords["a"] is coords_ref
-    assert moved.coords["a"]["latitudes"] is coords_ref["latitudes"]
+    assert moved.coordinates["a"] is coords_ref
 
 
 def test_to_moves_dynamic_coordinates() -> None:
-    coords = _make_coords()
-    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, coords={"a": coords})
+    coords = _make_coordinates()
+    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, coordinates={"a": coords})
 
     moved = batch.to("cpu")
 
-    # Dynamic coords go through .to(); the dict is rebuilt (not the same object).
-    assert moved.coords["a"] is not coords
-    assert torch.equal(moved.coords["a"]["latitudes"], coords["latitudes"])
+    # Dynamic coords go through .to(); a fresh tensor object is produced.
+    assert moved.coordinates["a"] is not coords
+    assert torch.equal(moved.coordinates["a"], coords)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="pin_memory requires CUDA")
 def test_pin_memory_skips_static_coordinates() -> None:
-    coords_ref = _make_coords()
+    coords_ref = _make_coordinates()
     batch = Batch(
         data={"a": torch.zeros(2, 1, 1, 4, 2)},
-        coords={"a": coords_ref},
+        coordinates={"a": coords_ref},
         metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
     )
     pinned = batch.pin_memory()
     # Static coords untouched.
-    assert pinned.coords["a"] is coords_ref
+    assert pinned.coordinates["a"] is coords_ref
 
 
 # -------------------------------------------------------------------- with_data
 
 
 def test_with_data_replaces_data_and_shares_envelope() -> None:
-    coords_ref = _make_coords()
+    coords_ref = _make_coordinates()
     metadata_ref = {STATIC_COORDS_META_KEY: frozenset({"a"})}
     batch = Batch(
         data={"a": torch.zeros(2, 1, 1, 4, 2)},
-        coords={"a": coords_ref},
+        coordinates={"a": coords_ref},
         metadata=metadata_ref,
     )
 
@@ -206,10 +203,9 @@ def test_with_data_replaces_data_and_shares_envelope() -> None:
     assert new_batch.data["a"] is new_tensor
     assert torch.equal(new_batch.data["a"], torch.ones(2, 1, 1, 4, 2))
 
-    # Coords and metadata are shared by reference (no copy).
-    assert new_batch.coords is batch.coords
-    assert new_batch.coords["a"] is coords_ref
-    assert new_batch.coords["a"]["latitudes"] is coords_ref["latitudes"]
+    # Coordinates and metadata are shared by reference (no copy).
+    assert new_batch.coordinates is batch.coordinates
+    assert new_batch.coordinates["a"] is coords_ref
     assert new_batch.metadata is batch.metadata
 
     # Static-coord membership preserved through the envelope.
@@ -231,11 +227,11 @@ def test_with_data_rejects_mismatched_keys() -> None:
 
 
 def test_with_data_supports_multiple_datasets() -> None:
-    coords_a = _make_coords()
-    coords_b = _make_coords(grid=8)
+    coords_a = _make_coordinates()
+    coords_b = _make_coordinates(grid=8)
     batch = Batch(
         data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 8, 2)},
-        coords={"a": coords_a, "b": coords_b},
+        coordinates={"a": coords_a, "b": coords_b},
     )
 
     new_a = torch.ones(2, 1, 1, 4, 2)
@@ -244,24 +240,24 @@ def test_with_data_supports_multiple_datasets() -> None:
 
     assert new_batch.data["a"] is new_a
     assert new_batch.data["b"] is new_b
-    # Per-dataset coord identity preserved.
-    assert new_batch.coords["a"] is coords_a
-    assert new_batch.coords["b"] is coords_b
+    # Per-dataset coordinates identity preserved.
+    assert new_batch.coordinates["a"] is coords_a
+    assert new_batch.coordinates["b"] is coords_b
 
 
 # ---------------------------------------------------------------- node_coords
 
 
 def test_node_coords_returns_stacked_latlon() -> None:
-    coords = _make_coords()
-    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, coords={"a": coords})
+    coords = _make_coordinates()
+    batch = Batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, coordinates={"a": coords})
 
     out = batch.node_coords("a")
 
     assert out is not None
     assert out.shape == (4, 2)
-    assert torch.equal(out[:, 0], coords["latitudes"])
-    assert torch.equal(out[:, 1], coords["longitudes"])
+    # node_coords is just the stored ``coordinates`` tensor (already stacked).
+    assert out is coords
 
 
 def test_node_coords_returns_none_when_missing() -> None:
@@ -270,11 +266,11 @@ def test_node_coords_returns_none_when_missing() -> None:
     assert batch.node_coords("a") is None
 
 
-def test_node_coords_returns_none_for_partial_coords() -> None:
-    """If only one of latitudes/longitudes is present we cannot stack — return None."""
+def test_node_coords_returns_none_for_sparse_coordinates() -> None:
+    """Sparse datasets store ``coordinates`` as ``list[Tensor]``; node_coords returns None."""
     batch = Batch(
-        data={"a": torch.zeros(2, 1, 1, 4, 2)},
-        coords={"a": {"latitudes": torch.zeros(4)}},
+        data={"a": [torch.zeros(1, 4, 2), torch.zeros(1, 6, 2)]},
+        coordinates={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
     )
 
     assert batch.node_coords("a") is None

@@ -31,6 +31,7 @@ from anemoi.models.data.batch import Batch
 from anemoi.training.data.data_reader import ObservationDataReader
 
 # ----------------------------------------------------------------- test on some "real" obs data
+# TODO: replace this with a mock anemoi.dataset object
 
 from anemoi.datasets import open_dataset
 
@@ -57,8 +58,9 @@ def test_make_anemoi_reader(start: int = 2015, end: int = 2017) -> None:
     # Unpack the sample into the unified contract.
     sample = reader._unpack_sample(payload)
 
-    assert set(sample) == {"data", "coords", "metadata"}
+    assert set(sample) == {"data", "coordinates", "timedeltas", "metadata"}
     assert sample["data"].shape[-1] == 5  # 5 variables
+    assert sample["coordinates"].shape[-1] == 2  # (N, 2) lat/lon
 
 
 def test_batch_collate_and_to() -> None:
@@ -70,7 +72,7 @@ def test_batch_collate_and_to() -> None:
     payload2 = _get_obs_sample(slice(40, 44))
 
     # ``Batch`` is a per-dataset envelope, so each sample must be wrapped
-    # under its dataset name (here "obs") before collation.
+    # under its dataset name (here "npp_atms") before collation.
     sample1 = {_DATASET_NAME: reader._unpack_sample(payload1)}
     sample2 = {_DATASET_NAME: reader._unpack_sample(payload2)}
 
@@ -112,12 +114,13 @@ def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> dict:
 
 
 def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> dict:
+    coords = torch.stack(
+        [torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)],
+        dim=-1,
+    )
     return {
         "data": torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
-        "coords": {
-            "latitudes": torch.linspace(-1.0, 1.0, grid),
-            "longitudes": torch.linspace(0.0, 6.0, grid),
-        },
+        "coordinates": coords,
         "metadata": {},
     }
 
@@ -132,25 +135,25 @@ def test_unpack_sample_returns_unified_contract() -> None:
 
     sample = reader._unpack_sample(payload)
 
-    assert set(sample) == {"data", "coords", "metadata"}
+    assert set(sample) == {"data", "coordinates", "timedeltas", "metadata"}
     # Data: dummy ensemble dim, no time axis, original (N, V) preserved.
     assert sample["data"].shape == (1, n, v)
     assert sample["data"].dtype == torch.float32
     np.testing.assert_allclose(sample["data"][0].numpy(), payload.data)
 
-    assert set(sample["coords"]) == {"latitudes", "longitudes", "timedeltas"}
-    for key in ("latitudes", "longitudes", "timedeltas"):
-        assert sample["coords"][key].shape == (n,)
-
-    # Coordinates are converted to radians.
+    # Coordinates: single (N, 2) tensor stacking lat/lon (in radians).
+    assert sample["coordinates"].shape == (n, 2)
     np.testing.assert_allclose(
-        sample["coords"]["latitudes"].numpy(),
+        sample["coordinates"][:, 0].numpy(),
         np.deg2rad(payload.latitudes),
     )
     np.testing.assert_allclose(
-        sample["coords"]["longitudes"].numpy(),
+        sample["coordinates"][:, 1].numpy(),
         np.deg2rad(payload.longitudes),
     )
+
+    # Timedeltas live at the top level, separate from coordinates.
+    assert sample["timedeltas"].shape == (n,)
 
     # Boundaries are passed through unchanged (Python slice tuple).
     assert sample["metadata"][BOUNDARIES_META_KEY] is payload.boundaries
@@ -192,15 +195,21 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
     assert batch.data["obs"][0].shape[1] == 5
     assert batch.data["obs"][1].shape[1] == 7
 
-    # Sparse coords are also list[Tensor] per key.
-    for key in ("latitudes", "longitudes", "timedeltas"):
-        assert isinstance(batch.coords["obs"][key], list)
-        assert len(batch.coords["obs"][key]) == 2
-        assert batch.coords["obs"][key][0].shape == (5,)
-        assert batch.coords["obs"][key][1].shape == (7,)
+    # Sparse coordinates are list[(N_i, 2)] tensors per sample.
+    assert isinstance(batch.coordinates["obs"], list)
+    assert len(batch.coordinates["obs"]) == 2
+    assert batch.coordinates["obs"][0].shape == (5, 2)
+    assert batch.coordinates["obs"][1].shape == (7, 2)
 
-    # Static-grid coords reused by reference (single tensor, no batch dim).
-    assert batch.coords["grid"]["latitudes"].shape == (grid,)
+    # Sparse timedeltas are list[(N_i,)] tensors per sample, stored separately
+    # from coordinates.
+    assert isinstance(batch.timedeltas["obs"], list)
+    assert len(batch.timedeltas["obs"]) == 2
+    assert batch.timedeltas["obs"][0].shape == (5,)
+    assert batch.timedeltas["obs"][1].shape == (7,)
+
+    # Static-grid coordinates reused by reference (single tensor, no batch dim).
+    assert batch.coordinates["grid"].shape == (grid, 2)
     assert batch.metadata[STATIC_COORDS_META_KEY] == frozenset({"grid"})
 
     # Boundaries gathered into per-dataset metadata as list[tuple[slice, ...]].
@@ -231,8 +240,8 @@ def test_to_mixed_batch_moves_tensors_and_preserves_boundaries() -> None:
 
     moved = batch.to("cpu", non_blocking=False)
 
-    # Static-grid coords short-circuit: same Python object.
-    assert moved.coords["grid"] is batch.coords["grid"]
+    # Static-grid coordinates short-circuit: same Python object.
+    assert moved.coordinates["grid"] is batch.coordinates["grid"]
 
     # Gridded data is a tensor on cpu.
     assert isinstance(moved.data["grid"], torch.Tensor)
@@ -243,10 +252,11 @@ def test_to_mixed_batch_moves_tensors_and_preserves_boundaries() -> None:
     assert len(moved.data["obs"]) == 2
     assert all(t.device.type == "cpu" for t in moved.data["obs"])
 
-    # Sparse coords moved per-list-entry.
-    for key in ("latitudes", "longitudes", "timedeltas"):
-        assert isinstance(moved.coords["obs"][key], list)
-        assert all(t.device.type == "cpu" for t in moved.coords["obs"][key])
+    # Sparse coordinates and timedeltas moved per-list-entry.
+    assert isinstance(moved.coordinates["obs"], list)
+    assert all(t.device.type == "cpu" for t in moved.coordinates["obs"])
+    assert isinstance(moved.timedeltas["obs"], list)
+    assert all(t.device.type == "cpu" for t in moved.timedeltas["obs"])
 
     # Boundaries are passed through unchanged (identity-preserved).
     assert moved.metadata["obs"][BOUNDARIES_META_KEY] is batch.metadata["obs"][BOUNDARIES_META_KEY]
