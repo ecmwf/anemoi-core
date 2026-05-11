@@ -87,12 +87,9 @@ deterministic:
  Time Aggregate Loss Functions
 ***************************
 
-A key challenge in temporal downscaling is **temporal consistency**: the
-model must produce output sequences that are internally coherent over
-time, not just accurate at each individual step. This is especially
-critical for variables like precipitation (``tp``, ``cp``) whose
-statistics (totals, extremes, and temporal gradients) matter as much as
-instantaneous values.
+These loss functions encourage the model to produce **temporally consistent** outputs 
+i.e. output sequences that are internally coherent over
+time, not just accurate at each individual step.
 
 :class:`~anemoi.training.losses.aggregate.TimeAggregateLossWrapper`
 addresses this by applying a base loss function to *time-aggregated*

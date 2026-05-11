@@ -44,7 +44,6 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         multiscale_config: object | None = None,
         graph_data: HeteroData | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
-        keep_batch_sharded: bool = True,
         autocast: bool = False,
         ignore_nans: bool = False,
         # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
@@ -86,12 +85,6 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             Main graph; required for on-the-fly mode to copy data-node positions.
         data_node_name : str
             Node type in *graph_data* that holds the data-grid coordinates.
-        keep_batch_sharded : bool
-            Whether the task should keep the batch grid-sharded during loss
-            computation. When enabled, the task passes shard-layout metadata to
-            this wrapper and multiscale smoothing follows the sharded path.
-            If disabled, the loss is evaluated on replicated full-grid tensors
-            on each model rank.
         autocast : bool
             Whether to use automatic mixed precision for the projections.
         ignore_nans : bool
@@ -126,7 +119,6 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
         self.weights = weights
-        self.keep_batch_sharded = keep_batch_sharded
         self.supports_sharding = True
         self.mloss = None
         self.projector = SparseProjector(autocast=autocast)

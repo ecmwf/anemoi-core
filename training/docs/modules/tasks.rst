@@ -155,7 +155,7 @@ Example: ``input_timestep="6H"``, ``output_timestep="3H"``,
 ``output_left_boundary=True`` produces output offsets
 ``[0H, 3H]`` and input offsets ``[0H, 6H]``.
 
-We strongly recommend using the time aggregate loss when training any
+The default is to use the time aggregate loss when training any
 temporal downscaler.
 
 .. automodule:: anemoi.training.tasks.temporal_downscaling
