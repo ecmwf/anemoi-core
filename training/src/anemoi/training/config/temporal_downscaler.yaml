@@ -7,7 +7,7 @@ defaults:
 - model: graphtransformer
 - task: temporal_downscaler
 - training: single
-- override training/training_loss: single_composite
+- override training/training_loss: single_MSE_aggregation
 - _self_
 
 config_validation: True
