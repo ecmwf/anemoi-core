@@ -94,26 +94,6 @@ def normalize_projection_edges_name(
     raise ValueError(f"edges_name must be str, tuple, list, or None, got {type(edges_name)}")
 
 
-def create_projection_graph_provider(
-    graph: HeteroData,
-    edges_name: str | tuple[str, str, str],
-    *,
-    edge_weight_attribute: Optional[str] = None,
-    src_node_weight_attribute: Optional[str] = None,
-    row_normalize: bool = False,
-) -> "ProjectionGraphProvider":
-    edges_name = normalize_projection_edges_name(edges_name)
-    if not hasattr(graph[edges_name], "edge_index"):
-        raise ValueError(f"Graph does not have edge_index for edges {edges_name}")
-    return ProjectionGraphProvider(
-        graph=graph,
-        edges_name=edges_name,
-        edge_weight_attribute=edge_weight_attribute,
-        src_node_weight_attribute=src_node_weight_attribute,
-        row_normalize=row_normalize,
-    )
-
-
 class BaseGraphProvider(nn.Module, ABC):
     """Base class for graph edge providers.
 
