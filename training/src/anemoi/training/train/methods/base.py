@@ -886,7 +886,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         assert isinstance(batch, Batch), "batch must be a Batch instance"
         for dataset_name in batch.data:
-            batch.data[dataset_name] = self.model.pre_processors[dataset_name](batch.data[dataset_name])
+            pre_processor = self.model.pre_processors[dataset_name]
+            payload = batch.data[dataset_name]
+            # Sparse observation datasets carry their per-sample tensors as
+            # ``list[Tensor]`` (varying ``N_i``). Apply the pre-processor to
+            # each entry independently rather than to the list as a whole.
+            if isinstance(payload, list):
+                batch.data[dataset_name] = [pre_processor(t) for t in payload]
+            else:
+                batch.data[dataset_name] = pre_processor(payload)
         return batch
 
     def _prepare_loss_scalers(self) -> None:
