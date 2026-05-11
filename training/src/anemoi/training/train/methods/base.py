@@ -270,7 +270,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                graph_data=graph_data,
+                #graph_data=graph_data,
                 data_node_name=data_node_name,
             )
 
@@ -278,7 +278,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data,
+                #graph_data=graph_data,
                 data_node_name=data_node_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
@@ -303,32 +303,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.model_comm_group = None
         self.reader_groups = None
 
-        reader_group_size = self.config.dataloader.read_group_size
-
-        self.shard_sizes, self.grid_sizes = {}, {}
-        for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
-                self.grid_sizes[dataset_name],
-                reader_group_size,
-            )
+        self.reader_group_size = self.config.dataloader.read_group_size
 
         self.grid_dim = -2
 
         # check sharding support
         self.keep_batch_sharded = self.config.model.keep_batch_sharded
-        read_group_supports_sharding = reader_group_size == self.config.system.hardware.num_gpus_per_model
+        read_group_supports_sharding = self.reader_group_size == self.config.system.hardware.num_gpus_per_model
         assert read_group_supports_sharding or not self.keep_batch_sharded, (
-            f"Reader group size {reader_group_size} does not match the number of GPUs per model "
+            f"Reader group size {self.reader_group_size} does not match the number of GPUs per model "
             f"{self.config.system.hardware.num_gpus_per_model}, but `model.keep_batch_sharded=True` was set. ",
             "Please set `model.keep_batch_sharded=False` or set `dataloader.read_group_size` ="
             "`hardware.num_gpus_per_model`.",
         )
 
         # set flag if loss and metrics support sharding
-        self._check_sharding_support()
+        #self._check_sharding_support()
 
         LOGGER.debug("n_step_input: %d", self.n_step_input)
 
@@ -355,29 +345,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
 
-    def create_graph(self, graph_config) -> HeteroData:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-
-            # Try loading existing
-            if graph_filename.exists() and not graph_config.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-
-            # TODO(): We could add some functionality to load partial graphs here, and compute the rest from the config.
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        return GraphCreator(config=graph_config).create(save_path=graph_filename, overwrite=graph_config.overwrite)
-
-    def _check_sharding_support(self) -> None:
+    #def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(
             getattr(leaf, "supports_sharding", False) for loss in self.loss.values() for leaf in loss.iter_leaf_losses()
         )
@@ -864,17 +832,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_slice = {}
 
         for dataset_name in self.dataset_names:
-            grid_size = batch.grid_sizes.get(dataset_name)
+            grid_size = batch.grid_sizes[dataset_name]
             if grid_size is None:
                 # Observation datasets: no sharding, no allgather needed.
-                self.grid_shard_shapes[dataset_name] = None
+                self.grid_shard_sizes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
                 continue
 
             shard_shapes = get_balanced_partition_sizes(grid_size, self.reader_group_size)
 
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
+                self.grid_shard_sizes[dataset_name] = shard_shapes
                 start, end = get_partition_range(
                     partition_sizes=self.grid_shard_sizes[dataset_name],
                     partition_id=self.reader_group_rank,
@@ -882,7 +850,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 self.grid_shard_slice[dataset_name] = slice(start, end)
             else:
                 self.grid_shard_sizes[dataset_name] = None
-                self.grid_shard_slice[dataset_name] = None
+                self.grid_shard_slice[dataset_name] = batch.grid_shard_indices[dataset_name]
                 batch.data[dataset_name] = self.allgather_batch(
                     batch.data[dataset_name], grid_size, shard_shapes
                 )
@@ -958,16 +926,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         torch.Tensor
             Allgathered (full) batch
         """
-        grid_size = self.grid_sizes[dataset_name]
-        grid_shard_sizes = self.shard_sizes[dataset_name]
-
         if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
         return gather_tensor(
             batch,
             self.grid_dim,
-            grid_shard_sizes,
+            shard_shapes,
             self.reader_groups[self.reader_group_id],
         )
 

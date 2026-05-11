@@ -13,6 +13,7 @@ from omegaconf import OmegaConf
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 
+COORDS_DIM = 4
 
 # This function retrieves the configuration for multiple datasets, supporting both new and old config formats.
 # Its location in the codebase may be revisited in the near future.

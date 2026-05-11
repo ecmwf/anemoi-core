@@ -80,7 +80,7 @@ class NamedNodesAttributes(nn.Module):
         self.define_fixed_attributes(graph_data, trainable_parameters)
 
         self.trainable_tensors = nn.ModuleDict()
-        for nodes_name, nodes in graph_data.node_items():
+        for nodes_name, _ in graph_data.node_items():
             self.register_tensor(nodes_name, trainable_parameters[nodes_name])
 
     def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:

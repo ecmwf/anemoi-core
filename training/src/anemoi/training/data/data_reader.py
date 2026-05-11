@@ -389,8 +389,6 @@ class ObservationDataReader(BaseAnemoiReader):
         """Observation readers have a per-sample (dynamic) coordinate set."""
         return False
 
-    is_static_grid: bool = False
-
     @property
     def grid_size(self) -> None:
         """Return None — observation datasets have no static grid."""
@@ -420,15 +418,16 @@ class ObservationDataReader(BaseAnemoiReader):
         """Return dataset metadata."""
         return {}
 
-    def _unpack_sample(self, x) -> dict:
-        """Unpack one ``self.data[time_indices, ...]`` payload into the unified contract.
+    def get_sample(
+        self,
+        time_indices: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> dict:
+        """Get a sample from the observation dataset.
 
-        Parameters
-        ----------
-        x : object
-            Object yielded by ``self.data[...]`` exposing ``data``,
-            ``latitudes``, ``longitudes``, ``timedeltas`` (numpy arrays) and
-            ``boundaries`` (``tuple[slice, ...]``).
+        ``grid_shard_indices`` is accepted for API compatibility with
+        :class:`GriddedDataReader` but ignored — sharding for sparse
+        observations is not yet implemented.
 
         Returns
         -------
@@ -440,6 +439,8 @@ class ObservationDataReader(BaseAnemoiReader):
             ``coordinates`` so the model layer can route them
             independently.
         """
+        x = self.data[time_indices, ...]
+
         # Introduce a dummy ensemble dimension to align with the (E, N, V)
         # contract; the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
@@ -456,21 +457,9 @@ class ObservationDataReader(BaseAnemoiReader):
             "coordinates": coordinates,
             "timedeltas": timedeltas,
             "metadata": {"boundaries": x.boundaries},
+            "grid_size": self.grid_size,
+            "grid_shard_indices": grid_shard_indices,
         }
-
-    def get_sample(
-        self,
-        time_indices: TimeIndices,
-        grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> dict:
-        """Get a sample from the observation dataset.
-
-        ``grid_shard_indices`` is accepted for API compatibility with
-        :class:`GriddedDataReader` but ignored — sharding for sparse
-        observations is not yet implemented.
-        """
-        del grid_shard_indices  # TODO: figure out sharding for sparse obs
-        return self._unpack_sample(self.data[time_indices, ...])
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)

@@ -137,7 +137,7 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
+        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -315,18 +315,6 @@ class BaseGraphModel(nn.Module):
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
             )
-
-    def _build_named_node_attributes_graph(self) -> HeteroData:
-        node_attributes_graph = HeteroData()
-        for dataset_name in self.dataset_names:
-            node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
-            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
-
-        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
-            node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
-            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
-
-        return node_attributes_graph
 
     @abstractmethod
     def forward(

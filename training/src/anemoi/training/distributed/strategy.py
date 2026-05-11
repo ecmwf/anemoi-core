@@ -119,7 +119,7 @@ class BaseDDPStrategy(DDPStrategy):
 
         super().setup(trainer)
 
-        self.shard_sizes = self._setup_shard_sizes(trainer)
+        self.shard_sizes = None #self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
