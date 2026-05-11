@@ -170,6 +170,7 @@ class AnemoiProfiler(AnemoiTrainer):
     @cached_property
     def model_summary(self) -> str:
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
+            self._build_example_input_array()
             model = self.model
             return self.profiler.get_model_summary(model=model, example_input_array=self.example_input_array)
         return None
@@ -301,8 +302,13 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def datamodule(self) -> AnemoiDatasetsDataModule:
-        datamodule = super().datamodule
-        # to generate a model summary with shapes we need a sample input array
+        return super().datamodule
+
+    def _build_example_input_array(self) -> None:
+        """Fetch one batch to build example_input_array for model summary."""
+        if hasattr(self, "example_input_array"):
+            return
+        datamodule = self.datamodule
         batch = next(iter(datamodule.train_dataloader()))
         if type(batch) in [list, tuple]:
             batch = batch[0]
@@ -324,7 +330,6 @@ class AnemoiProfiler(AnemoiTrainer):
                     self.config.dataloader.read_group_size,
                     1,
                 )
-        return datamodule
 
     @cached_property
     def profiler(self) -> BenchmarkProfiler:
