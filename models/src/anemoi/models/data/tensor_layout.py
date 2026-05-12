@@ -71,6 +71,23 @@ class TensorLayout:
             time_in_grid=self.time_in_grid,
         )
 
+    def without_batch_dim(self) -> "TensorLayout":
+        """Return a new layout with the batch dim removed (inverse of :meth:`with_batch_dim`).
+
+        Positive non-``None`` axis positions are shifted by ``-1``; negative
+        positions are left unchanged.
+        """
+        if self.batch is None:
+            return self
+        return TensorLayout(
+            batch=None,
+            time=self.time - 1 if self.time is not None and self.time > 0 else self.time,
+            ensemble=self.ensemble - 1 if self.ensemble is not None and self.ensemble > 0 else self.ensemble,
+            grid=self.grid - 1 if self.grid > 0 else self.grid,
+            variables=self.variables - 1 if self.variables > 0 else self.variables,
+            time_in_grid=self.time_in_grid,
+        )
+
     def axis(self, name: str, *, ndim: int | None = None) -> int:
         """Return the physical dim index for logical axis ``name``.
 
@@ -90,3 +107,12 @@ class TensorLayout:
         """Return whether the layout defines a position for logical axis ``name``."""
         return getattr(self, name, None) is not None
 
+    def __repr__(self) -> str:
+        parts = []
+        for name in ("batch", "time", "ensemble", "grid", "variables"):
+            value = getattr(self, name)
+            if value is not None:
+                parts.append(f"{name}={value}")
+        if self.time_in_grid:
+            parts.append("time_in_grid=True")
+        return f"TensorLayout({', '.join(parts)})"

@@ -110,51 +110,35 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-        coordinates: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size, coordinates=coordinates)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+
+        grid_shard_sizes = x.grid_shard_indices
 
         x_skip = self.residual[dataset_name](
-            x,
+            x.data,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             n_step_output=self.n_step_output,
         )
 
-        # inputs = [
-        #     einops.rearrange(x.data, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-        #     einops.repeat(x.latlons.to(x.data.device), "grid latlon -> (batch grid) latlon", batch=batch_size),
-        # ]
+        inputs = [
+            einops.rearrange(x.data, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+            einops.repeat(x.latlons.to(x.data.device), "grid latlon -> (batch grid) latlon", batch=batch_size),
+        ]
 
-        # trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
-        # if trainable_parameters is not None:
-        #     trainable_parameters = trainable_parameters.to(x.data.device)
-        #     if grid_shard_shapes is not None:
-        #         shard_shapes_nodes = get_or_apply_shard_shapes(
-        #             trainable_parameters, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
-        #         )
-        #         trainable_parameters = shard_tensor(trainable_parameters, 0, shard_shapes_nodes, model_comm_group)
+        trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
+        if trainable_parameters is not None:
+            trainable_parameters = trainable_parameters.to(x.data.device)
+            if grid_shard_shapes is not None:
+                shard_shapes_nodes = get_or_apply_shard_shapes(
+                    trainable_parameters, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+                )
+                trainable_parameters = shard_tensor(trainable_parameters, 0, shard_shapes_nodes, model_comm_group)
             
-        #     inputs.append(trainable_parameters)
+            inputs.append(trainable_parameters)
 
-        # x_data_latent = torch.cat(inputs, dim=-1)  # feature dimension
-        
-        # shard_shapes_data = get_or_apply_shard_shapes(
-        #     x_data_latent, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
-
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
-
-        # normalize and add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x.data, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
-        )
+        x_data_latent = torch.cat(inputs, dim=-1)  # feature dimension
 
         return x_data_latent, x_skip, grid_shard_sizes
 
