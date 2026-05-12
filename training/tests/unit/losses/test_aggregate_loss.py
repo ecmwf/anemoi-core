@@ -353,6 +353,7 @@ def _make_multiscale_wrapper(inner: BaseLoss | None = None) -> "MultiscaleLossWr
         weights=[1.0],
     )
 
+
 def test_nested_scaler_shared_through_chain() -> None:
     leaf = _make_loss()
     ms = _make_multiscale_wrapper(leaf)
