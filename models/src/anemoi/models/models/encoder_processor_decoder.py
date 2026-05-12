@@ -125,10 +125,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         else:
             x_skip = None
 
-        inputs = [
-            einops.rearrange(x.data, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-            einops.repeat(x.latlons.to(x.data.device), "grid latlon -> (batch grid) latlon", batch=batch_size),
-        ]
+        inputs = []
+
+        if x.is_static:
+            inputs.append(einops.rearrange(x.data, f"{x.layout.pattern} -> (batch ensemble grid) (time variables)"))
+        else:
+            inputs.append(x.data)
+
+        inputs.append(einops.repeat(x.latlons.to(x.data.device), "grid latlon -> (batch grid) latlon", batch=batch_size))
 
         trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
         if trainable_parameters is not None:
