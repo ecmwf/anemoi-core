@@ -17,6 +17,7 @@ from functools import cached_property
 import numpy as np
 import torch
 from rich.console import Console
+from rich.text import Text
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
@@ -348,21 +349,19 @@ class MultiDataset(IterableDataset):
         return x
 
     def __custom_printer(self, dataset_name: str, x: dict[str, torch.Tensor]) -> Tree:
-        tree = Tree("Sample:")
-        subtree = tree.add(f"Dataset: {dataset_name}")
+        tree = Tree(Text("Sample:"))
+        subtree = tree.add(Text(f"Dataset: {dataset_name}"))
         for key, value in x.items():
             if isinstance(value, torch.Tensor):
-                subtree.add(f"{key}: shape {value.shape}, dtype {value.dtype}")
+                subtree.add(Text(f"{key}: shape {value.shape}, dtype {value.dtype}"))
             elif isinstance(value, list):
                 for v in value:
                     if isinstance(v, torch.Tensor):
-                        subtree.add(f"{key}: shape {v.shape}, dtype {v.dtype}")
+                        subtree.add(Text(f"{key}: shape {v.shape}, dtype {v.dtype}"))
                     else:
-                        subtree.add(f"{key}: {v}")
+                        subtree.add(Text(f"{key}: {v}"))
             else:
-                subtree.add(f"{key}: {value}")
-
-        from io import StringIO
+                subtree.add(Text(f"{key}: {value}"))
         buf = StringIO()
         console = Console(file=buf, highlight=False)
         console.print(tree)
