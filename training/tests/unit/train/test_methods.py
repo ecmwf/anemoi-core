@@ -237,13 +237,13 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     module = MagicMock(spec=BaseTrainingModule)
     loss = CaptureLoss()
     group = object()
-    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    shard_sizes = [1, 1]
 
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_sizes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_sizes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -272,13 +272,13 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     module = MagicMock(spec=BaseTrainingModule)
     loss = ShardingAwareCaptureLoss()
     group = object()
-    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    shard_sizes = [1, 1]
 
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_sizes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_sizes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -297,7 +297,7 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
         "grid_shard_slice": grid_shard_slice,
         "group": group,
         "grid_dim": -2,
-        "grid_shard_sizes": shard_shapes,
+        "grid_shard_sizes": shard_sizes,
     }
 
 
@@ -351,14 +351,14 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     module = MagicMock(spec=BaseDiffusionTraining)
     loss = CaptureLoss()
     group = object()
-    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    shard_sizes = [1, 1]
     weights = {"data": torch.tensor([0.25])}
 
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_sizes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_sizes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -386,14 +386,14 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
     module = MagicMock(spec=BaseDiffusionTraining)
     loss = ShardingAwareCaptureLoss()
     group = object()
-    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    shard_sizes = [1, 1]
     weights = {"data": torch.tensor([0.25])}
 
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_sizes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_sizes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -413,7 +413,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
         "grid_shard_slice": grid_shard_slice,
         "group": group,
         "grid_dim": -2,
-        "grid_shard_sizes": shard_shapes,
+        "grid_shard_sizes": shard_sizes,
     }
 
 
@@ -426,7 +426,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     metric = CaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
-    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    shard_sizes = [1, 1]
 
     module.model = MagicMock()
     module.model.post_processors = {"data": post_processor}
@@ -435,7 +435,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_sizes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_sizes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -461,13 +461,13 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     }
 
 
-def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() -> None:
+def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> None:
     """calculate_val_metrics adds shard layout when metric.needs_shard_layout_info."""
     module = MagicMock(spec=BaseTrainingModule)
     metric = ShardingAwareCaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
-    shard_shapes = [(1, 1, 1, 2, 3), (1, 1, 1, 2, 3)]
+    shard_sizes = [1, 1]
 
     module.model = MagicMock()
     module.model.post_processors = {"data": post_processor}
@@ -476,7 +476,7 @@ def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() ->
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
-    module.grid_shard_sizes = {"data": shard_shapes}
+    module.grid_shard_sizes = {"data": shard_sizes}
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -497,7 +497,7 @@ def test_calculate_val_metrics_forwards_dataset_shard_shapes_when_requested() ->
         "grid_shard_slice": grid_shard_slice,
         "group": group,
         "grid_dim": -2,
-        "grid_shard_sizes": shard_shapes,
+        "grid_shard_sizes": shard_sizes,
     }
 
 
