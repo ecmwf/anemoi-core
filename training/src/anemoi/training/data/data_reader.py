@@ -435,14 +435,21 @@ class ObservationDataReader(BaseAnemoiReader):
         Returns
         -------
         dict
-            ``{"data": (1, N, V) tensor, "coordinates": (N, 2) tensor,
-            "timedeltas": (N,) tensor, "metadata": {"boundaries": ...}}``
-            with latitudes/longitudes in **radians** to match the gridded
-            reader convention. ``timedeltas`` are kept separate from
-            ``coordinates`` so the model layer can route them
-            independently.
+            ``
+            {
+                "data": (N, V) tensor,
+                "coordinates": (N, 2) tensor,
+                "timedeltas": (N,) tensor,
+                "metadata": {
+                    "boundaries": ...
+                }
+            }
+            ``
+            with latitudes/longitudes in **radians** to match the gridded reader convention. 
+            ``timedeltas`` are kept separate from ``coordinates`` so the model layer can route
+            them independently.
         """
-        x = self.data[time_indices, ...]
+        x = self.data[time_indices]
 
         # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
