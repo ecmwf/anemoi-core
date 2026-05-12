@@ -52,6 +52,24 @@ class TensorLayout:
     variables: int = -1
     time_in_grid: bool = False
 
+    _AXIS = ("batch", "time", "ensemble", "grid", "variables")
+
+    @property
+    def dims(self) -> set[str]:
+        """Set of logical axes defined by this layout."""
+        return {name for name in self._AXIS if getattr(self, name) is not None}
+
+    @property
+    def ndims(self) -> int:
+        """Number of dimensions in tensors with this layout."""
+        return len(self.dims)
+
+    @property
+    def pattern(self) -> str:
+        """Einops pattern string for this layout, with named axes."""
+        parts = list(sorted(self.dims, key=lambda x: getattr(self, x)))
+        return " ".join(parts)
+
     def with_batch_dim(self) -> "TensorLayout":
         """Return a new layout shifted by +1 to account for a leading batch dim.
 
