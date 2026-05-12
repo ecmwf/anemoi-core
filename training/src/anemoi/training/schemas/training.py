@@ -419,6 +419,8 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseLossSchema):
+    scalers: list[str] = Field(default_factory=list)
+    "Scalers applied at the combined-loss level; sub-losses define their own scalers."
     losses: list[
         BaseLossSchema
         | AlmostFairKernelCRPSSchema
