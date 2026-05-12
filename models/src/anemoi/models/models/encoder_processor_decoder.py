@@ -115,12 +115,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         grid_shard_sizes = x.grid_shard_indices
 
-        x_skip = self.residual[dataset_name](
-            x.data,
-            grid_shard_sizes=grid_shard_sizes,
-            model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
-        )
+        if x.is_static:
+            x_skip = self.residual[dataset_name](
+                x.data,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                n_step_output=self.n_step_output,
+            )
+        else:
+            x_skip = None
 
         inputs = [
             einops.rearrange(x.data, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
@@ -131,10 +134,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if trainable_parameters is not None:
             trainable_parameters = trainable_parameters.to(x.data.device)
             if grid_shard_sizes is not None:
-                shard_shapes_nodes = get_or_apply_shard_shapes(
-                    trainable_parameters, 0, shard_shapes_dim=grid_shard_sizes, model_comm_group=model_comm_group
-                )
-                trainable_parameters = shard_tensor(trainable_parameters, 0, shard_shapes_nodes, model_comm_group)
+                trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
             
             inputs.append(trainable_parameters)
 
@@ -243,20 +243,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_sizes_data_dict = {}
 
         # # prepare hidden latent
-        # x_hidden_latent = torch.cat([torch.sin(self._hidden_latlons()), torch.cos(self._hidden_latlons())], dim=-1)
-        # hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        # if hidden_trainable_parameters is not None:
-        #     hidden_trainable_parameters = hidden_trainable_parameters.to(x_hidden_latent.device)
-        #     x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
-        # shard_shapes_hidden = get_shard_shapes(x_hidden_latent, 0, model_comm_group)
-
-        # for dataset_name in dataset_names:
-        #     x_data_latent, x_skip, shard_shapes_data = self._assemble_input(
-        #         batch.view(dataset_name),
-
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
+        x_hidden_latent = torch.cat([torch.sin(self._hidden_latlons()), torch.cos(self._hidden_latlons())], dim=-1)
+        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        if hidden_trainable_parameters is not None:
+            hidden_trainable_parameters = hidden_trainable_parameters.to(x_hidden_latent.device)
+            x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
+        shard_shapes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_shapes_hidden, model_comm_group)
 
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
@@ -282,7 +275,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             enc_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
-                dst_nodes=shard_sizes_hidden,
+                dst_nodes=shard_shapes_hidden,
                 edges=enc_edge_shard_sizes,
             )
 
