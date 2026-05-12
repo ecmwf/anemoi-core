@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+from io import StringIO
 import logging
 import os
 import random
@@ -16,6 +17,7 @@ from functools import cached_property
 import numpy as np
 import torch
 from rich.console import Console
+from rich.text import Text
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
@@ -336,8 +338,34 @@ class MultiDataset(IterableDataset):
                 grid_indices = slice(None)
 
             x[name] = dataset.get_sample(time_steps, grid_indices)
+            LOGGER.info(
+                "Worker %d (pid %d) read sample for dataset '%s' : %s",
+                self.worker_id,
+                os.getpid(),
+                name,
+                self.__custom_printer(name, x[name]),
+            )
 
         return x
+
+    def __custom_printer(self, dataset_name: str, x: dict[str, torch.Tensor]) -> Tree:
+        tree = Tree(Text("Sample:"))
+        subtree = tree.add(Text(f"Dataset: {dataset_name}"))
+        for key, value in x.items():
+            if isinstance(value, torch.Tensor):
+                subtree.add(Text(f"{key}: shape {value.shape}, dtype {value.dtype}"))
+            elif isinstance(value, list):
+                for v in value:
+                    if isinstance(v, torch.Tensor):
+                        subtree.add(Text(f"{key}: shape {v.shape}, dtype {v.dtype}"))
+                    else:
+                        subtree.add(Text(f"{key}: {v}"))
+            else:
+                subtree.add(Text(f"{key}: {value}"))
+        buf = StringIO()
+        console = Console(file=buf, highlight=False)
+        console.print(tree)
+        return buf.getvalue()
 
     def __iter__(self):
         """Return an iterator that yields per-dataset coordinate-rich payloads.

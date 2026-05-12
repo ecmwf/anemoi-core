@@ -271,12 +271,12 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         Backed by ``self.data.latitudes`` (which is stored in degrees by
         ``anemoi.datasets``); converted once and cached.
         """
-        return np.deg2rad(np.asarray(self.data.latitudes))
+        return np.deg2rad(np.asarray(self.data.latitudes, dtype=np.float32))
 
     @cached_property
     def longitudes(self) -> np.ndarray:
         """Return per-grid-point longitudes in **radians**."""
-        return np.deg2rad(np.asarray(self.data.longitudes))
+        return np.deg2rad(np.asarray(self.data.longitudes, dtype=np.float32))
 
     @property
     def has_trajectories(self) -> bool:
@@ -444,10 +444,9 @@ class ObservationDataReader(BaseAnemoiReader):
         """
         x = self.data[time_indices, ...]
 
-        # Introduce a dummy ensemble dimension to align with the (E, N, V)
-        # contract; the leading time axis is intentionally absent — per-time
+        # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
-        data = torch.from_numpy(np.asarray(x.data)[None, ...])
+        data = torch.from_numpy(np.asarray(x.data))
         latitudes = np.deg2rad(np.asarray(x.latitudes))
         longitudes = np.deg2rad(np.asarray(x.longitudes))
         coordinates = torch.from_numpy(

@@ -43,6 +43,7 @@ intentionally **not** transferred to device by :meth:`Batch.to`.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -54,6 +55,8 @@ import einops
 import torch
 from torch.utils.data import default_collate
 from anemoi.models.data.tensor_layout import TensorLayout
+
+LOGGER = logging.getLogger(__name__)
 
 # Key in ``Batch.metadata`` listing dataset names whose coordinate tensors are
 # static (allocated once, shared by reference, not transferred per step).
@@ -163,6 +166,30 @@ class Batch:
     def is_static_coords(self, dataset_name: str) -> bool:
         """Return whether ``dataset_name``'s coordinates are static."""
         return dataset_name in self.static_coord_datasets
+
+    def __repr__(self) -> str:
+        """Compact summary of per-dataset shapes, layouts and static-coords flag.
+
+        Designed for debug logging — describes each dataset by its data
+        shape (or ``list[shape]`` for sparse), its :class:`TensorLayout`
+        (or ``<no layout>``) and whether its coordinates are static.
+        """
+        if not self.data:
+            return "Batch(<empty>)"
+
+        lines = ["Batch("]
+        for name in self.dataset_names:
+            payload = self.data[name]
+            if isinstance(payload, list):
+                shapes = [tuple(t.shape) for t in payload]
+                shape_repr = f"list[{len(payload)}] of shapes={shapes}"
+            else:
+                shape_repr = f"shape={tuple(payload.shape)}"
+            layout_repr = repr(self.layouts[name]) if name in self.layouts else "<no layout>"
+            static_repr = " static_coords" if self.is_static_coords(name) else ""
+            lines.append(f"  {name}: {shape_repr} layout={layout_repr}{static_repr}")
+        lines.append(")")
+        return "\n".join(lines)
 
     def __getitem__(self, dataset_name: str) -> torch.Tensor | list[torch.Tensor]:
         """Return the data payload for ``dataset_name`` (mapping behaviour).
@@ -461,7 +488,11 @@ class Batch:
             # ``boundaries`` key in their per-sample metadata (set by
             # ``ObservationDataReader._unpack_sample``). Gridded samples
             # never carry it, so this is a self-describing dispatch.
-            if BOUNDARIES_META_KEY in sample_meta:
+            is_sparse = BOUNDARIES_META_KEY in sample_meta
+            LOGGER.info("Metadata for %s: %s", name, sample_meta)
+            LOGGER.info("IS %s A SPARSE DATASET? %s", name, is_sparse)
+
+            if is_sparse:
                 if name in static:
                     msg = (
                         f"Dataset {name!r} produced a sparse (boundaries-tagged) "
@@ -528,20 +559,51 @@ class Batch:
             if "grid_shard_indices" in payload:
                 collated_grid_shard_indices[name] = payload["grid_shard_indices"]
 
-        # Layouts: per-dataset TensorLayout from sample payloads, shifted to
-        # include the new leading batch dimension added by collation.
+        # Layouts: per-dataset TensorLayout from sample payloads. For
+        # gridded datasets the data is stacked along a new leading batch
+        # axis, so we shift the layout via ``with_batch_dim()``. For
+        # sparse datasets the per-sample tensors are kept as a
+        # ``list[Tensor]`` (no new tensor axis is added — the batch
+        # dimension is the list itself), so the per-sample layout is
+        # stored unchanged.
         collated_layouts: dict[str, TensorLayout] = {}
         for name in dataset_names:
             payload = first[name]
-            if "layout" in payload:
-                collated_layouts[name] = payload["layout"].with_batch_dim()
+            if "layout" not in payload:
+                continue
+            sample_layout = payload["layout"]
+            if isinstance(collated_data[name], list):
+                collated_layouts[name] = sample_layout
+            else:
+                collated_layouts[name] = sample_layout.with_batch_dim()
+
+        # Sanity-check: every non-None axis position in the layout must be
+        # a valid axis of the (possibly per-sample) collated data tensor.
+        # This catches reader-side mistakes early instead of letting them
+        # surface as cryptic errors deep inside model code.
+        for name, layout in collated_layouts.items():
+            payload_data = collated_data[name]
+            ref = payload_data[0] if isinstance(payload_data, list) else payload_data
+            ndim = ref.ndim
+            for axis_name in ("batch", "time", "ensemble", "grid", "variables"):
+                pos = getattr(layout, axis_name)
+                if pos is None:
+                    continue
+                if not (-ndim <= pos < ndim):
+                    msg = (
+                        f"TensorLayout for dataset {name!r} declares "
+                        f"{axis_name}={pos} but the collated tensor only has "
+                        f"{ndim} dimensions (shape={tuple(ref.shape)}). "
+                        f"Layout: {layout!r}."
+                    )
+                    raise ValueError(msg)
 
         metadata: dict[str, Any] = {}
         if static:
             metadata[STATIC_COORDS_META_KEY] = frozenset(static)
         metadata.update(per_dataset_metadata)
 
-        return Batch(
+        batch = Batch(
             data=collated_data,
             coordinates=collated_coordinates,
             metadata=metadata,
@@ -550,6 +612,8 @@ class Batch:
             grid_shard_indices=collated_grid_shard_indices,
             layouts=collated_layouts,
         )
+        LOGGER.debug("Batch.collate produced:\n%r", batch)
+        return batch
 
 
 @dataclass(frozen=True, slots=True)

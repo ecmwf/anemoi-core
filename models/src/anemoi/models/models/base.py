@@ -276,8 +276,29 @@ class BaseGraphModel(nn.Module):
 
         return in_out_sharded
 
-    def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
-        dim_sizes = [_x.shape[dim] for _x in x.values()]
+    def _get_consistent_dim(self, x: dict[str, "Tensor | list[Tensor]"], dim: int) -> int:
+        """Return a dimension size that is consistent across all datasets.
+
+        Sparse-observation datasets carry their per-sample tensors as
+        ``list[Tensor]`` (the list itself is the batch axis — no leading
+        batch dim is added on collation). For ``dim == 0`` (batch size)
+        the list length plays the role of ``shape[0]``. For other
+        dimensions the per-sample tensor uses a different layout
+        (``(E, N, V)``) so we cannot map the gridded ``dim`` index onto
+        it; in that case list entries are skipped and the size is
+        derived from the tensor entries only.
+        """
+        dim_sizes: list[int] = []
+        for _x in x.values():
+            if isinstance(_x, list):
+                if dim == 0:
+                    dim_sizes.append(len(_x))
+                # Other dims live in a different per-sample layout for
+                # sparse datasets — skip and rely on tensor entries.
+                continue
+            dim_sizes.append(_x.shape[dim])
+
+        assert dim_sizes, f"_get_consistent_dim: no entries available for dim={dim}"
         # Assert all datasets have the same sizes
         assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
