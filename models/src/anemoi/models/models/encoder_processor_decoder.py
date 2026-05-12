@@ -32,6 +32,11 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+def latlons_to_sincos(latlon: torch.Tensor) -> torch.Tensor:
+    return torch.cat([torch.sin(latlon), torch.cos(latlon)], dim=-1)
+
+
+
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
@@ -110,10 +115,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         grid_shard_sizes = x.grid_shard_indices
+        if grid_shard_sizes == slice(None):
+            grid_shard_sizes = None
 
         if x.is_static:
             x_skip = self.residual[dataset_name](
@@ -128,11 +135,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         inputs = []
 
         if x.is_static:
-            inputs.append(einops.rearrange(x.data, f"{x.layout.pattern} -> (batch ensemble grid) (time variables)"))
+            input_coordinates = x.coordinates.to(x.data.device)
+            inputs = [
+                einops.rearrange(x.data, f"{x.layout.pattern} -> (batch ensemble grid) (time variables)"),
+                einops.repeat(latlons_to_sincos(input_coordinates), "grid latlon -> (batch grid) latlon", batch=batch_size)
+            ]
         else:
-            inputs.append(x.data)
-
-        inputs.append(einops.repeat(x.latlons.to(x.data.device), "grid latlon -> (batch grid) latlon", batch=batch_size))
+            if len(x.data) == 1:
+                input_coordinates = x.coordinates[0].to(x.data[0].device)
+                inputs = [x.data[0], latlons_to_sincos(input_coordinates)]
+            else:
+                input_coordinates = torch.cat(x.coordinates, dim=0).to(x.data[0].device)
+                inputs = [torch.cat(x.data, dim=0), latlons_to_sincos(input_coordinates)]
 
         trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
         if trainable_parameters is not None:
@@ -144,7 +158,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         x_data_latent = torch.cat(inputs, dim=-1)  # feature dimension
 
-        return x_data_latent, x_skip, grid_shard_sizes
+        return input_coordinates, x_data_latent, x_skip, grid_shard_sizes
 
     def _assemble_output(
         self,
@@ -169,11 +183,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        assert (
-            x_skip.shape[1] == x_out.shape[1]
-        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        if x_skip is not None:
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -247,7 +262,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_sizes_data_dict = {}
 
         # Prepare hidden latent
-        x_hidden_latent = torch.cat([torch.sin(self._hidden_latlons()), torch.cos(self._hidden_latlons())], dim=-1)
+        hidden_coordinates = self._hidden_coordinates()
+        x_hidden_latent = latlons_to_sincos(hidden_coordinates)
         x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_size)
 
         hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
@@ -255,12 +271,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             hidden_trainable_parameters = hidden_trainable_parameters.to(x_hidden_latent.device)
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
 
-        shard_shapes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_shapes_hidden, model_comm_group)
+        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
         for dataset_name in dataset_names:
-            x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                batch.view(dataset_name),  # x[dataset_name],
+            dataset_batch = batch.view(dataset_name)
+            data_coords, x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
+                dataset_batch,
                 batch_size=batch_size,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
@@ -273,8 +290,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
-                src_coords=batch.node_coords(dataset_name),
-                dst_coords=self._hidden_latlons(),
+                src_coords=data_coords,
+                dst_coords=hidden_coordinates,
                 model_comm_group=model_comm_group,
             )
             encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)
@@ -282,7 +299,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             enc_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
-                dst_nodes=shard_shapes_hidden,
+                dst_nodes=shard_sizes_hidden,
                 edges=enc_edge_shard_sizes,
             )
 
@@ -304,8 +321,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
-            src_coords=self._hidden_latlons(),
-            dst_coords=self._hidden_latlons(),
+            src_coords=hidden_coordinates,
+            dst_coords=hidden_coordinates,
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
@@ -333,7 +350,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
-                src_coords=self._hidden_latlons(),
+                src_coords=hidden_coordinates,
                 dst_coords=batch.node_coords(dataset_name),
                 model_comm_group=model_comm_group,
             )

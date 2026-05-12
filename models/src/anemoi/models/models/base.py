@@ -154,7 +154,7 @@ class BaseGraphModel(nn.Module):
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
 
-    def _hidden_latlons(self) -> torch.Tensor:
+    def _hidden_coordinates(self) -> torch.Tensor:
         return self._graph_data[self._graph_name_hidden].x
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:

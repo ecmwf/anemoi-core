@@ -373,8 +373,13 @@ class Batch:
         the per-sample list directly.
         """
         value = self.coordinates.get(dataset_name)
-        if value is None or isinstance(value, list):
+        if value is None:
             return None
+        if isinstance(value, list):
+            if len(value) > 1:
+                return torch.cat(value, dim=0)
+            else:
+                return value[0]
         return value
 
     # ------------------------------------------------------- bulk indexing
@@ -506,14 +511,10 @@ class Batch:
                 collated_data[name] = [sample[name]["data"] for sample in samples]
 
                 if "coordinates" in first_payload:
-                    collated_coordinates[name] = [
-                        sample[name]["coordinates"] for sample in samples
-                    ]
+                    collated_coordinates[name] = [sample[name]["coordinates"] for sample in samples]
 
                 if "timedeltas" in first_payload:
-                    collated_timedeltas[name] = [
-                        sample[name]["timedeltas"] for sample in samples
-                    ]
+                    collated_timedeltas[name] = [sample[name]["timedeltas"] for sample in samples]
 
                 # metadata: each leaf becomes a list of length B (one per sample).
                 meta_keys = tuple(sample_meta.keys())
@@ -537,12 +538,10 @@ class Batch:
                     )
 
             if "timedeltas" in first_payload:
-                # Gridded datasets normally don't carry ``timedeltas``; if
-                # they do, stack them along a new batch dimension just like
-                # the other tensors.
-                collated_timedeltas[name] = default_collate(
-                    [sample[name]["timedeltas"] for sample in samples],
-                )
+                # Gridded datasets normally don't carry ``timedeltas``
+                # if they do, stack them along a new batch dimension 
+                # just like the other tensors.
+                collated_timedeltas[name] = default_collate([sample[name]["timedeltas"] for sample in samples])
 
         # Grid sizes: extract from sample payloads (all samples in a batch
         # must agree since default_collate requires matching tensor shapes).
@@ -635,20 +634,6 @@ class DatasetView:
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     grid_shard_indices: Any = None
     boundaries: list[tuple[slice, ...]] | None = None
-
-    # ------------------------------------------------------------- helpers
-
-    @property
-    def latlons(self) -> torch.Tensor:
-        """Return ``[sin(lat), sin(lon), cos(lat), cos(lon)]`` along a trailing dim.
-
-        Computed from the stored ``(..., N, 2)`` ``coordinates`` tensor;
-        only valid for non-sparse (single-tensor) views.
-        """
-        if not isinstance(self.coordinates, torch.Tensor):
-            msg = "DatasetView.latlons requires a single coordinates tensor (gridded datasets only)."
-            raise TypeError(msg)
-        return torch.cat([torch.sin(self.coordinates), torch.cos(self.coordinates)], dim=-1).to(torch.float32)
 
     def time_slices(self) -> list[tuple[slice, ...]] | None:
         """Return per-sample boundary slices for sparse views; ``None`` otherwise.
