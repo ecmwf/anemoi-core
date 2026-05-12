@@ -245,8 +245,7 @@ ScalerSchema = (
 
 
 class ImplementedLossesUsingBaseLossSchema(StrEnum):
-    kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
-    afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
+    crps = "anemoi.training.losses.CRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
@@ -265,24 +264,19 @@ class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
-    "Scalars to include in loss calculation"
+    "Scalers to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
     target_variables: list[str] | None = None
 
 
-class KernelCRPSSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
-    fair: bool = True
-    "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
-
-
-class AlmostFairKernelCRPSSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
-    alpha: float = 1.0
-    """Factor for linear combination of fair (unbiased, ensemble variance component
-    weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
+class CRPSSchema(BaseLossSchema):
+    alpha: float = Field(default=0.95, ge=0.0, le=1.0)
+    """Factor for linear combination of fair CRPS and standard CRPS.
+    Values between 0 and 1 give the almost fair CRPS formulation."""
+    backend: Literal["naive", "stable"] = "stable"
+    "Backend used for the point-wise CRPS calculation."
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
@@ -337,7 +331,7 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
+    per_scale_loss: CRPSSchema | BaseLossSchema
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     # Deprecated: pass inside multiscale_config instead.
@@ -377,7 +371,9 @@ class SpectralLossSchema(BaseLossSchema):
 
 class CombinedLossSchema(BaseLossSchema):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
-    losses: list[MultiScaleLossSchema | SpectralLossSchema | BaseLossSchema] = Field(min_length=1)
+    losses: list[MultiScaleLossSchema | SpectralLossSchema | CRPSSchema | HuberLossSchema | BaseLossSchema] = Field(
+        min_length=1,
+    )
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -417,10 +413,8 @@ def _loss_discriminator(v: Any) -> str:
         return "combined"
     if target == "anemoi.training.losses.MultiscaleLossWrapper":
         return "multiscale"
-    if target == "anemoi.training.losses.kcrps.AlmostFairKernelCRPS":
-        return "almost_fair"
-    if target == "anemoi.training.losses.kcrps.KernelCRPS":
-        return "kernel"
+    if target == "anemoi.training.losses.CRPS":
+        return "crps"
     if target in {
         "anemoi.training.losses.spectral.FourierCorrelationLoss",
         "anemoi.training.losses.spectral.LogSpectralDistance",
@@ -438,8 +432,7 @@ LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
     | Annotated[HuberLossSchema, Tag("huber")]
     | Annotated[CombinedLossSchema, Tag("combined")]
-    | Annotated[AlmostFairKernelCRPSSchema, Tag("almost_fair")]
-    | Annotated[KernelCRPSSchema, Tag("kernel")]
+    | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),
