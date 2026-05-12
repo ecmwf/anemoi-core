@@ -246,12 +246,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
 
-        # # prepare hidden latent
+        # Prepare hidden latent
         x_hidden_latent = torch.cat([torch.sin(self._hidden_latlons()), torch.cos(self._hidden_latlons())], dim=-1)
+        x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_size)
+
         hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         if hidden_trainable_parameters is not None:
             hidden_trainable_parameters = hidden_trainable_parameters.to(x_hidden_latent.device)
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
+
         shard_shapes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_shapes_hidden, model_comm_group)
 
