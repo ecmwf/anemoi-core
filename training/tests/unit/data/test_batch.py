@@ -15,6 +15,11 @@ import torch
 from anemoi.training.data.batch import STATIC_COORDS_META_KEY
 from anemoi.training.data.batch import Batch
 from anemoi.training.data.batch import DatasetView
+from anemoi.models.data.tensor_layout import TensorLayout
+
+
+def _gridded_layout() -> TensorLayout:
+    return TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 
 def _make_data_tensor(grid: int = 4, vars_: int = 2) -> torch.Tensor:
@@ -36,7 +41,12 @@ def _make_coordinates(grid: int = 4) -> torch.Tensor:
 def test_batch_basic_construction_and_access() -> None:
     data = {"a": torch.zeros(2, 1, 1, 4, 2)}
     coordinates = {"a": _make_coordinates()}
-    batch = Batch(data=data, coordinates=coordinates, metadata={STATIC_COORDS_META_KEY: frozenset({"a"})})
+    batch = Batch(
+        data=data,
+        coordinates=coordinates,
+        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        layouts={"a": _gridded_layout()},
+    )
 
     assert batch.dataset_names == ("a",)
     assert "a" in batch

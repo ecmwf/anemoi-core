@@ -193,9 +193,18 @@ class Forecaster(BaseTask):
         output_mask: dict[str, object] | None = None,
         grid_shard_slice: dict[str, slice | None] | None = None,
     ) -> "Batch":
-        """Advance the input state for the next rollout step, preserving coords and metadata."""
+        """Advance the input state for the next rollout step, preserving coords and metadata.
+
+        Sparse observation datasets (``layout.time_in_grid=True``) are not
+        autoregressive — their input state is passed through unchanged.
+        """
         new_data = {}
         for dataset_name in x.dataset_names:
+            view = x.view(dataset_name)
+            if view.layout.time_in_grid:
+                # Sparse obs: no explicit time axis to roll; pass through.
+                new_data[dataset_name] = x[dataset_name]
+                continue
             new_data[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
                 y_pred[dataset_name],

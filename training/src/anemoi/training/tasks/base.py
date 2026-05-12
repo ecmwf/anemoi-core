@@ -147,12 +147,17 @@ class BaseTask(ABC):
         time_indices = self.get_batch_input_indices()
         time_indices = normalize_time_indices(time_indices)
 
-        new_data = {}
-        for dataset_name, dataset_batch in batch.data.items():
-            dataset_batch = dataset_batch[:, time_indices]
-            new_data[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(new_data[dataset_name].shape))
-        return batch.with_data(new_data)
+        var_indices = {
+            dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names
+        }
+        new_batch = batch.select_time(time_indices).select_vars(var_indices)
+        for dataset_name, payload in new_batch.data.items():
+            LOGGER.debug(
+                "SHAPE: x[%s] = %s",
+                dataset_name,
+                payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
+            )
+        return new_batch
 
     def get_targets(self, batch: "Batch", **kwargs) -> "Batch":
         """Extract model targets from a Batch, preserving coords and metadata.
@@ -173,11 +178,14 @@ class BaseTask(ABC):
         time_indices = self.get_batch_output_indices(**kwargs)
         time_indices = normalize_time_indices(time_indices)
 
-        new_targets = {}
-        for dataset_name, dataset_batch in batch.data.items():
-            new_targets[dataset_name] = dataset_batch[:, time_indices]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(new_targets[dataset_name].shape))
-        return batch.with_data(new_targets)
+        new_batch = batch.select_time(time_indices)
+        for dataset_name, payload in new_batch.data.items():
+            LOGGER.debug(
+                "SHAPE: y[%s] = %s",
+                dataset_name,
+                payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
+            )
+        return new_batch
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""

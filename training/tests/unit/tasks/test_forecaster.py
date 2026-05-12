@@ -14,6 +14,8 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.data.batch import Batch
+from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.training.tasks import Forecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
@@ -156,7 +158,8 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [-6h, 0h, +6h] → 3 time steps in batch
-    batch = {"data": torch.randn(b, 3, e, g, v)}
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    batch = Batch(data={"data": torch.randn(b, 3, e, g, v)}, layouts={"data": layout})
     x = task.get_inputs(batch, data_indices)
     assert x["data"].shape[1] == 2  # multistep_input=2
 
@@ -165,7 +168,8 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     """get_targets extracts multistep_output time steps from the batch."""
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 3, e, g, v)}
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    batch = Batch(data={"data": torch.randn(b, 3, e, g, v)}, layouts={"data": layout})
     y = task.get_targets(batch)
     assert y["data"].shape[1] == 1  # multistep_output=1
 
