@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 from typing import Union
 
+import einops
 import numpy as np
 import torch
 from torch import Tensor
@@ -218,7 +219,8 @@ class StaticGraphProvider(BaseGraphProvider):
         """Implementation of get_edges."""
         edge_trainable_params = self.trainable(batch_size)
         if edge_trainable_params is not None:
-            edge_attr = torch.cat([self.edge_attr, edge_trainable_params], dim=1)
+            edge_attr = einops.repeat(self.edge_attr, "e f -> (repeat e) f", repeat=batch_size)
+            edge_attr = torch.cat([edge_attr, edge_trainable_params], dim=1)
         else:
             edge_attr = self.edge_attr
 

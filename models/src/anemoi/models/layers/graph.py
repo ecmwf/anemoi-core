@@ -117,3 +117,21 @@ class NamedNodesAttributes(nn.Module):
             return None
 
         return self.trainable_tensors[name](batch_size)
+
+    def __repr__(self) -> str:
+        names = sorted(
+            set(self.num_nodes) | set(self.num_trainable_parameters) | set(self.trainable_tensors),
+        )
+        lines = [f"{self.__class__.__name__}("]
+        for name in names:
+            n_nodes = self.num_nodes.get(name)
+            n_train = self.num_trainable_parameters.get(name, 0)
+            tt = self.trainable_tensors.get(name) if name in self.trainable_tensors else None
+            shape = tuple(tt.trainable.shape) if (tt is not None and tt.trainable is not None) else None
+            lines.append(
+                f"  {name}: num_nodes={n_nodes}, "
+                f"num_trainable_parameters={n_train}, "
+                f"trainable_tensor_shape={shape}",
+            )
+        lines.append(")")
+        return "\n".join(lines)

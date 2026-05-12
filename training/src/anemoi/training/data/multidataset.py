@@ -338,7 +338,7 @@ class MultiDataset(IterableDataset):
                 grid_indices = slice(None)
 
             x[name] = dataset.get_sample(time_steps, grid_indices)
-            LOGGER.info(
+            LOGGER.debug(
                 "Worker %d (pid %d) read sample for dataset '%s' : %s",
                 self.worker_id,
                 os.getpid(),
