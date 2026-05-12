@@ -130,9 +130,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
         if trainable_parameters is not None:
             trainable_parameters = trainable_parameters.to(x.data.device)
-            if grid_shard_shapes is not None:
+            if grid_shard_sizes is not None:
                 shard_shapes_nodes = get_or_apply_shard_shapes(
-                    trainable_parameters, 0, shard_shapes_dim=grid_shard_shapes, model_comm_group=model_comm_group
+                    trainable_parameters, 0, shard_shapes_dim=grid_shard_sizes, model_comm_group=model_comm_group
                 )
                 trainable_parameters = shard_tensor(trainable_parameters, 0, shard_shapes_nodes, model_comm_group)
             
