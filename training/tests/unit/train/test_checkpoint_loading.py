@@ -359,7 +359,7 @@ def _make_module_with_forecaster_task(rollout_cfg: dict) -> tuple[DummyTrainingM
 
 
 def test_on_save_checkpoint_persists_rollout_step() -> None:
-    """on_save_checkpoint writes the current rollout step into the checkpoint dict."""
+    """on_save_checkpoint writes the current rollout step and last_increased_epoch into the checkpoint."""
     module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
     task.on_train_epoch_end(0)
     task.on_train_epoch_end(1)
@@ -369,6 +369,7 @@ def test_on_save_checkpoint_persists_rollout_step() -> None:
     BaseTrainingModule.on_save_checkpoint(module, checkpoint)
 
     assert checkpoint["task_state"]["rollout"]["step"] == 3
+    assert checkpoint["task_state"]["rollout"]["last_increased_epoch"] == 1
 
 
 def test_on_load_checkpoint_restores_rollout_step() -> None:
@@ -376,13 +377,44 @@ def test_on_load_checkpoint_restores_rollout_step() -> None:
     module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
 
     checkpoint = {
-        "task_state": {"rollout": {"step": 3}},
+        "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     assert task.rollout.step == 3
+    assert task.rollout._last_increased_epoch == 1
+
+
+def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
+    """PyTorch-Lightning fires on_train_epoch_end with the last completed epoch during restore."""
+    rollout_cfg = {"start": 1, "epoch_increment": 1, "maximum": 10}
+
+    # --- first job: two epochs ---
+    module, task = _make_module_with_forecaster_task(rollout_cfg)
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+
+    checkpoint: dict = {}
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+
+    # --- restore into a fresh module via on_load_checkpoint ---
+    resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
+    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
+    checkpoint["state_dict"] = {}
+    BaseTrainingModule.on_load_checkpoint(resumed_module, checkpoint)
+
+    # PL fires on_train_epoch_end with the last completed epoch during restore
+    resumed_task.on_train_epoch_end(1)
+    assert resumed_task.rollout.step == 3, "spurious on_train_epoch_end(1) on restore must not increment step"
+
+    # --- second job: two more epochs ---
+    resumed_task.on_train_epoch_end(2)
+    assert resumed_task.rollout.step == 4
+    resumed_task.on_train_epoch_end(3)
+    assert resumed_task.rollout.step == 5
 
 
 def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None:

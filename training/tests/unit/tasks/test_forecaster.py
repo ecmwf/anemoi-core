@@ -151,7 +151,7 @@ def test_forecaster_rollout_no_increment_when_zero() -> None:
 
 
 def test_rollout_config_state_dict_captures_current_step() -> None:
-    """state_dict returns the live step, not the initial start value."""
+    """state_dict returns the live step and last_increased_epoch, not the initial start value."""
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
@@ -160,16 +160,30 @@ def test_rollout_config_state_dict_captures_current_step() -> None:
     )
     task.on_train_epoch_end(0)
     task.on_train_epoch_end(1)
-    assert task.rollout.state_dict() == {"step": 3}
+    assert task.rollout.state_dict() == {"step": 3, "last_increased_epoch": 1}
 
 
 def test_rollout_config_load_state_dict_restores_step() -> None:
-    """load_state_dict overwrites step regardless of current value."""
+    """load_state_dict overwrites step and last_increased_epoch regardless of current value."""
     from anemoi.training.tasks.forecaster import RolloutConfig
 
     cfg = RolloutConfig(start=1, epoch_increment=1, maximum=10)
-    cfg.load_state_dict({"step": 7})
+    cfg.load_state_dict({"step": 7, "last_increased_epoch": 5})
     assert cfg.step == 7
+    assert cfg._last_increased_epoch == 5
+
+
+def test_rollout_config_increase_is_idempotent_per_epoch() -> None:
+    """on_train_epoch_end called twice with the same epoch does not double-increment."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 5},
+    )
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(0)  # second call with same epoch — must be a no-op
+    assert task.rollout.step == 2
 
 
 # ── Forecaster: training_runtime_state_dict / load_training_runtime_state_dict ─────────────────────
