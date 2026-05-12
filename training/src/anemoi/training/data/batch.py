@@ -21,8 +21,10 @@ will then be turned into a deprecation shim.
 
 from __future__ import annotations
 
+from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.batch import DatasetView
+from anemoi.models.data.batch import TensorLayout
 
-__all__ = ["STATIC_COORDS_META_KEY", "Batch", "DatasetView"]
+__all__ = ["BOUNDARIES_META_KEY", "STATIC_COORDS_META_KEY", "Batch", "DatasetView", "TensorLayout"]

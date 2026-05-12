@@ -364,7 +364,7 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         """Return the per-sample payload in the unified contract."""
         return {
             "data": self.get_data(time_indices, grid_shard_indices),
-            "layout": TensorLayout(time=0, variables=2, ensemble=1, grid=3),
+            "layout": TensorLayout(time=0, ensemble=1, grid=2, variables=3),
             "coordinates": self.get_coordinates(time_indices, grid_shard_indices),
             "metadata": {},
             "grid_size": self.grid_size,
@@ -457,7 +457,7 @@ class ObservationDataReader(BaseAnemoiReader):
 
         return {
             "data": data,
-            "layout": TensorLayout(grid=0, variables=1, time_in_grid=True),
+            "layout": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
             "coordinates": coordinates,
             "timedeltas": timedeltas,
             "metadata": {"boundaries": x.boundaries},

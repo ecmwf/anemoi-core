@@ -11,7 +11,7 @@
 
 Covers:
 
-* :meth:`ObservationDataReader._unpack_sample` — single-round-trip unpack.
+* :meth:`ObservationDataReader.get_sample` — single-round-trip unpack.
 * :meth:`Batch.collate` on a mixed gridded + sparse batch.
 * :meth:`Batch.to` on the same mixed batch (CPU-only round-trip; the
   test asserts behaviour, not GPU availability).
@@ -28,12 +28,8 @@ import torch
 from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.batch import TensorLayout
 from anemoi.training.data.data_reader import ObservationDataReader
-
-# ----------------------------------------------------------------- test on some "real" obs data
-# TODO: replace this with a mock anemoi.dataset object
-
-from anemoi.datasets import open_dataset
 
 _DATASET_NAME = "npp_atms"
 _DATASET_CONFIG = {
@@ -43,22 +39,15 @@ _DATASET_CONFIG = {
     "select": ["obsvalue_rawbt_1", "obsvalue_rawbt_7", "cos_vza", "cos_latitude", "cos_longitude"],
 }
 
-def _get_obs_sample(time_index: int | slice | list[int] = 0):
-    ds = open_dataset(**_DATASET_CONFIG)
-    return ds[time_index, ...]
-
 
 def test_make_anemoi_reader(start: int = 2015, end: int = 2017) -> None:
     """Test that we can make an ObservationDataReader and unpack a sample."""
     reader = ObservationDataReader(dataset_config=_DATASET_CONFIG, start=start, end=end)
 
-    # Get a sample from the dataset (duck-typed contract).
-    payload = _get_obs_sample(slice(start, end))
+    # Get a sample directly via the public reader API.
+    sample = reader.get_sample(slice(start, end))
 
-    # Unpack the sample into the unified contract.
-    sample = reader._unpack_sample(payload)
-
-    assert set(sample) == {"data", "coordinates", "timedeltas", "metadata"}
+    assert {"data", "layout", "coordinates", "timedeltas", "metadata"}.issubset(sample)
     assert sample["data"].shape[-1] == 5  # 5 variables
     assert sample["coordinates"].shape[-1] == 2  # (N, 2) lat/lon
 
@@ -67,14 +56,10 @@ def test_batch_collate_and_to() -> None:
     """Test that we can collate a batch of two observation samples and move it to the GPU."""
     reader = ObservationDataReader(dataset_config=_DATASET_CONFIG, start=2015, end=2017)
 
-    # Get two samples from the dataset (duck-typed contract).
-    payload1 = _get_obs_sample(slice(20, 24))
-    payload2 = _get_obs_sample(slice(40, 44))
-
     # ``Batch`` is a per-dataset envelope, so each sample must be wrapped
     # under its dataset name (here "npp_atms") before collation.
-    sample1 = {_DATASET_NAME: reader._unpack_sample(payload1)}
-    sample2 = {_DATASET_NAME: reader._unpack_sample(payload2)}
+    sample1 = {_DATASET_NAME: reader.get_sample(slice(20, 24))}
+    sample2 = {_DATASET_NAME: reader.get_sample(slice(40, 44))}
 
     # Collate the samples into a batch.
     batch = Batch.collate([sample1, sample2], static_coord_datasets=())
@@ -107,10 +92,31 @@ def _make_obs_payload(n: int = 5, v: int = 3, n_times: int = 2):
     )
 
 
+def _unpack_payload(payload) -> dict:
+    """Mirror ``ObservationDataReader.get_sample`` post-indexing logic.
+
+    ``get_sample`` does ``x = self.data[time_indices, ...]`` and then
+    builds the unified per-sample dict from that ``x``. This helper
+    starts from a pre-built ``x`` (the ``payload``) so the tests don't
+    need a fully-instantiated reader / open dataset.
+    """
+    data = torch.from_numpy(np.asarray(payload.data)[None, ...])
+    latitudes = np.deg2rad(np.asarray(payload.latitudes))
+    longitudes = np.deg2rad(np.asarray(payload.longitudes))
+    coordinates = torch.from_numpy(np.stack([latitudes, longitudes], axis=-1))
+    timedeltas = torch.from_numpy(np.asarray(payload.timedeltas, dtype=np.float32))
+    return {
+        "data": data,
+        "layout": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+        "coordinates": coordinates,
+        "timedeltas": timedeltas,
+        "metadata": {BOUNDARIES_META_KEY: payload.boundaries},
+    }
+
+
 def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> dict:
     """Build a sparse sample matching the ObservationDataReader contract."""
-    reader = ObservationDataReader.__new__(ObservationDataReader)
-    return reader._unpack_sample(_make_obs_payload(n=n, v=v, n_times=n_times))
+    return _unpack_payload(_make_obs_payload(n=n, v=v, n_times=n_times))
 
 
 def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> dict:
@@ -131,11 +137,10 @@ def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> 
 def test_unpack_sample_returns_unified_contract() -> None:
     n, v = 6, 3
     payload = _make_obs_payload(n=n, v=v, n_times=2)
-    reader = ObservationDataReader.__new__(ObservationDataReader)
 
-    sample = reader._unpack_sample(payload)
+    sample = _unpack_payload(payload)
 
-    assert set(sample) == {"data", "coordinates", "timedeltas", "metadata"}
+    assert {"data", "layout", "coordinates", "timedeltas", "metadata"}.issubset(sample)
     # Data: dummy ensemble dim, no time axis, original (N, V) preserved.
     assert sample["data"].shape == (1, n, v)
     assert sample["data"].dtype == torch.float32

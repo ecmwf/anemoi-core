@@ -145,13 +145,32 @@ class BaseTask(ABC):
             sharing coords and metadata by reference.
         """
         time_indices = self.get_batch_input_indices()
+        LOGGER.info("Input time indices before normalization: %s -- type %s", time_indices, type(time_indices))
         time_indices = normalize_time_indices(time_indices)
+        LOGGER.info("Normalized time indices: %s -- type %s", time_indices, type(time_indices))
 
         new_data = {}
         for dataset_name, dataset_batch in batch.data.items():
-            dataset_batch = dataset_batch[:, time_indices]
-            new_data[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(new_data[dataset_name].shape))
+            input_vars = data_indices[dataset_name].data.input.full
+            layout = batch.layouts.get(dataset_name)
+            # Sparse datasets carry per-sample tensors as ``list[Tensor]``
+            # with ``time_in_grid=True`` — the time axis is folded into
+            # the grid axis, so there is no time slice to take here. We
+            # only need to apply the variable selection to each entry.
+            if isinstance(dataset_batch, list) or (layout is not None and layout.time is None):
+                if isinstance(dataset_batch, list):
+                    new_data[dataset_name] = [t[..., input_vars] for t in dataset_batch]
+                else:
+                    new_data[dataset_name] = dataset_batch[..., input_vars]
+            else:
+                dataset_batch = dataset_batch[:, time_indices]
+                new_data[dataset_name] = dataset_batch[..., input_vars]
+            shape = (
+                [list(t.shape) for t in new_data[dataset_name]]
+                if isinstance(new_data[dataset_name], list)
+                else list(new_data[dataset_name].shape)
+            )
+            LOGGER.info("SHAPE: x[%s].shape = %s", dataset_name, shape)
         return batch.with_data(new_data)
 
     def get_targets(self, batch: "Batch", **kwargs) -> "Batch":
@@ -175,8 +194,20 @@ class BaseTask(ABC):
 
         new_targets = {}
         for dataset_name, dataset_batch in batch.data.items():
-            new_targets[dataset_name] = dataset_batch[:, time_indices]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(new_targets[dataset_name].shape))
+            layout = batch.layouts.get(dataset_name)
+            # Sparse datasets have no time axis (time_in_grid=True), so
+            # the per-sample tensors are passed through as-is — they
+            # already represent the relevant offsets.
+            if isinstance(dataset_batch, list):
+                new_targets[dataset_name] = list(dataset_batch)
+                shape = [list(t.shape) for t in new_targets[dataset_name]]
+            elif layout is not None and layout.time is None:
+                new_targets[dataset_name] = dataset_batch
+                shape = list(dataset_batch.shape)
+            else:
+                new_targets[dataset_name] = dataset_batch[:, time_indices]
+                shape = list(new_targets[dataset_name].shape)
+            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, shape)
         return batch.with_data(new_targets)
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027

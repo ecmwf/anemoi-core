@@ -106,7 +106,7 @@ class Postprocessor(BasePreprocessor):
         LOGGER.info(f"Postprocessor: applying {method} to {name}")
         return postprocessor_function
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Postprocess model output tensor."""
         if not in_place:
             x = x.clone()
@@ -251,7 +251,7 @@ class ConditionalPostprocessor(Postprocessor):
         """
         pass
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:
+    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
         """Set values in the output tensor."""
         if not in_place:
             x = x.clone()
