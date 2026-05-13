@@ -70,8 +70,48 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
 
 
 _DEPRECATED_TARGETS: dict[str, str] = {
+    "anemoi.training.losses.kcrps.KernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' (default). The 'alpha' parameter controls the fair/standard CRPS blend "
+        "(alpha=1.0 gives fully fair CRPS)."
+    ),
+    "anemoi.training.losses.kcrps.AlmostFairKernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' and set 'alpha' to control the fair/standard CRPS blend "
+        "(0 < alpha < 1 gives the almost fair formulation, alpha=1.0 gives fully fair CRPS)."
+    ),
     "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
         "This callback has been deprecated and removed, update your config to remove any references to it. "
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotEnsSample' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotHistogram' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotLoss' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotSpectrum' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotSample' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
+        "instead and update your config accordingly."
     ),
 }
 

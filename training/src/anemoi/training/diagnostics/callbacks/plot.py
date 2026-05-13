@@ -26,6 +26,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from matplotlib.colors import Colormap
+from matplotlib.figure import Figure
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
@@ -774,7 +775,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 trainer,
                 pl_module,
                 output,
-                batch,
+                pl_module.plot_adapter.prepare_loss_batch(batch),
                 batch_idx,
             )
 
@@ -821,6 +822,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
         batch: dict[str, torch.Tensor],
+        members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
@@ -838,6 +840,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
             The batch of data
+        members : int | list[int] | None, optional
+            Ensemble members to select. Only used when the plot adapter is ensemble-aware.
+            None returns all members. Default is 0 (first member).
 
         Returns
         -------
@@ -865,9 +870,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = torch.cat(
             tuple(
-                self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                    self.sample_idx : self.sample_idx + 1
-                ]
+                pl_module.plot_adapter.select_members(
+                    self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                        self.sample_idx : self.sample_idx + 1
+                    ],
+                    members,
+                )
                 for x in outputs[1]
             ),
         )
@@ -936,7 +944,10 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.sample_idx = sample_idx
         self.parameters = parameters
 
-        self.precip_and_related_fields = precip_and_related_fields
+        # Per-callback value takes priority; fall back to plotting_settings if not given.
+        self.precip_and_related_fields = precip_and_related_fields or (
+            self.plotting_settings.precip_and_related_fields if self.plotting_settings else None
+        )
         self.accumulation_levels_plot = accumulation_levels_plot
         self.per_sample = per_sample
         self.colormaps = colormaps
@@ -972,7 +983,13 @@ class PlotSample(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            data, output_tensor = self.process(
+                pl_module,
+                dataset_name,
+                outputs,
+                batch,
+                members=self._get_process_members(),
+            )
 
             local_rank = pl_module.local_rank
 
@@ -985,19 +1002,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             )
 
             for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
-                fig = plot_predicted_multilevel_flat_sample(
-                    plot_parameters_dict,
-                    self.per_sample,
-                    latlons,
-                    self.accumulation_levels_plot,
-                    x,
-                    y_true,
-                    y_pred,
-                    datashader=self.datashader_plotting,
-                    precip_and_related_fields=self.precip_and_related_fields,
-                    colormaps=self.colormaps,
-                    projection_kind=self.projection_kind,
-                )
+                fig = self._make_figure(plot_parameters_dict, latlons, x, y_true, y_pred)
 
                 self._output_figure(
                     logger,
@@ -1011,6 +1016,124 @@ class PlotSample(BasePlotAdditionalMetrics):
                         f"val_pred_sample_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
                     ),
                 )
+
+    def _get_process_members(self) -> int | list[int] | None:
+        """Return the ``members`` argument passed to ``process()``.
+
+        Default selects member 0 (deterministic view). Subclasses override
+        to pass a different selection (e.g. all members for ensemble plots).
+        """
+        return 0
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
+        return plot_predicted_multilevel_flat_sample(
+            plot_parameters_dict,
+            self.per_sample,
+            latlons,
+            self.accumulation_levels_plot,
+            x,
+            y_true,
+            y_pred,
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
+
+
+class PlotEnsSample(PlotSample):
+    """Plot ensemble mean, spread, and the difference of members to the mean for each variable."""
+
+    def __init__(
+        self,
+        sample_idx: int,
+        parameters: list[str],
+        accumulation_levels_plot: list[float],
+        precip_and_related_fields: list[str] | None = None,
+        colormaps: dict[str, Colormap] | None = None,
+        per_sample: int = 6,
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        members: list[int] | int | None = None,
+        focus_area: list[dict] | None = None,
+        plotting_settings: PlottingSettings | None = None,
+    ) -> None:
+        """Initialise the PlotEnsSample callback.
+
+        Parameters
+        ----------
+        sample_idx : int
+            Sample to plot
+        parameters : list[str]
+            Parameters to plot
+        accumulation_levels_plot : list[float]
+            Accumulation levels to plot
+        precip_and_related_fields : list[str] | None, optional
+            Precip variable names, by default None
+        colormaps : dict[str, Colormap] | None, optional
+            Dictionary of colormaps, by default None
+        per_sample : int, optional
+            Number of plots per sample, by default 6
+        every_n_batches : int | None, optional
+            Batch frequency to plot at, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        members : list[int] | int | None, optional
+            Ensemble members to plot. None plots all members, by default None.
+        focus_area : list[dict] | None, optional
+            Focus area configuration, by default None
+        plotting_settings : PlottingSettings | None, optional
+            Plotting configuration settings, by default None (uses defaults)
+        """
+        super().__init__(
+            sample_idx=sample_idx,
+            parameters=parameters,
+            accumulation_levels_plot=accumulation_levels_plot,
+            precip_and_related_fields=precip_and_related_fields,
+            colormaps=colormaps,
+            per_sample=per_sample,
+            every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
+            focus_area=focus_area,
+            plotting_settings=plotting_settings,
+        )
+        self.plot_members = members
+
+    def _get_process_members(self) -> list | None:
+        """Return configured ensemble members (None = all members)."""
+        return self.plot_members
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,  # noqa: ARG002
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create an ensemble figure with members, mean, spread and error."""
+        from anemoi.training.diagnostics.plots import plot_predicted_ensemble
+
+        return plot_predicted_ensemble(
+            parameters=plot_parameters_dict,
+            n_plots_per_sample=4,
+            latlons=latlons,
+            clevels=self.accumulation_levels_plot,
+            y_true=np.asarray(y_true).squeeze(),
+            y_pred=np.asarray(y_pred).squeeze(),
+            datashader=self.datashader_plotting,
+            precip_and_related_fields=self.precip_and_related_fields,
+            colormaps=self.colormaps,
+            projection_kind=self.projection_kind,
+        )
 
 
 class PlotSpectrum(BasePlotAdditionalMetrics):
