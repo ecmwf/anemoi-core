@@ -165,6 +165,7 @@ class SpectralLoss(BaseLoss):
         spatial_start_dim = x.ndim - 2
         return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
 
+
 class PowerSpectrumLoss(SpectralLoss):
     r"""L2 loss on power-per-wavenumber in spectral domain.
     TODO(@Sara): find a better name. possibly configurable power spectrum/PSD loss?
@@ -211,8 +212,10 @@ class PowerSpectrumLoss(SpectralLoss):
 
         sc_pred = self.transform.forward(pred)
         sc_target = self.transform.forward(target)
-        pred_amp = torch.sum(sc_pred.real ** 2 + sc_pred.imag ** 2, dim=-2)  # sum over order (M) dim to get power per wavenumber
-        target_amp = torch.sum(sc_target.real ** 2 + sc_target.imag ** 2, dim=-2)
+        pred_amp = torch.sum(
+            sc_pred.real**2 + sc_pred.imag**2, dim=-2,
+        )  # sum over order (M) dim to get power per wavenumber
+        target_amp = torch.sum(sc_target.real**2 + sc_target.imag**2, dim=-2)
         diff = (pred_amp - target_amp) ** 2
 
         _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
@@ -223,6 +226,7 @@ class PowerSpectrumLoss(SpectralLoss):
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group)
+
 
 class LogSpectralDistance(SpectralLoss):
     r"""Log Spectral Distance (LSD)."""
