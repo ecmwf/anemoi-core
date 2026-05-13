@@ -304,7 +304,7 @@ class LossVariableMapper(BaseLossWrapper):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **kwargs,
@@ -347,9 +347,10 @@ class LossVariableMapper(BaseLossWrapper):
                 "without_scalers": without_scalers,
                 "grid_shard_slice": grid_shard_slice,
                 "group": group,
-                "squash_mode": squash_mode,
             },
         )
+        if squash_mode is not None:
+            loss_kwargs["squash_mode"] = squash_mode
 
         empty_metric_selection = False
         if isinstance(scaler_indices, tuple):

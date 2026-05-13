@@ -154,7 +154,6 @@ def test_multiscale_loss_deprecated_loss_matrices_path_with_on_the_fly_config_re
 
 _COMBINED_LOSS_BASE = {
     "_target_": "anemoi.training.losses.combined.CombinedLoss",
-    "scalers": [],
 }
 
 
@@ -162,7 +161,6 @@ def test_combined_loss_with_scalers_valid() -> None:
     CombinedLossSchema(
         **{
             **_COMBINED_LOSS_BASE,
-            "scalers": ["*"],
             "losses": [
                 {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["nan_mask_weights"]},
                 {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["nan_mask_weights"]},

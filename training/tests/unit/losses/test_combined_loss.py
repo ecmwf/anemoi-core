@@ -44,10 +44,9 @@ def test_combined_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test"]},
                 ],
-                "scalers": ["test"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -68,10 +67,9 @@ def test_combined_loss_invalid_loss_weights() -> None:
                 {
                     "_target_": "anemoi.training.losses.combined.CombinedLoss",
                     "losses": [
-                        {"_target_": "anemoi.training.losses.MSELoss"},
-                        {"_target_": "anemoi.training.losses.MAELoss"},
+                        {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                        {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test"]},
                     ],
-                    "scalers": ["test"],
                     "loss_weights": [1.0, 0.5, 1],
                 },
             ),
@@ -106,7 +104,6 @@ def test_combined_loss_seperate_scalers() -> None:
                     {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
                     {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
                 ],
-                "scalers": ["test", "test2"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -208,7 +205,6 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
                     },
                 ],
                 "loss_weights": [1.0, 0.5],
-                "scalers": ["*"],
             },
         ),
         scalers={

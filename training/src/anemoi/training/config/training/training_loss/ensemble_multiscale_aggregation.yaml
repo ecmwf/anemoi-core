@@ -1,7 +1,6 @@
 datasets:
   data:
     _target_: anemoi.training.losses.combined.CombinedLoss
-    scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
     ignore_nans: False
     # loss_weights: [n_timesteps / (n_timesteps + n_agg_ops), n_agg_ops / (n_timesteps + n_agg_ops)]
     # Each sub-loss averages internally (raw over timesteps, aggregate over agg ops).

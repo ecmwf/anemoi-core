@@ -252,7 +252,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
-    combined = "anemoi.training.losses.combined.CombinedLoss"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
@@ -418,9 +417,15 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
-class CombinedLossSchema(BaseLossSchema):
-    scalers: list[str] = Field(default_factory=list)
-    "Scalers applied at the combined-loss level; sub-losses define their own scalers."
+class CombinedLossSchema(BaseModel):
+    """Schema for CombinedLoss. Does not accept scalers; each child loss defines its own."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
+    "CombinedLoss target."
+    ignore_nans: bool = False
+    "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     losses: list[
         BaseLossSchema
         | AlmostFairKernelCRPSSchema
@@ -432,25 +437,6 @@ class CombinedLossSchema(BaseLossSchema):
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
-
-    @field_validator("losses", mode="before")
-    @classmethod
-    def add_empty_scalers(cls, losses: Any) -> Any:
-        """Add empty scalers to loss functions, as scalers can be set at top level."""
-        from omegaconf import DictConfig
-        from omegaconf.omegaconf import open_dict
-
-        for loss in losses:
-            target = loss.get("_target_", "") if hasattr(loss, "get") else ""
-            if "MultiscaleLossWrapper" in str(target):
-                continue
-            if "scalers" not in loss:
-                if isinstance(loss, DictConfig):
-                    with open_dict(loss):
-                        loss["scalers"] = []
-                else:
-                    loss["scalers"] = []
-        return losses
 
     @model_validator(mode="after")
     def check_length_of_weights_and_losses(self) -> Self:
