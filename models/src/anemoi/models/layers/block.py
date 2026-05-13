@@ -665,7 +665,9 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
 
         if self.graph_attention_backend == "triton":
-            csc, _, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True, assume_sorted=edges_are_dst_sorted)
+            csc, _, reverse = edge_index_to_csc(
+                edge_index, num_nodes=conv_size, reverse=True, assume_sorted=edges_are_dst_sorted
+            )
             args_conv = (edges, csc, reverse)
         else:
             args_conv = (edges, edge_index, conv_size)
