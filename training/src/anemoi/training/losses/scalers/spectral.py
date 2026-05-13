@@ -44,6 +44,7 @@ class SpectralDimensionScaler(BaseScaler):
     def __init__(
         self,
         n_spectral_modes: int,
+        n_spectral: int | None = None,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -53,6 +54,8 @@ class SpectralDimensionScaler(BaseScaler):
         ----------
         n_spectral_modes : int
             Number of total wavenumbers (L dimension).
+        n_spectral : int, optional
+            Total number of spectral modes (length of the flattened spectral dimension). Default to n_spectral_modes
         norm : str, optional
             Type of normalization to apply.
             Options are None, unit-sum, unit-mean and l1.
@@ -62,7 +65,7 @@ class SpectralDimensionScaler(BaseScaler):
         super().__init__(norm=norm)
         del kwargs
         self.n_spectral_modes = n_spectral_modes
-        self.n_spectral = self.n_spectral_modes**2
+        self.n_spectral = n_spectral if n_spectral is not None else self.n_spectral_modes
 
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
         """Return uniform scaling values (i.e. ones).
