@@ -706,8 +706,9 @@ nor does it submit to any jurisdiction. #}
                 selectedNode = nodeName;
                 connectedNodes = new Set();
 
-                // Compute adjacency on the fly
-                EDGE_SETS.forEach(es => {
+                // Compute adjacency on the fly, only for visible edge sets
+                EDGE_SETS.forEach((es, i) => {
+                    if (!edgeSetMeshes[i].visible) return;
                     es.edges.forEach(([a, b]) => {
                         if (a === nodeName) connectedNodes.add(b);
                         else if (b === nodeName) connectedNodes.add(a);
