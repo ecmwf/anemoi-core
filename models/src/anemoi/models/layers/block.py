@@ -692,12 +692,22 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
             for i in range(num_chunks):
                 out += self.apply_gt(
-                    query=query, key=key, value=value, edges=edge_attr_list[i], edge_index=edge_index_list[i], size=size,
+                    query=query,
+                    key=key,
+                    value=value,
+                    edges=edge_attr_list[i],
+                    edge_index=edge_index_list[i],
+                    size=size,
                     edges_are_dst_sorted=edges_are_dst_sorted,
                 )
         else:
             out = self.apply_gt(
-                query=query, key=key, value=value, edges=edges, edge_index=edge_index, size=size,
+                query=query,
+                key=key,
+                value=value,
+                edges=edges,
+                edge_index=edge_index,
+                size=size,
                 edges_are_dst_sorted=edges_are_dst_sorted,
             )
 
@@ -880,7 +890,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             key = self.k_norm(key)
 
         out = self.attention_block(
-            query, key, value, edges, edge_index, size, num_chunks=1,
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks=1,
             edges_are_dst_sorted=layer_kwargs.get("edges_are_dst_sorted", False),
         )
 
@@ -1006,7 +1022,13 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
         out = self.attention_block(
-            query, key, value, edges, edge_index, size, num_chunks,
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks,
             edges_are_dst_sorted=kwargs.get("edges_are_dst_sorted", False),
         )
 
