@@ -318,7 +318,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
         # set flag if loss and metrics support sharding
-        #self._check_sharding_support()
+        self._check_sharding_support()
 
         LOGGER.debug("n_step_input: %d", self.n_step_input)
 
@@ -345,7 +345,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # For multi-dataset, use a generic name or combine dataset names
         return "multi_dataset"
 
-    #def _check_sharding_support(self) -> None:
+    def _check_sharding_support(self) -> None:
         self.loss_supports_sharding = all(
             getattr(leaf, "supports_sharding", False) for loss in self.loss.values() for leaf in loss.iter_leaf_losses()
         )
