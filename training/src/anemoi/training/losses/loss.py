@@ -190,8 +190,7 @@ def get_loss_function(
             _apply_scalers(wrapper, resolved, scalers, data_indices)
         return wrapper
 
-    if scalers is None:
-        scalers = {}
+    scalers = scalers or {}
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
