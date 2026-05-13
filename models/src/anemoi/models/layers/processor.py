@@ -526,6 +526,7 @@ class GraphTransformerProcessor(BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=True,  # ensured by ensure_edges_are_dst_sorted above
             **kwargs,
         )
 

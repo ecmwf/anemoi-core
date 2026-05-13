@@ -358,6 +358,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
                 batch_size,
                 model_comm_group,
                 cond,
+                edges_are_dst_sorted=True,  # ensured by prepare_edge_sharding_wrapper
                 **kwargs,
             ).to(dtype=out_type)
 
@@ -454,6 +455,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             return maybe_checkpoint(
                 self.mapper_forward_with_heads_sharding,
                 self.gradient_checkpointing,
+                edges_are_dst_sorted=edges_are_dst_sorted,
                 **kwargs_forward,
             )
 
