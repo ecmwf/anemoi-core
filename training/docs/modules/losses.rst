@@ -62,9 +62,17 @@ reference it in the config as follows:
 
 The following probabilistic loss functions are available by default:
 
--  ``KernelCRPSLoss``: Kernel CRPS loss.
--  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
-   et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+-  ``CRPS``: Kernel CRPS loss for ensemble predictions. ``alpha=0`` gives
+   standard CRPS, ``alpha=1`` gives fair CRPS, and values between 0 and 1
+   give the almost fair CRPS formulation (`Lang et al. (2024)
+   <http://arxiv.org/abs/2412.15832>`_). The default ``alpha: 0.95``
+   combines 5% standard CRPS with 95% fair CRPS.
+   The ``backend`` option can be set to:
+
+   - ``naive``: simple loop over unordered ensemble-member pairs, avoiding
+     materialization of the full pairwise tensor.
+   - ``stable``: materializes pairwise tensors and uses the numerically
+     stable all-pairs formulation.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
    handle noise weights
 
@@ -78,7 +86,7 @@ deterministic:
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
+            _target_: anemoi.training.losses.CRPS
             # loss function kwargs here
 
 .. _multiscale-loss-functions:
@@ -87,11 +95,12 @@ deterministic:
  Multiscale Loss Functions
 ***************************
 
-The ``MultiscaleLossWrapper`` wraps any base loss (e.g.
-``AlmostFairKernelCRPS``) and evaluates it at multiple spatial scales
-by progressively smoothing both predictions and targets. Each scale
-loss is computed on the *residual* between successive smoothing levels,
-so coarser scales capture large-scale errors and finer scales capture
+The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
+presented in <https://arxiv.org/abs/2506.10868>. It wraps any base loss
+(e.g. ``CRPS``) and evaluates it at multiple spatial scales by
+progressively smoothing both predictions and targets. Each scale loss is
+computed on the *residual* between successive smoothing levels, so
+coarser scales capture large-scale errors and finer scales capture
 small-scale structure.
 
 The number of weights must equal the number of smoothing levels. A final
@@ -117,11 +126,11 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
                base_sigma: 0.1
                scale_factor: 2                 # neighbours and sigma double each level
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
-               alpha: 1.0
+               alpha: 0.95
 
 File-based mode (load precomputed ``.npz`` matrices from disk):
 
@@ -140,7 +149,7 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
                   - filter_O96_w=gaussian_d=2.0x.npz
                   - null                                # full resolution (no smoothing)
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
@@ -456,32 +465,10 @@ Validation metrics as defined in the config file at
 ``config.training.validation_metrics`` follow the same initialisation
 behaviour as the loss function, but can be a list. In this case all
 losses are calculated and logged as a dictionary with the corresponding
-name
+name.
 
-Scaling Validation Losses
-=========================
-
-Validation metrics can **not** by default be scaled by scalers across
-the variable dimension, but can be by all other scalers. If you want to
-scale a validation metric by the variable weights, it must be added to
-`config.training.scale_validation_metrics`.
-
-These metrics are then kept in the normalised, preprocessed space, and
-thus the indexing of scalers aligns with the indexing of the tensors.
-
-By default, only `all` is kept in the normalised space and scaled.
-
-.. code:: yaml
-
-   # List of validation metrics to keep in normalised space, and scalers to be applied
-   # Use '*' in reference all metrics, or a list of metric names.
-   # Unlike above, variable scaling is possible due to these metrics being
-   # calculated in the same way as the training loss, within the model space.
-   scale_validation_metrics:
-   scalers_to_apply: ['variable']
-   metrics:
-      - 'all'
-      # - "*"
+Validation metrics can **not** be scaled by scalers across
+the variable dimension, but can be by all other scalers.
 
 ***********************
  Custom Loss Functions
