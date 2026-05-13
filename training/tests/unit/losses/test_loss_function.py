@@ -12,10 +12,9 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.training.losses import AlmostFairKernelCRPS
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
-from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
@@ -29,7 +28,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
-losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
+losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
 spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
 losses += spectral_losses
 
@@ -41,6 +40,47 @@ losses += spectral_losses
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
     loss = loss_cls(x_dim=4, y_dim=4) if loss_cls in spectral_losses else loss_cls()
     assert isinstance(loss, BaseLoss)
+
+
+def _expected_crps(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
+    ens_size = preds.shape[-1]
+    mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+    pair_sum = torch.zeros_like(mae)
+    for i in range(ens_size - 1):
+        pair_sum += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+    coef = -(alpha / (ens_size * (ens_size - 1)) + (1.0 - alpha) / (ens_size**2))
+    return mae + coef * pair_sum
+
+
+def test_crps_defaults_to_almost_fair_stable_backend() -> None:
+    loss = CRPS()
+    assert loss.alpha == 0.95
+    assert loss.backend == "stable"
+    assert loss.name == "crps0.95"
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.5, 0.95, 1.0])
+def test_crps_backends_match_expected_formula(alpha: float) -> None:
+    preds = torch.randn(2, 2, 3, 4, 5, dtype=torch.float64)
+    targets = torch.randn(2, 2, 3, 4, dtype=torch.float64)
+
+    expected = _expected_crps(preds, targets, alpha)
+    naive = CRPS(alpha=alpha, backend="naive")._kernel_crps(preds, targets)
+    stable = CRPS(alpha=alpha, backend="stable")._kernel_crps(preds, targets)
+
+    torch.testing.assert_close(naive, expected)
+    torch.testing.assert_close(stable, expected)
+
+
+@pytest.mark.parametrize("alpha", [-0.1, 1.1])
+def test_crps_rejects_invalid_alpha(alpha: float) -> None:
+    with pytest.raises(ValueError, match="alpha must be in the range"):
+        CRPS(alpha=alpha)
+
+
+def test_crps_rejects_invalid_backend() -> None:
+    with pytest.raises(ValueError, match="Unknown CRPS backend"):
+        CRPS(backend="unknown")  # type: ignore[arg-type]
 
 
 @pytest.fixture
