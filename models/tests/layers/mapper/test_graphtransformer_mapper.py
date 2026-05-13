@@ -170,8 +170,10 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
         )
 
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        x_src, x_dst = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
+        x_src, x_dst = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
         assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
@@ -203,13 +205,17 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
         )
 
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
 
         mapper.num_chunks = 4
-        x_src_c, x_dst_c = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        x_src_c, x_dst_c = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
 
         mapper.num_chunks = 1
-        x_src, x_dst = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        x_src, x_dst = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
 
         assert torch.allclose(
             x_src, x_src_c, atol=1e-4
@@ -218,6 +224,28 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             x_dst, x_dst_c, atol=1e-4
         ), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
 
+    def test_unsorted_edges_are_sorted_before_partitioning(self, mapper, pair_tensor, graph_provider):
+        x = pair_tensor
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
+
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
+
+        mapper.num_chunks = 4
+        x_src_sorted, x_dst_sorted = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
+
+        perm = torch.randperm(edge_index.shape[1], device=edge_index.device)
+        x_src_unsorted, x_dst_unsorted = mapper.forward(
+            x, batch_size, shard_info, edge_attr[perm], edge_index[:, perm], edges_are_dst_sorted=False
+        )
+
+        assert torch.allclose(x_src_sorted, x_src_unsorted, atol=1e-4)
+        assert torch.allclose(x_dst_sorted, x_dst_unsorted, atol=1e-4)
+
     def test_strategy(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor
         batch_size = 1
@@ -225,11 +253,13 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
             src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
         )
 
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
 
         out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_info, edge_attr, edge_index)
 
-        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_info, edge_attr, edge_index)
+        out_edges = mapper.mapper_forward_with_edge_sharding(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4
@@ -250,8 +280,10 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         shard_info = BipartiteGraphShardInfo(
             src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
         )
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        _, x_dst = mapper.forward(pair_tensor, batch_size, shard_info, edge_attr, edge_index)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
+        _, x_dst = mapper.forward(
+            pair_tensor, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
         assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
 
 
@@ -305,8 +337,10 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src, device=device),
         )
 
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        result = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
+        result = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
         assert result.shape == torch.Size([self.NUM_DST_NODES, self.OUT_CHANNELS_DST])
 
         # Dummy loss
@@ -342,13 +376,17 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src, device=device),
         )
 
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
 
         mapper.num_chunks = 4
-        out_c = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        out_c = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
 
         mapper.num_chunks = 1
-        out = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        out = mapper.forward(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
 
         assert torch.allclose(out, out_c, atol=1e-4), f"out ({out}) != out_c ({out_c}) when num_chunks is changed"
 
@@ -362,11 +400,13 @@ class TestGraphTransformerBackwardMapper(TestGraphTransformerBaseMapper):
             torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_src, device=device),
         )
 
-        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
 
         out_heads = mapper.mapper_forward_with_heads_sharding(x, batch_size, shard_info, edge_attr, edge_index)
 
-        out_edges = mapper.mapper_forward_with_edge_sharding(x, batch_size, shard_info, edge_attr, edge_index)
+        out_edges = mapper.mapper_forward_with_edge_sharding(
+            x, batch_size, shard_info, edge_attr, edge_index, edges_are_dst_sorted=edges_are_dst_sorted
+        )
 
         assert torch.allclose(
             out_heads, out_edges, atol=1e-4

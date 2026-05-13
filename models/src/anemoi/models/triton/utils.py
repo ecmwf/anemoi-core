@@ -23,6 +23,14 @@ def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj,
     return edge_index[:, perm], perm
 
 
+def is_edge_index_dst_sorted(edge_index: Adj) -> bool:
+    """Check whether edge_index is sorted by destination node (edge_index[1])."""
+    dst = edge_index[1]
+    if dst.numel() <= 1:
+        return True
+    return bool(torch.all(dst[1:] >= dst[:-1]).item())
+
+
 def edge_index_to_csc(
     edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = None, reverse: bool = True, assume_sorted: bool = False
 ):

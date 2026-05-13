@@ -38,6 +38,7 @@ from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.triton.utils import edge_index_to_csc
+from anemoi.models.triton.utils import is_edge_index_dst_sorted
 from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
 
@@ -51,6 +52,9 @@ NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
 # Change attention implementation during inference runtime
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
+
+# Debug flag: verify edges are dst-sorted at the block level before CSC conversion
+ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
 class BaseBlock(nn.Module, ABC):
@@ -644,6 +648,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edges: Tensor,
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
+        edges_are_dst_sorted: bool = False,
     ) -> Tensor:
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
@@ -652,6 +657,12 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         if ATTENTION_BACKEND != "" and not self._attention_backend_applied:
             self.set_attention_function()
             self._attention_backend_applied = True
+
+        if edges_are_dst_sorted and ANEMOI_DEBUG_SHARDING:
+            assert is_edge_index_dst_sorted(edge_index), (
+                "edges_are_dst_sorted=True but edge_index is not sorted by destination node. "
+                "This indicates a bug in edge sorting/sharding."
+            )
 
         if self.graph_attention_backend == "triton":
             csc, _, reverse = edge_index_to_csc(edge_index, num_nodes=conv_size, reverse=True, assume_sorted=True)
@@ -670,6 +681,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
         num_chunks: int,
+        edges_are_dst_sorted: bool = False,
     ) -> Tensor:
         # split 1-hop edges into chunks, compute self.conv chunk-wise
         if num_chunks > 1:
@@ -680,10 +692,24 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
             for i in range(num_chunks):
                 out += self.apply_gt(
-                    query=query, key=key, value=value, edges=edge_attr_list[i], edge_index=edge_index_list[i], size=size
+                    query=query,
+                    key=key,
+                    value=value,
+                    edges=edge_attr_list[i],
+                    edge_index=edge_index_list[i],
+                    size=size,
+                    edges_are_dst_sorted=edges_are_dst_sorted,
                 )
         else:
-            out = self.apply_gt(query=query, key=key, value=value, edges=edges, edge_index=edge_index, size=size)
+            out = self.apply_gt(
+                query=query,
+                key=key,
+                value=value,
+                edges=edges,
+                edge_index=edge_index,
+                size=size,
+                edges_are_dst_sorted=edges_are_dst_sorted,
+            )
 
         return out
 
@@ -863,7 +889,16 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks=1)
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks=1,
+            edges_are_dst_sorted=layer_kwargs.get("edges_are_dst_sorted", False),
+        )
 
         if self.shard_strategy == "heads":
             out = self.shard_output_seq(out, shard_info, head_shard_sizes, batch_size, model_comm_group)
@@ -956,6 +991,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
+        **kwargs,
     ):
         x_skip = x
 
@@ -985,7 +1021,16 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         # "inner" chunking for memory reductions in inference, controlled via env variable:
         num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
-        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks,
+            edges_are_dst_sorted=kwargs.get("edges_are_dst_sorted", False),
+        )
 
         out = self.shard_output_seq(out, bipartite_shard_info, head_shard_sizes, batch_size, model_comm_group)
 
