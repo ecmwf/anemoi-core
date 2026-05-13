@@ -196,6 +196,13 @@ def get_loss_function(
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
     available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
+    # If the target class requests AVAILABLE_SCALERS (e.g. CombinedLoss), always
+    # pass the full unfiltered scalers so child losses can control their own.
+    if (
+        hasattr(target_cls, "factory_context_keys")
+        and LossFactoryContextKey.AVAILABLE_SCALERS in target_cls.factory_context_keys
+    ):
+        available_scalers = scalers
     factory_context = LossFactoryContext(
         available_scalers=available_scalers,
         data_indices=data_indices,

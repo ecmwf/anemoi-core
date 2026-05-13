@@ -75,7 +75,10 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     log_text = f"Final Variable Scaling in {loss.__class__.__name__}: "
     scaling_values, scaling_sum = {}, 0.0
     for idx, name in subset_vars:
-        value = float(variable_scaling[idx])
+        if idx < variable_scaling.shape[0]:
+            value = float(variable_scaling[idx])
+        else:
+            value = 1.0
         log_text += f"{name}: {value:.4g}, "
         scaling_values[name] = value
         scaling_sum += value
