@@ -17,6 +17,7 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import PointWiseMapperComponent
 from .common_components import TransformerModelComponent
 
 
@@ -44,7 +45,12 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"shard_strategy": str}
+        allowed_extras = {
+            "shard_strategy": str,
+            "graph_attention_backend": str,
+            "edge_pre_mlp": bool,
+            "gradient_checkpointing": bool,
+        }
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
@@ -72,5 +78,10 @@ class TransformerDecoderSchema(TransformerModelComponent):
     "Use alibi slopes for attention implementation. Default to False."
     use_rotary_embeddings: bool = Field(example=False)
     "Use rotary embeddings for attention implementation. Default to False."
-    shard_strategy: str = Field(example="heads")
-    "Shard strategy to use for the model component. Default to 'heads'."
+
+
+class PointWiseBackwardMapperSchema(PointWiseMapperComponent):
+    target_: Literal["anemoi.models.layers.mapper.PointWiseBackwardMapper"] = Field(..., alias="_target_")
+    "Point-wise decoder object from anemoi.models.layers.mapper."
+    initialise_data_extractor_zero: bool = Field(default=False)
+    "Initialise the data extractor with zeros. Default to False."

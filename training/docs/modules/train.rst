@@ -4,27 +4,27 @@
 
 Anemoi provides a modular and extensible training framework for Graph
 Neural Networks (GNNs), designed for tasks such as forecasting,
-interpolation, and ensemble learning. The training setup is structured
+temporal downscaling, and ensemble learning. The training setup is structured
 around three key components:
 
--  ``BaseGraphModule``: The abstract base class for all task-specific
+-  ``BaseTrainingModule``: The abstract base class for all task-specific
    models, encapsulating shared logic for training, evaluation, and
    distributed execution.
 
 -  **Tasks**: Task-specific subclasses that implement models for
-   deterministic forecasting, interpolation, ensemble learning, etc.
+   forecasting, temporal downscaling, autoencoding, etc.
 
 -  ``AnemoiTrainer``: The training orchestrator responsible for running
    and managing the training and validation loops.
 
 To train a model, users typically subclass one of the pre-implemented
-graph modules or create a new one by extending ``BaseGraphModule``.
+graph modules or create a new one by extending ``BaseTrainingModule``.
 
 *****************
- BaseGraphModule
+ BaseTrainingModule
 *****************
 
-All model tasks subclass :class:`~anemoi.graphmodules.BaseGraphModule`,
+All training methods subclass :class:`~anemoi.training.train.methods.base.BaseTrainingModule`,
 which itself inherits from PyTorch Lightning's
 :class:`~pytorch_lightning.LightningModule`. This base class defines the
 standard interface for all models in Anemoi and implements the core
@@ -39,11 +39,9 @@ Key responsibilities include:
 -  Input/output masking to support variable or region-specific
    processing
 
-``BaseGraphModule`` is not intended to be instantiated directly.
-Instead, model developers should subclass it to implement specific
-forecasting or interpolation tasks by overriding the :meth:`_step`
-method and optionally customizing the initialization logic in
-:meth:`__init__`.
+``BaseTrainingModule`` is not intended to be instantiated directly.
+Instead, use one of the concrete training methods or subclass it to
+implement a new one by overriding the :meth:`_step` method.
 
 **Core Parameters:**
 
@@ -57,8 +55,6 @@ method and optionally customizing the initialization logic in
    positions.
 -  ``supporting_arrays``: Optional maps like topography or land-sea
    masks.
--  ``truncation_data``: Masking information to restrict training or
-   validation to a subset of time or space.
 
 **Subclasses must implement:**
 
@@ -69,32 +65,73 @@ Additional features include optional sharding of input batches across
 devices (to reduce communication overhead), dynamic creation of scalers
 from statistics.
 
-.. autoclass:: anemoi.graphmodules.BaseGraphModule
+.. automodule:: anemoi.training.train.methods.base
    :members:
-   :undoc-members:
+   :no-undoc-members:
+   :show-inheritance:
+
+*********************
+ Training Methods
+*********************
+
+The training method is the PyTorch Lightning module that implements the
+forward pass, loss computation, and metric calculation for a given task.
+All methods inherit from
+:class:`~anemoi.training.train.methods.base.BaseTrainingModule`.
+
+:class:`~anemoi.training.train.methods.single.SingleTraining`
+   Deterministic single-member training. Compatible with
+   :class:`~anemoi.training.tasks.forecasting.Forecaster`,
+   :class:`~anemoi.training.tasks.temporal_downscaling.TemporalDownscaler`,
+   and :class:`~anemoi.training.tasks.timeless.Autoencoder`.
+
+:class:`~anemoi.training.train.methods.ensemble.EnsembleTraining`
+   Ensemble (multi-member) training. Generates multiple perturbed
+   members per device and uses ``DDPEnsGroupStrategy`` for distributed
+   execution.
+
+:class:`~anemoi.training.train.methods.diffusion.DiffusionTraining`
+   Base class for diffusion-based probabilistic forecasters. Applies
+   stepwise pre/post-processors and handles the noise-conditioned
+   forward pass.
+
+.. automodule:: anemoi.training.train.methods.single
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.train.methods.ensemble
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.train.methods.diffusion
+   :members:
+   :no-undoc-members:
    :show-inheritance:
 
 *****************
  Available Tasks
 *****************
 
-Anemoi supports multiple task-specific models, which are high-level
-subclasses of :class:`~anemoi.graphmodules.BaseGraphModule` and provide
-working implementations for key scientific workflows.
+Anemoi supports multiple task-specific implementations that define the
+temporal I/O structure for each scientific workflow.
 
-Current supported graphmodules include:
+Current supported tasks include:
 
-#. **Deterministic Forecasting** —
-   :class:`~anemoi.training.train.tasks.forecaster.GraphForecaster`
-#. **Ensemble Forecasting** —
-   :class:`~anemoi.training.train.tasks.ensforecaster.GraphEnsForecaster`
-#. **Time Interpolation** —
-   :class:`~anemoi.training.train.tasks.interpolator.GraphInterpolator`
+#. **Forecaster** —
+   :class:`~anemoi.training.tasks.forecasting.Forecaster`
+#. **Temporal Downscaler** —
+   :class:`~anemoi.training.tasks.temporal_downscaling.TemporalDownscaler`
+#. **AutoEncoder** —
+   :class:`~anemoi.training.tasks.timeless.Autoencoder`
 
-Each of these implements the ``__init__`` and ``_step`` methods to
-define task-specific model behavior. They support full Lightning
-compatibility and make use of internal utilities like metric tracking,
-variable masking, and inverse-scaling.
+Each task defines which time steps are loaded as inputs and targets and
+provides helpers for mapping those offsets to batch positions.
+
+.. seealso::
+
+   :doc:`tasks` — Task classes, ``RolloutConfig``, and batch-index helpers.
 
 Key methods to override when adapting or extending a model:
 
@@ -103,20 +140,22 @@ Key methods to override when adapting or extending a model:
 -  ``_step``: Implements the forward pass and loss/metric computation
    for a single batch.
 
-.. automodule:: anemoi.training.train.tasks.forecaster
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
+Task ``_step`` return contract
+==============================
 
-.. automodule:: anemoi.training.train.tasks.ensforecaster
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
+Task implementations are expected to return a 3-tuple with a consistent
+shape across all task types:
 
-.. automodule:: anemoi.training.train.tasks.interpolator
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
+- ``loss``: a tensor scalar used for optimization.
+- ``metrics``: a mapping of metric names to tensors.
+- ``predictions``: a list of per-step dictionaries keyed by dataset
+  name.
+
+For single-output tasks (for example autoencoder), the
+``predictions`` value is a one-element list. For rollout-based tasks,
+the list contains one entry per rollout step. This shared contract keeps
+plotting callbacks task-agnostic and avoids task-specific unpacking
+logic.
 
 *********************
  Training Controller

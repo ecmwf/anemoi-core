@@ -26,7 +26,7 @@ def data_indices():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "e": 4, "d": 5, "other": 6}
-    return IndexCollection(config=config, name_to_index=name_to_index)
+    return IndexCollection(config.data, name_to_index=name_to_index)
 
 
 @pytest.fixture()
@@ -42,7 +42,7 @@ def data_indices_with_target():
         },
     )
     name_to_index = {"tp_point": 0, "tp_radar": 1, "tp": 2, "dem": 3}
-    return IndexCollection(config=config, name_to_index=name_to_index)
+    return IndexCollection(config.data, name_to_index=name_to_index)
 
 
 def test_dataindices_init(data_indices) -> None:
@@ -76,6 +76,7 @@ def test_dataindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
+            "name_to_index": dict(x=0, y=1, z=2, q=3, e=4, d=5, other=6),
         },
         "output": {
             "full": torch.Tensor([1, 2, 3, 5, 6]).to(torch.int),
@@ -83,13 +84,17 @@ def test_dataindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([0, 4]).to(torch.int),
             "diagnostic": torch.Tensor([2, 3]).to(torch.int),
             "prognostic": torch.Tensor([1, 5, 6]).to(torch.int),
+            "name_to_index": dict(x=0, y=1, z=2, q=3, e=4, d=5, other=6),
         },
     }
 
     for key in ["output", "input"]:
         for subkey, value in data_indices.data.todict()[key].items():
             assert subkey in expected_output[key]
-            assert torch.allclose(value, expected_output[key][subkey])
+            if isinstance(value, dict):
+                assert value == expected_output[key][subkey]
+            else:
+                assert torch.allclose(value, expected_output[key][subkey])
 
 
 def test_modelindices_todict(data_indices) -> None:
@@ -100,6 +105,7 @@ def test_modelindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([0, 2]).to(torch.int),
             "diagnostic": torch.Tensor([]).to(torch.int),
             "prognostic": torch.Tensor([1, 3, 4]).to(torch.int),
+            "name_to_index": dict(x=0, y=1, e=2, d=3, other=4),
         },
         "output": {
             "full": torch.Tensor([0, 1, 2, 3, 4]).to(torch.int),
@@ -107,13 +113,17 @@ def test_modelindices_todict(data_indices) -> None:
             "forcing": torch.Tensor([]).to(torch.int),
             "diagnostic": torch.Tensor([1, 2]).to(torch.int),
             "prognostic": torch.Tensor([0, 3, 4]).to(torch.int),
+            "name_to_index": dict(y=0, z=1, q=2, d=3, other=4),
         },
     }
 
     for key in ["output", "input"]:
         for subkey, value in data_indices.model.todict()[key].items():
             assert subkey in expected_output[key]
-            assert torch.allclose(value, expected_output[key][subkey])
+            if isinstance(value, dict):
+                assert value == expected_output[key][subkey]
+            else:
+                assert torch.allclose(value, expected_output[key][subkey])
 
 
 def test_data_indices_with_target(data_indices_with_target) -> None:
@@ -131,3 +141,26 @@ def test_data_indices_with_target(data_indices_with_target) -> None:
         == {"tp_point": 0, "tp_radar": 1, "tp": 2, "dem": 3}
     )
     assert data_indices_with_target.model.output.name_to_index == {"tp": 0}
+
+
+def test_data_indices_cross_space_positions(data_indices) -> None:
+    assert data_indices.data_full_ordered_names == ["x", "y", "z", "q", "e", "d", "other"]
+    assert data_indices.data_full_name_to_position == {"x": 0, "y": 1, "z": 2, "q": 3, "e": 4, "d": 5, "other": 6}
+    assert data_indices.data_output_positions_in_data_full == [1, 2, 3, 5, 6]
+    assert data_indices.model_output_positions_in_data_full == [1, 2, 3, 5, 6]
+    assert data_indices.model_output_positions_in_data_output == [0, 1, 2, 3, 4]
+    assert data_indices.model_output_in_data_output_is_identity is True
+    assert data_indices.model_output_in_data_output_is_contiguous is True
+    assert data_indices.model_output_in_data_output_contiguous_start == 0
+    assert data_indices.model_output_in_data_output_contiguous_length == 5
+
+
+def test_data_indices_cross_space_positions_with_target(data_indices_with_target) -> None:
+    assert data_indices_with_target.data_full_ordered_names == ["tp_point", "tp_radar", "tp", "dem"]
+    assert data_indices_with_target.data_output_positions_in_data_full == [0, 1, 2]
+    assert data_indices_with_target.model_output_positions_in_data_full == [2]
+    assert data_indices_with_target.model_output_positions_in_data_output == [2]
+    assert data_indices_with_target.model_output_in_data_output_is_identity is False
+    assert data_indices_with_target.model_output_in_data_output_is_contiguous is True
+    assert data_indices_with_target.model_output_in_data_output_contiguous_start == 2
+    assert data_indices_with_target.model_output_in_data_output_contiguous_length == 1

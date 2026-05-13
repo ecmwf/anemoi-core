@@ -7,26 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
-import sys
 from abc import ABC
 from abc import abstractmethod
+from enum import StrEnum
 
 import torch
 
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.utils.enums import TensorDim
-
-if sys.version_info < (3, 11):
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
-
-else:
-    from enum import StrEnum
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,7 +71,7 @@ class BaseScaler(ABC):
         -------
         scale_dims : tuple[int, ...]
             Dimensions over which the scalers are applied.
-        scaler_values : np.ndarray
+        scaler_values : torch.Tensor
             Scaler values
         """
         scaler_values = self.get_scaling_values()
@@ -102,18 +92,18 @@ class BaseUpdatingScaler(BaseScaler):
     which are called during the training loop. These methods allow the scalers to
     update their values based on the current state of the model and the training data.
 
-    The callback methods are expected to return a np.ndarray of scaling values,
+    The callback methods are expected to return a torch.Tensor of scaling values,
     which will be normalised. If they return None, the scaler will not update its values.
 
     Override `get_scaling_values` to provide initial scaling values if needed.
-    The default implementation returns an array of ones.
+    The default implementation returns a tensor of ones.
     """
 
-    def on_training_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:  # noqa: ARG002
+    def on_training_start(self, model: AnemoiModelInterface, **kwargs) -> torch.Tensor | None:  # noqa: ARG002
         """Callback method called at the start of training."""
         LOGGER.debug("%s.on_training_start called.", self.__class__.__name__)
 
-    def on_batch_start(self, model: AnemoiModelInterface) -> torch.Tensor | None:  # noqa: ARG002
+    def on_batch_start(self, model: AnemoiModelInterface, **kwargs) -> torch.Tensor | None:  # noqa: ARG002
         """Callback method called at the start of each batch."""
         LOGGER.debug("%s.on_train_batch_start called.", self.__class__.__name__)
 

@@ -40,8 +40,11 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         The name of the source nodes.
     target_name : str
         The name of the target nodes.
-    cutoff_factor : float
+    cutoff_factor : float | None
         Factor to multiply the grid reference distance to get the cut-off radius.
+        Mutually exclusive with cutoff_distance_km.
+    cutoff_distance_km : float | None
+        Cutoff radius in kilometers. Mutually exclusive with cutoff_factor.
     source_mask_attr_name : str | None
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
@@ -63,17 +66,33 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self,
         source_name: str,
         target_name: str,
-        cutoff_factor: float,
+        cutoff_factor: float | None = None,
+        cutoff_distance_km: float | None = None,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
         max_num_neighbours: int = 64,
     ) -> None:
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
-        assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
+
+        # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
+        if cutoff_factor is None and cutoff_distance_km is None:
+            raise ValueError("Either cutoff_factor or cutoff_distance_km must be provided.")
+        if cutoff_factor is not None and cutoff_distance_km is not None:
+            raise ValueError("cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one.")
+
+        if cutoff_factor is not None:
+            assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
+            assert cutoff_factor > 0, "Cutoff factor must be positive."
+
+        if cutoff_distance_km is not None:
+            assert isinstance(cutoff_distance_km, (int, float)), "Cutoff distance must be a float."
+            assert cutoff_distance_km > 0, "Cutoff distance must be positive."
+
         assert isinstance(max_num_neighbours, int), "Number of nearest neighbours must be an integer."
-        assert cutoff_factor > 0, "Cutoff factor must be positive."
         assert max_num_neighbours > 0, "Number of nearest neighbours must be positive."
+
         self.cutoff_factor = cutoff_factor
+        self.cutoff_distance_km = cutoff_distance_km
         self.max_num_neighbours = max_num_neighbours
 
     @staticmethod
@@ -104,8 +123,9 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
     def get_cutoff_radius(self, graph: HeteroData):
         """Compute the cut-off radius.
 
-        The cut-off radius is computed as the product of the target nodes
-        reference distance and the cut-off factor.
+        The cut-off radius is computed either as:
+        - The product of the target nodes reference distance and the cut-off factor, or
+        - Directly from the cutoff distance in kilometers.
 
         Parameters
         ----------
@@ -115,12 +135,20 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         Returns
         -------
         float
-            The cut-off radius.
+            The cut-off radius in Cartesian coordinates on unit sphere.
         """
-        reference_dist = CutOffEdges.get_reference_distance(
-            graph[self.target_name], mask_attr_name=self.target_mask_attr_name
-        )
-        return reference_dist * self.cutoff_factor
+        if self.cutoff_distance_km is not None:
+            # Convert km to Cartesian distance on unit sphere
+            # For small distances: Cartesian distance ≈ great circle distance (radians)
+            # radians = km / EARTH_RADIUS
+            radius = self.cutoff_distance_km / EARTH_RADIUS
+        else:
+            # Use factor-based approach
+            reference_dist = CutOffEdges.get_reference_distance(
+                graph[self.target_name], mask_attr_name=self.target_mask_attr_name
+            )
+            radius = reference_dist * self.cutoff_factor
+        return radius
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
@@ -136,7 +164,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
     def _crop_to_max_num_neighbours(self, adjmat):
         """Remove neighbors exceeding the maximum allowed limit."""
         nodes_to_drop = np.maximum(np.bincount(adjmat.row) - self.max_num_neighbours, 0)
-        if num_nodes_to_drop := nodes_to_drop.sum() == 0:
+        if (num_nodes_to_drop := nodes_to_drop.sum()) == 0:
             return adjmat
 
         LOGGER.info(
@@ -146,14 +174,26 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
             self.max_num_neighbours,
         )
 
-        # Compute indices to remove
-        mask = np.ones(adjmat.nnz, dtype=bool)
-        node_idx = np.where(nodes_to_drop > 0)[0]
-        for node_id in node_idx:
-            indices_of_largest_dist = np.argpartition(adjmat.data[adjmat.row == node_id], -nodes_to_drop[node_id])[
-                -nodes_to_drop[node_id] :
-            ]
-            mask[np.where(adjmat.row == node_id)[0][indices_of_largest_dist]] = False
+        # Vectorized approach: sort edges by (row, distance) to group by node
+        # no repeated O(nnz) scans in a loop
+        sort_idx = np.lexsort((adjmat.data, adjmat.row))
+        sorted_rows = adjmat.row[sort_idx]
+
+        # Find where each row starts and ends
+        row_changes = np.concatenate(([0], np.where(np.diff(sorted_rows) != 0)[0] + 1, [len(sorted_rows)]))
+
+        # Compute rank of each edge within its row
+        edge_rank_in_row = np.zeros(len(sorted_rows), dtype=int)
+        for i in range(len(row_changes) - 1):
+            start, end = row_changes[i], row_changes[i + 1]
+            edge_rank_in_row[start:end] = np.arange(end - start)
+
+        # Keep edges where rank < max_num_neighbours (smallest distances are first due to sorting)
+        mask_sorted = edge_rank_in_row < self.max_num_neighbours
+
+        # Map back to original order
+        mask = np.zeros(adjmat.nnz, dtype=bool)
+        mask[sort_idx] = mask_sorted
 
         # Define the new sparse matrix
         return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
@@ -183,12 +223,22 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         torch.Tensor of shape (2, num_edges)
             The adjacency matrix.
         """
-        LOGGER.info(
-            "Using CutOff-Edges (with radius = %.1f km) between %s and %s.",
-            self.radius * EARTH_RADIUS,
-            self.source_name,
-            self.target_name,
-        )
+        radius_km = self.radius * EARTH_RADIUS
+        if self.cutoff_distance_km is not None:
+            LOGGER.info(
+                "Using CutOff-Edges (with radius = %.1f km [direct]) between %s and %s.",
+                radius_km,
+                self.source_name,
+                self.target_name,
+            )
+        else:
+            LOGGER.info(
+                "Using CutOff-Edges (with radius = %.1f km [factor=%.2f]) between %s and %s.",
+                radius_km,
+                self.cutoff_factor,
+                self.source_name,
+                self.target_name,
+            )
         return super().compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)
 
 
@@ -231,8 +281,9 @@ class ReversedCutOffEdges(CutOffEdges):
     def get_cutoff_radius(self, graph: HeteroData):
         """Compute the cut-off radius.
 
-        The cut-off radius is computed as the product of the target nodes
-        reference distance and the cut-off factor.
+        The cut-off radius is computed either as:
+        - The product of the source nodes reference distance and the cut-off factor, or
+        - Directly from the cutoff distance in kilometers.
 
         Parameters
         ----------
@@ -242,12 +293,20 @@ class ReversedCutOffEdges(CutOffEdges):
         Returns
         -------
         float
-            The cut-off radius.
+            The cut-off radius in Cartesian coordinates on unit sphere.
         """
-        reference_dist = CutOffEdges.get_reference_distance(
-            graph[self.source_name], mask_attr_name=self.source_mask_attr_name
-        )
-        return reference_dist * self.cutoff_factor
+        if self.cutoff_distance_km is not None:
+            # Convert km to Cartesian distance on unit sphere
+            # For small distances: Cartesian distance ≈ great circle distance (radians)
+            # radians = km / EARTH_RADIUS
+            radius = self.cutoff_distance_km / EARTH_RADIUS
+        else:
+            # Use factor-based approach
+            reference_dist = CutOffEdges.get_reference_distance(
+                graph[self.source_name], mask_attr_name=self.source_mask_attr_name
+            )
+            radius = reference_dist * self.cutoff_factor
+        return radius
 
     def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         adj_matrix = adj_matrix.T

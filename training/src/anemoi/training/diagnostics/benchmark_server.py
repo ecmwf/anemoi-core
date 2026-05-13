@@ -18,8 +18,8 @@ import tarfile
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Callable
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -625,7 +625,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
 
     # get metadata
     commit = get_git_revision_hash()
-    yyyy_mm_dd = datetime.now(tz=timezone.utc).date()
+    yyyy_mm_dd = datetime.now(tz=UTC).date()
 
     # create Benchmark value objects
     local_benchmark_results = []
@@ -686,6 +686,40 @@ def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
     return artifacts
 
 
+@rank_zero_only
+def track_dataloader_benchmark_results(
+    test_case: str,
+    batches_per_second: float,
+) -> None:
+    """Track dataloader metrics by updating the remote benchmark server on main."""
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping dataloader benchmark tracking: not on main branch")
+        return
+
+    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+    user, hostname, path = parse_benchmark_config(config_path)
+    store = f"ssh://{user}@{hostname}:{path}"
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
+
+    commit = get_git_revision_hash()
+    today = datetime.now(tz=UTC).date()
+    dataloader_benchmark_results = [
+        BenchmarkValue(
+            name="dataloaderThroughputIterPerS",
+            value=batches_per_second,
+            unit="iter/s",
+            date=today,
+            commit=commit,
+            op=operator.ge,
+            tolerance=10,
+        ),
+    ]
+
+    LOGGER.info("Updating dataloader benchmark metrics on server")
+    for dataloader_benchmark_value in dataloader_benchmark_results:
+        benchmark_server.set_value(dataloader_benchmark_value)
+
+
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:
     local_results_str = "Local benchmark results:\n"
     local_results_str += "-" * 20 + "\n"
@@ -702,7 +736,8 @@ def benchmark(
     store: str,
     update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
-    local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
+    profiler_path = cfg.system.output.profiler
+    local_benchmark_results = get_local_benchmark_results(profiler_path)
 
     # Get reference benchmark results
     benchmark_server = parse_benchmark_location(store, test_case=test_case)
@@ -725,7 +760,7 @@ def benchmark(
 
     if len(failed_tests) > 0:
         msg = f"The following tests failed: {failed_tests}"
-        artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+        artifacts = get_local_benchmark_artifacts(profiler_path)
         artifacts_tar = Path(f"./{test_case}_artifacts.tar.gz")
         _tar_files(artifacts, artifacts_tar)
         LOGGER.info("Profiling artifacts from failed run stored under: %s", artifacts_tar)
@@ -736,5 +771,5 @@ def benchmark(
         LOGGER.info("Updating metrics on server")
         for local_benchmark_value in local_benchmark_results:
             benchmark_server.set_value(local_benchmark_value)
-            artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+            artifacts = get_local_benchmark_artifacts(profiler_path)
             benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)

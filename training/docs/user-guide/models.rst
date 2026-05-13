@@ -2,25 +2,16 @@
  Models
 ########
 
-The user can pick between different model tasks and types when using
+The user can pick between different model types when using
 anemoi-training:
 
-**Model Tasks:**
-
-#. Deterministic Forecasting (GraphForecaster)
-#. Ensemble Forecasting (GraphEnsForecaster)
-#. Time Interpolation (GraphInterpolator)
-#. Diffusion-based Forecasting (GraphDiffusionForecaster)
-
-The model tasks specify the training objective and are specified in the
-configuration through ``training.model_task``. They are our
-`LightningModules <https://lightning.ai/docs/pytorch/lightning.html>`_.
 
 **Model Types:**
 
 #. Graph Neural Network (GNN)
 #. Graph Transformer Neural Network
 #. Transformer Neural Network
+#. Point-wise Multilayer Perceptron
 
 The model types specify the model architecture and can be chosen
 independently of the model task. Currently, all models have a
@@ -33,10 +24,6 @@ For a more detailed read on connections in Graph Neural Networks,
 For detailed instructions on creating models, see the
 :ref:`anemoi-models:usage-create-model`.
 
-.. note::
-
-   Currently, the GNN model type is not supported with the Ensemble
-   Forecasting model task and the Diffusion Forecasting model task.
 
 ************
  Processors
@@ -44,7 +31,7 @@ For detailed instructions on creating models, see the
 
 The processor is the part of the model that performs the computation on
 the latent space. The processor can be chosen to be a GNN,
-GraphTransformer or Transformer with Flash attention.
+GraphTransformer, Transformer with Flash attention or Point-wise MLP.
 
 GNN
 ===
@@ -54,7 +41,7 @@ al. (2023).
 
 The physical data is encoded on to a multi-mesh latent space of
 decreasing resolution. This multi-mesh is defined by the graph given in
-``config.hardware.files.graph``.
+``config.system.input.graph``.
 
 .. figure:: ../images/gnn-encoder-decoder-multimesh.jpg
    :width: 500
@@ -99,13 +86,28 @@ coarser than the resolution of the base data.
 
    Attention windows (grid points highlighted in blue) for different grid points (red).
 
+.. note::
+
+   The Transformer does not require a subgraph.
+
+Point-wise MLP
+==============
+
+The Point-wise MLP applies the same multilayer perceptron independently
+to each node. Results for each node are not conditioned on other nodes,
+as there is no message passing or interaction between nodes.
+
+.. note::
+
+   The Point-wise MLP does not require a subgraph.
+
 *******************
  Encoders/Decoders
 *******************
 
-The encoder and decoder can be chosen to be a GNN, a GraphTransformer,
-or a Transformer. This choice is independent of the processor, but
-currently the encoder and decoder must be the same model type otherwise
+The encoders and decoders can be chosen to be GNNs, GraphTransformers,
+or Transformers. This choice is independent of the processor, but
+currently the encoders and decoders must be the same model type otherwise
 the code will break.
 
 *******************
@@ -133,31 +135,128 @@ For detailed information and examples, see
 ******************
 
 Field truncation is a pre-processing step applied during autoregressive
-rollout. It smooths the input data which helps maintain stability during
-rollout.
+rollout. It smooths the skipped connection data which helps maintain
+stability during rollout and can be used for multi-scale loss
+computation.
 
-The truncation process relies on pre-computed transformation matrices
-which can be specified in the configuration:
+**********
+ Overview
+**********
 
-.. code:: yaml
+Truncation matrices are sparse transformation matrices that filter
+high-frequency components from the input data. This process serves two
+main purposes:
 
-   path:
-      truncation: /path/to/truncation/matrix
-   files:
-      truncation: truncation_matrix.pt
-      truncation_inv: truncation_matrix_inv.pt
+#. **Stability Enhancement**: Smoothing the skipped connection data
+   helps maintain numerical stability during long autoregressive
+   rollouts by reducing noise amplification.
 
-Once set, the truncation matrices are used automatically during the
-rollout.
+#. **Multi-scale Loss Computation**: For ensemble training, truncation
+   matrices can be used to compute losses at different scales.
 
 .. note::
 
-   The truncation matrices required for field truncation can be
-   generated using the ``anemoi-graphs`` package.
+   Truncation matrices can be generated using the ``anemoi-graphs``
+   package, or constructed at runtime (on-the-fly mode). For detailed
+   instructions on how to create these matrices, see
+   :ref:`Create sparse matrices with anemoi-graphs
+   <anemoi-graphs:usage-create_sparse_matrices>`.
 
-   For detailed instructions on how to create these matrices, see the
-   documentation at :ref:`Create sparse matrices with anemoi-graphs
-   <anemoi-graphs:usage-create_sparse_matrices>` tutorial.
+**********************
+ TruncatedConnection
+**********************
+
+:class:`anemoi.models.layers.residual.TruncatedConnection` applies a
+coarse-graining and reconstruction step to the skip-connection features.
+It is configured via a single ``truncation_config`` key that supports
+two modes.
+
+**On-the-fly mode** — build the projection graph at startup from a
+coarser grid:
+
+.. code:: yaml
+
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_config:
+         grid: o32
+         num_nearest_neighbours: 3
+         sigma: 1.0
+
+**File-based mode** — load pre-computed sparse matrices from disk:
+
+.. code:: yaml
+
+   model:
+     residual:
+       _target_: anemoi.models.layers.residual.TruncatedConnection
+       truncation_config:
+         truncation_down_file_path: /path/to/truncation_down.npz
+         truncation_up_file_path: /path/to/truncation_up.npz
+
+.. _multiscale-loss-userguide:
+
+**********************
+ Multiscale Loss
+**********************
+
+The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
+presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
+functions such as the ``AlmostFairKernelCRPSLoss`` to provide
+scale-aware model training.
+
+The wrapper is configured via a single ``multiscale_config`` key that
+supports two modes.
+
+**On-the-fly mode** — build smoothing graphs at startup from a
+geometric progression of KNN smoothers:
+
+.. code:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           weights: [0.5, 0.25, 0.15, 0.1]
+           multiscale_config:
+             num_scales: 3          # builds 3 smoothed + 1 full-res = 4 scales
+             base_num_nearest_neighbours: 4
+             base_sigma: 0.1
+             scale_factor: 2
+           per_scale_loss:
+             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             scalers: ['node_weights']
+
+**File-based mode** — load pre-computed sparse matrices from disk:
+
+.. code:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         your_dataset_name:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           weights: [0.5, 0.25, 0.15, 0.1]
+           multiscale_config:
+             loss_matrices_path: /path/to/matrices
+             loss_matrices:
+               - filter_8x.npz   # coarsest scale
+               - filter_4x.npz
+               - filter_2x.npz
+               - null            # full resolution
+           per_scale_loss:
+             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             scalers: ['node_weights']
+
+The loss at each scale is computed on the *residual* between successive
+smoothing levels, so that each scale captures the energy in its
+frequency band. Scales must be ordered coarsest-first; the final
+``null`` entry always applies no smoothing (full resolution).
+
+The number of entries in ``weights`` must equal the total number of
+scales (smoothed + full-res).
 
 ***************
  Ensemble Size

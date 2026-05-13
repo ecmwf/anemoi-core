@@ -11,7 +11,6 @@
 import logging
 from itertools import chain
 from pathlib import Path
-from warnings import warn
 
 import torch
 from hydra.utils import instantiate
@@ -39,26 +38,6 @@ class GraphCreator:
         else:
             self.config = config
 
-        # Support previous version. This will be deprecated in a future release
-        edges = []
-        for edges_cfg in self.config.get("edges", []):
-            if "edge_builder" in edges_cfg:
-                warn(
-                    "This format will be deprecated. The key 'edge_builder' is renamed to 'edge_builders' and takes a list of edge builders. In addition, the source_mask_attr_name & target_mask_attr_name fields are moved under the each edge builder.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-                edge_builder_cfg = edges_cfg.get("edge_builder")
-                if edge_builder_cfg is not None:
-                    edge_builder_cfg = DotDict(edge_builder_cfg)
-                    edge_builder_cfg.source_mask_attr_name = edges_cfg.get("source_mask_attr_name", None)
-                    edge_builder_cfg.target_mask_attr_name = edges_cfg.get("target_mask_attr_name", None)
-                    edges_cfg["edge_builders"] = [edge_builder_cfg]
-
-            edges.append(edges_cfg)
-        self.config.edges = edges
-
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph.
 
@@ -83,7 +62,9 @@ class GraphCreator:
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
                 edge_builder = instantiate(
-                    edge_builder_cfg, source_name=edges_cfg.source_name, target_name=edges_cfg.target_name
+                    edge_builder_cfg,
+                    source_name=edges_cfg.source_name,
+                    target_name=edges_cfg.target_name,
                 )
                 graph = edge_builder.update_graph(graph, attrs_config=None)
 
@@ -163,7 +144,9 @@ class GraphCreator:
         else:
             # The error is only logged for compatibility with multi-gpu training in anemoi-training.
             # Currently, distributed graph creation is not supported so we create the same graph in each gpu.
-            LOGGER.error(f"Graph already exists at {save_path}. Use overwrite=True to overwrite.")
+            LOGGER.error(
+                f"Graph not saved because {save_path} already exists. If this occurred during a multi-process or multi-GPU run, another process likely saved it first. If you intended to recreate it, rerun with overwrite=True."
+            )
 
     def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
         """Create the graph and save it to the output path.
@@ -191,3 +174,27 @@ class GraphCreator:
             self.save(graph, save_path, overwrite)
 
         return graph
+
+
+def load_graph_from_file(graph_filename: Path) -> HeteroData:
+    """Load a serialized graph on the currently active distributed device."""
+    try:
+        from anemoi.graphs.utils import get_distributed_device
+
+        map_location = get_distributed_device()
+    except Exception:
+        map_location = "cpu"
+
+    LOGGER.info("Loading graph data from %s", graph_filename)
+    return torch.load(graph_filename, map_location=map_location, weights_only=False)
+
+
+def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
+    """Ensure the loaded graph contains the required dataset node types."""
+    missing = [n for n in required_dataset_names if n not in graph_data.node_types]
+    if missing:
+        msg = (
+            "Loaded graph is missing dataset node types required by the dataloader. "
+            f"Missing {missing}; available nodes are {graph_data.node_types}."
+        )
+        raise ValueError(msg)

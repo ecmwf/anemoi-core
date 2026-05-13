@@ -36,7 +36,7 @@ def input_normalizer():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics)
 
 
@@ -66,7 +66,7 @@ def remap_normalizer():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics)
 
 

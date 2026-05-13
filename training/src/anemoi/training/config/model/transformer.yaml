@@ -5,6 +5,8 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -34,6 +36,7 @@ processor:
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
@@ -46,8 +49,10 @@ encoder:
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: 'edges'
+  shard_strategy: "edges"
+  graph_attention_backend: "triton" # Options: "triton", "pyg"
 
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
@@ -59,8 +64,14 @@ decoder:
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: 'edges'
+  shard_strategy: "edges"
+  graph_attention_backend: "triton" # Options: "triton", "pyg"
+
+residual:
+  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+  step: -1 # use the latest step as skip connection
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
@@ -73,8 +84,8 @@ trainable_parameters:
 
 attributes:
   edges:
-  - edge_length
-  - edge_dirs
+    - edge_length
+    - edge_dirs
   nodes: []
 
 # Torch compile configuration
@@ -106,12 +117,11 @@ compile:
 
 # Bounding configuration
 bounding: #These are applied in order
-
   # Bound tp (total precipitation) with a Relu bounding layer
   # ensuring a range of [0, infinity) to avoid negative precipitation values.
   - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
     variables:
-    - tp
+      - tp
 
   # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
   # This guarantees that cp is physically consistent with tp by restricting cp

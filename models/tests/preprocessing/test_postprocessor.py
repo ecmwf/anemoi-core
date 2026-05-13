@@ -34,7 +34,7 @@ def postprocessor():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return Postprocessor(config=config.data.postprocessor, data_indices=data_indices)
 
 
@@ -71,7 +71,7 @@ def normmrelupostprocessor():
         "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
 
     return NormalizedReluPostprocessor(
         config=config.data.normmrelupostprocessor,
@@ -107,7 +107,7 @@ def conditionalzeropostprocessor():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return ConditionalZeroPostprocessor(config=config.data.conditionalzeropostprocessor, data_indices=data_indices)
 
 
@@ -138,7 +138,7 @@ def conditionalnanpostprocessor():
         },
     )
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return ConditionalNaNPostprocessor(config=config.data.conditionalnanpostprocessor, data_indices=data_indices)
 
 
@@ -223,7 +223,7 @@ def input_normalizer_postprocessor():
         "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
     }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
-    data_indices = IndexCollection(config=config, name_to_index=name_to_index)
+    data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return (
         InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics),
         NormalizedReluPostprocessor(

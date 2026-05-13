@@ -20,6 +20,8 @@ from torch_geometric.utils import bipartite_subgraph
 from torch_geometric.utils import k_hop_subgraph
 from torch_geometric.utils import mask_to_index
 
+from anemoi.models.distributed.shapes import ShardSizes
+
 
 def get_k_hop_edges(
     nodes: Tensor,
@@ -63,8 +65,8 @@ def sort_edges_1hop_sharding(
     edge_index: Adj,
     mgroup: Optional[ProcessGroup] = None,
     relabel_dst_nodes: bool = False,
-) -> tuple[Adj, Tensor, list, list]:
-    """Rearanges edges into 1 hop neighbourhoods for sharding across GPUs.
+) -> tuple[Tensor, Adj, ShardSizes]:
+    """Rearrange edges into 1-hop neighbourhoods for sharding across GPUs.
 
     Parameters
     ----------
@@ -81,9 +83,9 @@ def sort_edges_1hop_sharding(
 
     Returns
     -------
-    tuple[Adj, Tensor, list, list]
-        edges sorted according to k hop neigh., edge attributes of sorted edges,
-        shapes of edge indices for partitioning between GPUs, shapes of edge attr for partitioning between GPUs
+    tuple[Tensor, Adj, ShardSizes]
+        Edge attributes and edge indices sorted according to 1-hop neighbourhoods,
+        plus edge shard sizes when a model communication group is provided.
     """
     if mgroup:
         num_chunks = dist.get_world_size(group=mgroup)
@@ -92,12 +94,50 @@ def sort_edges_1hop_sharding(
             num_nodes, edge_attr, edge_index, num_chunks, relabel_dst_nodes=relabel_dst_nodes
         )
 
-        edge_index_shapes = [x.shape for x in edge_index_list]
-        edge_attr_shapes = [x.shape for x in edge_attr_list]
+        edge_shard_sizes = [e.shape[0] for e in edge_attr_list]
 
-        return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_attr_shapes, edge_index_shapes
+        return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_shard_sizes
 
-    return edge_attr, edge_index, [], []
+    return edge_attr, edge_index, None
+
+
+def shard_edges_1hop(
+    edge_attr: Tensor,
+    edge_index: Adj,
+    src_size: int,
+    dst_size: int,
+    model_comm_group: Optional[ProcessGroup],
+) -> tuple[Tensor, Adj, ShardSizes]:
+    """Sort and shard edges for 1-hop sharding.
+
+    Parameters
+    ----------
+    edge_attr : Tensor
+        Edge attributes
+    edge_index : Adj
+        Edge index
+    src_size : int
+        Number of source nodes
+    dst_size : int
+        Number of destination nodes
+    model_comm_group : ProcessGroup, optional
+        Model communication group
+
+    Returns
+    -------
+    tuple[Tensor, Adj, ShardSizes]
+        Sharded edge_attr, sharded edge_index, and edge_shard_sizes.
+    """
+    from anemoi.models.distributed.graph import shard_tensor
+
+    num_nodes = (src_size, dst_size)
+    edge_attr, edge_index, edge_shard_sizes = sort_edges_1hop_sharding(
+        num_nodes, edge_attr, edge_index, model_comm_group
+    )
+    edge_index = shard_tensor(edge_index, 1, edge_shard_sizes, model_comm_group)
+    edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
+
+    return edge_attr, edge_index, edge_shard_sizes
 
 
 def sort_edges_1hop_chunks(
