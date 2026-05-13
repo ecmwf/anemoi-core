@@ -113,6 +113,22 @@ _DEPRECATED_TARGETS: dict[str, str] = {
         "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
         "instead and update your config accordingly."
     ),
+    "anemoi.models.layers.activations.GLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: glu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.SwiGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: swiglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.GEGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: geglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.ReGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: reglu' "
+        "in your model component config instead."
+    ),
 }
 
 
