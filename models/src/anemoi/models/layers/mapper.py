@@ -371,7 +371,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         for dst_chunk in dst_chunks:
             out_dst[dst_chunk] = maybe_checkpoint(
-                self.run_processor_chunk_edge_sharding,
+                self.run_processor_chunk,
                 self.gradient_checkpointing,
                 (x_src, x_dst),
                 dst_chunk,

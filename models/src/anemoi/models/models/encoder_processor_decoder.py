@@ -72,7 +72,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
-        self.processor = ProfilerWrapper(self.processor, "processor")
 
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
@@ -114,7 +113,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_comm_group=model_comm_group,
             n_step_output=self.n_step_output,
         )
-        self.decoder = ProfilerWrapper(self.decoder, "decoder")
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
