@@ -62,9 +62,17 @@ reference it in the config as follows:
 
 The following probabilistic loss functions are available by default:
 
--  ``KernelCRPSLoss``: Kernel CRPS loss.
--  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
-   et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+-  ``CRPS``: Kernel CRPS loss for ensemble predictions. ``alpha=0`` gives
+   standard CRPS, ``alpha=1`` gives fair CRPS, and values between 0 and 1
+   give the almost fair CRPS formulation (`Lang et al. (2024)
+   <http://arxiv.org/abs/2412.15832>`_). The default ``alpha: 0.95``
+   combines 5% standard CRPS with 95% fair CRPS.
+   The ``backend`` option can be set to:
+
+   - ``naive``: simple loop over unordered ensemble-member pairs, avoiding
+     materialization of the full pairwise tensor.
+   - ``stable``: materializes pairwise tensors and uses the numerically
+     stable all-pairs formulation.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
    handle noise weights
 
@@ -78,7 +86,7 @@ deterministic:
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
+            _target_: anemoi.training.losses.CRPS
             # loss function kwargs here
 
 .. _multiscale-loss-functions:
@@ -141,11 +149,12 @@ and ``ensemble_multiscale_aggregation`` combine it with the primary loss inside 
  Multiscale Loss Functions
 ***************************
 
-The ``MultiscaleLossWrapper`` wraps any base loss (e.g.
-``AlmostFairKernelCRPS``) and evaluates it at multiple spatial scales
-by progressively smoothing both predictions and targets. Each scale
-loss is computed on the *residual* between successive smoothing levels,
-so coarser scales capture large-scale errors and finer scales capture
+The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
+presented in <https://arxiv.org/abs/2506.10868>. It wraps any base loss
+(e.g. ``CRPS``) and evaluates it at multiple spatial scales by
+progressively smoothing both predictions and targets. Each scale loss is
+computed on the *residual* between successive smoothing levels, so
+coarser scales capture large-scale errors and finer scales capture
 small-scale structure.
 
 The number of weights must equal the number of smoothing levels. A final
@@ -171,11 +180,11 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
                base_sigma: 0.1
                scale_factor: 2                 # neighbours and sigma double each level
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
-               alpha: 1.0
+               alpha: 0.95
 
 File-based mode (load precomputed ``.npz`` matrices from disk):
 
@@ -194,7 +203,7 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
                   - filter_O96_w=gaussian_d=2.0x.npz
                   - null                                # full resolution (no smoothing)
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True

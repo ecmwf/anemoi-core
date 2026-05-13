@@ -9,7 +9,7 @@ datasets:
     multiscale_config: null  # null = single scale, no smoothing
     weights: [1.0]
     per_scale_loss:
-      _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      _target_: anemoi.training.losses.CRPS
       scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
 
       # Scalers to include in loss calculation

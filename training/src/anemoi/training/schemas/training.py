@@ -21,6 +21,7 @@ from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
@@ -244,8 +245,7 @@ ScalerSchema = (
 
 
 class ImplementedLossesUsingBaseLossSchema(StrEnum):
-    kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
-    afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
+    crps = "anemoi.training.losses.CRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
@@ -263,24 +263,19 @@ class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
-    "Scalars to include in loss calculation"
+    "Scalers to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
     target_variables: list[str] | None = None
 
 
-class KernelCRPSSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
-    fair: bool = True
-    "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
-
-
-class AlmostFairKernelCRPSSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
-    alpha: float = 1.0
-    """Factor for linear combination of fair (unbiased, ensemble variance component
-    weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
+class CRPSSchema(BaseLossSchema):
+    alpha: float = Field(default=0.95, ge=0.0, le=1.0)
+    """Factor for linear combination of fair CRPS and standard CRPS.
+    Values between 0 and 1 give the almost fair CRPS formulation."""
+    backend: Literal["naive", "stable"] = "stable"
+    "Backend used for the point-wise CRPS calculation."
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
@@ -337,7 +332,7 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
+    per_scale_loss: CRPSSchema | BaseLossSchema
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     # Deprecated: pass inside multiscale_config instead.
@@ -379,7 +374,7 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
     time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
     "Time aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: BaseLossSchema | AlmostFairKernelCRPSSchema | KernelCRPSSchema
+    loss_fn: BaseLossSchema | CRPSSchema
     "Inner loss function applied to each time-aggregated output."
     scalers: list[str] | None = None
     "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
@@ -426,14 +421,9 @@ class CombinedLossSchema(BaseModel):
     "CombinedLoss target."
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
-    losses: list[
-        BaseLossSchema
-        | AlmostFairKernelCRPSSchema
-        | KernelCRPSSchema
-        | SpectralLossSchema
-        | TimeAggregateLossWrapperSchema
-        | MultiScaleLossSchema
-    ] = Field(min_length=1)
+    losses: list[MultiScaleLossSchema | TimeAggregateLossWrapperSchema | SpectralLossSchema | CRPSSchema | HuberLossSchema | BaseLossSchema] = Field(
+        min_length=1,
+    )
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -448,16 +438,37 @@ class CombinedLossSchema(BaseModel):
         return self
 
 
-LossSchemas = (
-    BaseLossSchema
-    | HuberLossSchema
-    | CombinedLossSchema
-    | AlmostFairKernelCRPSSchema
-    | KernelCRPSSchema
-    | SpectralLossSchema
-    | MultiScaleLossSchema
-    | TimeAggregateLossWrapperSchema
-)
+def _loss_discriminator(v: Any) -> str:
+    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
+    if target == "anemoi.training.losses.combined.CombinedLoss":
+        return "combined"
+    if target == "anemoi.training.losses.MultiscaleLossWrapper":
+        return "multiscale"
+    if target == "anemoi.training.losses.CRPS":
+        return "crps"
+    if target in {
+        "anemoi.training.losses.spectral.FourierCorrelationLoss",
+        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.LogFFT2Distance",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.SpectralL2Loss",
+    }:
+        return "spectral"
+    if target == "anemoi.training.losses.HuberLoss":
+        return "huber"
+    return "base"
+
+
+LossSchemas = Annotated[
+    Annotated[BaseLossSchema, Tag("base")]
+    | Annotated[HuberLossSchema, Tag("huber")]
+    | Annotated[CombinedLossSchema, Tag("combined")]
+    | Annotated[CRPSSchema, Tag("crps")]
+    | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
+    | Annotated[MultiScaleLossSchema, Tag("multiscale")],
+    Discriminator(_loss_discriminator),
+]
 
 
 class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):

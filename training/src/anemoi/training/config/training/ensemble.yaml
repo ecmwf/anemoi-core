@@ -51,6 +51,7 @@ strategy:
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
+
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
 # and logged according to their name.
@@ -61,7 +62,7 @@ validation_metrics:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       fkcrps:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+        _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
         ignore_nans: False
         alpha: 1.0
@@ -73,7 +74,7 @@ validation_metrics:
         weights: [1.0]
 
         per_scale_loss:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+          _target_: anemoi.training.losses.CRPS
           scalers: ['node_weights', 'time_steps']
 
           # Scalers to include in loss calculation
