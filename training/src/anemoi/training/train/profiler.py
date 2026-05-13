@@ -26,7 +26,6 @@ from rich.console import Console
 
 from anemoi.training.diagnostics.profilers import BenchmarkProfiler
 from anemoi.training.diagnostics.profilers import ProfilerProgressBar
-from anemoi.training.diagnostics.trace_analyser import analyse_trace
 from anemoi.training.train.train import AnemoiTrainer
 
 LOGGER = logging.getLogger(__name__)
@@ -85,7 +84,6 @@ class AnemoiProfiler(AnemoiTrainer):
         if memory_metrics_df is not None:
             warnings.warn("INFO: Memory Report metrics represent metrics aggregated across all nodes")
             self.print_report("Memory Profiling", memory_metrics_df, color="purple", emoji="floppy_disk")
-            analyse_trace(self.profiler.dirpath)
 
         if system_metrics_df is not None:
             self.print_report("System Profiling", system_metrics_df, color="Red", emoji="desktop_computer")

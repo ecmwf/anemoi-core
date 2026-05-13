@@ -2,7 +2,6 @@
 memory:
   enabled: False
   steps: 5 # wait warmup steps and then do steps (too many steps would lead to a big file)
-  wait: 10
   warmup: 2
   extra_plots: False
   trace_rank0_only: False #set to true and it will profile rank 0 only. Reads SLURM_PROC_ID so won't work when not running via Slurm

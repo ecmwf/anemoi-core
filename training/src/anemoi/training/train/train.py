@@ -47,7 +47,6 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -663,17 +662,6 @@ class AnemoiTrainer(ABC):
     def train(self) -> None:
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
-
-        import os
-
-        if self.config.training.deterministic:
-            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
-            torch.backends.cudnn.benchmark = False
-            torch.backends.cudnn.deterministic = True
-            torch.use_deterministic_algorithms(True)
-            seed = int(os.environ["ANEMOI_BASE_SEED"])
-            torch.manual_seed(seed)
-            np.random.seed(seed)
 
         trainer = pl.Trainer(
             accelerator=self.accelerator,

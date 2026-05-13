@@ -24,8 +24,6 @@ from .common_components import TransformerModelComponent
 class GNNDecoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNBackwardMapper"] = Field(..., alias="_target_")
     "GNN decoder object from anemoi.models.layers.mapper."
-    shard_strategy: str = Field(example="edges")
-    "Shard strategy to use for the model component. Default to 'edges'."
 
 
 class GraphTransformerDecoderSchema(TransformerModelComponent):
@@ -39,8 +37,6 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Normalize the query and key vectors. Default to False."
     initialise_data_extractor_zero: bool = Field(example=False)
     "Initialise the data extractor with zeros. Default to False."
-    shard_strategy: str = Field(example="edges")
-    "Shard strategy to use for the model component. Default to 'edges'."
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:

@@ -135,7 +135,7 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
         self.ens_comm_subgroup_rank_0 = ens_comm_subgroup_rank_0
-
+        
     def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Setup batch sharding, broadcasting data from rank 0 of each ensemble subgroup."""
         for dataset_name in batch:

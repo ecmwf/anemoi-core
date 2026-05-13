@@ -39,7 +39,7 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-# Number of chunks used in inference (https://github.com/ecmwf/anemoi-models/pull/46)
+# Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/406)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_MAPPER = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER", NUM_CHUNKS_INFERENCE))
 
@@ -286,7 +286,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         return x_src, x_dst, edge_attr, edge_index, shard_info, cond
 
-    def run_processor_chunk(
+    def run_processor_chunk_edge_sharding(
         self,
         x: tuple[Tensor, Tensor],
         dst_chunk: Tensor,
@@ -371,7 +371,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         for dst_chunk in dst_chunks:
             out_dst[dst_chunk] = maybe_checkpoint(
-                self.run_processor_chunk,
+                self.run_processor_chunk_edge_sharding,
                 self.gradient_checkpointing,
                 (x_src, x_dst),
                 dst_chunk,
@@ -737,8 +737,6 @@ class GNNBaseMapper(BaseMapper, ABC):
         layer_kernels : DotDict, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy : str, optional
-            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -880,8 +878,6 @@ class GNNForwardMapper(GNNBaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy : str, optional
-            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -973,8 +969,6 @@ class GNNBackwardMapper(GNNBaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy : str, optional
-            Strategy to shard tensors, by default "edges"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1272,8 +1266,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1390,7 +1382,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
         window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
-        shard_strategy: str = "heads",
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerForwardMapper.
@@ -1430,8 +1421,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1512,7 +1501,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
-        shard_strategy: str = "heads",
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerBackwardMapper.
@@ -1552,8 +1540,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
-        shard_strategy : str, optional
-            Strategy to shard tensors, by default "heads"
         """
         super().__init__(
             in_channels_src=in_channels_src,
