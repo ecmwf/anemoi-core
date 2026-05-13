@@ -152,13 +152,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _assert_condition_shapes(self, condition: dict[str, torch.Tensor]) -> tuple[int, int]:
         dataset_names = list(condition)
         condition_ref = condition[dataset_names[0]]
-        assert condition_ref.ndim == 5, "Expected condition to have 5 dimensions (batch, time, ensemble, grid, vars)."
+        assert condition_ref.ndim == 5, "Expected condition to have shape (batch, 1, ensemble, 1, 1)."
         batch_size, _, ensemble_size = condition_ref.shape[:3]
         for dataset_name in dataset_names:
             condition_shape = condition[dataset_name].shape
             assert (
                 len(condition_shape) == 5
-            ), f"Expected condition to have 5 dimensions (batch, time, ensemble, grid, vars) for '{dataset_name}'."
+            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
+            assert (
+                condition_shape[1] == condition_shape[3] == condition_shape[4] == 1
+            ), f"Expected condition to have shape (batch, 1, ensemble, 1, 1) for '{dataset_name}'."
             assert (
                 condition_shape[0] == batch_size and condition_shape[2] == ensemble_size
             ), "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
@@ -202,21 +205,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
-        batch_size, ensemble_size = self._assert_condition_shapes(condition)
+        self._assert_condition_shapes(condition)
         dataset_names = list(x.keys())
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
         # the condition that way, so we can read it from the first dataset,
         # embed it once, and repeat it over each dataset's graph nodes below.
-        condition_base = condition[dataset_names[0]][:, 0, :, 0, 0].unsqueeze(-1)
+        condition_base = condition[dataset_names[0]][:, 0, :, 0]
         noise_cond_base = self._embed_noise_conditioning(condition_base)
-        cond_dim = noise_cond_base.shape[-1]
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
         for dataset_name in x:
-            time_size = condition[dataset_name].shape[1]
-            noise_cond = noise_cond_base[:, None, :, None, :].expand(batch_size, time_size, ensemble_size, 1, cond_dim)
+            # Keep conditioning width independent of n_step_output. The same
+            # transport noise/time embedding is shared across all output steps.
+            noise_cond = noise_cond_base[:, None, :, None, :]
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
                 noise_cond, dataset_name=dataset_name, edge_conditioning=False
             )

@@ -169,7 +169,7 @@ class StochasticInterpolantTransportObjective(TransportObjective):
         # Important: the model later reads the condition from one dataset and
         # assumes every dataset carries the same bridge time. Keep this shared
         # across datasets unless the model conditioning path is changed too.
-        return {dataset_name: time_base.expand(shape_x) for dataset_name, shape_x in shape.items()}
+        return dict.fromkeys(shape, time_base)
 
     @property
     def _alpha_schedule(self) -> str:

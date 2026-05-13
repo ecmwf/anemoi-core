@@ -593,7 +593,7 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
 
     objective = StochasticInterpolantTransportObjective(module).prepare(prepared)
 
-    time_level = torch.full_like(clean["data"], 0.25)
+    time_level = torch.full((1, 1, 1, 1, 1), 0.25)
     expected_anchor = anchor["data"] + 0.25
     expected_interpolant = 0.75 * expected_anchor + 0.25**2 * clean["data"] + 0.25 * 0.75
     expected_drift = -expected_anchor + 0.5 * clean["data"] + 0.5
@@ -629,8 +629,9 @@ def test_stochastic_interpolant_time_sampling_avoids_exact_endpoints(
 
     eps = 1e-7
     expected_base = eps + (1.0 - 2.0 * eps) * torch.tensor([[0.0, 1.0], [0.5, 0.99999]])
-    expected = expected_base[:, None, :, None, None].expand_as(time_level)
+    expected = expected_base[:, None, :, None, None]
     torch.testing.assert_close(time_level, expected)
+    assert time_level.shape == (2, 1, 2, 1, 1)
     assert torch.min(time_level) > 0.0
     assert torch.max(time_level) < 1.0
 

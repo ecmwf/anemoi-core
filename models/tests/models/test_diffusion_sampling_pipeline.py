@@ -37,6 +37,36 @@ def _transport_model_stub() -> AnemoiTransportModelEncProcDec:
     return model
 
 
+def test_transport_conditioning_embedding_uses_compact_condition_width() -> None:
+    model = _transport_model_stub()
+    model._graph_name_hidden = "hidden"
+    model.node_attributes = SimpleNamespace(num_nodes={"data": 4, "hidden": 5})
+    cond_dim = 8
+    model._embed_noise_conditioning = lambda sigma: torch.ones(
+        (*sigma.shape[:-1], cond_dim),
+        device=sigma.device,
+        dtype=sigma.dtype,
+    )
+
+    x = {"data": torch.empty(2, 2, 3, 7, 1)}
+    condition = {"data": torch.zeros(2, 1, 3, 1, 1)}
+
+    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = model._build_conditioning_kwargs(x, condition)
+
+    data_cond, hidden_cond = fwd_mapper_kwargs["data"]["cond"]
+    hidden_back_cond, data_back_cond = bwd_mapper_kwargs["data"]["cond"]
+    assert data_cond.shape == data_back_cond.shape == (2 * 3 * 4, cond_dim)
+    assert hidden_cond.shape == hidden_back_cond.shape == processor_kwargs["cond"].shape == (2 * 3 * 5, cond_dim)
+
+
+def test_transport_conditioning_rejects_expanded_condition_shape() -> None:
+    model = _transport_model_stub()
+    expanded_condition = {"data": torch.zeros(2, 4, 3, 7, 1)}
+
+    with pytest.raises(AssertionError, match="Expected condition to have shape"):
+        model._assert_condition_shapes(expanded_condition)
+
+
 def test_before_sampling_non_sharded_returns_none_grid_shapes() -> None:
     model = _transport_model_stub()
 
