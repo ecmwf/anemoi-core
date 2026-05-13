@@ -421,7 +421,14 @@ class CombinedLossSchema(BaseModel):
     "CombinedLoss target."
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
-    losses: list[MultiScaleLossSchema | TimeAggregateLossWrapperSchema | SpectralLossSchema | CRPSSchema | HuberLossSchema | BaseLossSchema] = Field(
+    losses: list[
+        MultiScaleLossSchema
+        | TimeAggregateLossWrapperSchema
+        | SpectralLossSchema
+        | CRPSSchema
+        | HuberLossSchema
+        | BaseLossSchema
+    ] = Field(
         min_length=1,
     )
     "Losses to combine, can be any of the normal losses."
