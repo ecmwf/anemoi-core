@@ -12,7 +12,7 @@ import torch
 
 from anemoi.training.losses.aggregate import TimeAggregateLossWrapper
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
+from anemoi.training.losses.kcrps import CRPS
 from anemoi.training.losses.mae import MAELoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
@@ -29,9 +29,9 @@ def _make_loss() -> MAELoss:
     return loss
 
 
-def _make_crps_loss() -> AlmostFairKernelCRPS:
-    """Return an AlmostFairKernelCRPS loss with a unit grid scaler (4 grid points)."""
-    loss = AlmostFairKernelCRPS(no_autocast=False)
+def _make_crps_loss() -> CRPS:
+    """Return a CRPS loss with a unit grid scaler (4 grid points)."""
+    loss = CRPS(no_autocast=False)
     loss.add_scaler(TensorDim.GRID, torch.ones(4), name="unit_grid")
     return loss
 
@@ -178,7 +178,7 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
 
 @pytest.mark.parametrize("agg_op", ["mean", "min", "max", "diff"])
 def test_crps_returns_scalar_tensor(agg_op: str) -> None:
-    """TimeAggregateLossWrapper with AlmostFairKernelCRPS should return a scalar for each agg type."""
+    """TimeAggregateLossWrapper with CRPS should return a scalar for each agg type."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
     target = torch.rand(BS, TIME, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper([agg_op], _make_crps_loss())

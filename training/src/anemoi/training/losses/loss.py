@@ -157,8 +157,9 @@ def get_loss_function(
     target_variables = loss_config.pop("target_variables", None)
 
     graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
+    target = loss_config.get("_target_")
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+    if target in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(
             OmegaConf.create(per_scale_loss_config),
@@ -175,7 +176,7 @@ def get_loss_function(
             **_graph_data_kwargs(target_cls, graph_data, graph_extra),
         )
 
-    if "_target_" in loss_config and loss_config["_target_"] in WRAPPED_LOSSES:
+    if target in WRAPPED_LOSSES:
         inner_loss_config = loss_config.pop("loss_fn")
         inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
         wrapper = instantiate(loss_config, loss_fn=inner_loss)
