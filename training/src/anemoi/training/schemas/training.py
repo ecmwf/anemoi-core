@@ -262,8 +262,8 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
-    "Scalers to include in loss calculation"
+    scalers: list[str] = Field(default_factory=list, example=["variable"])
+    "Scalers to include in loss calculation. Defaults to empty (no scaling)."
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
@@ -413,12 +413,18 @@ class SpectralLossSchema(BaseLossSchema):
 
 
 class CombinedLossSchema(BaseModel):
-    """Schema for CombinedLoss. Does not accept scalers; each child loss defines its own."""
+    """Schema for CombinedLoss.
+
+    Top-level ``scalers`` act as defaults for sub-losses that don't specify their own.
+    Sub-losses that explicitly set ``scalers`` override the parent value.
+    """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     "CombinedLoss target."
+    scalers: list[str] = Field(default_factory=list)
+    "Default scalers propagated to sub-losses that don't specify their own."
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     losses: list[
@@ -434,6 +440,36 @@ class CombinedLossSchema(BaseModel):
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
+
+    @model_validator(mode="before")
+    @classmethod
+    def propagate_scalers_to_children(cls, data: Any) -> Any:
+        """Propagate parent scalers to sub-losses that don't specify their own.
+
+        MultiscaleLossWrapper is skipped because it manages scalers via per_scale_loss.
+        """
+        from omegaconf import DictConfig
+        from omegaconf.omegaconf import open_dict
+
+        parent_scalers = data.get("scalers", []) if hasattr(data, "get") else []
+        if not parent_scalers:
+            return data
+
+        losses = data.get("losses", []) if hasattr(data, "get") else []
+        for loss in losses:
+            if not hasattr(loss, "get"):
+                continue
+            target = loss.get("_target_", "")
+            # MultiscaleLossWrapper manages scalers on per_scale_loss, not at top level
+            if "MultiscaleLossWrapper" in str(target):
+                continue
+            if "scalers" not in loss:
+                if isinstance(loss, DictConfig):
+                    with open_dict(loss):
+                        loss["scalers"] = list(parent_scalers)
+                elif isinstance(loss, dict):
+                    loss["scalers"] = list(parent_scalers)
+        return data
 
     @model_validator(mode="after")
     def check_length_of_weights_and_losses(self) -> Self:

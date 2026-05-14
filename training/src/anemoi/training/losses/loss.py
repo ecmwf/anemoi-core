@@ -159,6 +159,14 @@ def get_loss_function(
     graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
     target = loss_config.get("_target_")
 
+    # For CombinedLoss, propagate parent scalers to sub-losses that don't specify their own.
+    if "CombinedLoss" in (target or "") and scalers_to_include:
+        for sub_loss in loss_config.get("losses", []):
+            if isinstance(sub_loss, dict) and "scalers" not in sub_loss:
+                # MultiscaleLossWrapper manages scalers on per_scale_loss, not at top level
+                if "MultiscaleLossWrapper" not in sub_loss.get("_target_", ""):
+                    sub_loss["scalers"] = list(scalers_to_include)
+
     if target in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(
