@@ -124,6 +124,8 @@ class CombinedLoss(BaseLoss):
                         DictConfig(loss_config),
                         scalers=available_scalers,
                         data_indices=data_indices,
+                        graph_data=kwargs.get("graph_data"),
+                        data_node_name=kwargs.get("data_node_name"),
                     ),
                 )
             elif isinstance(loss, type):
