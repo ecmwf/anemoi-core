@@ -14,7 +14,6 @@ from typing import Optional
 
 import torch
 from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
@@ -127,6 +126,7 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
+        self.is_dataset_static = is_dataset_static
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.num_channels = model_config.model.num_channels
@@ -331,6 +331,10 @@ class BaseGraphModel(nn.Module):
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
+            if not self.is_dataset_static[dataset_name]:
+                LOGGER.info(f"Skipping residual connection for static dataset: {dataset_name}")
+                continue 
+
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
                 residual_config,

@@ -12,8 +12,6 @@ import logging
 from abc import ABC
 from collections.abc import Iterable
 
-import torch
-
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.utils.time_indices import normalize_time_indices
 

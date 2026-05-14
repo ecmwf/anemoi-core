@@ -28,7 +28,6 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
-from torch.utils import data
 
 LOGGER = logging.getLogger(__name__)
 
@@ -446,7 +445,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dtype=x_out.dtype, 
                 dataset_name=dataset_name,
             )
-
         
         return target.with_data(x_out_dict)
 
