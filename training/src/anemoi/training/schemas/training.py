@@ -412,7 +412,30 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
-class CombinedLossSchema(BaseModel):
+def _loss_discriminator(v: Any) -> str:
+    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
+    if target == "anemoi.training.losses.combined.CombinedLoss":
+        return "combined"
+    if target == "anemoi.training.losses.MultiscaleLossWrapper":
+        return "multiscale"
+    if target == "anemoi.training.losses.CRPS":
+        return "crps"
+    if target in {
+        "anemoi.training.losses.spectral.FourierCorrelationLoss",
+        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.LogFFT2Distance",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.SpectralL2Loss",
+    }:
+        return "spectral"
+    if target == "anemoi.training.losses.HuberLoss":
+        return "huber"
+    if target == "anemoi.training.losses.aggregate.TimeAggregateLossWrapper":
+        return "time_aggregate"
+    return "base"
+
+
+class CombinedLossSchema(BaseLossSchema):
     """Schema for CombinedLoss.
 
     Top-level ``scalers`` act as defaults for sub-losses that don't specify their own.
@@ -423,20 +446,17 @@ class CombinedLossSchema(BaseModel):
 
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     "CombinedLoss target."
-    scalers: list[str] = Field(default_factory=list)
-    "Default scalers propagated to sub-losses that don't specify their own."
-    ignore_nans: bool = False
-    "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     losses: list[
-        MultiScaleLossSchema
-        | TimeAggregateLossWrapperSchema
-        | SpectralLossSchema
-        | CRPSSchema
-        | HuberLossSchema
-        | BaseLossSchema
-    ] = Field(
-        min_length=1,
-    )
+        Annotated[
+            Annotated[BaseLossSchema, Tag("base")]
+            | Annotated[HuberLossSchema, Tag("huber")]
+            | Annotated[CRPSSchema, Tag("crps")]
+            | Annotated[SpectralLossSchema, Tag("spectral")]
+            | Annotated[MultiScaleLossSchema, Tag("multiscale")]
+            | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
+            Discriminator(_loss_discriminator),
+        ]
+    ] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -479,27 +499,6 @@ class CombinedLossSchema(BaseModel):
             error_msg = "Number of losses and weights must match"
             raise ValueError(error_msg)
         return self
-
-
-def _loss_discriminator(v: Any) -> str:
-    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
-    if target == "anemoi.training.losses.combined.CombinedLoss":
-        return "combined"
-    if target == "anemoi.training.losses.MultiscaleLossWrapper":
-        return "multiscale"
-    if target == "anemoi.training.losses.CRPS":
-        return "crps"
-    if target in {
-        "anemoi.training.losses.spectral.FourierCorrelationLoss",
-        "anemoi.training.losses.spectral.LogSpectralDistance",
-        "anemoi.training.losses.spectral.LogFFT2Distance",
-        "anemoi.training.losses.spectral.SpectralCRPSLoss",
-        "anemoi.training.losses.spectral.SpectralL2Loss",
-    }:
-        return "spectral"
-    if target == "anemoi.training.losses.HuberLoss":
-        return "huber"
-    return "base"
 
 
 LossSchemas = Annotated[
