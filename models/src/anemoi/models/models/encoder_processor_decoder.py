@@ -249,11 +249,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                     model_comm_group=model_comm_group,
                 )
 
-            enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
-                dst_nodes=shard_sizes_hidden,
-                edges=enc_edge_shard_sizes,
-            )
+                enc_shard_info = BipartiteGraphShardInfo(
+                    src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
+                    dst_nodes=shard_sizes_hidden,
+                    edges=enc_edge_shard_sizes,
+                )
 
                 # Encoder for this dataset
                 x_data_latent, x_latent = self.encoder[dataset_name](
