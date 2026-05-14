@@ -109,8 +109,6 @@ class PlotSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
@@ -156,7 +154,7 @@ class PlotHistogramSchema(BaseModel):
 
 
 class PlotEnsSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample"] = Field(alias="_target_")
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotEnsSample"] = Field(alias="_target_")
     "PlotEnsSample object from anemoi training diagnostics callbacks."
     dataset_names: list[str] = Field(examples=["data"])
     "List of dataset names to plot."
@@ -166,8 +164,6 @@ class PlotEnsSampleSchema(BaseModel):
     "List of parameters to plot."
     accumulation_levels_plot: list[float]
     "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
     precip_and_related_fields: list[str] | None = Field(default=None)
     "List of precipitation related fields, by default None."
     per_sample: int = Field(example=6)
@@ -182,71 +178,13 @@ class PlotEnsSampleSchema(BaseModel):
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
 
 
-class PlotEnsLossSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss"] = Field(alias="_target_")
-    "PlotLoss object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    parameter_groups: dict[str, list[str]]
-    "Dictionary with parameter groups with parameter names as key."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at."
-
-
-class PlotEnsSpectrumSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum"] = Field(alias="_target_")
-    "PlotSpectrum object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
-
-
-class PlotEnsHistogramSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram"] = Field(alias="_target_")
-    "PlotHistogram object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
-    "List of precipitation related fields, by default None."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
-
-
-class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot"] = Field(
-        alias="_target_",
-    )
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
-    every_n_epochs: int | None
-    "Epoch frequency to plot at."
-
-
 PlotCallbacks = Annotated[
     GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
     | PlotSpectrumSchema
     | PlotHistogramSchema
-    | PlotEnsSampleSchema
-    | PlotEnsLossSchema
-    | PlotEnsSpectrumSchema
-    | PlotEnsHistogramSchema
-    | GraphTrainableFeaturesPlotEnsSchema,
+    | PlotEnsSampleSchema,
     Field(discriminator="target_"),
 ]
 
@@ -270,6 +208,14 @@ class PlotSchema(PydanticBaseModel):
     "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    colormaps: dict | None = None
+    "Variable-specific colormaps keyed by 'default', 'error', or variable name group."
+    precip_and_related_fields: list[str] | None = None
+    "Names of precipitation and related fields that use a special colormap."
+    focus_areas: dict | None = None
+    "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
+    datasets_to_plot: list[str] | None = None
+    "Dataset names to include in plots."
 
 
 class TimeLimitSchema(BaseModel):
@@ -374,6 +320,10 @@ class MlflowSchema(BaseModel):
     "Log terminal logs to MLflow."
     run_name: str | None
     "Name of run."
+    prefix: str = ""
+    "Prefix for metric keys logged to MLflow."
+    log_hyperparams: bool = True
+    "Whether to log hyperparameters."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
     expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])

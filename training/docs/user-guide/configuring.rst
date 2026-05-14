@@ -150,10 +150,6 @@ match the dataset you provide.
          dataset: datset-n320-2019-2021-6h.zarr
          graph: first_graph_n320.pt
 
-   training:
-      lr:
-         rate: 1e-3
-
 When we save this `example.yaml` file, we can run the training with this
 config using:
 
@@ -176,13 +172,13 @@ or override individual config entries such as
 
 .. code:: bash
 
-   anemoi-training train diagnostics.plot.enabled=False
+   anemoi-training train system.hardware.num_gpus_per_node=1
 
 or combine everything together
 
 .. code:: bash
 
-   anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
+   anemoi-training train --config-name=debug.yaml model=transformer system.hardware.num_gpus_per_node=1
 
 .. _config-validation:
 
