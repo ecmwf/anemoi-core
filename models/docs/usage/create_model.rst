@@ -311,6 +311,38 @@ Layer kernels are particularly useful when:
 #. You need to customize the behaviour of specific layers in different
    parts of the model
 
+.. _mlp-implementations:
+
+**********************
+ MLP Implementations
+**********************
+
+Transformer and GraphTransformer components support selecting the
+feed-forward implementation via ``mlp_implementation``:
+
+.. code:: yaml
+
+   processor:
+     mlp_hidden_ratio: 4
+     mlp_implementation: mlp  # options: mlp, glu, swiglu, geglu, reglu
+
+   encoder:
+     mlp_hidden_ratio: 4
+     mlp_implementation: mlp
+
+   decoder:
+     mlp_hidden_ratio: 4
+     mlp_implementation: mlp
+
+Recommended ``mlp_hidden_ratio``:
+
+- ``mlp``: ``4``
+- gated variants (``glu``, ``swiglu``, ``geglu``, ``reglu``): ``~2.67``
+  (for comparable parameter count/compute to ``mlp:4``)
+
+For GNN components, the same ``mlp_implementation`` options are
+available, while depth is controlled with ``mlp_extra_layers``.
+
 .. rubric:: Footnotes
 
 .. [#f1]
