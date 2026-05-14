@@ -89,7 +89,7 @@ class BaseResidualConnection(nn.Module, ABC):
         """Zero out specified prognostic variables in the input tensor."""
         if self.drop_indices is None or len(self.drop_indices) == 0:
             return x
-        
+
         x_skip = x.clone()
         x_skip[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
         return x_skip
