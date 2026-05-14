@@ -106,6 +106,17 @@ def _extract_constructor_context(
     return context.for_loss_class(get_class(target))
 
 
+def _propagate_combined_scalers(loss_config: dict, scalers_to_include: list) -> None:
+    """Propagate parent scalers to CombinedLoss sub-losses that don't specify their own."""
+    for sub_loss in loss_config.get("losses", []):
+        if (
+            isinstance(sub_loss, dict)
+            and "scalers" not in sub_loss
+            and "MultiscaleLossWrapper" not in sub_loss.get("_target_", "")
+        ):
+            sub_loss["scalers"] = list(scalers_to_include)
+
+
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
@@ -161,11 +172,7 @@ def get_loss_function(
 
     # For CombinedLoss, propagate parent scalers to sub-losses that don't specify their own.
     if "CombinedLoss" in (target or "") and scalers_to_include:
-        for sub_loss in loss_config.get("losses", []):
-            if isinstance(sub_loss, dict) and "scalers" not in sub_loss:
-                # MultiscaleLossWrapper manages scalers on per_scale_loss, not at top level
-                if "MultiscaleLossWrapper" not in sub_loss.get("_target_", ""):
-                    sub_loss["scalers"] = list(scalers_to_include)
+        _propagate_combined_scalers(loss_config, scalers_to_include)
 
     if target in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
