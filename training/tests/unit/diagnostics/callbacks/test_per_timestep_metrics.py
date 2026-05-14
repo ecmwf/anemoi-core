@@ -18,7 +18,6 @@ import torch
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
 from anemoi.training.losses.base import BaseLoss
 
-
 BS = 2
 TIME = 6
 ENS = 4
