@@ -44,7 +44,7 @@ class PerTimestepMetrics(Callback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        outputs: list,
+        outputs: list,  # noqa: ARG002
         batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
