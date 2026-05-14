@@ -20,7 +20,7 @@ By default, the residual connection is applied to all prognostic
 variables. To exclude one or more prognostic variables from the
 connection, list their names under the ``drop`` argument of the residual
 configuration. The listed variables will be zeroed out in the skip
-branch, so the model will be predicting full states rathen increments
+branch, so the model will be predicting full states rather than increments
 for those variables.
 
 *****************************

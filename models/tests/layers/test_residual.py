@@ -10,11 +10,19 @@ from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
 from anemoi.models.layers.residual import TruncatedConnection
 
-# ── Fixtures ──────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def data_indices():
+    data_indices = MagicMock()
+    data_indices.model.input.prognostic = [0, 1, 2]
+    data_indices.model.input.name_to_index = {"a": 0, "b": 1, "c": 2, "d": 3}
+    data_indices.model.input.includes = list(data_indices.model.input.name_to_index.keys())
+    data_indices.data.input.prognostic = [0, 1, 2]
+    return data_indices
 
 
 @pytest.fixture
-def graph_data():
+def graph_data() -> HeteroData:
     g = HeteroData()
     g["data"].num_nodes = 2
     g["hidden"].num_nodes = 1
@@ -30,24 +38,14 @@ def graph_data():
 
 
 @pytest.fixture
-def flat_data():
+def flat_data() -> torch.Tensor:
     x = torch.randn(11, 7, 5, 2, 3)  # batch, dates, ensemble, grid, features
     return x
 
 
 @pytest.fixture
-def edge_index():
+def edge_index() -> torch.Tensor:
     return torch.tensor([[0, 1, 1], [1, 0, 2]])
-
-
-def _make_data_indices(n_prognostic=3):
-    """Create a mock data_indices with n_prognostic prognostic variables."""
-    data_indices = MagicMock()
-    data_indices.model.input.prognostic = list(range(n_prognostic))
-    names = {f"var{i}": i for i in range(n_prognostic)}
-    data_indices.model.input.name_to_index = names
-    data_indices.data.input.prognostic = list(range(n_prognostic))
-    return data_indices
 
 
 def _make_regular_graph(nlat=8):
@@ -77,10 +75,9 @@ def _make_octahedral_graph(nlat=8):
     return graph, nlat, n_points
 
 
-# ── TruncatedConnection tests (existing) ─────────────────────────────────
+# ── TruncatedConnection tests ─────────────────────────────────
 
-
-def test_truncation_mapper_init(graph_data):
+def test_truncation_mapper_init(graph_data: HeteroData):
     _ = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
@@ -89,7 +86,7 @@ def test_truncation_mapper_init(graph_data):
     )
 
 
-def test_forward(graph_data, data_indices):
+def test_forward(graph_data: HeteroData):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
@@ -101,7 +98,7 @@ def test_forward(graph_data, data_indices):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-def test_forward_no_weight(graph_data):
+def test_forward_no_weight(graph_data: HeteroData):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
@@ -112,7 +109,7 @@ def test_forward_no_weight(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-def test_forward_with_src_node_weight(graph_data, data_indices):
+def test_forward_with_src_node_weight(graph_data: HeteroData):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
@@ -124,7 +121,7 @@ def test_forward_with_src_node_weight(graph_data, data_indices):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-def test_forward_with_edges_name(graph_data):
+def test_forward_with_edges_name(graph_data: HeteroData):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
@@ -136,7 +133,7 @@ def test_forward_with_edges_name(graph_data):
     assert x_truncated.shape == (5, 2, 2, 3)  # (batch, ensemble, coarse_grid, features)
 
 
-def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data, monkeypatch):
+def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data: HeteroData, monkeypatch):
     mapper = TruncatedConnection(
         graph_data,
         truncation_down_edges_name=("data", "to", "hidden"),
@@ -168,7 +165,7 @@ def test_truncated_connection_shard_sizes_calls_all_to_all(graph_data, monkeypat
     assert calls[1]["scatter_sizes"] == [1, 1]  # grid_shard_sizes used as scatter
 
 
-def test_skipconnection(flat_data):
+def test_skipconnection(flat_data: torch.Tensor):
     mapper = SkipConnection()
     out = mapper.forward(flat_data)
     expected_out = flat_data[:, -1, ...]
@@ -176,7 +173,7 @@ def test_skipconnection(flat_data):
     assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
 
 
-def test_skipconnection_drop(flat_data, data_indices):
+def test_skipconnection_drop(flat_data: torch.Tensor, data_indices):
     """Variables listed under ``drop`` are zeroed out in the skip branch."""
     drop = ["a", "c"]
     mapper = SkipConnection(drop=drop, data_indices=data_indices)
@@ -197,7 +194,13 @@ def test_skipconnection_drop_invalid_variable(data_indices):
         SkipConnection(drop=["not_a_variable"], data_indices=data_indices)
 
 
-def test_skipconnection_drop_default_keeps_all(flat_data, data_indices):
+def test_skipconnection_drop_non_prognostic_variable(data_indices):
+    """Dropping a variable that is not prognostic should raise an error."""
+    with pytest.raises(AssertionError):
+        SkipConnection(drop=["d"], data_indices=data_indices)
+
+
+def test_skipconnection_drop_default_keeps_all(flat_data: torch.Tensor, data_indices):
     """By default, no variables are dropped from the skip connection."""
     mapper = SkipConnection(data_indices=data_indices)
     assert mapper.drop_indices == []
@@ -208,22 +211,19 @@ def test_skipconnection_drop_default_keeps_all(flat_data, data_indices):
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────
 
 
-def test_scalar_ornstein_shape():
-    data_indices = _make_data_indices(3)
+def test_scalar_ornstein_shape(data_indices):
     conn = ScalarOrnsteinConnection(data_indices=data_indices)
     x = torch.randn(2, 4, 1, 10, 3)  # batch, time, ens, nodes, features
     out = conn.forward(x)
     assert out.shape == (2, 1, 10, 3)
 
 
-def test_scalar_ornstein_frozen_weights():
-    data_indices = _make_data_indices(3)
+def test_scalar_ornstein_frozen_weights(data_indices):
     conn = ScalarOrnsteinConnection(theta_train=False, data_indices=data_indices)
     assert not conn.weight.requires_grad
 
 
-def test_scalar_ornstein_trainable_weights():
-    data_indices = _make_data_indices(3)
+def test_scalar_ornstein_trainable_weights(data_indices):
     conn = ScalarOrnsteinConnection(theta_train=True, data_indices=data_indices)
     assert conn.weight.requires_grad
 
@@ -232,9 +232,8 @@ def test_scalar_ornstein_trainable_weights():
 
 
 @pytest.mark.parametrize("truncate", [False, True])
-def test_spectral_ornstein_regular(truncate):
+def test_spectral_ornstein_regular(truncate: bool, data_indices):
     graph, nlat, nlon = _make_regular_graph(nlat=8)
-    data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
         grid="regular",
@@ -249,9 +248,8 @@ def test_spectral_ornstein_regular(truncate):
 
 
 @pytest.mark.parametrize("truncate", [False, True])
-def test_spectral_ornstein_octahedral(truncate):
+def test_spectral_ornstein_octahedral(truncate: bool, data_indices):
     graph, nlat, n_points = _make_octahedral_graph(nlat=8)
-    data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
         grid="octahedral",
@@ -265,9 +263,8 @@ def test_spectral_ornstein_octahedral(truncate):
     assert out.shape == (2, 1, n_points, 3)
 
 
-def test_spectral_ornstein_skip_truncate_variables():
+def test_spectral_ornstein_skip_truncate_variables(data_indices):
     graph, nlat, nlon = _make_regular_graph(nlat=8)
-    data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
         grid="regular",
@@ -287,9 +284,8 @@ def test_spectral_ornstein_skip_truncate_variables():
     assert out.shape == (2, 1, nlat * nlon, 3)
 
 
-def test_spectral_ornstein_no_truncation_has_no_filter():
+def test_spectral_ornstein_no_truncation_has_no_filter(data_indices):
     graph, nlat, nlon = _make_regular_graph(nlat=8)
-    data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
         grid="regular",
@@ -302,9 +298,8 @@ def test_spectral_ornstein_no_truncation_has_no_filter():
     assert not hasattr(conn, "x_fsht")
 
 
-def test_spectral_ornstein_truncation_has_filter():
+def test_spectral_ornstein_truncation_has_filter(data_indices):
     graph, nlat, nlon = _make_regular_graph(nlat=8)
-    data_indices = _make_data_indices(3)
     conn = SpectralOrnsteinConnection(
         lmax=2,
         grid="regular",

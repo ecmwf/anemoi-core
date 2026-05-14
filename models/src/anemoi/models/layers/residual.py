@@ -42,7 +42,7 @@ def get_prognostic_indices(names: list[str], model_data_indices: IndexCollection
 
     drop_indices = [model_data_indices.name_to_index[name] for name in names]
 
-    assert any(
+    assert all(
         idx in model_data_indices.prognostic for idx in drop_indices
     ), "Variable names in 'drop' list have to refer to prognostic variables."
 
@@ -54,7 +54,7 @@ class BaseResidualConnection(nn.Module, ABC):
 
     def __init__(
         self,
-        drop: list[str] = [],
+        drop: list[str] | None = None,
         data_indices: IndexCollection | None = None,
     ) -> None:
         super().__init__()
@@ -87,7 +87,7 @@ class BaseResidualConnection(nn.Module, ABC):
 
     def _drop_variables(self, x: torch.Tensor) -> torch.Tensor:
         """Zero out specified prognostic variables in the input tensor."""
-        if self.drop_indices is None or len(self.drop_indices) == 0:
+        if len(self.drop_indices) == 0:
             return x
 
         x_skip = x.clone()
@@ -208,6 +208,7 @@ class TruncatedConnection(BaseResidualConnection):
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
+        **_,
     ) -> None:
         super().__init__(drop=drop, data_indices=data_indices)
 

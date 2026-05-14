@@ -58,6 +58,10 @@ class TruncatedConnectionSchema(BaseModel):
     src_node_weight_attribute: str | None = None
     autocast: bool = False
     row_normalize: bool = False
+    drop: list[str] = Field(
+        [],
+        description="List of prognostic variable names to drop from the skip connection. Defaults to an empty list.",
+    )
     # Deprecated: pass inside truncation_config instead.
     truncation_up_file_path: str | None = None
     truncation_down_file_path: str | None = None
@@ -82,10 +86,6 @@ class ScalarOrnsteinConnectionSchema(BaseModel):
     regressors: list[str] | None = Field(
         None,
         description="Variable names to use as regressors.",
-    )
-    drop: list[str] = Field(
-        [],
-        description="List of prognostic variable names to drop from the skip connection. Defaults to an empty list.",
     )
 
 
