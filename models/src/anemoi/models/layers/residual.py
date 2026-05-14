@@ -34,6 +34,21 @@ from anemoi.models.layers.spectral_transforms import InverseRegularSHT
 LOGGER = logging.getLogger(__name__)
 
 
+def get_prognostic_indices(names: list[str], model_data_indices: IndexCollection) -> list[int]:
+    """Get the indices of prognostic variables from a list of variable names."""
+    assert all(
+        v in model_data_indices.includes for v in names
+    ), "Variable names in 'drop' list have to refer to model variables: {}".format(model_data_indices.includes)
+
+    drop_indices = [model_data_indices.name_to_index[name] for name in names]
+
+    assert any(
+        idx in model_data_indices.prognostic for idx in drop_indices
+    ), "Variable names in 'drop' list have to refer to prognostic variables."
+
+    return drop_indices
+
+
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
@@ -43,18 +58,18 @@ class BaseResidualConnection(nn.Module, ABC):
         data_indices: IndexCollection | None = None,
     ) -> None:
         super().__init__()
-        self.drop_names = drop
+        self.drop_names = drop if drop is not None else []
 
-        model_data_indices = data_indices.model.input
-        assert all(
-            v in model_data_indices.includes for v in self.drop_names
-        ), "Variable names in 'drop' list have to refer to prognostic variables."
+        if data_indices is None:
+            assert len(self.drop_names) == 0, "Cannot specify variables to drop without data_indices."
+            self.drop_indices = []
+        else:
+            self.drop_indices = get_prognostic_indices(self.drop_names, data_indices.model.input)
 
-        self.drop_indices = [model_data_indices.name_to_index[name] for name in self.drop_names]
-        if len(self.drop_indices) > 0:
-            LOGGER.info(
-                f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}"
-            )
+            if len(self.drop_indices) > 0:
+                LOGGER.info(
+                    f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}"
+                )
 
     @abstractmethod
     def forward(
