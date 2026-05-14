@@ -91,7 +91,7 @@ class PerTimestepMetrics(Callback):
 
             # Gather ensemble members across the ensemble comm group
             if hasattr(pl_module, "ens_comm_subgroup") and pl_module.ens_comm_subgroup is not None:
-                from anemoi.training.distributed.primitives import gather_tensor
+                from anemoi.models.distributed.graph import gather_tensor
 
                 pred = gather_tensor(
                     pred.clone(),

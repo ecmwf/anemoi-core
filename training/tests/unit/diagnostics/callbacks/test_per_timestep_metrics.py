@@ -216,7 +216,7 @@ class TestPerTimestepMetrics:
         pl_module.ens_comm_subgroup_size = 2
 
         with patch(
-            "anemoi.training.distributed.primitives.gather_tensor",
+            "anemoi.models.distributed.graph.gather_tensor",
             side_effect=lambda x, **_: x,
         ):
             callback._eval_per_timestep(pl_module, batch)
