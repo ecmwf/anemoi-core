@@ -7,40 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Typed batch envelope carrying data, coordinates and metadata.
-
-A :class:`Batch` is the object that flows from the dataloader to the model.
-It bundles, per dataset:
-
-* ``data`` — either a stacked tensor with shape
-  ``(batch, time, ensemble, grid, vars)`` (gridded datasets) or a
-  ``list[torch.Tensor]`` of length ``batch`` with per-sample shape
-  ``(ensemble=1, grid_i, vars)`` (sparse observation datasets, where
-  ``grid_i`` varies per sample).
-* ``coordinates`` — per-dataset ``(N, 2)`` tensor stacking
-  ``(latitude, longitude)`` along the trailing dimension, in **radians**.
-  For static-grid datasets the tensor is shared by reference across the
-  batch dimension; for dynamic-grid (gridded non-static) datasets it has
-  a leading batch dimension; for sparse datasets the value is a
-  ``list[torch.Tensor]`` of length ``batch``.
-* ``timedeltas`` — *(sparse only)* per-dataset ``(N,)`` tensor (or
-  ``list[torch.Tensor]`` of length ``batch``) holding the per-point time
-  offset in seconds. Stored separately from ``coordinates`` so consumers
-  can route the spatial and temporal axes independently.
-* ``metadata`` — extension point for per-batch / per-dataset information
-  (masks, timestamps, sparse-obs ``boundaries``, ...).
-
-Coordinate tensors for static-grid datasets are shared by reference across
-the batch dimension to avoid per-worker / per-step copies. The set of static
-dataset names is stored under ``metadata["static_coords"]`` and consulted by
-:meth:`Batch.to` to skip redundant host-to-device transfers.
-
-Sparse observation datasets carry their per-time split information under
-``metadata[dataset_name]["boundaries"]`` as a ``list[tuple[slice, ...]]``
-(one entry per batch sample). These are Python ``slice`` objects and are
-intentionally **not** transferred to device by :meth:`Batch.to`.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -48,13 +14,12 @@ from collections.abc import Iterable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
-from dataclasses import replace as dataclass_replace
 from typing import Any
 
-import einops
 import torch
 from torch.utils.data import default_collate
 from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.dataset_view import DatasetView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,13 +34,7 @@ BOUNDARIES_META_KEY = "boundaries"
 
 
 def _to_device(value, device, *, non_blocking: bool):
-    """Recursively move tensors to ``device``; pass non-tensors through.
-
-    Handles the union types that flow through a sparse-aware :class:`Batch`:
-    plain :class:`torch.Tensor`, ``list[torch.Tensor]`` (sparse per-sample
-    payloads), and any non-tensor leaf (e.g. ``slice`` objects in the
-    ``boundaries`` metadata) which is returned unchanged.
-    """
+    """Recursively move tensors to ``device``, pass non-tensors through."""
     if isinstance(value, torch.Tensor):
         return value.to(device, non_blocking=non_blocking)
     if isinstance(value, list):
@@ -84,7 +43,7 @@ def _to_device(value, device, *, non_blocking: bool):
 
 
 def _pin_memory(value):
-    """Recursively pin tensors; pass non-tensors through. See :func:`_to_device`."""
+    """Recursively pin tensors, pass non-tensors through. See :func:`_to_device`."""
     if isinstance(value, torch.Tensor):
         return value.pin_memory()
     if isinstance(value, list):
@@ -151,8 +110,6 @@ class Batch:
     grid_shard_indices: dict[str, Any] = field(default_factory=dict)
     layouts: dict[str, TensorLayout] = field(default_factory=dict)
 
-    # ---------------------------------------------------------------- access
-
     @property
     def dataset_names(self) -> tuple[str, ...]:
         """Names of the datasets present in this batch (insertion order)."""
@@ -191,21 +148,7 @@ class Batch:
         lines.append(")")
         return "\n".join(lines)
 
-    def __getitem__(self, dataset_name: str) -> torch.Tensor | list[torch.Tensor]:
-        """Return the data payload for ``dataset_name`` (mapping behaviour).
-
-        Returns a stacked :class:`torch.Tensor` for gridded datasets and a
-        ``list[torch.Tensor]`` of length ``batch`` for sparse observation
-        datasets. For the richer per-dataset view that bundles data,
-        coords and the static flag, use :meth:`view`.
-        """
-        if dataset_name not in self.data:
-            msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
-            raise KeyError(msg)
-
-        return self.data[dataset_name]
-
-    def view(self, dataset_name: str) -> "DatasetView":
+    def __getitem__(self, dataset_name: str) -> "DatasetView":
         """Return a per-dataset view bundling data, coordinates, layout and metadata."""
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
@@ -218,6 +161,7 @@ class Batch:
                 "Set batch.layouts[name] or pass 'layout' in the sample payload during collation."
             )
             raise ValueError(msg)
+
         per_dataset_meta = self.metadata.get(dataset_name) if isinstance(self.metadata.get(dataset_name), dict) else None
         boundaries = per_dataset_meta.get(BOUNDARIES_META_KEY) if per_dataset_meta else None
         return DatasetView(
@@ -234,11 +178,8 @@ class Batch:
     def __contains__(self, dataset_name: str) -> bool:
         return dataset_name in self.data
 
-    def __iter__(self) -> Iterable[str]:
-        return iter(self.data)
-
     def __len__(self) -> int:
-        return len(self.data)
+        return len(self.dataset_names)
 
     def keys(self):  # noqa: D401 - mapping protocol
         """Return the dataset names (mapping protocol)."""
@@ -246,13 +187,11 @@ class Batch:
 
     def values(self):  # noqa: D401 - mapping protocol
         """Return the data tensors (mapping protocol)."""
-        return self.data.values()
+        return (self[dataset_name] for dataset_name in self.dataset_names)
 
     def items(self):  # noqa: D401 - mapping protocol
         """Return ``(name, tensor)`` pairs (mapping protocol)."""
-        return self.data.items()
-
-    # -------------------------------------------------------- device transfer
+        return ((dataset_name, self[dataset_name]) for dataset_name in self.dataset_names)
 
     def to(self, device: torch.device | str, *, non_blocking: bool = True) -> "Batch":
         """Move the batch to ``device``.
@@ -316,8 +255,6 @@ class Batch:
             layouts=self.layouts,
         )
 
-    # ------------------------------------------------------------- transform
-
     def with_data(self, new_data: dict[str, torch.Tensor]) -> "Batch":
         """Return a new :class:`Batch` with ``data`` replaced by ``new_data``.
 
@@ -339,50 +276,29 @@ class Batch:
             A new frozen :class:`Batch` sharing ``self.coordinates``,
             ``self.timedeltas`` and ``self.metadata`` by reference.
         """
-        if set(new_data.keys()) != set(self.data.keys()):
-            msg = (
-                "with_data: new_data keys must match the existing dataset names "
-                f"(got {sorted(new_data)}, expected {sorted(self.data)})."
+        if set(new_data.keys()) == set(self.data.keys()):
+            return Batch(
+                data=new_data,
+                coordinates=self.coordinates,
+                metadata=self.metadata,
+                grid_sizes=self.grid_sizes,
+                timedeltas=self.timedeltas,
+                grid_shard_indices=self.grid_shard_indices,
+                layouts=self.layouts,
             )
-            raise ValueError(msg)
 
+        new_data_keys = set(new_data.keys())
+        metadata_static_coords = self.metadata.get(STATIC_COORDS_META_KEY, frozenset())
+        metadata_static_coords &= new_data_keys
         return Batch(
-            data=new_data,
-            coordinates=self.coordinates,
-            metadata=self.metadata,
-            grid_sizes=self.grid_sizes,
-            timedeltas=self.timedeltas,
-            grid_shard_indices=self.grid_shard_indices,
-            layouts=self.layouts,
+            new_data,
+            coordinates={name: self.coordinates[name] for name in new_data_keys},
+            metadata={STATIC_COORDS_META_KEY: metadata_static_coords} | {name: self.metadata[name] for name in new_data_keys if name in self.metadata},
+            grid_sizes={name: self.grid_sizes[name] for name in new_data_keys},
+            timedeltas={name: self.timedeltas[name] for name in new_data_keys if name in self.timedeltas},
+            grid_shard_indices={name: self.grid_shard_indices[name] for name in new_data_keys},
+            layouts={name: self.layouts[name] for name in new_data_keys},
         )
-
-    def node_coords(self, dataset_name: str) -> torch.Tensor | None:
-        """Return per-node ``(num_nodes, 2)`` lat/lon coordinates for ``dataset_name``.
-
-        Returns the dataset's ``coordinates`` tensor as stored on the
-        batch — already shaped ``(N, 2)`` (or ``(B, N, 2)`` for dynamic
-        gridded datasets) with ``(latitude, longitude)`` along the
-        trailing dimension, in **radians**.
-
-        Returns ``None`` when the dataset has no entry in
-        :attr:`coordinates` — the model layer then falls back to its
-        registered static buffer (preserving full backward compatibility
-        with checkpoints trained before the typed-batch refactor). Sparse
-        datasets (``coordinates`` stored as ``list[torch.Tensor]``) also
-        return ``None`` here; consumers should use :meth:`view` to access
-        the per-sample list directly.
-        """
-        value = self.coordinates.get(dataset_name)
-        if value is None:
-            return None
-        if isinstance(value, list):
-            if len(value) > 1:
-                return torch.cat(value, dim=0)
-            else:
-                return value[0]
-        return value
-
-    # ------------------------------------------------------- bulk indexing
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "Batch":
         """Return a new :class:`Batch` with each dataset restricted to ``indices``.
@@ -391,13 +307,13 @@ class Batch:
         dispatches on ``layout.time_in_grid`` to handle gridded and
         sparse observation datasets uniformly.
         """
-        new_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
-        new_coords: dict[str, torch.Tensor | list[torch.Tensor]] = dict(self.coordinates)
-        new_timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = dict(self.timedeltas)
+        new_data = {}
+        new_coords = dict(self.coordinates)
+        new_timedeltas = dict(self.timedeltas)
         new_metadata = dict(self.metadata)
 
         for name in self.dataset_names:
-            view = self.view(name).select_time(indices)
+            view = self[name].select_time(indices)
             new_data[name] = view.data
             if view.coordinates is not None and name in self.coordinates:
                 new_coords[name] = view.coordinates
@@ -427,12 +343,10 @@ class Batch:
         new_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         for name in self.dataset_names:
             if name in indices_per_dataset:
-                new_data[name] = self.view(name).select_vars(indices_per_dataset[name]).data
+                new_data[name] = self[name].select_vars(indices_per_dataset[name]).data
             else:
                 new_data[name] = self.data[name]
         return self.with_data(new_data)
-
-    # ----------------------------------------------------------- construction
 
     @staticmethod
     def collate(
@@ -600,6 +514,7 @@ class Batch:
         metadata: dict[str, Any] = {}
         if static:
             metadata[STATIC_COORDS_META_KEY] = frozenset(static)
+
         metadata.update(per_dataset_metadata)
 
         batch = Batch(
@@ -613,193 +528,3 @@ class Batch:
         )
         LOGGER.debug("Batch.collate produced:\n%r", batch)
         return batch
-
-
-@dataclass(frozen=True, slots=True)
-class DatasetView:
-    """Per-dataset view returned by :meth:`Batch.view`.
-
-    Bundles the per-dataset payload (data, coordinates, timedeltas) with
-    its :class:`TensorLayout` so callers can index logical axes (``time``,
-    ``variables``) without hard-coded dimension positions. The same API
-    works for gridded and sparse observation datasets thanks to the
-    ``layout.time_in_grid`` dispatch.
-    """
-
-    name: str
-    data: torch.Tensor | list[torch.Tensor]
-    coordinates: torch.Tensor | list[torch.Tensor] | None
-    is_static: bool
-    layout: TensorLayout
-    timedeltas: torch.Tensor | list[torch.Tensor] | None = None
-    grid_shard_indices: Any = None
-    boundaries: list[tuple[slice, ...]] | None = None
-
-    def time_slices(self) -> list[tuple[slice, ...]] | None:
-        """Return per-sample boundary slices for sparse views; ``None`` otherwise.
-
-        For sparse observation datasets (``layout.time_in_grid=True``) the
-        ``boundaries`` describe which contiguous ranges of the grid axis
-        belong to each time step; for gridded datasets time is an explicit
-        dim so this returns ``None``.
-        """
-        return self.boundaries if self.layout.time_in_grid else None
-
-    # ------------------------------------------------------- core indexing
-
-    def select_time(self, indices: "slice | Sequence[int] | int") -> "DatasetView":
-        """Return a new view restricted to the given time indices.
-
-        Parameters
-        ----------
-        indices : int, slice, or sequence of int
-            Positions along the logical *time* axis. For gridded datasets
-            this indexes ``layout.time`` directly. For sparse observation
-            datasets it picks the corresponding boundary slices from
-            ``boundaries`` (per sample), updating data, coordinates,
-            timedeltas and the boundary list consistently.
-
-        Returns
-        -------
-        DatasetView
-            A new view with the same :class:`TensorLayout` but reduced
-            time extent.
-        """
-        if isinstance(indices, slice):
-            time_size = self._time_axis_size()
-            idx_list = list(range(*indices.indices(time_size)))
-        elif isinstance(indices, int):
-            idx_list = [int(indices)]
-        else:
-            idx_list = [int(i) for i in indices]
-
-        if not self.layout.time_in_grid:
-            return self._select_time_gridded(idx_list)
-
-        return self._select_time_sparse(idx_list)
-
-    def _time_axis_size(self) -> int:
-        """Return the logical number of time steps in this view."""
-        if self.layout.time_in_grid:
-            if self.boundaries is None:
-                msg = "Sparse view has no 'boundaries' metadata; cannot determine time size."
-                raise ValueError(msg)
-            return len(self.boundaries[0]) if self.boundaries else 0
-        if self.layout.time is None:
-            msg = f"Layout {self.layout!r} has no time axis."
-            raise ValueError(msg)
-        assert isinstance(self.data, torch.Tensor)
-        return self.data.shape[self.layout.time]
-
-    def _select_time_gridded(self, indices: list[int]) -> "DatasetView":
-        if self.layout.time is None:
-            msg = f"Layout {self.layout!r} has no time axis; cannot select_time on a gridded view."
-            raise ValueError(msg)
-        assert isinstance(self.data, torch.Tensor), "Gridded view must wrap a single tensor."
-        idx = torch.as_tensor(indices, dtype=torch.long, device=self.data.device)
-        new_data = self.data.index_select(self.layout.time, idx)
-        return dataclass_replace(self, data=new_data)
-
-    def _select_time_sparse(self, indices: list[int]) -> "DatasetView":
-        if self.boundaries is None:
-            msg = "Sparse view has no 'boundaries' metadata; cannot select_time."
-            raise ValueError(msg)
-        assert isinstance(self.data, list), "Sparse view must wrap a list[Tensor]."
-
-        coords_list = self.coordinates if isinstance(self.coordinates, list) else None
-        if self.coordinates is not None and coords_list is None:
-            msg = "Sparse view coordinates must be a list[Tensor]."
-            raise TypeError(msg)
-        td_list = self.timedeltas if isinstance(self.timedeltas, list) else None
-        if self.timedeltas is not None and td_list is None:
-            msg = "Sparse view timedeltas must be a list[Tensor]."
-            raise TypeError(msg)
-
-        grid_dim = self.layout.grid
-
-        new_data: list[torch.Tensor] = []
-        new_coords: list[torch.Tensor] | None = [] if coords_list is not None else None
-        new_timedeltas: list[torch.Tensor] | None = [] if td_list is not None else None
-        new_boundaries: list[tuple[slice, ...]] = []
-
-        for sample_idx, sample_bounds in enumerate(self.boundaries):
-            selected_slices = [sample_bounds[t] for t in indices]
-            sample_data = self.data[sample_idx]
-            data_pieces = [sample_data.narrow(grid_dim, s.start, s.stop - s.start) for s in selected_slices]
-            new_data.append(torch.cat(data_pieces, dim=grid_dim) if data_pieces else sample_data.narrow(grid_dim, 0, 0))
-
-            if new_coords is not None and coords_list is not None:
-                sample_coords = coords_list[sample_idx]
-                coord_pieces = [sample_coords[s.start : s.stop] for s in selected_slices]
-                new_coords.append(
-                    torch.cat(coord_pieces, dim=0) if coord_pieces else sample_coords[:0],
-                )
-
-            if new_timedeltas is not None and td_list is not None:
-                sample_td = td_list[sample_idx]
-                td_pieces = [sample_td[s.start : s.stop] for s in selected_slices]
-                new_timedeltas.append(
-                    torch.cat(td_pieces, dim=0) if td_pieces else sample_td[:0],
-                )
-
-            offset = 0
-            compact: list[slice] = []
-            for s in selected_slices:
-                length = s.stop - s.start
-                compact.append(slice(offset, offset + length))
-                offset += length
-            new_boundaries.append(tuple(compact))
-
-        return dataclass_replace(
-            self,
-            data=new_data,
-            coordinates=new_coords if new_coords is not None else self.coordinates,
-            timedeltas=new_timedeltas if new_timedeltas is not None else self.timedeltas,
-            boundaries=new_boundaries,
-        )
-
-    def select_vars(self, indices: Sequence[int] | torch.Tensor | slice) -> "DatasetView":
-        """Return a new view restricted to the given variable indices.
-
-        Indexes along ``layout.variables`` for both gridded and sparse
-        datasets. Coordinates / timedeltas / boundaries are unchanged.
-        """
-        if isinstance(self.data, list):
-            new_data = [self._index_vars(t, indices) for t in self.data]
-        else:
-            new_data = self._index_vars(self.data, indices)
-        return dataclass_replace(self, data=new_data)
-
-    def _index_vars(self, tensor: torch.Tensor, indices: Sequence[int] | torch.Tensor | slice) -> torch.Tensor:
-        var_dim = self.layout.axis("variables", ndim=tensor.ndim)
-        if isinstance(indices, slice):
-            slicer: list[Any] = [slice(None)] * tensor.ndim
-            slicer[var_dim] = indices
-            return tensor[tuple(slicer)]
-        idx = torch.as_tensor(list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device)
-        return tensor.index_select(var_dim, idx)
-
-    # ------------------------------------------------------- model adapters
-
-    def rearrange_for_encoder(self) -> torch.Tensor:
-        """Flatten the view's data to the encoder's expected ``(*, T*V)`` layout.
-
-        Returns
-        -------
-        torch.Tensor
-            For gridded views: shape ``(batch * ensemble * grid, time * variables)``.
-            For sparse views: shape ``(ensemble * total_grid, variables)``
-            obtained by concatenating per-sample tensors along the grid axis.
-        """
-        if not self.layout.time_in_grid:
-            assert isinstance(self.data, torch.Tensor), "Gridded view must wrap a single tensor."
-            return einops.rearrange(
-                self.data,
-                "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-            )
-        # Sparse: list[Tensor] of shape (ensemble=1, N_i, V). Concatenate
-        # samples along the grid axis to produce a single flat tensor.
-        assert isinstance(self.data, list), "Sparse view must wrap a list[Tensor]."
-        flat = torch.cat(self.data, dim=self.layout.grid)
-        # Result shape (ensemble, total_N, V) -> rearrange to (ensemble*total_N, V)
-        return einops.rearrange(flat, "ensemble grid vars -> (ensemble grid) vars")

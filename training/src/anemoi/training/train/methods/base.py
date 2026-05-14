@@ -582,6 +582,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             y_pred_full, y_full = y_pred, y
             final_grid_shard_slice = grid_shard_slice
 
+        if final_grid_shard_slice == slice(None):
+            final_grid_shard_slice = None
+
         return y_pred_full, y_full, final_grid_shard_slice
 
     def _compute_loss(
@@ -623,6 +626,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             loss_kwargs["pred_layout"] = pred_layout
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
+
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
@@ -716,14 +720,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Compute metrics if in validation mode
         metrics_next = {}
-        if validation_mode:
-            metrics_next = self._compute_metrics(
-                y_pred_full,
-                y_full,
-                grid_shard_slice=grid_shard_slice,
-                dataset_name=dataset_name,
-                **kwargs,
-            )
+        if validation_mode: pass
+            #metrics_next = self._compute_metrics(
+            #    y_pred_full,
+            #    y_full,
+            #    grid_shard_slice=grid_shard_slice,
+            #    dataset_name=dataset_name,
+            #    **kwargs,
+            #)
 
         return loss, metrics_next, y_pred
 
@@ -754,8 +758,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
-        assert isinstance(y_pred, dict | Batch), "y_pred must be a dict keyed by dataset name"
-        assert isinstance(y, dict | Batch), "y must be a dict keyed by dataset name"
+        assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
+        assert isinstance(y, Batch), "y must be a dict keyed by dataset name"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:

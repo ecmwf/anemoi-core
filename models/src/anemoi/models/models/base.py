@@ -138,6 +138,7 @@ class BaseGraphModel(nn.Module):
             hidden=self._graph_name_hidden,
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
+        self.use_encoder_data_output = {"grid": True, "obs": False}
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -190,12 +191,12 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters[dataset_name]
+        return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return COORDS_DIM + self.node_attributes.num_trainable_parameters[nodes_name]
+        return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(nodes_name, 0)
 
     @staticmethod
     def _as_hidden_node_names(
@@ -220,7 +221,10 @@ class BaseGraphModel(nn.Module):
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.
         # TODO: abstract different options into the base class
-        return self._calculate_input_dim(dataset_name)
+        if self.use_encoder_data_output[dataset_name]:
+            return self._calculate_input_dim(dataset_name)
+        else:
+            return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]
@@ -290,13 +294,13 @@ class BaseGraphModel(nn.Module):
         """
         dim_sizes: list[int] = []
         for _x in x.values():
-            if isinstance(_x, list):
+            if isinstance(_x.data, list):
                 if dim == 0:
-                    dim_sizes.append(len(_x))
+                    dim_sizes.append(len(_x.data))
                 # Other dims live in a different per-sample layout for
                 # sparse datasets — skip and rely on tensor entries.
                 continue
-            dim_sizes.append(_x.shape[dim])
+            dim_sizes.append(_x.data.shape[dim])
 
         assert dim_sizes, f"_get_consistent_dim: no entries available for dim={dim}"
         # Assert all datasets have the same sizes

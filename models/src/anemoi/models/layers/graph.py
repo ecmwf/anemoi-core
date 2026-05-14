@@ -86,14 +86,8 @@ class NamedNodesAttributes(nn.Module):
     def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
         """Define fixed attributes."""
         nodes_names = list(graph_data.node_types)
-        self.num_nodes = defaultdict(
-            lambda: None,
-            {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
-        )
-        self.num_trainable_parameters = defaultdict(
-            int,
-            {nodes_name: trainable_parameters[nodes_name] for nodes_name in nodes_names}
-        )
+        self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
+        self.num_trainable_parameters = {nodes_name: trainable_parameters[nodes_name] for nodes_name in nodes_names}
 
     def register_tensor(self, name: str, num_trainable_params: int) -> None:
         """Register a trainable tensor."""

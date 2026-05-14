@@ -199,16 +199,17 @@ class Forecaster(BaseTask):
         autoregressive — their input state is passed through unchanged.
         """
         new_data = {}
-        for dataset_name in x.dataset_names:
-            view = x.view(dataset_name)
+        for dataset_name, view in x.items():
+            view = x[dataset_name]
             if view.layout.time_in_grid:
                 # Sparse obs: no explicit time axis to roll; pass through.
                 new_data[dataset_name] = x[dataset_name]
                 continue
+
             new_data[dataset_name] = self._advance_dataset_input(
-                x[dataset_name],
-                y_pred[dataset_name],
-                batch[dataset_name],
+                x[dataset_name].data,
+                y_pred[dataset_name].data.to(x[dataset_name].data.dtype),
+                batch[dataset_name].data,
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],

@@ -62,7 +62,7 @@ def test_batch_basic_construction_and_access() -> None:
     assert dict(batch.items()) == data
 
     # Rich per-dataset view available via .view().
-    view = batch.view("a")
+    view = batch["a"]
     assert isinstance(view, DatasetView)
     assert view.name == "a"
     assert view.data is data["a"]

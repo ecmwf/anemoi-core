@@ -161,7 +161,7 @@ class BaseTask(ABC):
             )
         return new_batch
 
-    def get_targets(self, batch: "Batch", **kwargs) -> "Batch":
+    def get_targets(self, batch: "Batch", **kwargs) -> tuple["Batch", "Batch"]:
         """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
@@ -173,9 +173,12 @@ class BaseTask(ABC):
 
         Returns
         -------
-        Batch
-            New Batch with target tensors per dataset (shape ``(bs, num_outputs, ensemble, grid, full_nvar)``),
-            sharing coords and metadata by reference.
+        tuple[Batch, Batch]
+            ``(y, target)``. ``y`` holds target tensors per dataset
+            (shape ``(bs, num_outputs, ensemble, grid, full_nvar)``);
+            ``target`` mirrors ``y`` but with the variables axis sliced
+            to length ``0``, preserving coords / timedeltas / metadata /
+            layouts by reference.
         """
         time_indices = self.get_batch_output_indices(**kwargs)
         time_indices = normalize_time_indices(time_indices)
@@ -187,7 +190,19 @@ class BaseTask(ABC):
                 dataset_name,
                 payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
             )
-        return new_batch
+
+        empty_data = {}
+        for dataset_name, payload in new_batch.data.items():
+            layout = new_batch.layouts.get(dataset_name)
+            var_axis = layout.variables if layout is not None else -1
+            if isinstance(payload, list):
+                empty_data[dataset_name] = [t.narrow(var_axis, 0, 0) for t in payload]
+            else:
+                empty_data[dataset_name] = payload.narrow(var_axis, 0, 0)
+
+        target = new_batch.with_data(empty_data)
+
+        return new_batch, target
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""

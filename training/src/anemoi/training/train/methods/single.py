@@ -30,7 +30,7 @@ class SingleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> tuple[torch.Tensor, dict, list]:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).data.dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
@@ -38,9 +38,9 @@ class SingleTraining(BaseTrainingModule):
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for task_kwargs in task_steps:
-            y_pred = self(x)
+            y, target = self.task.get_targets(batch, **task_kwargs)
 
-            y = self.task.get_targets(batch, **task_kwargs)
+            y_pred = self(x, target=target)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,

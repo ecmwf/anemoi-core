@@ -151,6 +151,7 @@ class BaseLoss(nn.Module, ABC):
         self,
         out: torch.Tensor,
         squash: bool = True,
+        tensor_layout: "TensorLayout" = None,
         squash_mode: str = "avg",
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
@@ -184,11 +185,14 @@ class BaseLoss(nn.Module, ABC):
         ValueError
             If squash_mode is not one of ['avg', 'sum']
         """
+        if isinstance(out, list):
+            assert len(out) == 1, "Multiple outputs not supported yet"
+            out = out[0]
         if squash:
             if squash_mode == "avg":
-                out = self.avg_function(out, dim=TensorDim.VARIABLE, keepdim=True)
+                out = self.avg_function(out, dim=tensor_layout.grid, keepdim=True)
             elif squash_mode == "sum":
-                out = self.sum_function(out, dim=TensorDim.VARIABLE, keepdim=True)
+                out = self.sum_function(out, dim=tensor_layout.variable, keepdim=True)
             else:
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
@@ -196,21 +200,17 @@ class BaseLoss(nn.Module, ABC):
         # here the grid and time dimension are summed because
         # 1. the normalisation over grid points is handled in the node weighting
         # 2. the normalization over output steps is handled by the time_step scaler
+        dims = [tensor_layout.time, tensor_layout.grid]
         space_time_summed = self.sum_function(
             out,
-            dim=(
-                TensorDim.TIME,
-                TensorDim.GRID,
-            ),
+            dim=tuple([f for f in dims if f is not None]),
             keepdim=True,
         )
+
+        dims = [tensor_layout.batch, tensor_layout.time, tensor_layout.ensemble]
         out = self.avg_function(
             space_time_summed,
-            dim=(
-                TensorDim.BATCH_SIZE,
-                TensorDim.TIME,
-                TensorDim.ENSEMBLE_DIM,
-            ),
+            dim=tuple([f for f in dims if f is not None]),
         ).squeeze()
 
         return out if group is None else reduce_tensor(out, group)
@@ -299,8 +299,8 @@ class FunctionalLoss(BaseLoss):
 
     def forward(
         self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
+        pred: "DatasetView",
+        target: "DatasetView",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -340,6 +340,11 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
-        out = self.calculate_difference(pred, target)
-        out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
+        if isinstance(pred.data, list):
+            out = [self.calculate_difference(p, t) for p, t in zip(pred.data, target.data)]
+        else:
+            out = self.calculate_difference(pred.data, target.data)
+        # out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        return self.reduce(
+            out, squash, tensor_layout=pred.layout, group=group if is_sharded else None, squash_mode=squash_mode
+        )

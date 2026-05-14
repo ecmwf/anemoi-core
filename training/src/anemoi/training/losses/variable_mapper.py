@@ -354,8 +354,8 @@ class LossVariableMapper(BaseLoss):
         pred_indices = self.predicted_indices_by_layout[pred_layout]
         target_indices = self.target_indices_by_layout[target_layout]
 
-        pred_filtered = pred[..., pred_indices]
-        target_filtered = target[..., target_indices]
+        pred_filtered = pred.select_vars(pred_indices)
+        target_filtered = target.select_vars(target_indices)
 
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(
