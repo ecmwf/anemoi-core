@@ -72,10 +72,12 @@ class BaseResidualConnection(nn.Module, ABC):
 
     def _drop_variables(self, x: torch.Tensor) -> torch.Tensor:
         """Zero out specified prognostic variables in the input tensor."""
-        if len(self.drop_indices):
-            x[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
-
-        return x
+        if self.drop_indices is None or len(self.drop_indices) == 0:
+            return x
+        
+        x_skip = x.clone()
+        x_skip[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
+        return x_skip
 
     @staticmethod
     def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
