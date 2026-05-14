@@ -9,7 +9,7 @@ datasets:
     loss_weights: [0.6, 0.4]
     losses:
       - _target_: anemoi.training.losses.MSELoss
-        scalers: ['*']
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
         ignore_nans: False
       - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
         scalers: ['pressure_level', 'general_variable', 'node_weights']
