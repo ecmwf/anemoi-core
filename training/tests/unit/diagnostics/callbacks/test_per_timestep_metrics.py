@@ -41,7 +41,7 @@ class FakeLoss(BaseLoss):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs: object) -> torch.Tensor:
+    def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs: object) -> torch.Tensor:  # noqa: ARG002
         return torch.tensor(1.0)
 
     @property
@@ -215,15 +215,9 @@ class TestPerTimestepMetrics:
         pl_module.ens_comm_subgroup = MagicMock()
         pl_module.ens_comm_subgroup_size = 2
 
-        with (
-            patch(
-                "anemoi.training.diagnostics.callbacks.per_timestep_metrics.gather_tensor",
-                side_effect=lambda x, **_: x,
-            ),
-            patch(
-                "anemoi.training.distributed.primitives.gather_tensor",
-                side_effect=lambda x, **_: x,
-            ),
+        with patch(
+            "anemoi.training.distributed.primitives.gather_tensor",
+            side_effect=lambda x, **_: x,
         ):
             callback._eval_per_timestep(pl_module, batch)
 
