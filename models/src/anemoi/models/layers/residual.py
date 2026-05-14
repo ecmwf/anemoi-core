@@ -140,6 +140,10 @@ class TruncatedConnection(BaseResidualConnection):
         Whether to use automatic mixed precision for the projections.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
+    drop : list[str], optional
+        List of prognostic variable names to drop from the skip connection.
+    data_indices : IndexCollection, optional
+        Data indices object containing variable name to index mapping for the model input.
     truncation_up_file_path : str, optional
         Deprecated path to an ``.npz`` file for the up-projection matrix.
     truncation_down_file_path : str, optional
@@ -182,13 +186,11 @@ class TruncatedConnection(BaseResidualConnection):
         data_node_name: str = "data",
         autocast: bool = False,
         row_normalize: bool = False,
+        drop: list[str] = [],
+        data_indices: IndexCollection | None = None,
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
-        autocast: bool = False,
-        row_normalize: bool = False,
-        drop: list[str] = [],
-        data_indices: IndexCollection | None = None,
     ) -> None:
         super().__init__(drop=drop, data_indices=data_indices)
 
