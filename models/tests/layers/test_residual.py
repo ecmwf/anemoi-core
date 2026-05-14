@@ -269,7 +269,7 @@ def test_spectral_ornstein_skip_truncate_variables(data_indices):
         lmax=2,
         grid="regular",
         truncate=True,
-        skip_truncate_variables=["var0"],
+        skip_truncate_variables=["a"],
         graph=graph,
         data_indices=data_indices,
         dataset_name="data",
@@ -311,3 +311,7 @@ def test_spectral_ornstein_truncation_has_filter(data_indices):
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-k", "test_spectral_ornstein_skip_truncate_variables"])
