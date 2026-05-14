@@ -21,6 +21,9 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.losses.scalers.spectral import LinearMaxSpectralDimensionScaler
+from anemoi.training.losses.scalers.spectral import LinearSpectralDimensionScaler
+from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -557,3 +560,120 @@ def test_lead_time_decay_loss_scaling(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
     assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
+
+
+# ---------------------------------------------------------------------------
+# Spectral dimension scaler tests
+# ---------------------------------------------------------------------------
+"""Test that spectral scalers can be reshaped into a (L, M) matrix.
+
+The flat scaler of length ``n_spectral_modes ** 2`` should unflatten to
+``(n_spectral_modes, n_spectral_modes)`` where each *row* corresponds to a
+single total wavenumber and columns correspond to different orders.
+
+The spectral transform output (x_spec) has shape ``[..., L, M, variables]``
+with entries in dimensions ``(-3, -2)`` above the diagonal zeroed out::
+
+    [ X, 0, 0, 0]
+    [ X, X, 0, 0]
+    [ X, X, X, 0]
+    [ X, X, X, X]
+
+These spatial/spectral dims are then flattened into one "mode" axis::
+
+    [ X, 0, 0, 0, X, X, 0, 0, X, X, X, 0, X, X, X, X]
+
+The scaler operates on this flattened representation and can be unflattened
+back to ``(L, M)`` for inspection.
+"""
+
+
+@pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
+def test_uniform_scaler_reshape(n_spectral_modes: int) -> None:
+    """SpectralDimensionScaler: unflattened rows should all be identical (uniform)."""
+    scaler = SpectralDimensionScaler(n_spectral_modes=n_spectral_modes)
+    flat = scaler.get_scaling_values()
+
+    assert flat.shape == (n_spectral_modes**2,)
+
+    matrix = flat.unflatten(0, (n_spectral_modes, n_spectral_modes))
+
+    # All entries should be 1/n_spectral_modes (uniform weight).
+    expected_val = 1.0 / n_spectral_modes
+    assert torch.allclose(matrix, torch.full_like(matrix, expected_val))
+
+
+@pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
+@pytest.mark.parametrize(
+    ("scaler_cls", "kwargs"),
+    [
+        (SpectralDimensionScaler, {}),
+        (LinearSpectralDimensionScaler, {"slope": 0.01, "y_intercept": 0.1}),
+        (LinearMaxSpectralDimensionScaler, {"slope": 0.01, "y_intercept": 0.1, "maximum": 0.5}),
+    ],
+    ids=["uniform", "linear", "linear_max"],
+)
+def test_scaler_reshape_constant_within_wavenumber(scaler_cls: type, kwargs: dict, n_spectral_modes: int) -> None:
+    """All spectral scalers: all orders within a wavenumber row get the same weight."""
+    scaler = scaler_cls(n_spectral_modes=n_spectral_modes, **kwargs)
+    flat = scaler.get_scaling_values()
+
+    matrix = flat.unflatten(0, (n_spectral_modes, n_spectral_modes))
+
+    # Each row should be constant (same value repeated across orders).
+    for wn in range(n_spectral_modes):
+        row = matrix[wn]
+        assert torch.allclose(
+            row,
+            row[0].expand_as(row),
+        ), f"{scaler_cls.__name__}: Row {wn} is not constant across orders: {row}"
+
+
+@pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
+def test_linear_scaler_reshape_weight_formula(n_spectral_modes: int) -> None:
+    """LinearSpectralDimensionScaler: weight = slope * wavenumber + y_intercept."""
+    slope = 0.01
+    y_intercept = 0.1
+    scaler = LinearSpectralDimensionScaler(
+        n_spectral_modes=n_spectral_modes,
+        slope=slope,
+        y_intercept=y_intercept,
+    )
+    flat = scaler.get_scaling_values()
+    matrix = flat.unflatten(0, (n_spectral_modes, n_spectral_modes))
+
+    wavenumbers = torch.arange(n_spectral_modes, dtype=torch.float32)
+    expected_per_wn = slope * wavenumbers + y_intercept
+
+    # Check first column (order 0) matches the expected per-wavenumber value.
+    assert torch.allclose(matrix[:, 0], expected_per_wn, atol=1e-6), (
+        f"Per-wavenumber weights don't match formula.\n"
+        f"  Got:      {matrix[:, 0]}\n"
+        f"  Expected: {expected_per_wn}"
+    )
+
+
+@pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
+def test_linear_max_scaler_reshape_weight_formula(n_spectral_modes: int) -> None:
+    """LinearMaxSpectralDimensionScaler: weight = min(slope * wavenumber + y_intercept, maximum)."""
+    slope = 0.01
+    y_intercept = 0.1
+    maximum = 0.5
+    scaler = LinearMaxSpectralDimensionScaler(
+        n_spectral_modes=n_spectral_modes,
+        slope=slope,
+        y_intercept=y_intercept,
+        maximum=maximum,
+    )
+    flat = scaler.get_scaling_values()
+    matrix = flat.unflatten(0, (n_spectral_modes, n_spectral_modes))
+
+    wavenumbers = torch.arange(n_spectral_modes, dtype=torch.float32)
+    expected_per_wn = torch.minimum(slope * wavenumbers + y_intercept, torch.tensor(maximum))
+
+    # Check first column (order 0) matches the expected per-wavenumber value.
+    assert torch.allclose(matrix[:, 0], expected_per_wn, atol=1e-6), (
+        f"Per-wavenumber weights don't match formula.\n"
+        f"  Got:      {matrix[:, 0]}\n"
+        f"  Expected: {expected_per_wn}"
+    )
