@@ -77,6 +77,7 @@ def _make_octahedral_graph(nlat=8):
 
 # ── TruncatedConnection tests ─────────────────────────────────
 
+
 def test_truncation_mapper_init(graph_data: HeteroData):
     _ = TruncatedConnection(
         graph_data,
