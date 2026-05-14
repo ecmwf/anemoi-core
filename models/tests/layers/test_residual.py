@@ -3,11 +3,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
-from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
 from anemoi.models.layers.residual import TruncatedConnection
