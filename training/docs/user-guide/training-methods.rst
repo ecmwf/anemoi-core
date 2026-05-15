@@ -76,7 +76,7 @@ training:
 
    -  -  Training loss
       -  :class:`MSELoss`
-      -  :class:`AlmostFairKernelCRPS`
+      -  :class:`CRPS`
 
    -  -  Model
       -  :class:`AnemoiModelEncProcDec`
@@ -191,8 +191,8 @@ parallelise the training over the ensemble members and shard the model.
    :end-before: # Changes in validation metrics
 
 We need to specify the loss function for the CRPS training. Here, we use
-the :class:`anemoi.training.losses.kcrps.AlmostFairKernelCRPS` loss
-function (`Lang et al. (2024b) <https://arxiv.org/abs/2412.15832>`_):
+the :class:`anemoi.training.losses.CRPS` loss function (`Lang et
+al. (2024b) <https://arxiv.org/abs/2412.15832>`_):
 
 .. math::
 
@@ -200,6 +200,15 @@ function (`Lang et al. (2024b) <https://arxiv.org/abs/2412.15832>`_):
 
 The `alpha` parameter is a trade-off parameter between the CRPS and the
 fair CRPS.
+``alpha=0`` gives standard CRPS, ``alpha=1`` gives fair CRPS, and values
+between 0 and 1 give the almost fair CRPS formulation. By default,
+``alpha: 0.95`` gives a 5% standard CRPS and 95% fair CRPS combination.
+The ``backend`` parameter selects how the score is computed:
+
+- ``naive``: simple loop over unordered ensemble-member pairs, avoiding
+  materialization of the full pairwise tensor.
+- ``stable``: materializes pairwise tensors and uses the numerically stable
+  all-pairs formulation.
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
