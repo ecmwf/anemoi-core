@@ -167,6 +167,41 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.radius = self.get_cutoff_radius(graph)
         return super().prepare_node_data(graph)
 
+    def _radius_from_coords(self, reference_coords: torch.Tensor) -> float:
+        """Compute the cut-off radius from raw cartesian coordinates.
+
+        Used by the dynamic per-batch path
+        (:class:`anemoi.models.layers.graph_provider.GraphProvider`), which
+        calls ``compute_edge_index_from_coords`` directly and never goes
+        through :meth:`prepare_node_data`. Without this, ``self.radius``
+        would still be ``None`` from ``__init__`` and sklearn would default
+        to a unit-sphere search, returning every possible neighbour.
+
+        For ``cutoff_distance_km`` mode the result is independent of the
+        coordinates (purely physical, km-based). For ``cutoff_factor`` mode
+        it depends on the per-batch grid spacing of ``reference_coords``,
+        so it must be recomputed every call rather than cached on ``self``.
+        """
+        if self.cutoff_distance_km is not None:
+            return self.cutoff_distance_km / EARTH_RADIUS
+        # Factor-based: derive grid reference distance from the supplied
+        # cartesian coords (already on the unit sphere — no rad->cart step).
+        coords_cpu = reference_coords.detach().cpu()
+        nn = NearestNeighbors(metric="euclidean", n_jobs=4)
+        nn.fit(coords_cpu)
+        dists, _ = nn.kneighbors(coords_cpu, n_neighbors=2, return_distance=True)
+        reference_dist = float(dists[dists > 0].max())
+        return reference_dist * self.cutoff_factor
+
+    def compute_edge_index_from_coords(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor,
+    ) -> torch.Tensor:
+        # Reference for radius is the *target* nodes (matches ``get_cutoff_radius``).
+        # In factor mode this depends on the per-batch coords, so recompute every call;
+        # any prior value of ``self.radius`` may have been derived from a different node set.
+        self.radius = self._radius_from_coords(target_coords)
+        return super().compute_edge_index_from_coords(source_coords, target_coords)
+
     def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         edge_index = radius(source_coords, target_coords, r=self.radius, max_num_neighbors=self.max_num_neighbours)
         edge_index = torch.flip(edge_index, [0])
@@ -211,11 +246,15 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
     def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        LOGGER.info(
+            "Computing adjacency matrix using sklearn's NearestNeighbors with radius=%.4f and max_num_neighbours=%d", 
+            self.radius, 
+            self.max_num_neighbours
+        )
+        LOGGER.info("Source coords shape: %s, Target coords shape: %s", list(source_coords.shape), list(target_coords.shape))
+
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
-
-        if self.radius is None:
-            radius = 0.1
 
         adj_matrix = nearest_neighbour.radius_neighbors_graph(
             target_coords.cpu(), radius=self.radius, mode="distance"
@@ -327,6 +366,16 @@ class ReversedCutOffEdges(CutOffEdges):
     def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         adj_matrix = adj_matrix.T
         return super().undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
+
+    def compute_edge_index_from_coords(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor,
+    ) -> torch.Tensor:
+        # Reference for radius is the *source* nodes (matches ``get_cutoff_radius``).
+        # Recompute every call (factor-mode value depends on per-batch coords).
+        self.radius = self._radius_from_coords(source_coords)
+        # Skip ``CutOffEdges.compute_edge_index_from_coords`` (which would
+        # re-derive the radius from target_coords) and go straight to the base.
+        return BaseDistanceEdgeBuilders.compute_edge_index_from_coords(self, source_coords, target_coords)
 
     def undo_masking_edge_index(
         self, edge_index: torch.Tensor, source_nodes: NodeStorage, target_nodes: NodeStorage
