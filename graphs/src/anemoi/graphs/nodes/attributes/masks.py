@@ -130,7 +130,13 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
 class CutOutMask(BaseCombineAnemoiDatasetsMask):
     """Cut out mask.
 
-    It computes a mask for the first dataset in the cutout operation.
+    Computes a boolean mask for one or more grids in a combined anemoi dataset.
+    By default marks nodes from the first (index 0) grid as ``True``.
+
+    Parameters
+    ----------
+    grids : list[int] | None, optional
+        Grid indices to mark as ``True``. Defaults to ``[0]`` (first dataset).
 
     Methods
     -------
@@ -138,8 +144,8 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
         Compute the attribute for each node.
     """
 
-    def __init__(self) -> None:
-        self.grids = [0]  # It sets as true the nodes from the first (index=0) grid
+    def __init__(self, grids: list[int] | None = None) -> None:
+        self.grids = grids if grids is not None else [0]
         super().__init__()
 
 
