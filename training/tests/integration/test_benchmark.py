@@ -18,9 +18,18 @@ import psutil
 import pytest
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from torch.cuda import empty_cache
 from torch.cuda import reset_peak_memory_stats
+from torch_geometric.data import HeteroData
 
+from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import load_graph_from_file
+from anemoi.graphs.create import validate_loaded_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.diagnostics.benchmark_server import benchmark
 from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
 from anemoi.training.diagnostics.benchmark_server import track_dataloader_benchmark_results
@@ -79,11 +88,56 @@ def test_benchmark_dataloader(
         # Initialize datamodule
         datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
 
+        # Build graph_data from the config (mirrors AnemoiTrainer.graph_data logic)
+        dataset_names = list(get_multiple_datasets_config(cfg.dataloader.training).keys())
+        graph_cfg = cfg.graph
+        graph_path = cfg.system.input.graph
+        save_path = Path(graph_path) if graph_path else None
+        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
+
+        if save_path and save_path.exists() and not graph_cfg.get("overwrite", False):
+            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            graph_data = load_graph_from_file(save_path)
+            validate_loaded_graph(graph_data, required)
+            LOGGER.info("Loaded graph from %s", save_path)
+        else:
+            graph_data = GraphCreator(graph_config).create(save_path=save_path, overwrite=graph_cfg.get("overwrite", False))
+            LOGGER.info("Built graph from config")
+
+        # Compute shard_sizes: dict[dataset_name -> list[int]] using graph node counts
+        reader_group_size = int(cfg.system.hardware.num_gpus_per_model)
+        fused = uses_fused_dataset_graph(graph_data, dataset_names)
+        shard_sizes = {}
+        for name in dataset_names:
+            node_key = name if fused else DEFAULT_DATASET_NAME
+            grid_size = graph_data[node_key].num_nodes
+            shard_sizes[name] = get_balanced_partition_sizes(grid_size, reader_group_size)
+        LOGGER.info("Computed shard_sizes: %s", {k: v for k, v in shard_sizes.items()})
+
         # Get training dataloader
         train_dataloader = datamodule.train_dataloader()
 
+        train_dataloader.dataset.set_comm_group_info(
+            global_rank=0,
+            model_comm_group_id=0,
+            model_comm_group_rank=0,
+            model_comm_num_groups=1,
+            reader_group_rank=0,
+            reader_group_size=reader_group_size,
+            shard_sizes=shard_sizes,
+        )
+        LOGGER.info("Initialized training dataloader with batch size %d, reader_group_size: %d", train_dataloader.batch_size, train_dataloader.dataset.reader_group_size)
+
         rss_before = get_tree_rss_mib()
         LOGGER.info("Process tree RSS before benchmark: %.2f MiB", rss_before)
+
+
+        num_warmup_batches = 10
+        LOGGER.info("Warming up with %d batches", num_warmup_batches)
+        for batch_idx, batch in enumerate(train_dataloader):
+            if batch_idx >= num_warmup_batches:
+                break
 
         # Benchmark batch sampling speed
         num_batches_to_test = 100
@@ -128,7 +182,7 @@ def test_benchmark_dataloader(
         LOGGER.info("  Process tree RSS before: %.2f MiB", rss_before)
         LOGGER.info("  Process tree RSS after:  %.2f MiB", rss_after)
         LOGGER.info("  Process tree RSS delta:  %.2f MiB", rss_after - rss_before)
-        track_dataloader_benchmark_results(test_case, batches_per_second)
+        #track_dataloader_benchmark_results(test_case, batches_per_second)
     finally:
         restore_base_seed(original_seed)
 

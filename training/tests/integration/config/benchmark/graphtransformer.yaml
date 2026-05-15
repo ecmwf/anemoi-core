@@ -1,9 +1,11 @@
 # configuration for the "graphtransformer" benchmark
 system:
   hardware:
-    num_gpus_per_model: 2
+    num_gpus_per_model:  ${oc.env:GPM}
+    num_gpus_per_node:  ${oc.env:GPM}
   input:
-    dataset:  /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    #dataset: /e/data1/jureap-data/ecmwf/users/obrien2/rechunked-datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8-4gridchunks.zarr
+    dataset: ${oc.env:DATASET}
     graph: ./graphtransformer-bm-graph.pt
     #store locally so graph will be reused by non-zero processes
 
