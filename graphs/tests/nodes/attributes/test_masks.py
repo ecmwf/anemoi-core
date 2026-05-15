@@ -54,5 +54,29 @@ def test_combined_datasets_mask_missing_dataset(graph_with_nodes: HeteroData, ma
         node_attr_builder.compute(graph_with_nodes, "test_nodes")
 
 
+@pytest.mark.parametrize("grids_0, grids_1", [([0], [1])])
+def test_cutout_mask_grids(mocker, graph_with_nodes: HeteroData, mock_anemoi_dataset_cutout, grids_0, grids_1):
+    """Test CutOutMask default, [0], and [1] grid arguments."""
+    graph_with_nodes["test_nodes"]["_dataset"] = {}
+    mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
+
+    mask_default = CutOutMask()
+    mask_0 = CutOutMask(grids=grids_0)
+    mask_1 = CutOutMask(grids=grids_1)
+    mask_default = mask_default.compute(graph_with_nodes, "test_nodes")
+    mask_0 = mask_0.compute(graph_with_nodes, "test_nodes")
+    mask_1 = mask_1.compute(graph_with_nodes, "test_nodes")
+
+    # Default and explicit [0] should be equal
+    assert torch.equal(mask_default, mask_0)
+
+    # [0] and [1] should be complementary in mock_anemoi_dataset_cutout(non-overlapping and covering all nodes)
+    assert isinstance(mask_1, torch.Tensor)
+    assert mask_1.dtype == torch.bool
+    assert mask_1.shape == mask_0.shape
+    assert not torch.any(mask_0 & mask_1), "Grids 0 and 1 should not overlap."
+    assert torch.all(mask_0 | mask_1), "Grids 0 and 1 together should cover all nodes."
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
