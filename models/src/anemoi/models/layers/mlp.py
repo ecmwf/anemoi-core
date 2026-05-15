@@ -31,7 +31,7 @@ def _build_gating_activation(mlp_implementation: MLPImplementation) -> nn.Module
         return nn.GELU()
     if mlp_implementation == "reglu":
         return nn.ReLU()
-    valid = ("mlp", "glu", "swiglu", "geglu", "reglu")
+    valid = ("glu", "swiglu", "geglu", "reglu")
     raise ValueError(f"`mlp_implementation` must be one of {valid}, got '{mlp_implementation}'.")
 
 
