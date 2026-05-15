@@ -79,11 +79,11 @@ class Forecaster(BaseTask):
                 kwargs,
             )
 
+        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
         input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
+        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
         output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
-        self.num_input_steps = self.num_input_timesteps
-        self.num_output_steps = self.num_output_timesteps
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
@@ -202,6 +202,8 @@ class Forecaster(BaseTask):
 
         keep_steps = min(self.num_input_steps, self.num_output_steps)
         x = x.roll(-keep_steps, dims=1)
+
+        # Compute batch indices for the output offsets of this rollout step
         output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
         step_specs = [(output_batch_indices[-(i + 1)], x[:, -(i + 1)], -(i + 1)) for i in range(keep_steps)]
         return x, step_specs, False
@@ -231,7 +233,7 @@ class Forecaster(BaseTask):
         )
         next_steps = []
         for i, (batch_position, x_step, pred_position) in enumerate(step_specs):
-
+            # Get prognostic variables
             if pred_position is not None:
                 x_step[..., data_indices.model.input.prognostic] = y_pred[
                     :,
@@ -252,6 +254,7 @@ class Forecaster(BaseTask):
                     grid_shard_slice=grid_shard_slice,
                 )
 
+            # get new "constants" needed for time-varying fields
             forcing = batch[:, batch_position, ..., data_indices.data.input.forcing]
             if forcing.shape[1] == 1 and x_step.shape[1] != 1:
                 forcing = forcing.expand(-1, x_step.shape[1], -1, -1)
