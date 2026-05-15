@@ -634,7 +634,9 @@ class AnemoiTrainer(ABC):
     def strategy(self) -> Any:
         return instantiate(
             self.config.training.strategy,
-            static_graph=not self.config.training.accum_grad_batches > 1,
+            # TODO: make this configurable; if using sparse obs, then we need a dynamic compute graph
+            find_unused_parameters=True,
+            static_graph=False,  # not self.config.training.accum_grad_batches > 1,
         )
 
     @cached_property
