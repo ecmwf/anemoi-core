@@ -192,11 +192,11 @@ class BaseTask(ABC):
         empty_data = {}
         for dataset_name, payload in new_batch.data.items():
             layout = new_batch.layouts.get(dataset_name)
-            var_axis = layout.variables if layout is not None else -1
+            assert layout is not None, f"Layout is required for dataset '{dataset_name}' to determine variable axis for target slicing."
             if isinstance(payload, list):
-                empty_data[dataset_name] = [t.narrow(var_axis, 0, 0) for t in payload]
+                empty_data[dataset_name] = [t.narrow(layout.variables, 0, 0) for t in payload]
             else:
-                empty_data[dataset_name] = payload.narrow(var_axis, 0, 0)
+                empty_data[dataset_name] = payload.narrow(layout.variables, 0, 0)
 
         target = new_batch.with_data(empty_data)
 

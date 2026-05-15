@@ -473,7 +473,7 @@ class ObservationDataReader(BaseAnemoiReader):
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
-        if hasattr(self, "window"):
+        if hasattr(self.data, "window"):
             tree.add(f"Window: {self.window}")
         return tree
 
