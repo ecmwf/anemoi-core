@@ -340,8 +340,9 @@ Recommended ``mlp_hidden_ratio``:
 - gated variants (``glu``, ``swiglu``, ``geglu``, ``reglu``): ``~2.67``
   (for comparable parameter count/compute to ``mlp:4``)
 
-For GNN components, the same ``mlp_implementation`` options are
-available, while depth is controlled with ``mlp_extra_layers``.
+For GNN components, the same ``mlp_implementation`` and
+``mlp_hidden_ratio`` options are available. GNNs additionally support
+``mlp_extra_layers`` to control MLP depth (number of hidden layers).
 
 .. rubric:: Footnotes
 
