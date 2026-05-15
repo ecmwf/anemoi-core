@@ -55,9 +55,8 @@ class MultiDataset(IterableDataset):
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : list[int] | dict[str, TimeIndices]
-            Precomputed relative date indices. In the dense path this is the main-style
-            per-dataset native index mapping. In the sparse path this is the shared
-            model-relative index window.
+            Precomputed relative date indices for each data reader.
+            In the sparse path this is the shared model-relative index window.
         frequency : str | None, optional
             Shared model frequency used to convert sparse model-relative indices to
             each dataset's native time grid. Only needed in the sparse path.
