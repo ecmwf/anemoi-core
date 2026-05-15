@@ -48,7 +48,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
@@ -479,7 +479,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
@@ -511,7 +511,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x = x[
+                :,
+                0 : (n_step_input[dataset_name] if isinstance(n_step_input, dict) else n_step_input),
+                None,
+                ...,
+            ]  # add dummy ensemble dimension as 3rd index
 
             if model_comm_group is not None:
                 shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
@@ -578,7 +583,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         noise_scheduler_params: Optional[dict] = None,
@@ -769,7 +774,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
+                "input_timesteps": self._get_n_step_input(dataset),
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
@@ -785,7 +790,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
@@ -1011,7 +1016,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
@@ -1027,7 +1032,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x_in = x[
+                :,
+                0 : (n_step_input[dataset_name] if isinstance(n_step_input, dict) else n_step_input),
+                None,
+                ...,
+            ]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1:, None, ...]  # keep time dim and add dummy ensemble dimension
 
             if model_comm_group is not None:

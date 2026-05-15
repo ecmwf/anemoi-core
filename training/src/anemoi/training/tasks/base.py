@@ -11,6 +11,7 @@ import datetime
 import logging
 from abc import ABC
 from collections.abc import Iterable
+from collections.abc import Mapping
 
 import torch
 
@@ -55,9 +56,52 @@ class BaseTask(ABC):
 
     def __init__(
         self,
-        input_offsets: list[datetime.timedelta],
-        output_offsets: list[datetime.timedelta],
+        input_offsets: list[datetime.timedelta] | dict[str, list[datetime.timedelta]],
+        output_offsets: list[datetime.timedelta] | dict[str, list[datetime.timedelta]],
     ) -> None:
+        self.num_input_timesteps_by_dataset: dict[str, int] = {}
+        self.dataset_input_relative_times_by_dataset: dict[str, list[int]] = {}
+        self.dataset_target_relative_times_by_dataset: dict[str, list[int]] = {}
+        self.dataset_time_maps: dict[str, dict[int, int]] = {}
+        self._reference_input_dataset_name: str | None = None
+        self._reference_output_dataset_name: str | None = None
+
+        input_offsets_are_mapping = isinstance(input_offsets, Mapping) or hasattr(input_offsets, "items")
+        output_offsets_are_mapping = isinstance(output_offsets, Mapping) or hasattr(output_offsets, "items")
+
+        if input_offsets_are_mapping or output_offsets_are_mapping:
+            if not input_offsets_are_mapping or not output_offsets_are_mapping:
+                msg = "`input_offsets` and `output_offsets` must both be mappings for per-dataset sparse offsets."
+                raise ValueError(msg)
+            input_offsets = dict(input_offsets)
+            output_offsets = dict(output_offsets)
+            dataset_names = sorted(set(input_offsets) | set(output_offsets))
+            self._input_offsets = {
+                dataset_name: sorted(input_offsets.get(dataset_name, [])) for dataset_name in dataset_names
+            }
+            self._output_offsets = {
+                dataset_name: sorted(output_offsets.get(dataset_name, [])) for dataset_name in dataset_names
+            }
+            self._offsets = sorted(
+                {
+                    *[offset for offsets in self._input_offsets.values() for offset in offsets],
+                    *[offset for offsets in self._output_offsets.values() for offset in offsets],
+                },
+            )
+            self.num_input_timesteps_by_dataset = {
+                dataset_name: len(self._input_offsets[dataset_name]) for dataset_name in dataset_names
+            }
+            if len(self._input_offsets) > 0:
+                self._reference_input_dataset_name = max(
+                    self._input_offsets,
+                    key=lambda name: len(self._input_offsets[name]),
+                )
+            self._reference_output_dataset_name = next(
+                (name for name, offsets in self._output_offsets.items() if len(offsets) > 0),
+                self._reference_input_dataset_name,
+            )
+            return
+
         self._input_offsets = sorted(input_offsets)
         self._output_offsets = sorted(output_offsets)
         self._offsets = sorted(set(self._input_offsets + self._output_offsets))
@@ -69,12 +113,12 @@ class BaseTask(ABC):
     @property
     def num_input_timesteps(self) -> int:
         """Number of input time steps."""
-        return len(self._input_offsets)
+        return len(self.get_input_offsets())
 
     @property
     def num_output_timesteps(self) -> int:
         """Number of output time steps."""
-        return len(self._output_offsets)
+        return len(self.get_output_offsets())
 
     @property
     def num_steps(self) -> int:
@@ -85,16 +129,26 @@ class BaseTask(ABC):
         """Get the metric name for the current step (if any)."""
         return ""
 
-    def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
+    def get_input_offsets(self, dataset_name: str | None = None, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of input time offsets."""
+        if isinstance(self._input_offsets, Mapping):
+            if dataset_name is not None and dataset_name in self._input_offsets:
+                return self._input_offsets[dataset_name]
+            if self._reference_input_dataset_name is not None:
+                return self._input_offsets[self._reference_input_dataset_name]
         return self._input_offsets
 
-    def get_output_offsets(self, **_kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(self, dataset_name: str | None = None, **_kwargs) -> list[datetime.timedelta]:
         """Return the output offsets for a given step.
 
         The default implementation returns ``self._output_offsets``.
         Subclasses may override this to shift outputs per rollout step.
         """
+        if isinstance(self._output_offsets, Mapping):
+            if dataset_name is not None and dataset_name in self._output_offsets:
+                return self._output_offsets[dataset_name]
+            if self._reference_output_dataset_name is not None:
+                return self._output_offsets[self._reference_output_dataset_name]
         return self._output_offsets
 
     def get_offsets(self, **_kwargs) -> list[datetime.timedelta]:
@@ -123,6 +177,85 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
+    def _requested_input_relative_times(self, dataset_name: str) -> list[int]:
+        requested = self.dataset_input_relative_times_by_dataset.get(dataset_name)
+        if requested is not None and len(requested) > 0:
+            return requested
+        if self._reference_input_dataset_name is not None:
+            reference_requested = self.dataset_input_relative_times_by_dataset.get(self._reference_input_dataset_name)
+            if reference_requested is not None and len(reference_requested) > 0:
+                return reference_requested
+        return self.get_batch_input_indices()
+
+    def _requested_output_relative_times(self, dataset_name: str, rollout_step: int = 0) -> list[int]:
+        requested = self.dataset_target_relative_times_by_dataset.get(dataset_name)
+        if requested is not None:
+            return requested
+        if self._reference_output_dataset_name is not None:
+            reference_requested = self.dataset_target_relative_times_by_dataset.get(self._reference_output_dataset_name)
+            if reference_requested is not None:
+                return reference_requested
+        return self.get_batch_output_indices(rollout_step=rollout_step)
+
+    def _resolve_relative_time_metadata(
+        self,
+        metadata_inference: Mapping,
+        dataset_names: list[str],
+        keys: tuple[str, ...],
+    ) -> dict[str, list[int]]:
+        """Choose the richest per-dataset time window exposed by the datamodule metadata."""
+        relative_by_dataset: dict[str, list[int]] = {}
+
+        for dataset_name in dataset_names:
+            dataset_meta = metadata_inference.get(dataset_name, {})
+            timesteps_meta = dataset_meta.get("timesteps", {}) if isinstance(dataset_meta, Mapping) else {}
+
+            chosen: list[int] | None = None
+            for key in keys:
+                raw_relative = timesteps_meta.get(key, None)
+                if not isinstance(raw_relative, Mapping):
+                    continue
+                raw_values = raw_relative.get(dataset_name, None)
+                if raw_values is None:
+                    continue
+                candidate = [int(value) for value in raw_values]
+                if chosen is None or max(candidate, default=-1) > max(chosen, default=-1):
+                    chosen = candidate
+
+            if chosen is not None:
+                relative_by_dataset[dataset_name] = chosen
+
+        return relative_by_dataset
+
+    def _sample_batch_position(self, *, dataset_name: str, relative_time: int) -> int:
+        time_map = self.dataset_time_maps.get(dataset_name, {})
+        exact_idx = time_map.get(int(relative_time), None)
+        if exact_idx is not None:
+            return int(exact_idx)
+
+        available_times = sorted(int(value) for value in time_map)
+        if not available_times:
+            msg = f"Dataset '{dataset_name}' has no available relative times for sparse rollout."
+            raise ValueError(msg)
+
+        candidate_times = [value for value in available_times if value <= int(relative_time)]
+        if not candidate_times:
+            msg = (
+                f"Dataset '{dataset_name}' has no forcing/boundary time at or before relative time "
+                f"{relative_time}. Available times: {available_times}"
+            )
+            raise ValueError(msg)
+        sampled_time = candidate_times[-1]
+
+        LOGGER.info(
+            "Sparse rollout dataset=%s requested_time=%s sampled_time=%s",
+            dataset_name,
+            relative_time,
+            sampled_time,
+        )
+
+        return int(time_map[sampled_time])
+
     def get_inputs(
         self,
         batch: dict[str, torch.Tensor],
@@ -144,13 +277,26 @@ class BaseTask(ABC):
             Input tensors per dataset with shape
             ``(bs, num_inputs, grid, nvar)``.
         """
-        time_indices = self.get_batch_input_indices()
-        time_indices = normalize_time_indices(time_indices)
+        if len(self.dataset_time_maps) == 0:
+            x = {}
+            for dataset_name, dataset_batch in batch.items():
+                time_indices = self.get_batch_input_indices(dataset_name=dataset_name)
+                time_indices = normalize_time_indices(time_indices)
+                dataset_batch = dataset_batch[:, time_indices]
+                x[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
+                LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+            return x
 
         x = {}
         for dataset_name, dataset_batch in batch.items():
-            dataset_batch = dataset_batch[:, time_indices]
-            x[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
+            requested_relative_times = self._requested_input_relative_times(dataset_name)
+            input_positions = [
+                self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+                for relative_time in requested_relative_times
+            ]
+            input_index = torch.tensor(input_positions, device=dataset_batch.device, dtype=torch.long)
+            x_time = dataset_batch.index_select(1, input_index)
+            x[dataset_name] = x_time[..., data_indices[dataset_name].data.input.full]
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
         return x
 
@@ -172,12 +318,25 @@ class BaseTask(ABC):
             ``(bs, num_outputs, ensemble, grid, full_nvar)`` in DATA_FULL
             variable space (all variables including forcings).
         """
-        time_indices = self.get_batch_output_indices(**kwargs)
-        time_indices = normalize_time_indices(time_indices)
+        if len(self.dataset_time_maps) == 0:
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                time_indices = self.get_batch_output_indices(dataset_name=dataset_name, **kwargs)
+                time_indices = normalize_time_indices(time_indices)
+                y[dataset_name] = dataset_batch[:, time_indices]
+                LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
+            return y
 
+        rollout_step = kwargs.get("rollout_step", 0)
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, time_indices]
+            requested_relative_times = self._requested_output_relative_times(dataset_name, rollout_step=rollout_step)
+            target_positions = [
+                self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+                for relative_time in requested_relative_times
+            ]
+            target_index = torch.tensor(target_positions, device=dataset_batch.device, dtype=torch.long)
+            y[dataset_name] = dataset_batch.index_select(1, target_index)
             LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
         return y
 
@@ -191,6 +350,9 @@ class BaseTask(ABC):
         """Fill the metadata dictionary with task-specific information."""
         md_dict["task"] = self.name
 
+        metadata_inference = md_dict.get("metadata_inference", {})
+        dataset_names = metadata_inference.get("dataset_names", []) if isinstance(metadata_inference, Mapping) else []
+
         input_relative_date_indices = self.get_batch_input_indices()
         output_relative_date_indices = self.get_batch_output_indices()
         timestep = self._get_timestep_for_metadata()
@@ -202,9 +364,71 @@ class BaseTask(ABC):
             "timestep": timestep,  # backwards compatibility with inference
         }
 
-        dataset_names = md_dict["metadata_inference"]["dataset_names"]
         for dataset_name in dataset_names:
-            md_dict["metadata_inference"][dataset_name]["timesteps"] = timesteps
+            existing_timesteps = metadata_inference[dataset_name].get("timesteps", {})
+            metadata_inference[dataset_name]["timesteps"] = timesteps | existing_timesteps
+
+        if len(dataset_names) == 0:
+            return
+
+        self.dataset_input_relative_times_by_dataset = self._resolve_relative_time_metadata(
+            metadata_inference,
+            dataset_names,
+            (
+                "relative_date_input_indices_validation_by_dataset",
+                "relative_date_input_indices_training_by_dataset",
+            ),
+        )
+        self.dataset_target_relative_times_by_dataset = self._resolve_relative_time_metadata(
+            metadata_inference,
+            dataset_names,
+            (
+                "relative_date_target_indices_validation_by_dataset",
+                "relative_date_target_indices_training_by_dataset",
+            ),
+        )
+        if len(self.dataset_input_relative_times_by_dataset) > 0:
+            self._reference_input_dataset_name = max(
+                self.dataset_input_relative_times_by_dataset,
+                key=lambda name: len(self.dataset_input_relative_times_by_dataset[name]),
+            )
+        if any(len(values) > 0 for values in self.dataset_target_relative_times_by_dataset.values()):
+            self._reference_output_dataset_name = next(
+                name for name, values in self.dataset_target_relative_times_by_dataset.items() if len(values) > 0
+            )
+
+        relative_by_dataset = self._resolve_relative_time_metadata(
+            metadata_inference,
+            dataset_names,
+            (
+                "relative_date_indices_validation_by_dataset",
+                "relative_date_indices_training_by_dataset",
+            ),
+        )
+        reference_input_relative_times = (
+            self.dataset_input_relative_times_by_dataset.get(
+                self._reference_input_dataset_name,
+                self.get_batch_input_indices(),
+            )
+            if self._reference_input_dataset_name is not None
+            else self.get_batch_input_indices()
+        )
+        fallback_relative_indices = sorted(
+            {
+                *reference_input_relative_times,
+                *self._requested_output_relative_times(
+                    self._reference_output_dataset_name or dataset_names[0],
+                    rollout_step=max(self.num_steps - 1, 0),
+                ),
+            },
+        )
+        self.dataset_time_maps = {
+            dataset_name: {int(relative_time): batch_idx for batch_idx, relative_time in enumerate(relative_times)}
+            for dataset_name, relative_times in {
+                dataset_name: relative_by_dataset.get(dataset_name, fallback_relative_indices)
+                for dataset_name in dataset_names
+            }.items()
+        }
 
 
 class BaseSingleStepTask(BaseTask):

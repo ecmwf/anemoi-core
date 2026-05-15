@@ -66,7 +66,6 @@ class Forecaster(BaseTask):
         validation_rollout: int = 1,
         **kwargs,
     ) -> None:
-
         self.timestep = frequency_to_timedelta(timestep)
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
@@ -80,11 +79,11 @@ class Forecaster(BaseTask):
                 kwargs,
             )
 
-        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
         input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
-        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
         output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
+        self.num_input_steps = self.num_input_timesteps
+        self.num_output_steps = self.num_output_timesteps
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
@@ -125,17 +124,94 @@ class Forecaster(BaseTask):
 
         return self._compute_rollout_offsets(rollout_step)
 
-    def get_output_offsets(self, rollout_step: int = 0, mode: str = "training", **_kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(
+        self,
+        rollout_step: int = 0,
+        mode: str = "training",
+        dataset_name: str | None = None,
+        **_kwargs,
+    ) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
+        _ = dataset_name
         rollout_step = rollout_step if mode == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
+
+    def _requested_output_relative_times(self, dataset_name: str, rollout_step: int = 0) -> list[int]:
+        requested = self.dataset_target_relative_times_by_dataset.get(dataset_name)
+        if requested is not None:
+            if len(requested) == 0:
+                return []
+            rollout_window = max(self.rollout.maximum, self.validation_rollout)
+            if len(requested) % rollout_window != 0:
+                msg = (
+                    f"Dataset '{dataset_name}' target indices {requested} do not divide evenly across "
+                    f"rollout window {rollout_window}."
+                )
+                raise ValueError(msg)
+
+            per_step_output = len(requested) // rollout_window
+            start = rollout_step * per_step_output
+            stop = start + per_step_output
+            return requested[start:stop]
+
+        return super()._requested_output_relative_times(dataset_name, rollout_step=rollout_step)
+
+    def _prepare_next_input_steps(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        dataset_name: str | None,
+        rollout_step: int,
+        data_indices: IndexCollection,
+    ) -> tuple[torch.Tensor, list[tuple[int, torch.Tensor, int | None]], bool]:
+        use_sparse_time_maps = len(self.dataset_time_maps) > 0
+        if use_sparse_time_maps:
+            if dataset_name is None:
+                msg = "`dataset_name` is required for sparse rollout input updates."
+                raise ValueError(msg)
+
+            requested_output_relative_times = self._requested_output_relative_times(
+                dataset_name,
+                rollout_step=rollout_step,
+            )
+            step_specs = []
+            for relative_time in [
+                int(relative_time + (rollout_step + 1) * self.num_output_timesteps)
+                for relative_time in self._requested_input_relative_times(dataset_name)
+            ]:
+                batch_position = self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+                if not 0 <= batch_position < batch.shape[1]:
+                    msg = (
+                        f"Sparse rollout for dataset '{dataset_name}' resolved relative time {relative_time} "
+                        f"to batch position {batch_position}, but batch only has {batch.shape[1]} time steps."
+                    )
+                    raise ValueError(msg)
+                x_step = batch[:, batch_position, ..., data_indices.data.input.full].clone()
+
+                if x_step.shape[1] == 1 and y_pred.shape[2] != 1:
+                    x_step = x_step.expand(-1, y_pred.shape[2], -1, -1).clone()
+
+                pred_position = None
+                if int(relative_time) in requested_output_relative_times:
+                    pred_position = requested_output_relative_times.index(int(relative_time))
+                step_specs.append((batch_position, x_step, pred_position))
+
+            return x, step_specs, True
+
+        keep_steps = min(self.num_input_steps, self.num_output_steps)
+        x = x.roll(-keep_steps, dims=1)
+        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
+        step_specs = [(output_batch_indices[-(i + 1)], x[:, -(i + 1)], -(i + 1)) for i in range(keep_steps)]
+        return x, step_specs, False
 
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
         y_pred: torch.Tensor,
         batch: torch.Tensor,
+        dataset_name: str | None = None,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
@@ -145,42 +221,49 @@ class Forecaster(BaseTask):
 
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
-        keep_steps = min(self.num_input_steps, self.num_output_steps)
+        x, step_specs, use_sparse_time_maps = self._prepare_next_input_steps(
+            x,
+            y_pred,
+            batch,
+            dataset_name,
+            rollout_step,
+            data_indices,
+        )
+        next_steps = []
+        for i, (batch_position, x_step, pred_position) in enumerate(step_specs):
 
-        x = x.roll(-keep_steps, dims=1)
+            if pred_position is not None:
+                x_step[..., data_indices.model.input.prognostic] = y_pred[
+                    :,
+                    pred_position,
+                    ...,
+                    data_indices.model.output.prognostic,
+                ]
 
-        # Compute batch indices for the output offsets of this rollout step
-        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
+            true_state = batch[:, batch_position]
+            if true_state.shape[1] == 1 and x_step.shape[1] != 1:
+                true_state = true_state.expand(-1, x_step.shape[1], -1, -1)
 
-        for i in range(keep_steps):
-            # Get prognostic variables
-            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
-                :,
-                -(i + 1),
-                ...,
-                data_indices.model.output.prognostic,
-            ]
+            if output_mask is not None:
+                x_step = output_mask.rollout_boundary(
+                    x_step,
+                    true_state,
+                    data_indices,
+                    grid_shard_slice=grid_shard_slice,
+                )
 
-            batch_time_index = output_batch_indices[-(i + 1)]
-            true_state = batch[:, batch_time_index]
+            forcing = batch[:, batch_position, ..., data_indices.data.input.forcing]
+            if forcing.shape[1] == 1 and x_step.shape[1] != 1:
+                forcing = forcing.expand(-1, x_step.shape[1], -1, -1)
+            x_step[..., data_indices.model.input.forcing] = forcing
 
-            if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
-                true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
+            if use_sparse_time_maps:
+                next_steps.append(x_step)
+            else:
+                x[:, -(i + 1)] = x_step
 
-            x[:, -(i + 1)] = output_mask.rollout_boundary(
-                x[:, -(i + 1)],
-                true_state,
-                data_indices,
-                grid_shard_slice=grid_shard_slice,
-            )
-
-            # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
-                :,
-                batch_time_index,
-                ...,
-                data_indices.data.input.forcing,
-            ]
+        if use_sparse_time_maps:
+            return torch.stack(next_steps, dim=1)
         return x
 
     def advance_input(
@@ -199,6 +282,7 @@ class Forecaster(BaseTask):
                 x[dataset_name],
                 y_pred[dataset_name],
                 batch[dataset_name],
+                dataset_name=dataset_name,
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],

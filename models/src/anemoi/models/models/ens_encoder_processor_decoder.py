@@ -41,7 +41,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         n_step_output: int,
     ) -> None:
         self.condition_on_residual = DotDict(model_config).model.condition_on_residual

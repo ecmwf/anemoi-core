@@ -59,7 +59,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DictConfig,
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         n_step_output: int,
         graph_data: HeteroData,
         statistics: dict,

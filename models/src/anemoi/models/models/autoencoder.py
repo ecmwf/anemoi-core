@@ -49,7 +49,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        x_input = x[:, : self.n_step_input, ...]
+        x_input = x[
+            :,
+            : self._get_n_step_input(dataset_name),
+            ...,
+        ]
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (

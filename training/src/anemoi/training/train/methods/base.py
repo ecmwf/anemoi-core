@@ -189,6 +189,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.n_step_input = self.task.num_input_timesteps
         self.n_step_output = self.task.num_output_timesteps
+        task_input_steps_by_dataset = getattr(self.task, "num_input_timesteps_by_dataset", {})
+        self.n_step_input = {
+            dataset_name: int(task_input_steps_by_dataset.get(dataset_name, self.n_step_input))
+            for dataset_name in self.dataset_names
+        }
+        if all(value == self.task.num_input_timesteps for value in self.n_step_input.values()):
+            self.n_step_input = self.task.num_input_timesteps
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
@@ -325,7 +332,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
 
-        LOGGER.debug("n_step_input: %d", self.n_step_input)
+        LOGGER.debug("n_step_input: %s", self.n_step_input)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
