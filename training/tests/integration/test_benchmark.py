@@ -127,7 +127,7 @@ def test_benchmark_dataloader(
             reader_group_size=reader_group_size,
             shard_sizes=shard_sizes,
         )
-        LOGGER.info("Initialized training dataloader with batch size %d, reader_group_size: %d", train_dataloader.batch_size, train_dataloader.dataset.reader_group_size)
+        LOGGER.info("Initialized training dataloader with batch size %d, reader_group_size: %d, num_workers: %d", train_dataloader.batch_size, train_dataloader.dataset.reader_group_size, train_dataloader.num_workers)
 
         rss_before = get_tree_rss_mib()
         LOGGER.info("Process tree RSS before benchmark: %.2f MiB", rss_before)
