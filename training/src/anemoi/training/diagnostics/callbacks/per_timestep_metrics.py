@@ -18,6 +18,7 @@ from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -125,7 +126,14 @@ class PerTimestepMetrics(Callback):
                             "scaler_indices": (..., indices),
                             "grid_shard_slice": grid_shard_slice,
                             "group": pl_module.model_comm_group,
+                            "pred_layout": IndexSpace.MODEL_OUTPUT,
+                            "target_layout": IndexSpace.DATA_FULL,
                         }
+                        if getattr(metric, "needs_shard_layout_info", False):
+                            metric_kwargs.update(
+                                grid_dim=pl_module.grid_dim,
+                                grid_shard_sizes=pl_module.grid_shard_sizes[dataset_name],
+                            )
 
                         value = metric(pred_t_post, target_t_post, **metric_kwargs)
 

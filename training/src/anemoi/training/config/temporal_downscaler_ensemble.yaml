@@ -23,7 +23,9 @@ config_validation: True
 diagnostics:
   plot:
     callbacks: []
-  callbacks: []
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics
+      every_n_batches: 20
 
 system:
   input:
