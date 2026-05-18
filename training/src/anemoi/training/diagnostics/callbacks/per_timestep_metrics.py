@@ -72,18 +72,14 @@ class PerTimestepMetrics(Callback):
         """Run model and compute metrics per timestep."""
         # Get inputs and targets via the task
         x = pl_module.task.get_inputs(batch, data_indices=pl_module.data_indices)
-        if hasattr(pl_module, "_expand_ens_dim"):
-            x = pl_module._expand_ens_dim(x)
+        x = pl_module._expand_ens_dim(x) if hasattr(pl_module, "_expand_ens_dim") else x
 
         # Run model forward
         y_pred = pl_module(x)
 
         # Get targets
         y_full = pl_module.task.get_targets(batch)
-        if hasattr(pl_module, "_collapse_ens_dim"):
-            y = pl_module._collapse_ens_dim(y_full)
-        else:
-            y = y_full
+        y = pl_module._collapse_ens_dim(y_full) if hasattr(pl_module, "_collapse_ens_dim") else y_full
 
         batch_size = next(iter(batch.values())).shape[0]
 
