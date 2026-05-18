@@ -18,7 +18,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport.paths import stochastic_interpolant_sigma
 from anemoi.models.transport.paths import unit_time_grid
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +76,7 @@ class TransportModelObjective:
         raise NotImplementedError
 
 
-class DiffusionModelObjective(TransportModelObjective):
+class EDMDiffusionModelObjective(TransportModelObjective):
     """EDM diffusion model objective."""
 
     def forward(
@@ -137,18 +136,18 @@ class DiffusionModelObjective(TransportModelObjective):
             sigmas[dataset_name] = sigma_i
             y_init[dataset_name] = source[dataset_name].to(dtype=sigma_i.dtype) * sigma_i[0]
 
-        diffusion_sampler_config = dict(model.inference_defaults.diffusion_sampler)
+        edm_diffusion_sampler_config = _get_inference_defaults_section(model, "edm_diffusion_sampler")
         if sampler_params is not None:
-            diffusion_sampler_config.update(sampler_params)
+            edm_diffusion_sampler_config.update(sampler_params)
 
-        LOGGER.debug("diffusion_sampler_config: %s", diffusion_sampler_config)
+        LOGGER.debug("edm_diffusion_sampler_config: %s", edm_diffusion_sampler_config)
 
-        actual_sampler = diffusion_sampler_config.pop("sampler")
+        actual_sampler = edm_diffusion_sampler_config.pop("sampler")
         if actual_sampler not in transport_samplers.DIFFUSION_SAMPLERS:
             raise ValueError(f"Unknown sampler: {actual_sampler}")
 
         sampler_cls = transport_samplers.DIFFUSION_SAMPLERS[actual_sampler]
-        sampler_instance = sampler_cls(dtype=next(iter(sigmas.values())).dtype, **diffusion_sampler_config)
+        sampler_instance = sampler_cls(dtype=next(iter(sigmas.values())).dtype, **edm_diffusion_sampler_config)
 
         sigmas_ref = next(iter(sigmas.values()))
         for dataset_name, sigmas_i in sigmas.items():
@@ -255,9 +254,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         if sampler_params is not None:
             si_sampler_config.update(sampler_params)
 
-        # Euler-Maruyama follows the stochastic bridge
-        # For deterministic bridges, such as flow-matching-like SI you can also use Heun and Euler
-        actual_sampler = si_sampler_config.pop("sampler", "euler_maruyama")
+        actual_sampler = si_sampler_config.pop("sampler", "heun")
         num_steps = si_sampler_config.pop("num_steps", _get_default_num_steps(model))
 
         source = kwargs.get("source", kwargs.get("reference_state"))
@@ -292,27 +289,6 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
                 grid_shard_sizes=shard_sizes_arg,
             )
 
-        def sigma_fn(time_arg: torch.Tensor) -> torch.Tensor:
-            return stochastic_interpolant_sigma(
-                time_arg,
-                schedule=model.stochastic_interpolant.sigma_schedule,
-                noise_scale=model.stochastic_interpolant.noise_scale,
-            )
-
-        if actual_sampler in transport_samplers.STOCHASTIC_INTERPOLANT_SAMPLERS:
-            sampler_cls = transport_samplers.STOCHASTIC_INTERPOLANT_SAMPLERS[actual_sampler]
-            sampler_instance = sampler_cls(dtype=times.dtype, **si_sampler_config)
-
-            return sampler_instance.sample(
-                x,
-                y_init,
-                times,
-                transport_fn,
-                model_comm_group,
-                grid_shard_sizes=grid_shard_sizes,
-                sigma_fn=sigma_fn,
-            )
-
         if actual_sampler not in transport_samplers.VECTOR_FIELD_SAMPLERS:
             raise ValueError(f"Unknown stochastic-interpolant sampler: {actual_sampler}")
 
@@ -329,7 +305,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
 
 
 TRANSPORT_MODEL_OBJECTIVES = {
-    "diffusion": DiffusionModelObjective,
+    "edm_diffusion": EDMDiffusionModelObjective,
     "stochastic_interpolant": StochasticInterpolantModelObjective,
 }
 

@@ -555,7 +555,7 @@ class TransportTrainingSchema(BaseTrainingSchema):
     "Training objective."
     prediction_mode: Literal["state", "tendency"] = "state"
     "Endpoint semantics for the transport objective."
-    transport_objective: Literal["diffusion", "stochastic_interpolant"] = "diffusion"
+    transport_objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Transport objective used to perturb targets and train the model."
 
 

@@ -8,7 +8,7 @@ model:
   hidden_nodes_name: "hidden"
   latent_skip: True
   transport:
-    objective: diffusion
+    objective: edm_diffusion
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
@@ -26,14 +26,14 @@ model:
         sigma_min: 0.02
         rho: 7.0
         num_steps: 50
-      diffusion_sampler:
+      edm_diffusion_sampler:
         sampler: "heun"
         S_churn: 0.0
         S_min: 0.0
         S_max: .inf
         S_noise: 1.0
       stochastic_interpolant_sampler:
-        sampler: "euler_maruyama"
+        sampler: "heun"
         num_steps: 50
 
 layer_kernels:

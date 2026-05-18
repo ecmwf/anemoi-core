@@ -544,8 +544,8 @@ def test_plot_loss_temporal_downscaler():
         assert mock_output_figure.call_count == 1
 
 
-def test_plot_loss_diffusion():
-    """PlotLoss._plot with diffusion (forecaster, output_times=1) produces one figure."""
+def test_plot_loss_single_step_transport():
+    """PlotLoss._plot with a one-step transport model produces one figure."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
@@ -599,7 +599,7 @@ def test_plot_loss_diffusion():
             batch_idx=0,
             epoch=0,
         )
-        # Diffusion has output_times=1, so one figure
+        # One-step transport models have output_times=1, so one figure.
         assert mock_output_figure.call_count == 1
 
 

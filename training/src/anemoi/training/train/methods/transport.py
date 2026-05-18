@@ -18,7 +18,7 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.methods.diffusion import DiffusionTransportObjective
+from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import TransportObjective
@@ -300,7 +300,7 @@ PREDICTION_MODE_CLASSES = {
 
 
 TRANSPORT_OBJECTIVE_CLASSES = {
-    "diffusion": DiffusionTransportObjective,
+    "edm_diffusion": EDMDiffusionTransportObjective,
     "stochastic_interpolant": StochasticInterpolantTransportObjective,
 }
 
@@ -435,9 +435,9 @@ class BaseTransportTraining(BaseTrainingModule):
 
 
 class TransportTraining(BaseTransportTraining):
-    """Training module for diffusion and stochastic-interpolant transport models."""
+    """Training module for EDM diffusion and stochastic-interpolant transport models."""
 
-    transport_objective_name = "diffusion"
+    transport_objective_name = "edm_diffusion"
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

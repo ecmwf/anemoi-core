@@ -87,7 +87,7 @@ class TransportSourceConfig(BaseModel):
 
 
 class TransportConfig(BaseModel):
-    objective: Literal["diffusion", "stochastic_interpolant"] = "diffusion"
+    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Training and sampling objective used by the transport model."
     sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Typical data scale used by EDM diffusion."

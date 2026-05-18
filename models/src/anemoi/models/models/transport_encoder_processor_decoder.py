@@ -45,7 +45,7 @@ SamplingData = tuple[dict[str, torch.Tensor], ...]
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
-    """Encoder-processor-decoder model conditioned on diffusion noise or bridge time."""
+    """Encoder-processor-decoder model conditioned on diffusion noise level or bridge time."""
 
     def __init__(
         self,
@@ -396,15 +396,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Input batch after pre-processing
+            Input batch after pre-processing.
         pre_processors : dict[str, nn.Module]
-            Pre-processing module (already applied)
+            Pre-processing module (already applied).
         n_step_input : int
-            Number of input timesteps
+            Number of input timesteps.
         model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
+            Process group for distributed training.
         **kwargs
-            Additional parameters for subclasses
+            Additional parameters for subclasses.
 
         Returns
         -------
@@ -447,25 +447,25 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Parameters
         ----------
         out : dict[str, torch.Tensor]
-            Sampled output tensor
+            Sampled output tensor.
         post_processors : dict[str, nn.Module]
-            Post-processing module
+            Post-processing module.
         before_sampling_data : SamplingData
-            Data returned from _before_sampling (can be used by subclasses)
+            Data returned from _before_sampling (can be used by subclasses).
         model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
+            Process group for distributed training.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset grid shard sizes for gathering. ``None`` means the
             corresponding dataset is replicated, not sharded.
         gather_out : bool
-            Whether to gather output
+            Whether to gather output.
         **kwargs
-            Additional parameters for subclasses
+            Additional parameters for subclasses.
 
         Returns
         -------
         torch.Tensor
-            Post-processed output
+            Post-processed output.
         """
         for dataset_name in out.keys():
             out[dataset_name] = post_processors[dataset_name](out[dataset_name], in_place=False)
@@ -528,34 +528,34 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Input batched data (before pre-processing)
-        pre_processors : dict[str, nn.Module],
-            Pre-processing module
-        post_processors : dict[str, nn.Module],
-            Post-processing module
-        n_step_input : int,
-            Number of input timesteps
+            Input batched data (before pre-processing).
+        pre_processors : dict[str, nn.Module]
+            Pre-processing module.
+        post_processors : dict[str, nn.Module]
+            Post-processing module.
+        n_step_input : int
+            Number of input timesteps.
         model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
+            Process group for distributed training.
         gather_out : bool
-            Whether to gather output tensors across distributed processes
+            Whether to gather output tensors across distributed processes.
         noise_scheduler_params : Optional[dict]
             Dictionary of noise scheduler parameters (schedule_type, sigma_max, sigma_min, rho, num_steps, etc.)
-            These will override the default values from inference_defaults
+            These will override the default values from inference_defaults.
         sampler_params : Optional[dict]
             Dictionary of sampler parameters (sampler, S_churn, S_min, S_max, S_noise, etc.)
-            These will override the default values from inference_defaults
+            These will override the default values from inference_defaults.
         pre_processors_tendencies : Optional[dict[str, nn.Module]]
-            Pre-processing module for tendencies (used by subclasses)
+            Pre-processing module for tendencies (used by subclasses).
         post_processors_tendencies : Optional[dict[str, nn.Module]]
-            Post-processing module for tendencies (used by subclasses)
+            Post-processing module for tendencies (used by subclasses).
         **kwargs
-            Additional sampling parameters
+            Additional sampling parameters.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            Sampled output (after post-processing)
+            Sampled output (after post-processing).
         """
         with torch.no_grad():
 

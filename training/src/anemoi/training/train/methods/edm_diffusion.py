@@ -19,7 +19,7 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.index_space import IndexSpace
 
 
-class DiffusionTransportObjective(TransportObjective):
+class EDMDiffusionTransportObjective(TransportObjective):
     """EDM diffusion objective."""
 
     def prepare(
@@ -37,7 +37,7 @@ class DiffusionTransportObjective(TransportObjective):
         )
         source = self.build_transport_source(prepared)
         target_noised = self._noise_target(prepared.model_target, sigma, source)
-        # EDM Diffusion predicts the clean target. The prediction mode decides
+        # EDM diffusion predicts the clean target. The prediction mode decides
         # whether that clean target is a full state or a tendency field.
         # state uses DATA_FULL, tendency uses DATA_OUTPUT.
         return PreparedTransportObjective(
@@ -82,7 +82,7 @@ class DiffusionTransportObjective(TransportObjective):
         **_kwargs,
     ) -> torch.Tensor:
         """Compute EDM diffusion loss with noise weighting."""
-        assert weights is not None, f"{self.__class__.__name__} requires weights for diffusion loss computation."
+        assert weights is not None, f"{self.__class__.__name__} requires weights for EDM diffusion loss computation."
 
         loss = self.module.loss[dataset_name]
         loss_kwargs = {
@@ -124,7 +124,9 @@ class DiffusionTransportObjective(TransportObjective):
         sigma, weight = {}, {}
         dataset_names = list(shape.keys())
         ref_shape = shape[dataset_names[0]]
-        assert len(ref_shape) == 5, "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for diffusion noise."
+        assert (
+            len(ref_shape) == 5
+        ), "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for EDM diffusion noise."
         batch_size = ref_shape[0]
         ensemble_size = ref_shape[2]
         for dataset_name, shape_x in shape.items():
@@ -133,7 +135,7 @@ class DiffusionTransportObjective(TransportObjective):
             ), f"Expected 5D tensor shape (batch, time, ensemble, grid, vars) for dataset '{dataset_name}'."
             assert (
                 shape_x[0] == batch_size and shape_x[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets when sampling diffusion noise."
+            ), "Batch or ensemble dimension mismatch across datasets when sampling EDM diffusion noise."
 
         base_shape = (batch_size, ensemble_size)
         rnd_uniform = torch.rand(base_shape, device=device)

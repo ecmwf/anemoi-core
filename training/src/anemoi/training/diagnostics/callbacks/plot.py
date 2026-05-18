@@ -836,17 +836,17 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         Parameters
         ----------
         pl_module : pl.LightningModule
-            The LightningModule instance
+            The LightningModule instance.
         dataset_name : str
-            The name of the dataset to process
+            The name of the dataset to process.
         outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
             The outputs from the model. The second element must be a list of dicts
-            (one per outer step). Tasks with a single step (e.g. diffusion,
-            temporal downscaling) must return [y_pred] so that ``for x in outputs[1]``
+            (one per outer step). Tasks with a single step (e.g. one-step transport
+            objectives, temporal downscaling) must return [y_pred] so that ``for x in outputs[1]``
             iterates over steps; if they return the dict directly, iteration would
             be over dataset names and indexing would fail.
         batch : dict[str, torch.Tensor]
-            The batch of data
+            The batch of data.
         members : int | list[int] | None, optional
             Ensemble members to select. Only used when the plot adapter is ensemble-aware.
             None returns all members. Default is 0 (first member).
@@ -854,7 +854,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         Returns
         -------
         tuple[np.ndarray, np.ndarray]
-            The data and output tensors for plotting
+            The data and output tensors for plotting.
         """
         if self.latlons is None:
             self.latlons = {}

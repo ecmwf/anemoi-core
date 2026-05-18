@@ -2,7 +2,7 @@
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0.
 
-from .objectives import DiffusionModelObjective
+from .objectives import EDMDiffusionModelObjective
 from .objectives import StochasticInterpolantModelObjective
 from .objectives import TransportModelObjective
 from .objectives import get_transport_model_objective
@@ -17,7 +17,7 @@ from .sources import reference_state_sampling_source
 from .sources import sampling_source_specs
 
 __all__ = [
-    "DiffusionModelObjective",
+    "EDMDiffusionModelObjective",
     "EdmSettings",
     "NoiseConditioningSettings",
     "StochasticInterpolantModelObjective",

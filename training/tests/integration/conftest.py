@@ -456,14 +456,14 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
         "graphtransformer",
         "stretched",
         "ensemble_crps",
-        "diffusiontend",
+        "edm_diffusion_tendency",
     ],
     ids=[
         "lam",
         "graphtransformer",
         "stretched",
         "ensemble_crps",
-        "diffusiontend",
+        "edm_diffusion_tendency",
     ],
 )
 def benchmark_config(
@@ -488,9 +488,9 @@ def benchmark_config(
     elif test_case == "ensemble_crps":
         overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
-    elif test_case == "diffusiontend":
+    elif test_case == "edm_diffusion_tendency":
         overrides = []
-        base_config = "transport_diffusion_tendency"
+        base_config = "transport_edm_diffusion_tendency"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
@@ -612,18 +612,18 @@ def imerg_target_config(
 
 
 @pytest.fixture(
-    params=["transport_diffusion", "transport_diffusion_tendency"],
-    ids=["transport_diffusion", "transport_diffusion_tendency"],
+    params=["transport_edm_diffusion", "transport_edm_diffusion_tendency"],
+    ids=["transport_edm_diffusion", "transport_edm_diffusion_tendency"],
 )
-def diffusion_config(
+def edm_transport_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_edm_transport"):
         template = compose(config_name=request.param)
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
@@ -648,7 +648,7 @@ def stochastic_interpolant_config(
     ):
         template = compose(config_name=request.param)
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
@@ -661,34 +661,38 @@ def stochastic_interpolant_config(
     params=[
         pytest.param(
             [
-                "model=graphtransformer_diffusion",
+                "model=graphtransformer_transport",
                 "training=multi_transport",
                 "training.prediction_mode=state",
-                "training.transport_objective=diffusion",
+                "training.transport_objective=edm_diffusion",
             ],
-            id="diffusion",
+            id="edm_diffusion",
         ),
         pytest.param(
             [
-                "model=graphtransformer_diffusiontend",
+                "model=graphtransformer_transport_tendency",
                 "training=multi_transport",
                 "training.prediction_mode=tendency",
-                "training.transport_objective=diffusion",
+                "training.transport_objective=edm_diffusion",
             ],
-            id="diffusiontend",
+            id="edm_diffusion_tendency",
         ),
     ],
-    ids=["diffusion", "diffusiontend"],
+    ids=["edm_diffusion", "edm_diffusion_tendency"],
 )
-def multidatasets_diffusion_config(
+def multidatasets_edm_transport_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
     overrides = request.param
-    is_tendency = any("graphtransformer_diffusiontend" in override for override in overrides)
+    is_tendency = any("graphtransformer_transport_tendency" in override for override in overrides)
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_diffusion"):
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_multi_edm_transport",
+    ):
         template = compose(config_name="multi", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
@@ -711,7 +715,7 @@ def multidatasets_diffusion_config(
 
     cfg.diagnostics.plot.callbacks = (
         []
-    )  # remove plotting callbacks as they are tested in multidatasets and diffusion test cases
+    )  # remove plotting callbacks as they are tested in multidatasets and EDM transport test cases
     return cfg, [url_dataset, url_dataset_b]
 
 

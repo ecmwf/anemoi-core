@@ -31,7 +31,6 @@ TransportModelFunction = Callable[
 ]
 DenoisingFunction = TransportModelFunction
 VectorFieldFunction = TransportModelFunction
-DriftFunction = TransportModelFunction
 
 # Small tolerance used when a schedule provides an explicit final noise value.
 DEFAULT_FINAL_SIGMA_EPS = 1e-10
@@ -68,21 +67,21 @@ class NoiseScheduler(ABC):
         dtype_compute: torch.dtype = torch.float64,
         **kwargs,
     ) -> torch.Tensor:
-        """Generate the noise levels used by a diffusion sampler.
+        """Generate the noise levels used by an EDM diffusion sampler.
 
         Parameters
         ----------
         device : torch.device
-            Device to create tensors on
+            Device to create tensors on.
         dtype_compute : torch.dtype
-            Data type for the noise schedule computation
+            Data type for the noise schedule computation.
         **kwargs
-            Additional scheduler-specific parameters
+            Additional scheduler-specific parameters.
 
         Returns
         -------
         torch.Tensor
-            Noise schedule with shape (num_steps + 1,)
+            Noise schedule with shape (num_steps + 1,).
         """
         sigmas = self._build_schedule(
             device=device,
@@ -255,8 +254,8 @@ class ExponentialScheduler(NoiseScheduler):
         return sigmas
 
 
-class DiffusionSampler(ABC):
-    """Base class for diffusion samplers."""
+class EDMDiffusionSampler(ABC):
+    """Base class for EDM diffusion samplers."""
 
     @abstractmethod
     def sample(
@@ -269,36 +268,36 @@ class DiffusionSampler(ABC):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Run diffusion sampling from the initial noisy field to a clean prediction.
+        """Run EDM diffusion sampling from the initial noisy field to a clean prediction.
 
         Parameters
         ----------
         x : dict[str, torch.Tensor]
-            Input conditioning data with shape (batch, time, ensemble, grid, vars)
+            Input conditioning data with shape (batch, time, ensemble, grid, vars).
         y : dict[str, torch.Tensor]
-            Initial noise tensor with shape (batch, time, ensemble, grid, vars)
+            Initial noise tensor with shape (batch, time, ensemble, grid, vars).
         sigmas : torch.Tensor
             Noise schedule with shape (num_steps + 1,). The final value is
             expected to be exact zero after NoiseScheduler finalization.
         denoising_fn : Callable
-            Function that performs denoising
+            Function that performs denoising.
         model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
+            Process group for distributed training.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
         **kwargs
-            Additional sampler-specific parameters
+            Additional sampler-specific parameters.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            Sampled output with shape (batch, time, ensemble, grid, vars)
+            Sampled output with shape (batch, time, ensemble, grid, vars).
         """
         pass
 
 
-class EDMHeunSampler(DiffusionSampler):
+class EDMHeunSampler(EDMDiffusionSampler):
     """EDM Heun sampler with stochastic churn following Karras et al."""
 
     def __init__(
@@ -429,7 +428,7 @@ class EDMHeunSampler(DiffusionSampler):
         return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
 
-class DPMpp2MSampler(DiffusionSampler):
+class DPMpp2MSampler(EDMDiffusionSampler):
     """DPM++ 2M sampler (DPM-Solver++ with 2nd order multistep)."""
 
     def __init__(
@@ -648,88 +647,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
         return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
 
-class StochasticInterpolantEulerMaruyamaSampler(VectorFieldSampler):
-    """Euler-Maruyama sampler for stochastic-interpolant models with bridge noise."""
-
-    def __init__(
-        self,
-        noise_scale: float = 1.0,
-        dtype: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> None:
-        del kwargs
-        self.noise_scale = noise_scale
-        self.dtype = dtype
-
-    def sample(
-        self,
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
-        times: torch.Tensor,
-        vector_field_fn: DriftFunction = None,
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        drift_fn = kwargs.pop("drift_fn", vector_field_fn)
-        if drift_fn is None:
-            raise ValueError("StochasticInterpolantEulerMaruyamaSampler requires a drift_fn callable.")
-        sigma_fn = kwargs.get("sigma_fn")
-        if sigma_fn is None:
-            raise ValueError("StochasticInterpolantEulerMaruyamaSampler requires a sigma_fn callable.")
-
-        dtype = kwargs.get("dtype", self.dtype)
-        noise_scale = kwargs.get("noise_scale", self.noise_scale)
-        times = times.to(dtype)
-        if times.ndim != 1 or len(times) < 2:
-            raise ValueError("Stochastic-interpolant sampling requires a 1D time grid with at least two values.")
-        if not torch.isfinite(times).all():
-            raise ValueError("Stochastic-interpolant time grid must contain only finite values.")
-        if not torch.all(times[1:] > times[:-1]):
-            raise ValueError("Euler-Maruyama stochastic-interpolant sampling expects an increasing time grid.")
-
-        y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
-
-        for i in range(len(times) - 1):
-            time_i = times[i]
-            time_next = times[i + 1]
-            dt = time_next - time_i
-
-            y_model = {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
-            time_expanded = _expand_scalar_condition(time_i, y_model)
-            drift = drift_fn(
-                x,
-                y_model,
-                time_expanded,
-                model_comm_group,
-                grid_shard_sizes,
-            )
-            drift_solver = {dataset_name: drift_data.to(dtype) for dataset_name, drift_data in drift.items()}
-
-            sigma_i = sigma_fn(time_i)
-            if not torch.is_tensor(sigma_i):
-                sigma_i = torch.tensor(sigma_i, device=time_i.device, dtype=dtype)
-            else:
-                sigma_i = sigma_i.to(device=time_i.device, dtype=dtype)
-            noise_std = noise_scale * sigma_i * torch.sqrt(dt)
-
-            for dataset_name in y_solver:
-                dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
-                noise = randn_like_with_grid_sharding(
-                    y_solver[dataset_name],
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=dataset_grid_shard_sizes,
-                )
-                y_solver[dataset_name] = y_solver[dataset_name] + dt * drift_solver[dataset_name] + noise_std * noise
-
-        return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
-
-
 VECTOR_FIELD_SAMPLERS = {
     "euler": VectorFieldEulerSampler,
     "heun": VectorFieldHeunSampler,
-}
-
-STOCHASTIC_INTERPOLANT_SAMPLERS = {
-    "euler_maruyama": StochasticInterpolantEulerMaruyamaSampler,
 }

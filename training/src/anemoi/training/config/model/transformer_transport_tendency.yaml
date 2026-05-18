@@ -1,14 +1,15 @@
 num_channels: 1024
+condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
+  _target_: anemoi.models.models.AnemoiTransportTendModelEncProcDec
   hidden_nodes_name: "hidden"
   latent_skip: True
   transport:
-    objective: diffusion
+    objective: edm_diffusion
     sigma_data: 1.0
     noise_channels: 32
     noise_cond_dim: 16
@@ -26,14 +27,14 @@ model:
         sigma_min: 0.02
         rho: 7.0
         num_steps: 50
-      diffusion_sampler:
+      edm_diffusion_sampler:
         sampler: "heun"
         S_churn: 0.0
         S_min: 0.0
         S_max: .inf
         S_noise: 1.0
       stochastic_interpolant_sampler:
-        sampler: "euler_maruyama"
+        sampler: "heun"
         num_steps: 50
 
 layer_kernels:
@@ -56,18 +57,21 @@ layer_kernels:
     bias: False
 
 processor:
-  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
+  _target_: anemoi.models.layers.processor.TransformerProcessor
   num_layers: 16
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True
+  window_size: 512
+  dropout_p: 0.0 # GraphTransformer
+  attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
+  qk_norm: True # Transformer and GraphTransformer only
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
+  use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -83,7 +87,6 @@ encoder:
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-
 decoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
   trainable_size: ${model.trainable_parameters.hidden2data}
@@ -91,7 +94,7 @@ decoder:
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
   num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: False
+  initialise_data_extractor_zero: True
   qk_norm: True
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
@@ -111,8 +114,6 @@ trainable_parameters:
   hidden: 8
   data2hidden: 8
   hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
-
 
 attributes:
   edges:

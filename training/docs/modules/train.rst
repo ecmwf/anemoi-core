@@ -91,7 +91,7 @@ All methods inherit from
    execution.
 
 :class:`~anemoi.training.train.methods.transport.TransportTraining`
-   Configurable transport training for diffusion and stochastic-interpolant
+   Configurable transport training for EDM diffusion and stochastic-interpolant
    objectives. Selects state or tendency targets with ``prediction_mode``
    and the objective with ``transport_objective``.
 
@@ -110,7 +110,7 @@ All methods inherit from
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.train.methods.diffusion
+.. automodule:: anemoi.training.train.methods.edm_diffusion
    :members:
    :no-undoc-members:
    :show-inheritance:

@@ -15,7 +15,7 @@ import torch
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport import DiffusionModelObjective
+from anemoi.models.transport import EDMDiffusionModelObjective
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantModelObjective
 from anemoi.models.transport import TransportSourceBuilder
@@ -178,11 +178,11 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
             "sigma_min": 0.1,
             "num_steps": 4,
         },
-        diffusion_sampler={"sampler": "dummy"},
+        edm_diffusion_sampler={"sampler": "dummy"},
     )
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3, "ds_b": 4}
-    model.transport_objective = DiffusionModelObjective()
+    model.transport_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
     model.forward_network = lambda *_args, **_kwargs: None
 
@@ -198,10 +198,10 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
     assert set(out.keys()) == {"ds_a", "ds_b"}
 
 
-def test_sample_dispatches_stochastic_interpolant_to_euler_maruyama_sampler(
+def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class DummyStochasticInterpolantSampler:
+    class DummyVectorFieldSampler:
         def __init__(self, dtype: torch.dtype = torch.float64, **kwargs):
             del kwargs
             self.dtype = dtype
@@ -216,12 +216,10 @@ def test_sample_dispatches_stochastic_interpolant_to_euler_maruyama_sampler(
             grid_shard_sizes=None,
             **kwargs,
         ):
-            sigma_fn = kwargs["sigma_fn"]
+            del kwargs
             assert times.shape == (4,)
             assert times[0] == 0.0
             assert times[-1] == 1.0
-            torch.testing.assert_close(sigma_fn(torch.tensor(0.0)), torch.tensor(0.0))
-            torch.testing.assert_close(sigma_fn(torch.tensor(0.5)), torch.sqrt(torch.tensor(0.5)))
             torch.testing.assert_close(y["ds_a"], torch.zeros_like(y["ds_a"]))
             return vector_field_fn(
                 x,
@@ -234,7 +232,6 @@ def test_sample_dispatches_stochastic_interpolant_to_euler_maruyama_sampler(
     model = _transport_model_stub()
     model.transport_objective = StochasticInterpolantModelObjective()
     model.inference_defaults = SimpleNamespace(noise_scheduler={"num_steps": 3})
-    model.stochastic_interpolant = SimpleNamespace(sigma_schedule="brownian_bridge", noise_scale=1.0)
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3}
     model.forward_network = lambda _x, y, *_args, **_kwargs: y
@@ -250,9 +247,7 @@ def test_sample_dispatches_stochastic_interpolant_to_euler_maruyama_sampler(
         )
     }
 
-    monkeypatch.setitem(
-        transport_samplers.STOCHASTIC_INTERPOLANT_SAMPLERS, "euler_maruyama", DummyStochasticInterpolantSampler
-    )
+    monkeypatch.setitem(transport_samplers.VECTOR_FIELD_SAMPLERS, "heun", DummyVectorFieldSampler)
 
     x = {"ds_a": torch.randn(1, 3, 1, 5, 6, dtype=torch.float32)}
 
@@ -495,11 +490,11 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
             "sigma_min": 0.02,
             "num_steps": 6,
         },
-        diffusion_sampler={"sampler": sampler_name, **sampler_config},
+        edm_diffusion_sampler={"sampler": sampler_name, **sampler_config},
     )
     model.n_step_output = 2
     model.num_output_channels = {"dataset_a": 3, "dataset_b": 2}
-    model.transport_objective = DiffusionModelObjective()
+    model.transport_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
 
     def _network(

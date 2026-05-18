@@ -32,7 +32,7 @@ class PreparedPredictionTarget:
     validation metrics, because those may live in different variable spaces.
 
     model_target:
-        Target in MODEL_OUTPUT space. This is the tensor that diffusion or SI
+        Target in MODEL_OUTPUT space. This is the tensor that EDM diffusion or SI
         corrupts before passing it to the model.
 
     loss_target:
@@ -66,21 +66,21 @@ class PreparedTransportObjective:
     """Inputs and targets prepared by the selected transport objective.
 
     The transport objective decides how to corrupt the prediction target and
-    what the model should learn from that corrupted input. Diffusion predicts a
-    clean endpoint. SI predicts the bridge drift.
+    what the model should learn from that corrupted input. EDM diffusion
+    predicts a clean endpoint. SI predicts the bridge drift.
 
     conditioned_target:
         Corrupted target passed to the model together with the normal input.
-        For diffusion this is the noised target. For SI this is the interpolated
+        For EDM diffusion this is the noised target. For SI this is the interpolated
         bridge state.
 
     condition:
-        Scalar conditioning value expanded to tensor form. For diffusion this is
+        Scalar conditioning value expanded to tensor form. For EDM diffusion this is
         sigma. For SI this is the bridge time.
 
     loss_target:
         Target used by the loss after the transport objective has prepared it.
-        For diffusion this is usually the clean endpoint. For SI this is the
+        For EDM diffusion this is usually the clean endpoint. For SI this is the
         drift target.
 
     loss_target_layout:
@@ -92,7 +92,7 @@ class PreparedTransportObjective:
         models currently predict in MODEL_OUTPUT space.
 
     weights:
-        Optional per-sample/per-variable loss weights. Diffusion uses this for
+        Optional per-sample/per-variable loss weights. EDM diffusion uses this for
         EDM noise-level weighting. SI usually leaves this as None.
 
     aux:
@@ -110,7 +110,7 @@ class PreparedTransportObjective:
 
 
 class TransportObjective:
-    """Common interface for training objectives such as diffusion and stochastic interpolants."""
+    """Common interface for training objectives such as EDM diffusion and stochastic interpolants."""
 
     def __init__(self, module: TransportTraining) -> None:
         self.module = module

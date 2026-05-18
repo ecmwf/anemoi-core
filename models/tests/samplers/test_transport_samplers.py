@@ -20,7 +20,6 @@ from anemoi.models.samplers.transport_samplers import ExponentialScheduler
 from anemoi.models.samplers.transport_samplers import KarrasScheduler
 from anemoi.models.samplers.transport_samplers import LinearScheduler
 from anemoi.models.samplers.transport_samplers import NoiseScheduler
-from anemoi.models.samplers.transport_samplers import StochasticInterpolantEulerMaruyamaSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
 
@@ -302,52 +301,4 @@ def test_vector_field_heun_matches_linear_ode_predictor_corrector_step() -> None
     y_predictor = y[DATASET_NAME] + dt * f1
     f2 = 2.0 * y_predictor + times[1]
     expected = y[DATASET_NAME] + dt * (f1 + f2) / 2.0
-    torch.testing.assert_close(result[DATASET_NAME], expected)
-
-
-def test_stochastic_interpolant_euler_maruyama_matches_drift_when_noise_disabled() -> None:
-    x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float32)}
-    y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float32)}
-    times = torch.tensor([0.0, 0.25, 1.0], dtype=torch.float64)
-
-    def drift_fn(
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
-        time: dict[str, torch.Tensor],
-        model_comm_group=None,
-        grid_shard_sizes=None,
-    ) -> dict[str, torch.Tensor]:
-        del model_comm_group, grid_shard_sizes
-        assert time[DATASET_NAME].dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
-        return {DATASET_NAME: torch.ones_like(y[DATASET_NAME])}
-
-    sampler = StochasticInterpolantEulerMaruyamaSampler(dtype=torch.float64, noise_scale=0.0)
-    result = sampler.sample(x=x, y=y, times=times, drift_fn=drift_fn, sigma_fn=lambda t: 1.0 - t)
-
-    assert result[DATASET_NAME].dtype == x[DATASET_NAME].dtype
-    torch.testing.assert_close(result[DATASET_NAME], y[DATASET_NAME] + 1.0)
-
-
-def test_stochastic_interpolant_euler_maruyama_adds_path_noise_with_fixed_seed() -> None:
-    x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float64)}
-    y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float64)}
-    times = torch.tensor([0.0, 0.25], dtype=torch.float64)
-
-    def drift_fn(
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
-        time: dict[str, torch.Tensor],
-        model_comm_group=None,
-        grid_shard_sizes=None,
-    ) -> dict[str, torch.Tensor]:
-        del x, time, model_comm_group, grid_shard_sizes
-        return {dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()}
-
-    seed = 123
-    torch.manual_seed(seed)
-    sampler = StochasticInterpolantEulerMaruyamaSampler(dtype=torch.float64, noise_scale=0.5)
-    result = sampler.sample(x=x, y=y, times=times, drift_fn=drift_fn, sigma_fn=lambda t: 2.0)
-
-    torch.manual_seed(seed)
-    expected = y[DATASET_NAME] + 0.5 * 2.0 * torch.sqrt(times[1] - times[0]) * torch.randn_like(y[DATASET_NAME])
     torch.testing.assert_close(result[DATASET_NAME], expected)

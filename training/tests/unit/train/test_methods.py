@@ -34,7 +34,7 @@ from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.methods.diffusion import DiffusionTransportObjective
+from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
@@ -138,8 +138,8 @@ class DummyModel:
         )
 
 
-class DummyDiffusionModel(DummyModel):
-    """Stub for a diffusion model wrapping DummyModel."""
+class DummyTransportModel(DummyModel):
+    """Stub for a transport model wrapping DummyModel."""
 
     def __init__(self, num_output_variables: int | None = None) -> None:
         super().__init__(num_output_variables=num_output_variables, output_times=1)
@@ -250,7 +250,7 @@ def _wire_training_module(
 _CFG_EMPTY = DictConfig({"training": {"prediction_mode": "state", "transport_objective": "stochastic_interpolant"}})
 _CFG_DIFFUSION = DictConfig(
     {
-        "training": {"prediction_mode": "state", "transport_objective": "diffusion"},
+        "training": {"prediction_mode": "state", "transport_objective": "edm_diffusion"},
         "model": {"model": {"transport": {"rho": 7.0}}},
     },
 )
@@ -370,11 +370,11 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
 
 
-# ── DiffusionTransportObjective: compute_loss ─────────────────────────────────
+# ── EDMDiffusionTransportObjective: compute_loss ─────────────────────────────────
 
 
-def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
-    """DiffusionTransportObjective.compute_loss passes noise weights to the loss function."""
+def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
+    """EDMDiffusionTransportObjective.compute_loss passes noise weights to the loss function."""
     module = MagicMock(spec=TransportTraining)
     loss = CaptureLoss()
     group = object()
@@ -391,7 +391,7 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    result = DiffusionTransportObjective(module).compute_loss(
+    result = EDMDiffusionTransportObjective(module).compute_loss(
         y_pred=y_pred,
         y=y,
         dataset_name="data",
@@ -407,8 +407,8 @@ def test_diffusion_compute_loss_forwards_standard_loss_kwargs() -> None:
     }
 
 
-def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> None:
-    """DiffusionTransportObjective.compute_loss adds shard layout when loss.needs_shard_layout_info."""
+def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() -> None:
+    """EDMDiffusionTransportObjective.compute_loss adds shard layout when loss.needs_shard_layout_info."""
     module = MagicMock(spec=TransportTraining)
     loss = ShardingAwareCaptureLoss()
     group = object()
@@ -425,7 +425,7 @@ def test_diffusion_compute_loss_forwards_sharding_metadata_when_requested() -> N
     y = torch.randn(1, 1, 2, 3)
     grid_shard_slice = slice(0, 2)
 
-    DiffusionTransportObjective(module).compute_loss(
+    EDMDiffusionTransportObjective(module).compute_loss(
         y_pred=y_pred,
         y=y,
         dataset_name="data",
@@ -611,29 +611,6 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
         objective,
     )
     torch.testing.assert_close(reconstructed["data"], clean["data"])
-
-
-def test_stochastic_interpolant_time_sampling_avoids_exact_endpoints(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = SimpleNamespace()
-    objective = StochasticInterpolantTransportObjective(module)
-
-    def fake_rand(shape: tuple[int, ...], device: torch.device | None = None) -> torch.Tensor:
-        del shape
-        return torch.tensor([[0.0, 1.0], [0.5, 0.99999]], device=device)
-
-    monkeypatch.setattr(torch, "rand", fake_rand)
-
-    time_level = objective._sample_time_level({"data": (2, 1, 2, 3, 1)}, torch.device("cpu"))["data"]
-
-    eps = 1e-7
-    expected_base = eps + (1.0 - 2.0 * eps) * torch.tensor([[0.0, 1.0], [0.5, 0.99999]])
-    expected = expected_base[:, None, :, None, None]
-    torch.testing.assert_close(time_level, expected)
-    assert time_level.shape == (2, 1, 2, 1, 1)
-    assert torch.min(time_level) > 0.0
-    assert torch.max(time_level) < 1.0
 
 
 # ── BaseTrainingModule: calculate_val_metrics ──────────────────────────────────
@@ -921,16 +898,16 @@ def test_single_training_advance_input_called_once_per_step(
         assert kwargs["grid_shard_slice"] is module.grid_shard_slice
 
 
-# ── TransportTraining diffusion _step integration ─────────────────────────────
+# ── TransportTraining EDM transport _step integration ─────────────────────────────
 
 
-def test_diffusion_training_step_with_forecaster() -> None:
-    """TransportTraining._step returns a single diffusion prediction for a one-step forecaster."""
+def test_edm_transport_training_step_with_forecaster() -> None:
+    """TransportTraining._step returns a single transport prediction for a one-step forecaster."""
 
-    class _DummyDiffusionWrapper:
-        """Wraps DummyDiffusionModel to match the training module's nested model API."""
+    class _DummyTransportWrapper:
+        """Wraps DummyTransportModel to match the training module's nested model API."""
 
-        def __init__(self, inner: DummyDiffusionModel) -> None:
+        def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
 
     data_indices = _data_indices_single()
@@ -939,11 +916,11 @@ def test_diffusion_training_step_with_forecaster() -> None:
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION, task=task)
-    forecaster.model = _DummyDiffusionWrapper(
-        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    forecaster.model = _DummyTransportWrapper(
+        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
     forecaster._prediction_mode = StatePredictionMode(forecaster)
-    forecaster._transport_objective = DiffusionTransportObjective(forecaster)
+    forecaster._transport_objective = EDMDiffusionTransportObjective(forecaster)
     forecaster.rho = _CFG_DIFFUSION.model.model.transport.rho
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
@@ -1407,13 +1384,13 @@ def test_ensemble_training_uses_data_full_target_layout(
     ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
 
 
-def test_diffusion_training_uses_data_full_target_layout(
+def test_edm_transport_training_uses_data_full_target_layout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransportTraining diffusion _step must pass target_layout=DATA_FULL with the full batch slice as y."""
+    """TransportTraining EDM transport _step must pass target_layout=DATA_FULL with the full batch slice as y."""
 
-    class _DummyDiffusionWrapper:
-        def __init__(self, inner: DummyDiffusionModel) -> None:
+    class _DummyTransportWrapper:
+        def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
 
     # Include an extra target (observation) variable to exercise the target-variable path.
@@ -1424,11 +1401,11 @@ def test_diffusion_training_uses_data_full_target_layout(
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION, task=task)
-    forecaster.model = _DummyDiffusionWrapper(
-        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    forecaster.model = _DummyTransportWrapper(
+        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
     forecaster._prediction_mode = StatePredictionMode(forecaster)
-    forecaster._transport_objective = DiffusionTransportObjective(forecaster)
+    forecaster._transport_objective = EDMDiffusionTransportObjective(forecaster)
     forecaster.rho = _CFG_DIFFUSION.model.model.transport.rho
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
@@ -1467,7 +1444,7 @@ def test_diffusion_training_uses_data_full_target_layout(
     ), f"Expected target to have {full_v} (DATA_FULL) vars, got {captured['target_vars']}."
 
 
-def test_diffusion_training_target_reduction_fast_paths() -> None:
+def test_transport_training_target_reduction_fast_paths() -> None:
     """BaseTransportTraining.reduce_data_output_target_to_model_output uses fast paths when possible."""
     module = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(module)
@@ -1507,8 +1484,8 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
 ) -> None:
     """TransportTraining SI _step must pass target_layout=MODEL_OUTPUT for the drift target."""
 
-    class _DummyDiffusionWrapper:
-        def __init__(self, inner: DummyDiffusionModel) -> None:
+    class _DummyTransportWrapper:
+        def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
 
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
@@ -1518,8 +1495,8 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.model = _DummyDiffusionWrapper(
-        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    forecaster.model = _DummyTransportWrapper(
+        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
@@ -1561,8 +1538,8 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
 def test_stochastic_interpolant_training_step_with_forecaster() -> None:
     """TransportTraining SI _step returns one MODEL_OUTPUT prediction for a one-step forecaster."""
 
-    class _DummyDiffusionWrapper:
-        def __init__(self, inner: DummyDiffusionModel) -> None:
+    class _DummyTransportWrapper:
+        def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
 
     data_indices = _data_indices_single()
@@ -1571,8 +1548,8 @@ def test_stochastic_interpolant_training_step_with_forecaster() -> None:
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.model = _DummyDiffusionWrapper(
-        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    forecaster.model = _DummyTransportWrapper(
+        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
@@ -1682,8 +1659,8 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
 ) -> None:
     """TransportTraining SI can train drift in MODEL_OUTPUT tendency space."""
 
-    class _DummyDiffusionWrapper:
-        def __init__(self, inner: DummyDiffusionModel) -> None:
+    class _DummyTransportWrapper:
+        def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
 
     data_indices = _data_indices_single()
@@ -1692,8 +1669,8 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.model = _DummyDiffusionWrapper(
-        DummyDiffusionModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    forecaster.model = _DummyTransportWrapper(
+        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
     )
     forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
     forecaster.is_first_step = False
@@ -1761,10 +1738,10 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     assert captured["target_vars"] == n_model
 
 
-def test_diffusion_tend_training_compute_dataset_loss_metrics_uses_metric_state(
+def test_edm_transport_tendency_training_compute_dataset_loss_metrics_uses_metric_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransportTraining diffusion+tendency metrics must use DATA_FULL for validation metrics."""
+    """TransportTraining EDM transport tendency metrics must use DATA_FULL for validation metrics."""
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
 

@@ -33,14 +33,14 @@ The three built-in methods are:
         ensemble_size_per_device: 4
 
 ``TransportTraining`` (``anemoi.training.train.methods.transport``)
-   Configurable transport training for diffusion and stochastic-interpolant
+   Configurable transport training for EDM diffusion and stochastic-interpolant
    probabilistic forecasters. Use ``training.prediction_mode`` to select
    state or tendency targets, and ``training.transport_objective`` to
-   select ``diffusion`` or ``stochastic_interpolant``.
+   select ``edm_diffusion`` or ``stochastic_interpolant``.
 
 .. note::
 
-   ``EnsembleTraining`` and transport objectives such as diffusion or
+   ``EnsembleTraining`` and transport objectives such as EDM diffusion or
    stochastic interpolants require the GNN model type to be replaced with a
    compatible architecture (e.g. GraphTransformer). The plain GNN
    processor is not supported for these methods.
@@ -227,7 +227,7 @@ A typical config file for CRPS training is:
 
 Transport training covers probabilistic objectives that corrupt an
 endpoint and train a model to recover either the clean endpoint or the
-transport vector field. The supported objectives are ``diffusion`` and
+transport vector field. The supported objectives are ``edm_diffusion`` and
 ``stochastic_interpolant``.
 
 Use :class:`~anemoi.training.train.methods.transport.TransportTraining`
@@ -242,12 +242,12 @@ Top-level configs
 
 The transport entry points are:
 
--  ``transport_diffusion.yaml``
--  ``transport_diffusion_tendency.yaml``
+-  ``transport_edm_diffusion.yaml``
+-  ``transport_edm_diffusion_tendency.yaml``
 -  ``transport_stochastic_interpolant.yaml``
 -  ``transport_stochastic_interpolant_tendency.yaml``
 
-These configs select ``training: diffusion`` or
+These configs select ``training: edm_diffusion`` or
 ``training: stochastic_interpolant`` and set the corresponding
 ``training.transport_objective``. Tendency variants additionally select
 ``prediction_mode: tendency`` and a tendency model config.
@@ -263,7 +263,7 @@ Transport model configs put all objective-specific settings under
    model:
      _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
      transport:
-       objective: diffusion
+       objective: edm_diffusion
        sigma_data: 1.0
        sigma_max: 100.0
        sigma_min: 0.02
@@ -328,10 +328,10 @@ target, and ``epsilon`` is standard Gaussian bridge noise.
    additional additive Gaussian noise to the source endpoint before the
    bridge is built.
 
-Deterministic bridge / flow-matching-like setup
+Flow-matching-like setup
 ===============================================
 
-A flow-matching-like deterministic bridge can be set up as a
+A flow-matching-like training can be set up as a
 stochastic interpolant with a Gaussian source, linear endpoint schedules,
 and no bridge noise:
 
@@ -353,9 +353,9 @@ and no bridge noise:
            scale: 1.0
            noise_scale: 0.0
 
-With ``si_noise_scale: 0.0``, deterministic ODE samplers such as
-``euler`` or ``heun`` are appropriate. If bridge noise is used during
-training, prefer a stochastic sampler such as ``euler_maruyama``.
+Stochastic-interpolant training learns the bridge velocity field. Use
+ODE samplers such as ``euler`` or ``heun`` for sampling. Score-corrected SDE
+sampling is currently not part of this objective.
 
 Training configuration
 ======================
@@ -365,12 +365,12 @@ configs specialize it:
 
 .. code:: yaml
 
-   # training/diffusion.yaml
+   # training/edm_diffusion.yaml
    defaults:
      - transport
      - _self_
 
-   transport_objective: diffusion
+   transport_objective: edm_diffusion
 
    training_loss:
      datasets:
@@ -391,7 +391,7 @@ configs specialize it:
        data:
          _target_: anemoi.training.losses.MSELoss
 
-Diffusion uses a weighted clean-endpoint objective. Stochastic
+EDM diffusion uses a weighted clean-endpoint objective. Stochastic
 interpolants train the drift/vector field between the selected source
 and target endpoints. With a Gaussian source and ``si_noise_scale: 0``,
 the stochastic-interpolant objective is the deterministic bridge case
@@ -412,10 +412,10 @@ Default sampler settings live under
        sigma_min: 0.02
        rho: 7.0
        num_steps: 50
-     diffusion_sampler:
+     edm_diffusion_sampler:
        sampler: heun
      stochastic_interpolant_sampler:
-       sampler: euler_maruyama
+       sampler: heun
        num_steps: 50
 
 These defaults can be overridden at inference time with

@@ -5,4 +5,4 @@ defaults:
 
 training_method: anemoi.training.train.methods.TransportTraining
 prediction_mode: state
-transport_objective: diffusion
+transport_objective: edm_diffusion

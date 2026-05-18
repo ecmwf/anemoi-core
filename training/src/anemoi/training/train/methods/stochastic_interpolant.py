@@ -163,8 +163,7 @@ class StochasticInterpolantTransportObjective(TransportObjective):
                 shape_x[0] == batch_size and shape_x[2] == ensemble_size
             ), "Batch or ensemble dimension mismatch across datasets when sampling stochastic-interpolant times."
 
-        eps = 1e-7
-        time_base = eps + (1.0 - 2.0 * eps) * torch.rand((batch_size, ensemble_size), device=device)
+        time_base = torch.rand((batch_size, ensemble_size), device=device)
         time_base = time_base[:, None, :, None, None]
         # Important: the model later reads the condition from one dataset and
         # assumes every dataset carries the same bridge time. Keep this shared
