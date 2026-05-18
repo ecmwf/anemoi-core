@@ -70,6 +70,16 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
 
 
 _DEPRECATED_TARGETS: dict[str, str] = {
+    "anemoi.training.losses.kcrps.KernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' (default). The 'alpha' parameter controls the fair/standard CRPS blend "
+        "(alpha=1.0 gives fully fair CRPS)."
+    ),
+    "anemoi.training.losses.kcrps.AlmostFairKernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' and set 'alpha' to control the fair/standard CRPS blend "
+        "(0 < alpha < 1 gives the almost fair formulation, alpha=1.0 gives fully fair CRPS)."
+    ),
     "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
         "This callback has been deprecated and removed, update your config to remove any references to it. "
     ),
@@ -102,6 +112,22 @@ _DEPRECATED_TARGETS: dict[str, str] = {
         "This callback has been deprecated and removed, use "
         "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
         "instead and update your config accordingly."
+    ),
+    "anemoi.models.layers.activations.GLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: glu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.SwiGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: swiglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.GEGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: geglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.ReGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: reglu' "
+        "in your model component config instead."
     ),
 }
 

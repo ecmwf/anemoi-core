@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Literal
 
 import einops
 import torch
@@ -19,104 +20,34 @@ from anemoi.training.losses.base import BaseLoss
 LOGGER = logging.getLogger(__name__)
 
 
-class KernelCRPS(BaseLoss):
-    """Kernel CRPS loss."""
+CRPSBackend = Literal["naive", "stable"]
+
+
+class CRPS(BaseLoss):
+    """Kernel CRPS loss for ensemble predictions."""
 
     def __init__(
         self,
-        fair: bool = True,
-        ignore_nans: bool = False,
-        **kwargs,  # noqa: ARG002
-    ) -> None:
-        """Latitude- and (inverse-)variance-weighted kernel CRPS loss.
-
-        Parameters
-        ----------
-        fair : bool
-            Calculate a "fair" (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1.
-        ignore_nans : bool, optional
-            Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
-        """
-        super().__init__(ignore_nans=ignore_nans)
-
-        self.fair = fair
-
-    def _kernel_crps(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Kernel (ensemble) CRPS.
-
-        Parameters
-        ----------
-        preds : torch.Tensor
-            Predicted ensemble, shape (batch_size, n_out_steps, n_vars, latlon, ens_size)
-        targets : torch.Tensor
-            Ground truth, shape (batch_size, n_out_steps, n_vars, latlon)
-
-        Returns
-        -------
-        kCRPS : torch.Tensor
-            The point-wise kernel CRPS, shape (batch_size, n_out_steps, n_vars, latlon).
-        """
-        ens_size = preds.shape[-1]
-        mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
-
-        assert ens_size > 1, "Ensemble size must be greater than 1."
-
-        coef = -1.0 / (ens_size * (ens_size - 1)) if self.fair else -1.0 / (ens_size**2)
-
-        ens_var = torch.zeros(size=preds.shape[:-1], device=preds.device)
-        for i in range(ens_size):  # loop version to reduce memory usage
-            ens_var += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
-        ens_var = coef * ens_var
-
-        return mae + ens_var
-
-    def forward(
-        self,
-        y_pred: torch.Tensor,
-        y_target: torch.Tensor,
-        squash: bool = True,
-        *,
-        scaler_indices: tuple[int, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = None,
-        grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
-        squash_mode: str = "sum",
-    ) -> torch.Tensor:
-        is_sharded = grid_shard_slice is not None
-
-        y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
-        y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
-
-        kcrps_ = self._kernel_crps(y_pred, y_target)
-
-        kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
-        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        return self.reduce(kcrps_, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
-
-    @property
-    def name(self) -> str:
-        f_str = "f" if self.fair else ""
-        return f"{f_str}kcrps"
-
-
-class AlmostFairKernelCRPS(BaseLoss):
-    """Almost fair kernel CRPS loss."""
-
-    def __init__(
-        self,
-        alpha: float = 1.0,
+        alpha: float = 0.95,
+        backend: CRPSBackend = "stable",
         no_autocast: bool = True,
         ignore_nans: bool = False,
         **kwargs,  # noqa: ARG002
     ) -> None:
         """Latitude- and (inverse-)variance-weighted kernel CRPS loss.
 
+        ``alpha`` controls the interpolation between standard CRPS and fair CRPS. ``alpha=0`` gives standard
+        CRPS, ``alpha=1`` gives fair CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
+
         Parameters
         ----------
         alpha : float
             Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
             and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
+        backend : {"naive", "stable"}
+            Backend used for the point-wise CRPS calculation. The naive backend uses a simple loop over unordered
+            ensemble-member pairs and avoids materializing the full pairwise tensor. The stable backend materializes
+            pairwise tensors and uses the numerically stable all-pairs formulation.
         no_autocast : bool, optional
             Deactivate autocast for the kernel CRPS calculation
         ignore_nans : bool, optional
@@ -124,10 +55,29 @@ class AlmostFairKernelCRPS(BaseLoss):
         """
         super().__init__(ignore_nans=ignore_nans)
 
+        self._validate_arguments(alpha, backend)
+
         self.alpha = alpha
+        self.backend = backend
         self.no_autocast = no_autocast
 
-    def _kernel_crps(self, preds: torch.Tensor, targets: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
+    @staticmethod
+    def _validate_arguments(alpha: float, backend: CRPSBackend) -> None:
+        """Validate CRPS constructor arguments."""
+        if not 0.0 <= alpha <= 1.0:
+            msg = f"alpha must be in the range [0, 1], got {alpha}"
+            raise ValueError(msg)
+        if backend not in ("naive", "stable"):
+            msg = f"Unknown CRPS backend {backend!r}. Expected one of: 'naive', 'stable'."
+            raise ValueError(msg)
+
+    def _kernel_crps(
+        self,
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+        alpha: float | None = None,
+        backend: CRPSBackend | None = None,
+    ) -> torch.Tensor:
         """Kernel (ensemble) CRPS.
 
         Parameters
@@ -139,12 +89,44 @@ class AlmostFairKernelCRPS(BaseLoss):
         alpha : float
             Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
             and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
+        backend : {"naive", "stable"}
+            Backend used for the point-wise CRPS calculation.
 
         Returns
         -------
-        kCRPS : torch.Tensor
+        CRPS : torch.Tensor
             The point-wise kernel CRPS, shape (batch_size, n_out_steps, n_vars, latlon).
         """
+        alpha = self.alpha if alpha is None else alpha
+        backend = self.backend if backend is None else backend
+        ens_size = preds.shape[-1]
+        assert ens_size > 1, "Ensemble size must be greater than 1."
+
+        if backend == "naive":
+            return self._kernel_crps_naive(preds, targets, alpha)
+        if backend == "stable":
+            return self._kernel_crps_stable(preds, targets, alpha)
+
+        msg = f"Unknown CRPS backend {backend!r}. Expected one of: 'naive', 'stable'."
+        raise ValueError(msg)
+
+    @staticmethod
+    def _kernel_crps_naive(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
+        """CRPS formulation using a simple loop over unordered ensemble-member pairs."""
+        ens_size = preds.shape[-1]
+
+        mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+        coef = -(alpha / (ens_size * (ens_size - 1)) + (1.0 - alpha) / (ens_size**2))
+
+        ens_var = torch.zeros_like(mae)
+        for i in range(ens_size - 1):
+            ens_var += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+
+        return mae + coef * ens_var
+
+    @staticmethod
+    def _kernel_crps_stable(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
+        """CRPS formulation materializing pairwise tensors for the all-pairs formulation."""
         ens_size = preds.shape[-1]
 
         epsilon = (1.0 - alpha) / ens_size
@@ -159,8 +141,6 @@ class AlmostFairKernelCRPS(BaseLoss):
 
         mem_err = err_r * ~diag
         mem_err_transpose = mem_err.transpose(-1, -2)
-
-        assert ens_size > 1, "Ensemble size must be greater than 1."
 
         coef = 1.0 / (2.0 * ens_size * (ens_size - 1))
         return coef * torch.sum(mem_err + mem_err_transpose - (1 - epsilon) * var, dim=(-1, -2))
@@ -184,15 +164,15 @@ class AlmostFairKernelCRPS(BaseLoss):
 
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
-                kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
+                crps = self._kernel_crps(y_pred, y_target)
         else:
-            kcrps_ = self._kernel_crps(y_pred, y_target, alpha=self.alpha)
+            crps = self._kernel_crps(y_pred, y_target)
 
-        kcrps_ = einops.rearrange(kcrps_, "bs t v latlon -> bs t 1 latlon v")
-        kcrps_ = self.scale(kcrps_, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
+        crps = self.scale(crps, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(kcrps_, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
+        return self.reduce(crps, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
 
     @property
     def name(self) -> str:
-        return f"afkcrps{self.alpha:.2f}"
+        return f"crps{self.alpha:.2f}"
