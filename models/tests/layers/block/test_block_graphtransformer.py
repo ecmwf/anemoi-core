@@ -15,9 +15,13 @@ import torch
 import torch.nn as nn
 
 import anemoi.models.layers.block
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.conv import GraphTransformerConv
+from anemoi.models.layers.mlp import GatedMLPLayer
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -143,9 +147,7 @@ def test_GraphTransformerProcessorBlock_init(init_proc, block):
     assert isinstance(block.lin_edge, torch.nn.Linear), "block.lin_edge is not an instance of torch.nn.Linear"
     assert isinstance(block.conv, GraphTransformerConv), "block.conv is not an instance of GraphTransformerConv"
     assert isinstance(block.projection, torch.nn.Linear), "block.projection is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block.node_dst_mlp, torch.nn.Sequential
-    ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
+    assert isinstance(block.node_dst_mlp, MLP), "block.node_dst_mlp is not an instance of MLP"
     assert block.q_norm.bias is None
     assert block.k_norm.bias is None
     assert isinstance(
@@ -196,9 +198,7 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
     assert isinstance(
         block_with_edge_mlp.projection, torch.nn.Linear
     ), "block.projection is not an instance of torch.nn.Linear"
-    assert isinstance(
-        block_with_edge_mlp.node_dst_mlp, torch.nn.Sequential
-    ), "block.node_dst_mlp is not an instance of torch.nn.Sequential"
+    assert isinstance(block_with_edge_mlp.node_dst_mlp, MLP), "block.node_dst_mlp is not an instance of MLP"
     assert block_with_edge_mlp.q_norm.bias is None
     assert block_with_edge_mlp.k_norm.bias is None
     assert isinstance(
@@ -211,6 +211,29 @@ def test_GraphTransformerProcessorBlock_init_edge_mlp(init_proc, block_with_edge
     assert isinstance(
         block_with_edge_mlp.edge_pre_mlp[1], _layer_kernels.Activation.func
     ), "block.edge_pre_mlp[1] is not an instance of layer_kernels.Activation"
+
+
+def test_edge_pre_mlp_remains_plain_when_node_mlp_is_gated():
+    layer_kernels = load_layer_kernels({"Activation": {"_target_": "torch.nn.GELU"}})
+    block = GraphTransformerProcessorBlock(
+        in_channels=8,
+        hidden_dim=16,
+        out_channels=8,
+        edge_dim=4,
+        layer_kernels=layer_kernels,
+        num_heads=2,
+        bias=True,
+        update_src_nodes=False,
+        qk_norm=False,
+        graph_attention_backend="pyg",
+        edge_pre_mlp=True,
+        mlp_implementation="swiglu",
+    )
+
+    # Node MLP follows selected implementation.
+    assert isinstance(block.node_dst_mlp.mlp[0], GatedMLPLayer)
+    # Edge pre-processing MLP is explicitly forced to standard MLP implementation.
+    assert isinstance(block.edge_pre_mlp[0], nn.Linear)
 
 
 def test_GraphTransformerProcessorBlock_custom_attn_channels(init_proc):
@@ -275,15 +298,12 @@ def test_GraphTransformerProcessorBlock_accepts_conditioning():
     edge_index = torch.tensor([[0, 1, 2, 3, 0, 2], [1, 2, 3, 0, 2, 1]])
     edge_attr = torch.randn(num_edges, edge_dim)
 
+    shard_info = GraphShardInfo(nodes=[num_nodes], edges=[num_edges])
     x_out, edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_nodes, in_channels]],
-            [[num_nodes, in_channels]],
-            [[num_edges, edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=num_nodes,
         cond=cond,
@@ -327,15 +347,14 @@ def test_GraphTransformerMapperBlock_accepts_conditioning_on_default_path():
         torch.randn(num_dst_nodes, condition_shape),
     )
 
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes], edges=[edge_index.shape[1]]
+    )
     (x_src_out, x_dst_out), edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_src_nodes, in_channels]],
-            [[num_dst_nodes, in_channels]],
-            [[edge_index.shape[1], edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=(num_src_nodes, num_dst_nodes),
         cond=cond,
@@ -380,15 +399,14 @@ def test_GraphTransformerMapperBlock_accepts_conditioning_with_heads_sharding():
         torch.randn(num_dst_nodes, condition_shape),
     )
 
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes], edges=[edge_index.shape[1]]
+    )
     (x_src_out, x_dst_out), edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_src_nodes, in_channels]],
-            [[num_dst_nodes, in_channels]],
-            [[edge_index.shape[1], edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=(num_src_nodes, num_dst_nodes),
         cond=cond,
@@ -433,15 +451,14 @@ def test_GraphTransformerMapperBlock_src_updates_use_src_conditioning():
         torch.randn(num_dst_nodes, condition_shape),
     )
 
+    shard_info = BipartiteGraphShardInfo(
+        src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes], edges=[edge_index.shape[1]]
+    )
     (x_src_out, x_dst_out), edge_attr_out = block(
         x=x,
         edge_attr=edge_attr,
         edge_index=edge_index,
-        shapes=(
-            [[num_src_nodes, in_channels]],
-            [[num_dst_nodes, in_channels]],
-            [[edge_index.shape[1], edge_dim]],
-        ),
+        shard_info=shard_info,
         batch_size=1,
         size=(num_src_nodes, num_dst_nodes),
         cond=cond,
@@ -469,13 +486,16 @@ def test_GraphTransformerProcessorBlock_shard_qkve_heads(init_proc, block):
     key = torch.randn(in_channels, num_heads * block.out_channels_conv)
     value = torch.randn(in_channels, num_heads * block.out_channels_conv)
     edges = torch.randn(in_channels, num_heads * block.out_channels_conv)
-    shapes = (10, 10, 10)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[10], dst_nodes=[10], edges=[10])
     batch_size = 1
-    query, key, value, edges = block.shard_qkve_heads(query, key, value, edges, shapes, batch_size)
+    query, key, value, edges, head_shard_sizes = block.shard_qkve_heads(
+        query, key, value, edges, shard_info, batch_size
+    )
     assert query.shape == (in_channels, num_heads, block.out_channels_conv)
     assert key.shape == (in_channels, num_heads, block.out_channels_conv)
     assert value.shape == (in_channels, num_heads, block.out_channels_conv)
     assert edges.shape == (in_channels, num_heads, block.out_channels_conv)
+    assert head_shard_sizes == [num_heads]
 
 
 def test_GraphTransformerProcessorBlock_shard_output_seq(init_proc, block):
@@ -492,9 +512,10 @@ def test_GraphTransformerProcessorBlock_shard_output_seq(init_proc, block):
         _edge_pre_mlp,
     ) = init_proc
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
-    shapes = (10, 10, 10)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[10], dst_nodes=[10], edges=[10])
+    head_shard_sizes = [num_heads]
     batch_size = 1
-    out = block.shard_output_seq(out, shapes, batch_size)
+    out = block.shard_output_seq(out, shard_info, head_shard_sizes, batch_size)
     assert out.shape == (in_channels, num_heads * block.out_channels_conv)
 
 
@@ -517,12 +538,12 @@ def test_GraphTransformerProcessorBlock_forward_backward(init_proc, block):
     x = torch.randn((10, in_channels))
     edge_attr = torch.randn((10, edge_dim))
     edge_index = torch.randint(1, 10, (2, 10))
-    shapes = (10, 10, 10)
+    shard_info = GraphShardInfo(nodes=[10], edges=[10])
     batch_size = 1
     size = 10
 
     # Forward pass
-    output, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
+    output, _ = block(x, edge_attr, edge_index, shard_info, batch_size, size)
 
     # Check output shape
     assert output.shape == (10, out_channels)
@@ -727,9 +748,11 @@ def test_GraphTransformerMapperBlock_shard_qkve_heads(init_mapper, mapper_block)
     key = torch.randn(in_channels, num_heads * block.out_channels_conv)
     value = torch.randn(in_channels, num_heads * block.out_channels_conv)
     edges = torch.randn(in_channels, num_heads * block.out_channels_conv)
-    shapes = (10, 10, 10)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[10], dst_nodes=[10], edges=[10])
     batch_size = 1
-    query, key, value, edges = block.shard_qkve_heads(query, key, value, edges, shapes, batch_size)
+    query, key, value, edges, head_shard_sizes = block.shard_qkve_heads(
+        query, key, value, edges, shard_info, batch_size
+    )
     assert query.shape == (in_channels, num_heads, block.out_channels_conv)
     assert key.shape == (in_channels, num_heads, block.out_channels_conv)
     assert value.shape == (in_channels, num_heads, block.out_channels_conv)
@@ -751,9 +774,10 @@ def test_GraphTransformerMapperBlock_shard_output_seq(init_mapper, mapper_block)
     ) = init_mapper
     block = mapper_block
     out = torch.randn(in_channels, num_heads, block.out_channels_conv)
-    shapes = (10, 10, 10)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[10], dst_nodes=[10], edges=[10])
+    head_shard_sizes = [num_heads]
     batch_size = 1
-    out = block.shard_output_seq(out, shapes, batch_size)
+    out = block.shard_output_seq(out, shard_info, head_shard_sizes, batch_size)
     assert out.shape == (in_channels, num_heads * block.out_channels_conv)
 
 
@@ -777,12 +801,12 @@ def test_GraphTransformerMapperBlock_forward_backward(init_mapper, mapper_block)
     x = (torch.randn((10, in_channels)), torch.randn((10, in_channels)))
     edge_attr = torch.randn((10, edge_dim))
     edge_index = torch.randint(1, 10, (2, 10))
-    shapes = (10, 10, 10)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[10], dst_nodes=[10], edges=[10])
     batch_size = 1
     size = (10, 10)
 
     # Forward pass
-    output, _ = block(x, edge_attr, edge_index, shapes, batch_size, size)
+    output, _ = block(x, edge_attr, edge_index, shard_info, batch_size, size)
 
     # Check output shape
     assert output[0].shape == (10, out_channels)

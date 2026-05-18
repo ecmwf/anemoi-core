@@ -28,6 +28,7 @@ from anemoi.training.utils.enums import TensorDim
 class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
+    needs_graph_data: bool = True
     # CombinedLoss builds child losses itself, so it needs the filtered scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(
@@ -180,7 +181,7 @@ class CombinedLoss(BaseLoss):
 
         filtered_kwargs = dict(kwargs)
         filtered_kwargs.pop("grid_dim", None)
-        filtered_kwargs.pop("grid_shard_shapes", None)
+        filtered_kwargs.pop("grid_shard_sizes", None)
         return filtered_kwargs
 
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:

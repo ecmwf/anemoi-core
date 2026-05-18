@@ -154,7 +154,6 @@ def test_loss_variable_mapper_propagates_needs_shard_layout_info() -> None:
         loss=MultiscaleLossWrapper(
             per_scale_loss=MSELoss(),
             weights=[1.0],
-            keep_batch_sharded=True,
         ),
     )
 
