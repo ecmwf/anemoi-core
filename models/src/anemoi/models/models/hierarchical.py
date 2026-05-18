@@ -423,13 +423,12 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     model_comm_group=model_comm_group,
                 )
 
+        x_out_dict = {}
+        for dataset_name in dataset_names:
             # Compute decoder edges
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
                 dataset_name
-            ].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden_dict[self._graph_name_hidden[0]],
