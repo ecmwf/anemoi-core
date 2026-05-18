@@ -67,6 +67,21 @@ class TopNormalizer(BasePreprocessor):
         )
         self.normalizers["output"] = self.normalizer_output
 
+        # Previous high-res step (autoregressive conditioning). Same variables /
+        # indices as the output, but normalized with the *non-residual* (base)
+        # CERRA statistics that anemoi-datasets always carries. If the datamodule
+        # supplied base output stats separately (statistics[3]) use them; otherwise
+        # statistics[2] is already non-residual (no residual override configured).
+        # No user/config change is required.
+        base_output_statistics = statistics[3] if len(statistics) > 3 else statistics[2]
+        self.normalizer_prev = FieldNormalizer(
+            config=config,
+            statistics=base_output_statistics,
+            data_indices_ds=data_indices.data.output,
+            dataset="prev_hres",
+        )
+        self.normalizers["prev_hres"] = self.normalizer_prev
+
     def forward(
         self,
         x: torch.Tensor,

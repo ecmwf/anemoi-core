@@ -86,10 +86,38 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     model_state_dict = model.state_dict()
 
     for key in state_dict.copy():
-        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+        if key not in model_state_dict or state_dict[key].shape == model_state_dict[key].shape:
+            continue
+
+        ckpt_t = state_dict[key]
+        model_t = model_state_dict[key]
+
+        # Input-channel growth: a 2D weight whose output dim matches but whose
+        # input dim grew (e.g. the encoder `emb_nodes_src.weight` when the
+        # autoregressive previous-step block appends trailing input columns).
+        # Copy the pretrained block into the leading columns and zero-pad the
+        # new trailing input features, so the expanded model starts out
+        # *identical* to the source checkpoint (preserves downscaler gains).
+        if (
+            ckpt_t.ndim == 2
+            and model_t.ndim == 2
+            and ckpt_t.shape[0] == model_t.shape[0]
+            and ckpt_t.shape[1] < model_t.shape[1]
+        ):
+            expanded = model_t.clone()
+            expanded[:, : ckpt_t.shape[1]] = ckpt_t.to(expanded.dtype)
+            expanded[:, ckpt_t.shape[1] :] = 0.0
+            state_dict[key] = expanded
+            LOGGER.info(
+                "Expanding input-channel parameter (zero-padded new columns): %s %s -> %s",
+                key,
+                str(tuple(ckpt_t.shape)),
+                str(tuple(model_t.shape)),
+            )
+        else:
             LOGGER.info("Skipping loading parameter: %s", key)
-            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
-            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
+            LOGGER.info("Checkpoint shape: %s", str(ckpt_t.shape))
+            LOGGER.info("Model shape: %s", str(model_t.shape))
 
             del state_dict[key]  # Remove the mismatched key
 

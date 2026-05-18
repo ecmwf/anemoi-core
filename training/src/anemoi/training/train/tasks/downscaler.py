@@ -96,6 +96,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         x_in_hres: torch.Tensor,
         y_noised: torch.Tensor,
         sigma: torch.Tensor,
+        y_prev: torch.Tensor | None = None,
     ) -> torch.Tensor:
         return self.model.model.fwd_with_preconditioning(
             x_in_lres_interp_hres,
@@ -104,6 +105,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             sigma,
             model_comm_group=self.model_comm_group,
             grid_shard_shapes=self.hres_grid_shard_shapes,
+            y_prev=y_prev,
         )
 
     def _compute_loss(
@@ -157,24 +159,56 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
         x_in, x_in_hres, y = batch
 
+        # The last time slice of the window is the current target; for
+        # autoregressive training the slice just before it is the previous
+        # high-res step used as temporal conditioning. With the pure downscaler
+        # the window has length 1, so [:, -1] == [:, 0] (unchanged behaviour).
+        x_in_cur = x_in[:, -1, ...]
+        y_cur = y[:, -1, ...][:, None, ...]
+
         # interpolate low-res input to high-res
         x_in_interp_to_hres = self.model.model.apply_interpolate_to_high_res(
-            x_in[:, 0, ...],
+            x_in_cur,
             grid_shard_shapes=self.lres_grid_shard_shapes,
             model_comm_group=self.model_comm_group,
         )[:, None, ...]
-        
+
         # compute target with residual and non_residual variables
-        y_target = self.model.model.compute_residuals(y, x_in_interp_to_hres)
+        y_target = self.model.model.compute_residuals(y_cur, x_in_interp_to_hres)
 
         # normalize inputs and target
         x_in_interp_to_hres_norm = self.model.pre_processors(
             x_in_interp_to_hres, dataset="input_lres", in_place=False
-        ) 
+        )
         x_in_hres_norm = self.model.pre_processors(
-            x_in_hres, dataset="input_hres", in_place=False
-        ) 
+            x_in_hres[:, -1, ...][:, None, ...], dataset="input_hres", in_place=False
+        )
         y_target_norm = self.model.pre_processors(y_target, dataset="output", in_place=False)
+
+        # Autoregressive previous high-res step: full CERRA state normalized with
+        # the non-residual ("prev_hres") statistics. Optional per-sample dropout
+        # lets a single run mix AR and downscale-only samples with different loss
+        # weights, controlling how strongly the model relies on the previous step.
+        y_prev_norm = None
+        loss_weight_scale = None
+        if getattr(self.model.model, "use_previous_step", False):
+            y_prev_raw = y[:, -2, ...][:, None, ...]
+            y_prev_norm = self.model.pre_processors(
+                y_prev_raw, dataset="prev_hres", in_place=False
+            )
+            bs = y_prev_norm.shape[0]
+            p_drop = self.model.model.ar_p_no_previous
+            if training_mode and not validation_mode and p_drop > 0.0:
+                keep = torch.rand(bs, device=y_prev_norm.device) >= p_drop
+            else:
+                keep = torch.ones(bs, dtype=torch.bool, device=y_prev_norm.device)
+            keep_f = keep.view(bs, *([1] * (y_prev_norm.ndim - 1))).to(y_prev_norm.dtype)
+            y_prev_norm = y_prev_norm * keep_f
+            loss_weight_scale = torch.where(
+                keep,
+                torch.full((bs,), self.model.model.ar_loss_weight_previous, device=y_prev_norm.device),
+                torch.full((bs,), self.model.model.ar_loss_weight_no_previous, device=y_prev_norm.device),
+            )
 
         # Scaler update
         self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
@@ -189,6 +223,12 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             device=y_target_norm.device,
         )
 
+        # fold the AR/non-AR per-sample loss weight into the diffusion noise weights
+        if loss_weight_scale is not None:
+            noise_weights = noise_weights * loss_weight_scale.view(
+                -1, *([1] * (noise_weights.ndim - 1))
+            )
+
         # get targets and noised targets
         y_target_norm_noised = self._noise_target(y_target_norm, sigma)
 
@@ -198,6 +238,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             x_in_hres_norm,
             y_target_norm_noised,
             sigma,
+            y_prev=y_prev_norm,
         )  # shape is (bs, ens, latlon, nvar)
 
         # Use checkpoint for compute_loss_metrics

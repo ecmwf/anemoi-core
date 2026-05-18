@@ -86,8 +86,51 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         }
 
         statistics[2] = combined_statistics
+        # Carry the original (non-residual) high-res output statistics as a 4th
+        # entry so the autoregressive `prev_hres` normalizer can normalize the
+        # previous full CERRA state with its true (non-residual) statistics.
+        # Existing consumers only index [0]/[1]/[2], so this is backward-safe.
+        statistics.append(base_stats)
         return tuple(statistics)
         # return reduced_residual_statistics
+
+    @staticmethod
+    def _cfg_get(obj, key, default):
+        """Read ``key`` from a config node that may be a dict, an OmegaConf/DotDict
+        node or a pydantic schema object, returning ``default`` if absent."""
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    @cached_property
+    def _ar_num_previous_steps(self) -> int:
+        """Number of previous high-res steps fed as autoregressive conditioning.
+
+        Read from ``config.model.model.autoregressive``. Defaults to 0 (no AR),
+        which reproduces the pure-downscaler single-slice behaviour exactly.
+        """
+        model_node = self._cfg_get(self._cfg_get(self.config, "model", None), "model", None)
+        ar_node = self._cfg_get(model_node, "autoregressive", None)
+        if ar_node is None or not bool(self._cfg_get(ar_node, "use_previous_step", False)):
+            return 0
+        return int(self._cfg_get(ar_node, "num_previous_steps", 1))
+
+    @cached_property
+    def _ar_relative_date_indices(self) -> np.ndarray:
+        """Relative date offsets to load per sample.
+
+        ``[0]`` for the pure downscaler (single slice). For autoregressive with
+        ``p`` previous steps: ``[0, inc, 2*inc, ..., p*inc]`` where ``inc`` is the
+        model timeincrement; the last offset is the current target, the offset
+        just before it is the previous step used for temporal conditioning.
+        """
+        num_prev = self._ar_num_previous_steps
+        if num_prev <= 0:
+            return np.array([0], dtype=np.int64)
+        inc = self.timeincrement
+        return np.array([inc * k for k in range(num_prev + 1)], dtype=np.int64)
 
     def _get_dataset(
         self,
@@ -102,7 +145,7 @@ class DownscalingAnemoiDatasetsDataModule(AnemoiDatasetsDataModule):
         )  # NOTE: Functionality to be moved to anemoi datasets
         data = DownscalingDataset(
             data_reader=data_reader,
-            relative_date_indices=np.array([0]),
+            relative_date_indices=self._ar_relative_date_indices,
             shuffle=shuffle,
             label=label,
             lres_grid_indices=self.lres_grid_indices,

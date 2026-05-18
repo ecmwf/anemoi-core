@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import functools
 import logging
 import warnings
 from typing import Callable
@@ -53,6 +54,14 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         graph_data: HeteroData,
         truncation_data: dict,
     ) -> None:
+        # Autoregressive config parsed *before* super().__init__ because
+        # _calculate_input_dim() runs inside the base __init__ and needs the flag.
+        _mm = DotDict(model_config).model.model
+        _ar_cfg = dict(_mm.get("autoregressive", {}) or {})
+        self.use_previous_step = bool(_ar_cfg.get("use_previous_step", False))
+        self._ar_gate_init = float(_ar_cfg.get("gate_init", 0.0))
+        self._ar_gate_learnable = bool(_ar_cfg.get("gate_learnable", False))
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -86,6 +95,26 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             y_non_residual_indices,
             persistent=True,
         )
+
+        # Autoregressive previous-step conditioning.
+        # The previous high-res step is a full CERRA state -> same #channels as the output.
+        # `ar_gate` controls how strongly the previous step influences the prediction;
+        # init 0.0 so that, combined with zero-padded emb_nodes_src columns on weight
+        # import, the model starts out *exactly* as the pure downscaler.
+        self.num_prev_channels = self.num_output_channels if self.use_previous_step else 0
+        # Loss reweighting / previous-step dropout knobs (read by the task).
+        # Always defined (defaults are no-ops) so the task can read them safely.
+        self.ar_p_no_previous = float(_ar_cfg.get("p_no_previous", 0.0))
+        self.ar_loss_weight_previous = float(_ar_cfg.get("loss_weight_previous", 1.0))
+        self.ar_loss_weight_no_previous = float(
+            _ar_cfg.get("loss_weight_no_previous", 1.0)
+        )
+        if self.use_previous_step:
+            _gate = torch.tensor(self._ar_gate_init, dtype=torch.float32)
+            if self._ar_gate_learnable:
+                self.ar_gate = nn.Parameter(_gate)
+            else:
+                self.register_buffer("ar_gate", _gate, persistent=True)
 
         self.DEFAULT_LOW_NOISE_SCHEDULER_PARAMS = {
             "schedule_type": "karras",
@@ -391,12 +420,17 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         self._internal_output_idx = data_indices.model.output.prognostic
 
     def _calculate_input_dim(self, model_config):
-        return (
+        # input_lres + input_hres + noised targets + node_attributes
+        input_dim = (
             self.num_input_lres_channels
             + self.num_input_hres_channels
             + self.num_output_channels
-            + +self.node_attributes.attr_ndims[self._graph_name_data]
-        )  # input_lres + input_hres + noised targets + nodes_attributes
+            + self.node_attributes.attr_ndims[self._graph_name_data]
+        )
+        # + previous high-res step (autoregressive conditioning), appended last
+        if self.use_previous_step:
+            input_dim += self.num_output_channels
+        return input_dim
 
     def _assemble_input(
         self,
@@ -406,6 +440,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         bse,
         grid_shard_shapes=None,
         model_comm_group=None,
+        y_prev=None,
     ):
         node_attributes_data = self.node_attributes(
             self._graph_name_data, batch_size=bse
@@ -419,25 +454,38 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             )
 
         # combine noised target, input state, noise conditioning and add data positional info (lat/lon)
-
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(
-                    x_in_lres_interp_hres,
-                    "batch time ensemble grid vars -> (batch ensemble grid) (time  vars)",
-                ),
-                einops.rearrange(
-                    x_in_hres,
-                    "batch  time ensemble grid vars -> (batch ensemble grid) (time  vars)",
-                ),
-                einops.rearrange(
-                    y_noised,
-                    "batch  time ensemble grid vars -> (batch ensemble grid) (time  vars)",
-                ),
-                node_attributes_data,
+        latent_parts = [
+            einops.rearrange(
+                x_in_lres_interp_hres,
+                "batch time ensemble grid vars -> (batch ensemble grid) (time  vars)",
             ),
-            dim=-1,  # feature dimension
-        )
+            einops.rearrange(
+                x_in_hres,
+                "batch  time ensemble grid vars -> (batch ensemble grid) (time  vars)",
+            ),
+            einops.rearrange(
+                y_noised,
+                "batch  time ensemble grid vars -> (batch ensemble grid) (time  vars)",
+            ),
+            node_attributes_data,
+        ]
+
+        # Autoregressive conditioning: the (gated) previous high-res step is appended
+        # LAST so that all pre-existing input columns keep their position -> a pure
+        # downscaler checkpoint maps onto the leading emb_nodes_src columns unchanged.
+        if self.use_previous_step:
+            assert (
+                y_prev is not None
+            ), "use_previous_step=True but no previous step (y_prev) was provided."
+            latent_parts.append(
+                self.ar_gate
+                * einops.rearrange(
+                    y_prev,
+                    "batch  time ensemble grid vars -> (batch ensemble grid) (time  vars)",
+                ),
+            )
+
+        x_data_latent = torch.cat(latent_parts, dim=-1)  # feature dimension
         shard_shapes_data = self._get_shard_shapes(
             x_data_latent, 0, grid_shard_shapes, model_comm_group
         )
@@ -455,6 +503,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         c_noise: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
+        y_prev: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         start_init = time.time()
@@ -487,6 +536,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             bse,
             grid_shard_shapes,
             model_comm_group,
+            y_prev=y_prev,
         )
         x_hidden_latent = self.node_attributes(
             self._graph_name_hidden, batch_size=batch_size
@@ -546,6 +596,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         sigma: torch.Tensor,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
+        y_prev: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass with pre-conditioning of EDM diffusion model."""
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(sigma, self.sigma_data)
@@ -556,6 +607,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             c_noise,
             model_comm_group=model_comm_group,
             grid_shard_shapes=grid_shard_shapes,
+            y_prev=y_prev,
         )  # calls forward ...
         D_x = c_skip * y_noised + c_out * pred
 
@@ -568,6 +620,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         pre_processors: nn.Module,
         multi_step: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        x_in_prev: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> tuple[Union[torch.Tensor, tuple[torch.Tensor, ...]], Optional[list]]:
         """Prepare batch before sampling.
@@ -614,7 +667,13 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         )
         x_in_hres = pre_processors(x_in_hres, dataset="input_hres", in_place=False)
 
-        return (x_in_interp_to_hres, x_in_hres), hres_grid_shard_shapes
+        y_prev = None
+        if self.use_previous_step and x_in_prev is not None:
+            if len(x_in_prev.shape) == 4:
+                x_in_prev = x_in_prev[:, None, ...]
+            y_prev = pre_processors(x_in_prev, dataset="prev_hres", in_place=False)
+
+        return (x_in_interp_to_hres, x_in_hres, y_prev), hres_grid_shard_shapes
 
     def predict_step(
         self,
@@ -629,6 +688,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         sampler_params: Optional[dict] = None,
         pre_processors_tendencies: Optional[nn.Module] = None,
         post_processors_tendencies: Optional[nn.Module] = None,
+        x_in_prev: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Prediction step for flow/diffusion models - performs sampling.
@@ -687,6 +747,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 pre_processors,
                 multi_step,
                 model_comm_group,
+                x_in_prev=x_in_prev,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
                 **kwargs,
@@ -694,6 +755,9 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
             x_in_interp_to_hres = before_sampling_data[0]
             x_in_hres = before_sampling_data[1]
+            y_prev = (
+                before_sampling_data[2] if len(before_sampling_data) > 2 else None
+            )
 
             out = self.sample(
                 x_in_interp_to_hres,
@@ -702,6 +766,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 grid_shard_shapes=grid_shard_shapes,
                 noise_scheduler_params=noise_scheduler_params,
                 sampler_params=sampler_params,
+                y_prev=y_prev,
                 **kwargs,
             ).to(x_in_interp_to_hres.dtype)
 
@@ -728,6 +793,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         grid_shard_shapes: Optional[list] = None,
         noise_scheduler_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
+        y_prev: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Sample from the diffusion model.
@@ -831,12 +897,16 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
 
+        denoiser = self.fwd_with_preconditioning
+        if y_prev is not None:
+            denoiser = functools.partial(denoiser, y_prev=y_prev)
+
         return sampler_instance.sample(
             x_in_interp_to_hres,
             x_in_hres,
             y_init,
             sigmas,
-            self.fwd_with_preconditioning,
+            denoiser,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
         )

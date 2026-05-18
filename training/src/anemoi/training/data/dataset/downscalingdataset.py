@@ -95,10 +95,24 @@ class DownscalingDataset(NativeGridDataset):
                 self.reader_group_rank
             )
 
+            # Load the (possibly multi-step) time window relative to sample i.
+            # For the pure downscaler relative_date_indices == [0] -> single
+            # slice, identical to the previous self.data[i : i + 1] behaviour.
+            # For autoregressive training it is e.g. [0, inc] -> the slice at
+            # the last offset is the current target, the one before it is the
+            # previous high-res step used for temporal conditioning.
+            start = i + int(self.relative_date_indices[0])
+            end = i + int(self.relative_date_indices[-1]) + 1
+            timeincrement = (
+                int(self.relative_date_indices[1] - self.relative_date_indices[0])
+                if len(self.relative_date_indices) > 1
+                else 1
+            )
+
             # Load full grid in CPU memory, select grid_shard after
             # Note that anemoi-datasets currently doesn't support slicing + indexing
             # in the same operation.
-            x_in_lres, x_in_hres, y = self.data[i : i + 1]
+            x_in_lres, x_in_hres, y = self.data[start:end:timeincrement]
             x_in_lres = x_in_lres[..., lres_grid_shard_indices]
             x_in_hres = x_in_hres[..., hres_grid_shard_indices]
             y = y[..., hres_grid_shard_indices]
