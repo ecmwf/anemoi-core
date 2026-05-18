@@ -181,21 +181,13 @@ class BaseTask(ABC):
         requested = self.dataset_input_relative_times_by_dataset.get(dataset_name)
         if requested is not None and len(requested) > 0:
             return requested
-        if self._reference_input_dataset_name is not None:
-            reference_requested = self.dataset_input_relative_times_by_dataset.get(self._reference_input_dataset_name)
-            if reference_requested is not None and len(reference_requested) > 0:
-                return reference_requested
-        return self.get_batch_input_indices()
+        return self.get_batch_input_indices(dataset_name=dataset_name)
 
     def _requested_output_relative_times(self, dataset_name: str, rollout_step: int = 0) -> list[int]:
         requested = self.dataset_target_relative_times_by_dataset.get(dataset_name)
         if requested is not None:
             return requested
-        if self._reference_output_dataset_name is not None:
-            reference_requested = self.dataset_target_relative_times_by_dataset.get(self._reference_output_dataset_name)
-            if reference_requested is not None:
-                return reference_requested
-        return self.get_batch_output_indices(rollout_step=rollout_step)
+        return self.get_batch_output_indices(dataset_name=dataset_name, rollout_step=rollout_step)
 
     def _resolve_relative_time_metadata(
         self,
@@ -387,16 +379,6 @@ class BaseTask(ABC):
                 "relative_date_target_indices_training_by_dataset",
             ),
         )
-        if len(self.dataset_input_relative_times_by_dataset) > 0:
-            self._reference_input_dataset_name = max(
-                self.dataset_input_relative_times_by_dataset,
-                key=lambda name: len(self.dataset_input_relative_times_by_dataset[name]),
-            )
-        if any(len(values) > 0 for values in self.dataset_target_relative_times_by_dataset.values()):
-            self._reference_output_dataset_name = next(
-                name for name, values in self.dataset_target_relative_times_by_dataset.items() if len(values) > 0
-            )
-
         relative_by_dataset = self._resolve_relative_time_metadata(
             metadata_inference,
             dataset_names,
@@ -405,30 +387,25 @@ class BaseTask(ABC):
                 "relative_date_indices_training_by_dataset",
             ),
         )
-        reference_input_relative_times = (
-            self.dataset_input_relative_times_by_dataset.get(
-                self._reference_input_dataset_name,
-                self.get_batch_input_indices(),
-            )
-            if self._reference_input_dataset_name is not None
-            else self.get_batch_input_indices()
-        )
-        fallback_relative_indices = sorted(
-            {
-                *reference_input_relative_times,
-                *self._requested_output_relative_times(
-                    self._reference_output_dataset_name or dataset_names[0],
-                    rollout_step=max(self.num_steps - 1, 0),
-                ),
-            },
-        )
-        self.dataset_time_maps = {
-            dataset_name: {int(relative_time): batch_idx for batch_idx, relative_time in enumerate(relative_times)}
-            for dataset_name, relative_times in {
-                dataset_name: relative_by_dataset.get(dataset_name, fallback_relative_indices)
-                for dataset_name in dataset_names
-            }.items()
-        }
+        dataset_time_maps = {}
+        for dataset_name in dataset_names:
+            relative_times = relative_by_dataset.get(dataset_name)
+            if relative_times is None:
+                relative_times = sorted(
+                    {
+                        *self._requested_input_relative_times(dataset_name),
+                        *self._requested_output_relative_times(
+                            dataset_name,
+                            rollout_step=max(self.num_steps - 1, 0),
+                        ),
+                    },
+                )
+
+            dataset_time_maps[dataset_name] = {
+                int(relative_time): batch_idx for batch_idx, relative_time in enumerate(relative_times)
+            }
+
+        self.dataset_time_maps = dataset_time_maps
 
 
 class BaseSingleStepTask(BaseTask):

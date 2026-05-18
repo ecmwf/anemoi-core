@@ -177,28 +177,28 @@ def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
 
 def test_forecaster_sparse_inputs_use_dataset_specific_requested_times() -> None:
     task = Forecaster(
-        multistep_input=1,
+        multistep_input=2,
         multistep_output=1,
         timestep="5m",
-        rollout={"start": 1, "maximum": 3},
+        rollout={"start": 1, "maximum": 1},
     )
     metadata = {
         "metadata_inference": {
             "dataset_names": ["meps", "radar"],
             "meps": {
                 "timesteps": {
-                    "relative_date_input_indices_training_by_dataset": {"meps": [0, 72]},
-                    "relative_date_input_indices_validation_by_dataset": {"meps": [0, 72]},
-                    "relative_date_indices_training_by_dataset": {"meps": [0, 72]},
-                    "relative_date_indices_validation_by_dataset": {"meps": [0, 72]},
+                    "relative_date_input_indices_training_by_dataset": {"meps": [0]},
+                    "relative_date_input_indices_validation_by_dataset": {"meps": [0]},
+                    "relative_date_indices_training_by_dataset": {"meps": [0]},
+                    "relative_date_indices_validation_by_dataset": {"meps": [0]},
                 },
             },
             "radar": {
                 "timesteps": {
-                    "relative_date_input_indices_training_by_dataset": {"radar": [0]},
-                    "relative_date_input_indices_validation_by_dataset": {"radar": [0]},
-                    "relative_date_indices_training_by_dataset": {"radar": [0, 1, 2, 3]},
-                    "relative_date_indices_validation_by_dataset": {"radar": [0, 1, 2, 3]},
+                    "relative_date_input_indices_training_by_dataset": {"radar": [0, 1]},
+                    "relative_date_input_indices_validation_by_dataset": {"radar": [0, 1]},
+                    "relative_date_indices_training_by_dataset": {"radar": [0, 1, 2]},
+                    "relative_date_indices_validation_by_dataset": {"radar": [0, 1, 2]},
                 },
             },
         },
@@ -206,19 +206,19 @@ def test_forecaster_sparse_inputs_use_dataset_specific_requested_times() -> None
     task.fill_metadata(metadata)
 
     batch = {
-        "meps": torch.tensor([[[[[1.0, 10.0]]], [[[2.0, 20.0]]]]], dtype=torch.float32),
+        "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
         "radar": torch.tensor(
-            [[[[[3.0, 30.0]]], [[[4.0, 40.0]]], [[[5.0, 50.0]]], [[[6.0, 60.0]]]]],
+            [[[[[3.0, 30.0]]], [[[4.0, 40.0]]], [[[5.0, 50.0]]]]],
             dtype=torch.float32,
         ),
     }
 
     x = task.get_inputs(batch, _data_indices_multi())
 
-    assert x["meps"].shape == (1, 2, 1, 1, 2)
-    assert x["radar"].shape == (1, 1, 1, 1, 2)
-    torch.testing.assert_close(x["meps"][0, :, 0, 0, 0], torch.tensor([1.0, 2.0]))
-    torch.testing.assert_close(x["radar"][0, :, 0, 0, 0], torch.tensor([3.0]))
+    assert x["meps"].shape == (1, 1, 1, 1, 2)
+    assert x["radar"].shape == (1, 2, 1, 1, 2)
+    torch.testing.assert_close(x["meps"][0, :, 0, 0, 0], torch.tensor([1.0]))
+    torch.testing.assert_close(x["radar"][0, :, 0, 0, 0], torch.tensor([3.0, 4.0]))
 
 
 @pytest.mark.parametrize(
