@@ -90,7 +90,7 @@ def resolve_config_frequency(
     config: BaseSchema,
     task: BaseTask | None = None,
 ) -> str | datetime.timedelta:
-    """Resolve the shared model-grid frequency used by sparse time-index parsing."""
+    """Resolve the shared model-grid frequency used by mixed-frequency time-index parsing."""
     if task is not None:
         timestep = getattr(task, "timestep", None)
         if timestep is not None:
@@ -133,7 +133,7 @@ def resolve_task_relative_indices_by_dataset(
     *,
     mode: str,
 ) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
-    """Split each dataset's exact sparse indices into task inputs and targets."""
+    """Split each dataset's exact relative indices into task inputs and targets."""
     task_input_relative_indices = set(resolve_task_input_relative_indices(task))
     task_target_relative_indices = set(resolve_task_target_relative_indices(task, mode=mode))
 
@@ -215,7 +215,7 @@ def resolve_relative_date_indices(
     val_rollout: int = 1,
     logger: logging.Logger | None = None,
 ) -> list[int]:
-    """Resolve the shared model-relative window for sparse alignment."""
+    """Resolve the shared model-relative window for mixed-frequency alignment."""
     return default_relative_date_indices(
         config,
         task=task,

@@ -60,6 +60,7 @@ class BaseTask(ABC):
         output_offsets: list[datetime.timedelta] | dict[str, list[datetime.timedelta]],
     ) -> None:
         self.num_input_timesteps_by_dataset: dict[str, int] = {}
+        self.num_output_timesteps_by_dataset: dict[str, int] = {}
         self.dataset_input_relative_times_by_dataset: dict[str, list[int]] = {}
         self.dataset_target_relative_times_by_dataset: dict[str, list[int]] = {}
         self.dataset_time_maps: dict[str, dict[int, int]] = {}
@@ -71,7 +72,7 @@ class BaseTask(ABC):
 
         if input_offsets_are_mapping or output_offsets_are_mapping:
             if not input_offsets_are_mapping or not output_offsets_are_mapping:
-                msg = "`input_offsets` and `output_offsets` must both be mappings for per-dataset sparse offsets."
+                msg = "`input_offsets` and `output_offsets` must both be mappings for per-dataset offsets."
                 raise ValueError(msg)
             input_offsets = dict(input_offsets)
             output_offsets = dict(output_offsets)
@@ -91,15 +92,21 @@ class BaseTask(ABC):
             self.num_input_timesteps_by_dataset = {
                 dataset_name: len(self._input_offsets[dataset_name]) for dataset_name in dataset_names
             }
+            self.num_output_timesteps_by_dataset = {
+                dataset_name: len(self._output_offsets[dataset_name]) for dataset_name in dataset_names
+            }
             if len(self._input_offsets) > 0:
                 self._reference_input_dataset_name = max(
                     self._input_offsets,
                     key=lambda name: len(self._input_offsets[name]),
                 )
-            self._reference_output_dataset_name = next(
-                (name for name, offsets in self._output_offsets.items() if len(offsets) > 0),
-                self._reference_input_dataset_name,
-            )
+            if len(self._output_offsets) > 0:
+                self._reference_output_dataset_name = max(
+                    self._output_offsets,
+                    key=lambda name: len(self._output_offsets[name]),
+                )
+            else:
+                self._reference_output_dataset_name = self._reference_input_dataset_name
             return
 
         self._input_offsets = sorted(input_offsets)
@@ -183,11 +190,11 @@ class BaseTask(ABC):
             return requested
         return self.get_batch_input_indices(dataset_name=dataset_name)
 
-    def _requested_output_relative_times(self, dataset_name: str, rollout_step: int = 0) -> list[int]:
+    def _requested_output_relative_times(self, dataset_name: str, **kwargs) -> list[int]:
         requested = self.dataset_target_relative_times_by_dataset.get(dataset_name)
         if requested is not None:
             return requested
-        return self.get_batch_output_indices(dataset_name=dataset_name, rollout_step=rollout_step)
+        return self.get_batch_output_indices(dataset_name=dataset_name, **kwargs)
 
     def _resolve_relative_time_metadata(
         self,
@@ -227,7 +234,7 @@ class BaseTask(ABC):
 
         available_times = sorted(int(value) for value in time_map)
         if not available_times:
-            msg = f"Dataset '{dataset_name}' has no available relative times for sparse rollout."
+            msg = f"Dataset '{dataset_name}' has no available relative times for dataset-specific time sampling."
             raise ValueError(msg)
 
         candidate_times = [value for value in available_times if value <= int(relative_time)]
@@ -240,7 +247,7 @@ class BaseTask(ABC):
         sampled_time = candidate_times[-1]
 
         LOGGER.info(
-            "Sparse rollout dataset=%s requested_time=%s sampled_time=%s",
+            "Dataset time sampling dataset=%s requested_time=%s sampled_time=%s",
             dataset_name,
             relative_time,
             sampled_time,
@@ -319,10 +326,9 @@ class BaseTask(ABC):
                 LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
             return y
 
-        rollout_step = kwargs.get("rollout_step", 0)
         y = {}
         for dataset_name, dataset_batch in batch.items():
-            requested_relative_times = self._requested_output_relative_times(dataset_name, rollout_step=rollout_step)
+            requested_relative_times = self._requested_output_relative_times(dataset_name, **kwargs)
             target_positions = [
                 self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
                 for relative_time in requested_relative_times
@@ -396,7 +402,7 @@ class BaseTask(ABC):
                         *self._requested_input_relative_times(dataset_name),
                         *self._requested_output_relative_times(
                             dataset_name,
-                            rollout_step=max(self.num_steps - 1, 0),
+                            step=max(self.num_steps - 1, 0),
                         ),
                     },
                 )

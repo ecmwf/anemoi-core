@@ -131,8 +131,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         frequency_seconds = {name: frequency_to_seconds(reader.frequency) for name, reader in data_readers.items()}
-        use_sparse_alignment = len(set(frequency_seconds.values())) != 1
-        if use_sparse_alignment:
+        use_mixed_frequency_alignment = len(set(frequency_seconds.values())) != 1
+        if use_mixed_frequency_alignment:
             shared_frequency = resolve_config_frequency(self.config, task=self.task)
             return MultiDataset(
                 data_readers=data_readers,

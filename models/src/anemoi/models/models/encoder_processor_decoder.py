@@ -111,7 +111,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
+            n_step_output=self._get_n_step_output(dataset_name),
         )
 
         if grid_shard_sizes is not None:
@@ -143,7 +143,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=self.n_step_output,
+                time=self._get_n_step_output(dataset_name),
             )
             .to(dtype=dtype)
             .clone()

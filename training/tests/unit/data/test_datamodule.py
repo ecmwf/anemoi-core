@@ -91,7 +91,9 @@ def make_multidataset_cfg(*, meps_frequency: str, radar_frequency: str, data_fre
     )
 
 
-def test_datamodule_relative_date_indices_follow_task_config_for_sparse_forecaster(mocker: MockFixture) -> None:
+def test_datamodule_relative_date_indices_follow_task_config_for_mixed_frequency_forecaster(
+    mocker: MockFixture,
+) -> None:
     cfg = OmegaConf.create(
         {
             "data": {
@@ -147,7 +149,9 @@ def test_datamodule_relative_date_indices_follow_task_config_for_sparse_forecast
     assert datamodule.ds_train.model_relative_date_indices.tolist() == [0, 1, 2, 3]
 
 
-def test_datamodule_sparse_alignment_uses_task_timestep_without_data_frequency(mocker: MockFixture) -> None:
+def test_datamodule_mixed_frequency_alignment_uses_task_timestep_without_data_frequency(
+    mocker: MockFixture,
+) -> None:
     cfg = OmegaConf.create(
         {
             "data": {
@@ -234,7 +238,7 @@ def test_datamodule_keeps_dense_path_for_aligned_frequencies(
     assert ds_train.relative_date_indices_are_native
 
 
-def test_datamodule_uses_sparse_alignment_for_mixed_frequencies(
+def test_datamodule_uses_mixed_frequency_alignment_for_mixed_frequencies(
     mocker: MockFixture,
 ) -> None:
     cfg = make_multidataset_cfg(meps_frequency="1h", radar_frequency="5m")
@@ -273,7 +277,7 @@ def test_datamodule_uses_sparse_alignment_for_mixed_frequencies(
     assert frequency_to_seconds(ds_train.data_readers["nordic_radar"].frequency) == frequency_to_seconds("5m")
 
 
-def test_datamodule_sparse_alignment_prefers_task_timestep_over_data_frequency(
+def test_datamodule_mixed_frequency_alignment_prefers_task_timestep_over_data_frequency(
     mocker: MockFixture,
 ) -> None:
     cfg = make_multidataset_cfg(meps_frequency="1h", radar_frequency="5m", data_frequency="1h")
@@ -302,7 +306,7 @@ def test_datamodule_sparse_alignment_prefers_task_timestep_over_data_frequency(
     assert ds_train.data_relative_date_indices_by_dataset["nordic_radar"].tolist() == [0, 1]
 
 
-def test_datamodule_fill_metadata_derives_sparse_windows_from_task(
+def test_datamodule_fill_metadata_derives_mixed_frequency_windows_from_task(
     mocker: MockFixture,
 ) -> None:
     cfg = make_multidataset_cfg(meps_frequency="1h", radar_frequency="5m")

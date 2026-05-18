@@ -45,7 +45,7 @@ class BaseGraphModel(nn.Module):
         data_indices: dict,
         statistics: dict,
         n_step_input: int | dict[str, int],
-        n_step_output: int,
+        n_step_output: int | dict[str, int],
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -65,13 +65,16 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
         if isinstance(n_step_input, dict):
             self.n_step_input = {dataset_name: int(n_step_input[dataset_name]) for dataset_name in self.dataset_names}
         else:
             self.n_step_input = int(n_step_input)
+        if isinstance(n_step_output, dict):
+            self.n_step_output = {dataset_name: int(n_step_output[dataset_name]) for dataset_name in self.dataset_names}
+        else:
+            self.n_step_output = int(n_step_output)
 
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
@@ -142,6 +145,9 @@ class BaseGraphModel(nn.Module):
     def _get_n_step_input(self, dataset_name: str) -> int:
         return self.n_step_input[dataset_name] if isinstance(self.n_step_input, dict) else self.n_step_input
 
+    def _get_n_step_output(self, dataset_name: str) -> int:
+        return self.n_step_output[dataset_name] if isinstance(self.n_step_output, dict) else self.n_step_output
+
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
@@ -173,7 +179,7 @@ class BaseGraphModel(nn.Module):
         return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
-        return self.n_step_output * self.num_output_channels[dataset_name]
+        return self._get_n_step_output(dataset_name) * self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset

@@ -56,10 +56,10 @@ class MultiDataset(IterableDataset):
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : list[int] | dict[str, TimeIndices]
             Precomputed relative date indices for each data reader.
-            In the sparse path this is the shared model-relative index window.
+            In the mixed-frequency path this is the shared model-relative index window.
         frequency : str | None, optional
-            Shared model frequency used to convert sparse model-relative indices to
-            each dataset's native time grid. Only needed in the sparse path.
+            Shared model frequency used to convert model-relative indices to
+            each dataset's native time grid. Only needed in the mixed-frequency path.
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -239,7 +239,7 @@ class MultiDataset(IterableDataset):
             raise ValueError(msg)
 
         LOGGER.info(
-            "MultiDataset using sparse time-index alignment with anchor dataset '%s': %d valid indices.",
+            "MultiDataset using mixed-frequency time-index alignment with anchor dataset '%s': %d valid indices.",
             anchor_dataset_name,
             len(anchor_valid_indices),
         )
@@ -316,15 +316,15 @@ class MultiDataset(IterableDataset):
 
         sample_readers = {}
         for name, dataset in self.data_readers.items():
-            use_sparse_alignment = anchor_dataset_name is not None and name != anchor_dataset_name
+            use_mixed_frequency_alignment = anchor_dataset_name is not None and name != anchor_dataset_name
             sample_readers[name] = RelativeTimeReader(
                 dataset,
                 native_relative_indices=self.data_relative_date_indices_by_dataset[name],
                 model_relative_indices=(
-                    self.model_relative_date_indices_by_dataset[name] if use_sparse_alignment else None
+                    self.model_relative_date_indices_by_dataset[name] if use_mixed_frequency_alignment else None
                 ),
-                frequency_seconds=self.frequency_seconds if use_sparse_alignment else None,
-                anchor_dates_ns=anchor_dates_ns if use_sparse_alignment else None,
+                frequency_seconds=self.frequency_seconds if use_mixed_frequency_alignment else None,
+                anchor_dates_ns=anchor_dates_ns if use_mixed_frequency_alignment else None,
             )
         return sample_readers
 

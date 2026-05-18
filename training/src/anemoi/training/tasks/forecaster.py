@@ -137,7 +137,13 @@ class Forecaster(BaseTask):
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
-    def _requested_output_relative_times(self, dataset_name: str, rollout_step: int = 0) -> list[int]:
+    def _requested_output_relative_times(
+        self,
+        dataset_name: str,
+        rollout_step: int = 0,
+        step: int | None = None,
+    ) -> list[int]:
+        rollout_step = rollout_step if step is None else step
         requested = self.dataset_target_relative_times_by_dataset.get(dataset_name)
         if requested is not None:
             if len(requested) == 0:
@@ -166,10 +172,10 @@ class Forecaster(BaseTask):
         rollout_step: int,
         data_indices: IndexCollection,
     ) -> tuple[torch.Tensor, list[tuple[int, torch.Tensor, int | None]], bool]:
-        use_sparse_time_maps = len(self.dataset_time_maps) > 0
-        if use_sparse_time_maps:
+        use_dataset_time_maps = len(self.dataset_time_maps) > 0
+        if use_dataset_time_maps:
             if dataset_name is None:
-                msg = "`dataset_name` is required for sparse rollout input updates."
+                msg = "`dataset_name` is required for mixed-frequency input updates."
                 raise ValueError(msg)
 
             requested_output_relative_times = self._requested_output_relative_times(
@@ -184,7 +190,7 @@ class Forecaster(BaseTask):
                 batch_position = self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
                 if not 0 <= batch_position < batch.shape[1]:
                     msg = (
-                        f"Sparse rollout for dataset '{dataset_name}' resolved relative time {relative_time} "
+                        f"Mixed-frequency input update for dataset '{dataset_name}' resolved relative time {relative_time} "
                         f"to batch position {batch_position}, but batch only has {batch.shape[1]} time steps."
                     )
                     raise ValueError(msg)
@@ -223,7 +229,7 @@ class Forecaster(BaseTask):
 
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
-        x, step_specs, use_sparse_time_maps = self._prepare_next_input_steps(
+        x, step_specs, use_dataset_time_maps = self._prepare_next_input_steps(
             x,
             y_pred,
             batch,
@@ -260,12 +266,12 @@ class Forecaster(BaseTask):
                 forcing = forcing.expand(-1, x_step.shape[1], -1, -1)
             x_step[..., data_indices.model.input.forcing] = forcing
 
-            if use_sparse_time_maps:
+            if use_dataset_time_maps:
                 next_steps.append(x_step)
             else:
                 x[:, -(i + 1)] = x_step
 
-        if use_sparse_time_maps:
+        if use_dataset_time_maps:
             return torch.stack(next_steps, dim=1)
         return x
 

@@ -43,14 +43,14 @@ class FakeDatasetReader:
         raise NotImplementedError(msg)
 
 
-def load_sparse_multidatasets_config() -> DictConfig:
-    cfg = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_sparse_multidatasets.yaml")
+def load_mixed_frequency_multidatasets_config() -> DictConfig:
+    cfg = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_mixed_frequency_multidatasets.yaml")
     assert isinstance(cfg, DictConfig)
     return cfg
 
 
-def test_sparse_forecaster_metadata_derives_per_dataset_sparse_windows(mocker: MockFixture) -> None:
-    cfg = load_sparse_multidatasets_config()
+def test_mixed_frequency_forecaster_metadata_derives_per_dataset_time_windows(mocker: MockFixture) -> None:
+    cfg = load_mixed_frequency_multidatasets_config()
     fake_readers = {
         "meps_source": FakeDatasetReader(
             dataset_name="meps_source",

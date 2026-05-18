@@ -175,7 +175,7 @@ def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
     assert set(input_indices).isdisjoint(set(output_indices))
 
 
-def test_forecaster_sparse_inputs_use_dataset_specific_requested_times() -> None:
+def test_forecaster_mixed_frequency_inputs_use_dataset_specific_requested_times() -> None:
     task = Forecaster(
         multistep_input=2,
         multistep_output=1,
@@ -296,7 +296,7 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
 
 
-def test_forecaster_preserves_datamodule_sparse_timing_metadata() -> None:
+def test_forecaster_preserves_datamodule_mixed_frequency_timing_metadata() -> None:
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
@@ -322,7 +322,7 @@ def test_forecaster_preserves_datamodule_sparse_timing_metadata() -> None:
     assert task.dataset_time_maps["data"] == {0: 0, 2: 1}
 
 
-def test_forecaster_advance_input_reuses_latest_available_sparse_timestep() -> None:
+def test_forecaster_advance_input_reuses_latest_available_mixed_frequency_timestep() -> None:
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
@@ -375,7 +375,7 @@ def test_forecaster_advance_input_reuses_latest_available_sparse_timestep() -> N
     torch.testing.assert_close(updated["data"][0, 0, 0, 0, 1], torch.tensor(10.0))
 
 
-def test_forecaster_sparse_advance_input_preserves_ensemble_dimension() -> None:
+def test_forecaster_mixed_frequency_advance_input_preserves_ensemble_dimension() -> None:
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
@@ -427,7 +427,7 @@ def test_forecaster_sparse_advance_input_preserves_ensemble_dimension() -> None:
     torch.testing.assert_close(updated["data"][0, 0, :, 0, 1], torch.tensor([10.0, 10.0]))
 
 
-def test_forecaster_sparse_advance_input_checks_batch_bounds() -> None:
+def test_forecaster_mixed_frequency_advance_input_checks_batch_bounds() -> None:
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,

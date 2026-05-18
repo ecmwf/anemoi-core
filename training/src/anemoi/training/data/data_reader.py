@@ -320,7 +320,7 @@ class RelativeTimeReader:
         return {int(date_ns): idx for idx, date_ns in enumerate(self.dates_ns)}
 
     @property
-    def uses_sparse_alignment(self) -> bool:
+    def uses_mixed_frequency_alignment(self) -> bool:
         return (
             self.model_relative_indices is not None
             and self.frequency_seconds is not None
@@ -334,9 +334,9 @@ class RelativeTimeReader:
         sample_index: int,
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
-        if not self.uses_sparse_alignment:
+        if not self.uses_mixed_frequency_alignment:
             return self.reader.get_sample(self.resolve_dense_time_indices(sample_index), grid_shard_indices)
-        return self.get_sparse_sample(sample_index, grid_shard_indices)
+        return self.get_mixed_frequency_sample(sample_index, grid_shard_indices)
 
     def resolve_dense_time_indices(self, sample_index: int) -> TimeIndices:
         absolute_indices = sample_index + self.native_relative_indices
@@ -352,8 +352,8 @@ class RelativeTimeReader:
 
         return absolute_indices.tolist()
 
-    def resolve_sparse_time_indices(self, sample_index: int) -> TimeIndices:
-        if not self.uses_sparse_alignment:
+    def resolve_mixed_frequency_time_indices(self, sample_index: int) -> TimeIndices:
+        if not self.uses_mixed_frequency_alignment:
             dense_time_indices = self.resolve_dense_time_indices(sample_index)
             if isinstance(dense_time_indices, slice):
                 return expand_time_indices(dense_time_indices)
@@ -396,7 +396,7 @@ class RelativeTimeReader:
             resolved_native_indices[missing_mask] = np.where(within_tolerance, nearest_indices, -1)
             if np.any(within_tolerance) and not self._warned_nearest_time_fallback:
                 LOGGER.warning(
-                    "Sparse alignment for dataset '%s' fell back to the nearest native timestamp for %d requested "
+                    "Mixed-frequency alignment for dataset '%s' fell back to the nearest native timestamp for %d requested "
                     "times within a %d-second tolerance. Missing exact timestamps may map to a neighbouring "
                     "analysis cycle.",
                     getattr(self.reader, "data", self.reader.__class__.__name__),
@@ -409,12 +409,12 @@ class RelativeTimeReader:
             return int(resolved_native_indices[0])
         return resolved_native_indices.tolist()
 
-    def get_sparse_sample(
+    def get_mixed_frequency_sample(
         self,
         sample_index: int,
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
-        time_indices = self.resolve_sparse_time_indices(sample_index)
+        time_indices = self.resolve_mixed_frequency_time_indices(sample_index)
         requested_indices = expand_time_indices(time_indices)
         valid_positions = [
             pos
@@ -433,7 +433,7 @@ class RelativeTimeReader:
         if loaded is None:
             probe_idx = next((idx for idx in range(len(self.reader.dates)) if idx not in self.reader.missing), None)
             if probe_idx is None:
-                msg = "Sparse reader has no available native indices."
+                msg = "Reader has no available native indices."
                 raise ValueError(msg)
             probe = self.reader.get_sample([probe_idx], grid_shard_indices)
             probe = ensure_time_axis(probe)
