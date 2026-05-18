@@ -123,7 +123,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
                 _grid_reference_distance = get_grid_reference_distance(nodes.x)
                 nodes["_grid_reference_distance"] = _grid_reference_distance
         elif isinstance(nodes, torch.Tensor):
-            _grid_reference_distance = get_grid_reference_distance(nodes.x)
+            _grid_reference_distance = get_grid_reference_distance(nodes)
         else:
             raise ValueError("Unsupported type for nodes. Expected NodeStorage or torch.Tensor.")
 
