@@ -12,6 +12,42 @@ import torch
 from torch_geometric.data import HeteroData
 
 
+def _as_numpy_array(values: np.ndarray | torch.Tensor, name: str) -> np.ndarray:
+    """Convert array-like values used for plotting to a NumPy array."""
+    if isinstance(values, torch.Tensor):
+        return values.detach().cpu().numpy()
+    return np.asarray(values)
+
+
+def _validate_coordinates(coordinates: np.ndarray, name: str) -> None:
+    if coordinates.ndim != 2 or coordinates.shape[1] != 2:
+        msg = f"{name} must have shape (N, 2), got {coordinates.shape}."
+        raise ValueError(msg)
+
+
+def coordinates_to_lat_lon(coordinates: np.ndarray | torch.Tensor, name: str = "coordinates") -> tuple[list[float], list[float]]:
+    """Get latitude and longitude lists from coordinates in radians.
+
+    Parameters
+    ----------
+    coordinates : np.ndarray | torch.Tensor
+        Latitude-longitude coordinates in radians with shape ``(N, 2)``.
+    name : str, optional
+        Name used in validation error messages.
+
+    Returns
+    -------
+    latitudes : list[float]
+        Latitude coordinates in degrees.
+    longitudes : list[float]
+        Longitude coordinates in degrees.
+    """
+    coords = _as_numpy_array(coordinates, name)
+    _validate_coordinates(coords, name)
+    coords = np.rad2deg(coords)
+    return coords[:, 0].tolist(), coords[:, 1].tolist()
+
+
 def node_list(graph: HeteroData, nodes_name: str, mask: list[bool] | None = None) -> tuple[list[float], list[float]]:
     """Get the latitude and longitude of the nodes.
 
@@ -68,6 +104,61 @@ def edge_list(graph: HeteroData, source_nodes_name: str, target_nodes_name: str)
     nans = np.full_like(x0[:, :1], np.nan)
     latitudes = np.concatenate([x0[:, :1], y0[:, :1], nans], axis=1).flatten()
     longitudes = np.concatenate([x0[:, 1:2], y0[:, 1:2], nans], axis=1).flatten()
+    return latitudes, longitudes
+
+
+def edge_list_from_coordinates(
+    source_coords: np.ndarray | torch.Tensor,
+    target_coords: np.ndarray | torch.Tensor,
+    edge_index: np.ndarray | torch.Tensor,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Get line coordinates for plotting an edge index between coordinate arrays.
+
+    Parameters
+    ----------
+    source_coords : np.ndarray | torch.Tensor
+        Source latitude-longitude coordinates in radians with shape ``(N, 2)``.
+    target_coords : np.ndarray | torch.Tensor
+        Target latitude-longitude coordinates in radians with shape ``(M, 2)``.
+    edge_index : np.ndarray | torch.Tensor
+        Edge index with shape ``(2, E)``, where row 0 indexes source nodes and row 1 indexes target nodes.
+
+    Returns
+    -------
+    latitudes : np.ndarray
+        Latitude coordinates in degrees, with ``NaN`` separators between edges.
+    longitudes : np.ndarray
+        Longitude coordinates in degrees, with ``NaN`` separators between edges.
+    """
+    source = _as_numpy_array(source_coords, "source_coords")
+    target = _as_numpy_array(target_coords, "target_coords")
+    edges = _as_numpy_array(edge_index, "edge_index")
+
+    _validate_coordinates(source, "source_coords")
+    _validate_coordinates(target, "target_coords")
+
+    if edges.ndim != 2 or edges.shape[0] != 2:
+        msg = f"edge_index must have shape (2, E), got {edges.shape}."
+        raise ValueError(msg)
+    if not np.issubdtype(edges.dtype, np.integer):
+        msg = f"edge_index must contain integer indices, got dtype {edges.dtype}."
+        raise TypeError(msg)
+
+    if edges.shape[1] > 0:
+        source_indices = edges[0]
+        target_indices = edges[1]
+        if source_indices.min() < 0 or source_indices.max() >= source.shape[0]:
+            msg = f"edge_index source indices must be in [0, {source.shape[0]})."
+            raise IndexError(msg)
+        if target_indices.min() < 0 or target_indices.max() >= target.shape[0]:
+            msg = f"edge_index target indices must be in [0, {target.shape[0]})."
+            raise IndexError(msg)
+
+    source_edge_coords = np.rad2deg(source[edges[0]])
+    target_edge_coords = np.rad2deg(target[edges[1]])
+    nans = np.full_like(source_edge_coords[:, :1], np.nan)
+    latitudes = np.concatenate([source_edge_coords[:, :1], target_edge_coords[:, :1], nans], axis=1).flatten()
+    longitudes = np.concatenate([source_edge_coords[:, 1:2], target_edge_coords[:, 1:2], nans], axis=1).flatten()
     return latitudes, longitudes
 
 

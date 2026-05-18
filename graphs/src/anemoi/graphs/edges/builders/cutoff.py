@@ -112,12 +112,12 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         float
             The nodes reference distance.
         """
-        if mask_attr_name is not None:
-            # If masking nodes, we have to recompute the grid reference distance only over the masked nodes
-            mask = nodes[mask_attr_name]
-            _grid_reference_distance = get_grid_reference_distance(nodes.x, mask)
-        elif isinstance(nodes, NodeStorage):
-            if "_grid_reference_distance" in nodes:
+        if isinstance(nodes, NodeStorage):
+            if mask_attr_name is not None:
+                # If masking nodes, we have to recompute the grid reference distance only over the masked nodes
+                mask = nodes[mask_attr_name]
+                _grid_reference_distance = get_grid_reference_distance(nodes.x, mask)
+            elif "_grid_reference_distance" in nodes:
                 _grid_reference_distance = nodes["_grid_reference_distance"]
             else:
                 _grid_reference_distance = get_grid_reference_distance(nodes.x)
