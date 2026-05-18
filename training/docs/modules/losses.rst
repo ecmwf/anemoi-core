@@ -193,6 +193,14 @@ Supported transforms include:
    ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
    shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
 
+.. note::
+
+   ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
+   By default, a naive Fourier transform is performed in the meridional direction which is very inefficient when
+   executed on GPUs. Therefore an optimised version using graphs is provided, which can be switched on by setting
+   ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
+   significant speedups, but may not be supported on all devices and can have higher memory usage.
+
 Spectral kernel CRPS
 --------------------
 

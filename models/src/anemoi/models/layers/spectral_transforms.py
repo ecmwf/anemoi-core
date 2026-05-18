@@ -253,6 +253,7 @@ class ReducedSHT(SpectralTransform):
         self,
         grid: str,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -263,6 +264,9 @@ class ReducedSHT(SpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
 
@@ -291,7 +295,9 @@ class ReducedSHT(SpectralTransform):
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -311,6 +317,7 @@ class OctahedralSHT(SpectralTransform):
         self,
         nlat: int,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -318,16 +325,21 @@ class OctahedralSHT(SpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
+            on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
