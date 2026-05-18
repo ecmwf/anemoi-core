@@ -54,8 +54,6 @@ class CutOutMaskSchema(BaseModel):
         Field(..., alias="_target_")
     )
     "Implementation of the area masks from anemoi.graphs.nodes.attributes."
-    grids: list[int] | None = None
-    "Grid indices to mark as True. Defaults to [0] (first dataset) when not specified. Only valid for CutOutMask."
 
 
 class GridsMaskSchema(BaseModel):
