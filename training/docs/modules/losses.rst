@@ -129,7 +129,7 @@ following aggregations are supported:
          temporal transitions and discontinuities.
 
 The wrapper accumulates the specified loss function evaluated on each aggregation in
-turn and returns the sum. Because the ``time_steps`` scaler is
+turn and returns the average. Because the ``time_steps`` scaler is
 intentionally excluded from the inner ``loss_fn`` (temporal aggregation
 collapses the time dimension), only spatial and variable scalers should
 be listed there.
