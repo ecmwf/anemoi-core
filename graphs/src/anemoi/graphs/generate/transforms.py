@@ -62,7 +62,7 @@ def latlon_rad_to_cartesian(locations: torch.Tensor | tuple, radius: float = 1) 
     locations : torch.Tensor of shape (N, 2)
         The 2D coordinates of the points, in radians.
     radius : float, optional
-        The radius of the sphere containing los points. Defaults to the unit sphere.
+        The radius of the sphere containing the points. Defaults to the unit sphere.
 
     Returns
     -------

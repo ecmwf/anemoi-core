@@ -62,7 +62,11 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
     return nearest_neighbour
 
 
-def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> float:
+def get_grid_reference_distance(
+    coords_rad: torch.Tensor,
+    mask: torch.Tensor | None = None, 
+    use_cartesian: bool = True
+) -> float:
     """Get the reference distance of the grid.
 
     It is the maximum distance of a node in the mesh with respect to its nearest neighbour.
@@ -73,15 +77,17 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
         corrdinates in radians
     mask : torch.Tensor, optional
         mask to remove nodes, by default None
+    use_cartesian : bool, optional
+        Whether to convert coordinates to Cartesian before computing distances. Defaults to True.
 
     Returns
     -------
     float
         The reference distance of the grid.
     """
-    xyz = latlon_rad_to_cartesian(coords_rad)
-    nearest_neighbours = get_nearest_neighbour(xyz, mask)
-    dists, _ = nearest_neighbours.kneighbors(xyz, n_neighbors=2, return_distance=True)
+    points = latlon_rad_to_cartesian(coords_rad) if use_cartesian else coords_rad
+    nearest_neighbours = get_nearest_neighbour(points, mask)
+    dists, _ = nearest_neighbours.kneighbors(points, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
 
 

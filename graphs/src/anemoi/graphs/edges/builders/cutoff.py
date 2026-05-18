@@ -97,7 +97,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         self.radius = None
 
     @staticmethod
-    def get_reference_distance(nodes: NodeStorage, mask_attr_name: torch.Tensor | None = None) -> float:
+    def get_reference_distance(nodes: NodeStorage, mask_attr_name: torch.Tensor | None = None, **kwargs) -> float:
         """Compute the reference distance.
 
         Parameters
@@ -115,15 +115,15 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         if isinstance(nodes, NodeStorage):
             if mask_attr_name is not None:
                 # If masking nodes, we have to recompute the grid reference distance only over the masked nodes
-                mask = nodes[mask_attr_name]
-                _grid_reference_distance = get_grid_reference_distance(nodes.x, mask)
+                kwargs["mask"] = nodes[mask_attr_name]
+                _grid_reference_distance = get_grid_reference_distance(nodes.x, **kwargs)
             elif "_grid_reference_distance" in nodes:
                 _grid_reference_distance = nodes["_grid_reference_distance"]
             else:
-                _grid_reference_distance = get_grid_reference_distance(nodes.x)
+                _grid_reference_distance = get_grid_reference_distance(nodes.x, **kwargs)
                 nodes["_grid_reference_distance"] = _grid_reference_distance
         elif isinstance(nodes, torch.Tensor):
-            _grid_reference_distance = get_grid_reference_distance(nodes)
+            _grid_reference_distance = get_grid_reference_distance(nodes, **kwargs)
         else:
             raise ValueError("Unsupported type for nodes. Expected NodeStorage or torch.Tensor.")
 
@@ -154,11 +154,18 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         else:
             # Use factor-based approach
             if isinstance(reference, HeteroData):
-                target_nodes = reference[self.target_name]
+                # Coordinates are always stored as 2d lat/lon in radians in the graph
+                target_nodes, use_cartesian = reference[self.target_name], True
             elif isinstance(reference, torch.Tensor):
-                target_nodes = reference
+                target_nodes, use_cartesian = reference, False
+            else:
+                raise ValueError("Unsupported type for reference. Expected HeteroData or torch.Tensor.")
 
-            reference_dist = CutOffEdges.get_reference_distance(target_nodes, mask_attr_name=self.target_mask_attr_name)
+            reference_dist = CutOffEdges.get_reference_distance(
+                target_nodes,
+                mask_attr_name=self.target_mask_attr_name,
+                use_cartesian=use_cartesian,
+            )
             radius = reference_dist * self.cutoff_factor
         return radius
 

@@ -167,9 +167,9 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         Parameters
         ----------
         source_coords : torch.Tensor
-            Coordinates of source nodes.
+            Coordinates of source nodes of shape (num_source_nodes, 3) in unit sphere.
         target_coords : torch.Tensor
-            Coordinates of target nodes.
+            Coordinates of target nodes of shape (num_target_nodes, 3) in unit sphere.
 
         Returns
         -------
@@ -201,6 +201,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             Indices of source and target nodes connected by an edge.
         """
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
+        # 3d cartesian coordinates
 
         if TORCH_CLUSTER_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
