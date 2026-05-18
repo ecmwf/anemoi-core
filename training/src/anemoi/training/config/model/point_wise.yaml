@@ -27,7 +27,7 @@ processor:
   _target_: anemoi.models.layers.processor.PointWiseMLPProcessor
   num_layers: 16
   num_chunks: 2
-  mlp_hidden_ratio: 4 # PointWise/GraphTransformer/Transformer only
+  mlp_hidden_ratio: 4
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
