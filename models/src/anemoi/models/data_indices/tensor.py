@@ -14,9 +14,7 @@ import torch
 class BaseTensorIndex:
     """Indexing for variables in index as Tensor."""
 
-    def __init__(
-        self, *, includes: list[str], excludes: list[str], name_to_index: dict[str, int]
-    ) -> None:
+    def __init__(self, *, includes: list[str], excludes: list[str], name_to_index: dict[str, int]) -> None:
         """Initialize indexing tensors from includes and excludes using name_to_index.
 
         Parameters
@@ -81,16 +79,12 @@ class BaseTensorIndex:
     def _build_idx_from_excludes(self, excludes=None) -> "torch.Tensor[int]":
         if excludes is None:
             excludes = self.excludes
-        return torch.Tensor(
-            sorted(i for name, i in self.name_to_index.items() if name not in excludes)
-        ).to(torch.int)
+        return torch.Tensor(sorted(i for name, i in self.name_to_index.items() if name not in excludes)).to(torch.int)
 
     def _build_idx_from_includes(self, includes=None) -> "torch.Tensor[int]":
         if includes is None:
             includes = self.includes
-        return torch.Tensor(sorted(self.name_to_index[name] for name in includes)).to(
-            torch.int
-        )
+        return torch.Tensor(sorted(self.name_to_index[name] for name in includes)).to(torch.int)
 
     def _build_idx_prognostic(self) -> "torch.Tensor[int]":
         return self._build_idx_from_excludes(self.includes + self.excludes)
@@ -99,12 +93,8 @@ class BaseTensorIndex:
 class InputTensorIndex(BaseTensorIndex):
     """Indexing for input variables."""
 
-    def __init__(
-        self, *, includes: list[str], excludes: list[str], name_to_index: dict[str, int]
-    ) -> None:
-        super().__init__(
-            includes=includes, excludes=excludes, name_to_index=name_to_index
-        )
+    def __init__(self, *, includes: list[str], excludes: list[str], name_to_index: dict[str, int]) -> None:
+        super().__init__(includes=includes, excludes=excludes, name_to_index=name_to_index)
         self.forcing = self._only
         self.diagnostic = self._removed
 
@@ -112,11 +102,7 @@ class InputTensorIndex(BaseTensorIndex):
 class OutputTensorIndex(BaseTensorIndex):
     """Indexing for output variables."""
 
-    def __init__(
-        self, *, includes: list[str], excludes: list[str], name_to_index: dict[str, int]
-    ) -> None:
-        super().__init__(
-            includes=includes, excludes=excludes, name_to_index=name_to_index
-        )
+    def __init__(self, *, includes: list[str], excludes: list[str], name_to_index: dict[str, int]) -> None:
+        super().__init__(includes=includes, excludes=excludes, name_to_index=name_to_index)
         self.forcing = self._removed
         self.diagnostic = self._only

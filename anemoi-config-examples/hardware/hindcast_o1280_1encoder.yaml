@@ -1,7 +1,7 @@
 defaults:
   - paths: main
   - files: hindcast_o1280_1encoder
-  
+
 
 
 # number of GPUs per node and number of nodes (for DDP)

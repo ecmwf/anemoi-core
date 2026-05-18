@@ -23,8 +23,8 @@ processor:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
-  mlp_hidden_ratio: 4 
-  num_heads: 4 
+  mlp_hidden_ratio: 4
+  num_heads: 4
 
 decoder:
   _target_: anemoi.models.layers.dynamic_mapper.DynamicGraphTransformerBackwardMapper

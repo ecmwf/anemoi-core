@@ -62,10 +62,12 @@ def displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=No
     return x
 
 
-def inverse_displace_boundary_atoms(x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None,eps=None):
+def inverse_displace_boundary_atoms(
+    x, lower_atom=None, upper_atom=None, lower_target=None, upper_target=None, eps=None
+):
     """Clamps the values back to the original range, to the original boundary values. Can be used on lower bound, upper bound, or both."""
 
-    return x.clamp(lower_atom, upper_atom)
+    return x.clamp_(lower_atom, upper_atom)
 
 
 # --------------------------------------------------------
@@ -153,7 +155,7 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
     return x.pow_(lambd)
 
 
-def inverse_power_transform(x, lambd=0.33, tangent_linear_above_one=False):
+def inverse_power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one=False):
     """Inverse power transform with optional inverse tangent-linear branch above 1."""
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
     if tangent_linear_above_one:
@@ -217,12 +219,12 @@ def inverse_asinh_converter(x, c=1.0):
 # --------------------------------------------------------
 def log1p_converter(x):
     """Convert positive var in to log(1+var)."""
-    return torch.log1p(x)
+    return torch.log1p_(x)
 
 
 def expm1_converter(x):
     """Convert back log(1+var) to var."""
-    return torch.expm1(x)
+    return torch.expm1_(x)
 
 
 # --------------------------------------------------------

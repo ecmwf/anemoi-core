@@ -1,7 +1,7 @@
 defaults:
   - data: downscaling_no_precip
   - dataloader: hindcast_o1280
-  - datamodule: downscaling  
+  - datamodule: downscaling
   - diagnostics: downscaling_no_precip_offline
   - hardware: hindcast_o1280_1encoder
   - graph: downscaling_1encoder_trinodes7

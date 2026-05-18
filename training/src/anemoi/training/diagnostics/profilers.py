@@ -662,10 +662,11 @@ class ProfilerProgressBar(TQDMProgressBar):
         List to store training rates (it/s).
     """
 
-    def __init__(self):
+    def __init__(self, refresh_rate: int = 1):
         super().__init__()
         self.validation_rates = []
         self.training_rates = []
+        self._refresh_rate = refresh_rate
 
     def _extract_rate(self, pbar: _tqdm) -> float:
         """Extracts the iteration rate from the progress bar.

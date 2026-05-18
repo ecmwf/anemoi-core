@@ -21,7 +21,7 @@ nodes:
       dataset: ${hardware.paths.data}/${hardware.files.dataset_x}
     attributes: ${graph.attributes.nodes}
 
-    
+
 edges:
 - source_name: data
   target_name: hidden
@@ -48,7 +48,7 @@ attributes:
   nodes:
     area_weight:
       _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
-      norm: unit-max 
+      norm: unit-max
   edges:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength

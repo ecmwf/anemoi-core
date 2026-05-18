@@ -93,7 +93,7 @@ loss_scaling:
     tcw: 1
     skt: 0.5
     msl: 2
-    tp: 2    
+    tp: 2
     cp: 2
   inverse_tendency_variance_scaling: False
 
