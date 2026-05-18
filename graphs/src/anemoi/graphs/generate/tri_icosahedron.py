@@ -10,6 +10,8 @@
 
 import logging
 from collections.abc import Iterable
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 import networkx as nx
 import numpy as np
@@ -116,6 +118,93 @@ def create_stretched_tri_nodes(
     # Creates the graph, with the nodes sorted by latitude and longitude.
     nx_graph = create_nx_graph_from_tri_coords(coords_rad, node_ordering)
 
+    return nx_graph, coords_rad, list(node_ordering)
+
+
+@dataclass(frozen=True)
+class LamRegionSpec:
+    """Specification for a single LAM region used in multi-resolution stretched grid creation.
+
+    Attributes
+    ----------
+    lam_resolution : int
+        The refinement level of the mesh inside this region.
+    area_mask_builder : KNNAreaMaskBuilder
+        A fitted KNNAreaMaskBuilder that masks nodes belonging to this region.
+    """
+
+    lam_resolution: int
+    area_mask_builder: KNNAreaMaskBuilder
+
+
+def create_multi_stretched_tri_nodes(
+    base_resolution: int,
+    lam_regions: Sequence[LamRegionSpec],
+) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
+    """Create a global mesh with multiple levels of resolutions (multi-level Areas Of Interest (AOI) stretched grid).
+
+    Selection logic:
+
+    1. Keep base_resolution nodes outside all AOIs.
+    2. For each AOI in priority order (highest lam_resolution first), keep
+       lam_resolution nodes inside that AOI, excluding any finer AOI overlap.
+
+    Parameters
+    ----------
+    base_resolution : int
+        Refinement level of the coarse global mesh used outside all AOIs.
+    lam_regions : Sequence[LamRegionSpec]
+        One entry per level of AOI resolution, ordered arbitrarily
+        (will be sorted internally by descending lam_resolution).
+
+    Returns
+    -------
+    nx_graph : nx.DiGraph
+        The graph with the added nodes.
+    coords_rad : np.ndarray
+        The node coordinates (not ordered) in radians.
+    node_ordering : list[int]
+        Order of the node coordinates to be sorted by latitude and longitude.
+
+    Raises
+    ------
+    ValueError
+        If lam_regions is empty.
+    """
+    if not lam_regions:
+        raise ValueError("lam_regions must not be empty.")
+
+    # Finest AOI takes priority over coarser ones.
+    lam_regions_sorted = sorted(lam_regions, key=lambda r: r.lam_resolution, reverse=True)
+
+    # Base coords: nodes outside the union of all AOIs.
+    base_coords_rad = get_latlon_coords_icosphere(base_resolution)
+    outside_all = np.ones(base_coords_rad.shape[0], dtype=bool)
+    for r in lam_regions_sorted:
+        outside_all &= ~r.area_mask_builder.get_mask(base_coords_rad)
+
+    parts: list[np.ndarray] = [base_coords_rad[outside_all]]
+
+    # AOI coords: inside this AOI excluding any finer AOI overlap.
+    finer_builders: list[KNNAreaMaskBuilder] = []
+    for r in lam_regions_sorted:
+        lam_coords_rad = get_latlon_coords_icosphere(r.lam_resolution)
+        in_this_level = r.area_mask_builder.get_mask(lam_coords_rad)
+
+        if finer_builders:
+            in_finer_level = np.zeros(lam_coords_rad.shape[0], dtype=bool)
+            for finer_builder in finer_builders:
+                in_finer_level |= finer_builder.get_mask(lam_coords_rad)
+            keep_mask = in_this_level & ~in_finer_level
+        else:
+            keep_mask = in_this_level
+
+        parts.append(lam_coords_rad[keep_mask])
+        finer_builders.append(r.area_mask_builder)
+
+    coords_rad = np.concatenate(parts, axis=0)
+    node_ordering = get_coordinates_ordering(coords_rad)
+    nx_graph = create_nx_graph_from_tri_coords(coords_rad, node_ordering)
     return nx_graph, coords_rad, list(node_ordering)
 
 

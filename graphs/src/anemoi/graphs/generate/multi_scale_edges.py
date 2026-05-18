@@ -91,7 +91,12 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
         all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
         all_points_mask_builder.fit_coords(nodes.x.cpu().numpy())
 
-        if x_hops == 1:
+        # The fast add_1_hop_edges method only works for single-resolution mode.
+        # In multi-resolution mode, node ordering is only responsible for ordering not node selection.
+        # Therefore, multi-resolution needs to fall back to the NX-based method.
+        is_multi_resolution = "_area_mask_builder" not in nodes
+
+        if x_hops == 1 and not is_multi_resolution:
             LOGGER.debug("Using tri-mesh only strategy for x_hops=1 multiscale-edge building.")
             # Compute the multiscale edges directly and store them in the node storage
             # No need of the networkx graph

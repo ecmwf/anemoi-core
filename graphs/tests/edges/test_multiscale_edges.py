@@ -10,6 +10,7 @@
 import networkx as nx
 import numpy as np
 import pytest
+import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import MultiScaleEdges
@@ -136,12 +137,85 @@ class TestMultiScaleEdgesStretched:
         graph = node_builder.update_graph(graph, {})
         return graph
 
+    @pytest.fixture()
+    def tri_graph_multi_resolution(self) -> HeteroData:
+        """Return a HeteroData object with multi-resolution stretched Tri nodes."""
+        graph = HeteroData()
+        coords = np.deg2rad(
+            np.array(
+                [
+                    [-45.0, 145.0],
+                    [-40.0, 150.0],
+                    [-35.0, 155.0],
+                    [-30.0, 160.0],
+                    [-25.0, 165.0],
+                ]
+            )
+        )
+        graph["data"].x = torch.tensor(np.asarray(coords, dtype=np.float32), dtype=torch.float32)
+        graph["data"]["_grid_reference_distance"] = 0.1
+
+        node_builder = StretchedTriNodes(
+            global_resolution=0,
+            name="hidden",
+            lam_regions=[
+                {
+                    "lam_resolution": 2,
+                    "reference_node_name": "data",
+                    "mask_attr_name": None,
+                    "margin_radius_km": 500.0,
+                },
+                {
+                    "lam_resolution": 1,
+                    "reference_node_name": "data",
+                    "mask_attr_name": None,
+                    "margin_radius_km": 1000.0,
+                },
+            ],
+        )
+
+        graph = node_builder.update_graph(graph, {})
+        return graph
+
     def test_edges(self, tri_graph: HeteroData):
         """Test MultiScaleEdges update method."""
         edges = MultiScaleEdges("hidden", "hidden", x_hops=1, scale_resolutions=None)
         graph = edges.update_graph(tri_graph)
         assert ("hidden", "to", "hidden") in graph.edge_types
         assert len(graph[("hidden", "to", "hidden")].edge_index) > 0
+
+    def test_single_resolution_uses_fast_1_hop(self, tri_graph: HeteroData, mocker):
+        """Single-resolution mode stretched nodes should keep using the fast 1-hop path."""
+        mocked_fast = mocker.patch.object(
+            tri_icosahedron,
+            "add_1_hop_edges",
+            wraps=tri_icosahedron.add_1_hop_edges,
+        )
+        edges = MultiScaleEdges("hidden", "hidden", x_hops=1, scale_resolutions=None)
+        graph = edges.update_graph(tri_graph)
+
+        assert ("hidden", "to", "hidden") in graph.edge_types
+        assert mocked_fast.called
+
+    def test_multi_resolution_falls_back_to_nx(self, tri_graph_multi_resolution: HeteroData, mocker):
+        """Multi-resolution mode stretched nodes should not use the fast 1-hop path."""
+        mocked_fast = mocker.patch.object(
+            tri_icosahedron,
+            "add_1_hop_edges",
+            side_effect=AssertionError("add_1_hop_edges method should not be used for multi-resolution mode"),
+        )
+        mocked_nx = mocker.patch.object(
+            tri_icosahedron,
+            "add_edges_to_nx_graph",
+            wraps=tri_icosahedron.add_edges_to_nx_graph,
+        )
+
+        edges = MultiScaleEdges("hidden", "hidden", x_hops=1, scale_resolutions=None)
+        graph = edges.update_graph(tri_graph_multi_resolution)
+
+        assert ("hidden", "to", "hidden") in graph.edge_types
+        assert not mocked_fast.called
+        assert mocked_nx.called
 
     @pytest.mark.parametrize("edge_resolutions", [[1], [0, 1, 2, 3, 4, 5, 6], [4, 6], [6]])
     def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):
