@@ -20,6 +20,7 @@ from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -493,10 +494,20 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = False,
         *args,
         **kwargs,
     ) -> Tensor:
         size = sum(shard_info.nodes)
+        num_nodes = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=num_nodes,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
 
         if shard_info.edges_are_sharded():
             # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
@@ -515,6 +526,7 @@ class GraphTransformerProcessor(BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=True,  # ensured by ensure_edges_are_dst_sorted above
             **kwargs,
         )
 

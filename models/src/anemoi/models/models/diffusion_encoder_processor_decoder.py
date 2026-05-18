@@ -348,9 +348,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                encoder_edge_attr,
+                encoder_edge_index,
+                enc_edge_shard_sizes,
+                enc_edges_dst_sorted,
+            ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=bse,
                 model_comm_group=model_comm_group,
             )
@@ -369,6 +372,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                edges_are_dst_sorted=enc_edges_dst_sorted,
                 **fwd_mapper_kwargs[dataset_name],
             )
             x_data_latent_dict[dataset_name] = x_data_latent
@@ -376,7 +380,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_latent = sum(dataset_latents.values())
 
         # Processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
+        (
+            processor_edge_attr,
+            processor_edge_index,
+            proc_edge_shard_sizes,
+            proc_edges_dst_sorted,
+        ) = self.processor_graph_provider.get_edges(
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
@@ -388,6 +397,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=proc_edges_dst_sorted,
             **processor_kwargs,
         )
 
@@ -399,9 +409,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         x_out_dict = {}
         for dataset_name in dataset_names:
             # Compute decoder edges using updated latent representation
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                decoder_edge_attr,
+                decoder_edge_index,
+                dec_edge_shard_sizes,
+                dec_edges_dst_sorted,
+            ) = self.decoder_graph_provider[dataset_name].get_edges(
                 batch_size=bse,
                 model_comm_group=model_comm_group,
             )
@@ -420,6 +433,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],
+                edges_are_dst_sorted=dec_edges_dst_sorted,
                 **bwd_mapper_kwargs[dataset_name],
             )
 

@@ -24,10 +24,12 @@ from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.khop_edges import bipartite_subgraph
-from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
+from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.khop_edges import shard_graph_to_local
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
@@ -234,104 +236,79 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edges_are_dst_sorted: bool = False,
     ):
-        x_src, x_dst = x
-        shard_sizes_src, shard_sizes_dst, shard_sizes_edges = (
-            shard_info.src_nodes,
-            shard_info.dst_nodes,
-            shard_info.edges,
+        x_dst = x[1]
+        num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=num_dst,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
-        # gather x_src if sharded, always reduce in bwds for correct gradient propagation on halo nodes
-        x_src = sync_tensor(x_src, 0, shard_sizes_src, model_comm_group, gather_in_fwd=shard_info.src_is_sharded())
-
-        # ensure dst is sharded to match 1hop edge sharding
-        x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
-
-        # 1hop sorting + edge sharding
-        if not shard_info.edges_are_sharded():
-            src_size = x_src.size(0)
-            dst_size = sum(shard_sizes_dst)
-            edge_attr, edge_index, shard_sizes_edges = shard_edges_1hop(
-                edge_attr, edge_index, src_size, dst_size, model_comm_group
-            )
-
-        # relabel destination indices from global to local
-        if model_comm_group is not None and model_comm_group.size() > 1:
-            rank = model_comm_group.rank()
-            dst_offset = sum(shard_sizes_dst[:rank])
-            edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
-            edge_index[1] -= dst_offset
-
-        # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
-        graph_size_full_src_sharded_dst = (x_src.shape[0], x_dst.shape[0])
-        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, graph_size_full_src_sharded_dst)
-
-        if cond is not None:  # sync cond_src to match x_src:
-            cond_src, cond_dst = cond
-            cond_src_full = sync_tensor(
-                cond_src,
-                0,
-                shard_sizes_src,
-                model_comm_group,
-                gather_in_fwd=shard_info.src_is_sharded(),
-            )
-            cond = (cond_src_full[nodes_src], cond_dst)
-
-        shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_src,
-            dst_nodes=shard_sizes_dst,
-            edges=shard_sizes_edges,
+        # build a GraphPartition for the distributed shard (across GPUs)
+        shard_partition = build_graph_partition_from_shard_info(
+            edge_index,
+            x,
+            shard_info,
+            model_comm_group,
         )
 
-        return x_src, x_dst, edge_attr, edge_index, shard_info, cond
+        # shard to local rank: gathers src, shards dst+edges, relabels dst, drops unconnected src
+        (x_src, x_dst), edge_attr, edge_index, shard_info, cond = shard_graph_to_local(
+            shard_partition,
+            x,
+            edge_attr,
+            edge_index,
+            shard_info,
+            model_comm_group,
+            cond=cond,
+        )
 
-    def run_processor_chunk_edge_sharding(
+        # build a second GraphPartition for local chunking within this shard
+        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
+        chunk_partition = build_graph_partition(
+            edge_index,
+            num_parts=num_chunks,
+            num_nodes=(x_src.shape[0], x_dst.shape[0]),
+        )
+
+        return x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition
+
+    def run_processor_chunk(
         self,
+        chunk_partition: GraphPartition,
+        chunk_id: int,
         x: tuple[Tensor, Tensor],
-        dst_chunk: Tensor,
         edge_attr: Tensor,
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        size: tuple[int],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> Tensor:
-        x_src, x_dst = x
-
-        # get subgraph of x_dst_chunk and incoming edges, drop unconnected src nodes
-        nodes_src_full = torch.arange(size[0], device=edge_index.device)
-        edge_index, edge_attr = bipartite_subgraph(
-            (nodes_src_full, dst_chunk),
-            edge_index,
-            edge_attr,
-            size=size,
-            relabel_nodes=True,
+        # O(1) slicing: extract subgraph for this chunk
+        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
+            chunk_id, x, edge_attr, edge_index, cond=cond
         )
-
-        # drop unconnected src nodes and relabel edges
-        x_src_chunk, edge_index_chunk, connected_src_nodes = drop_unconnected_src_nodes(x_src, edge_index, size)
-        x_dst_chunk = x_dst[dst_chunk]
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
-
-        if cond is not None:  # update cond with correct conditioning
-            cond_src, cond_dst = cond
-            cond = (cond_src[connected_src_nodes], cond_dst[dst_chunk])
 
         # pre-process chunk, embedding x_src/x_dst
         x_src_chunk, x_dst_chunk = self.pre_process((x_src_chunk, x_dst_chunk))
 
         (_, x_dst_out), _ = self.proc(
             (x_src_chunk, x_dst_chunk),
-            edge_attr,
+            edge_attr_chunk,
             edge_index_chunk,
             shard_info,
             batch_size,
             chunk_size,
             model_comm_group,
-            cond=cond,
+            cond=cond_chunk,
             **kwargs,
         )
 
@@ -347,9 +324,10 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shard_info, cond = maybe_checkpoint(
+        x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
             x,
@@ -359,29 +337,28 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             edge_index,
             model_comm_group,
             cond,
+            edges_are_dst_sorted,
         )
 
-        size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
-        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
-
-        dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(num_chunks)
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
-        for dst_chunk in dst_chunks:
-            out_dst[dst_chunk] = maybe_checkpoint(
-                self.run_processor_chunk_edge_sharding,
+        for chunk_id in range(chunk_partition.num_parts):
+            dst_range = chunk_partition._get_dst_range(chunk_id)
+            out_dst[dst_range] = maybe_checkpoint(
+                self.run_processor_chunk,
                 self.gradient_checkpointing,
+                chunk_partition,
+                chunk_id,
                 (x_src, x_dst),
-                dst_chunk,
                 edge_attr,
                 edge_index,
                 shard_info,
                 batch_size,
-                size,
                 model_comm_group,
                 cond,
+                edges_are_dst_sorted=True,  # ensured by prepare_edge_sharding_wrapper
                 **kwargs,
             ).to(dtype=out_type)
 
@@ -454,6 +431,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> PairTensor:
 
@@ -469,11 +447,15 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         }
 
         if self.shard_strategy == "edges":
-            return self.mapper_forward_with_edge_sharding(**kwargs_forward)
+            return self.mapper_forward_with_edge_sharding(
+                **kwargs_forward,
+                edges_are_dst_sorted=edges_are_dst_sorted,
+            )
         else:  # self.shard_strategy == "heads"
             return maybe_checkpoint(
                 self.mapper_forward_with_heads_sharding,
                 self.gradient_checkpointing,
+                edges_are_dst_sorted=edges_are_dst_sorted,
                 **kwargs_forward,
             )
 
@@ -822,6 +804,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1020,6 +1003,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> Tensor:
 
@@ -1089,6 +1073,7 @@ class PointWiseMapper(BaseMapper, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1142,6 +1127,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
@@ -1345,6 +1331,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = False,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
