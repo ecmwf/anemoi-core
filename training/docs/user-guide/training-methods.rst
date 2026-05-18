@@ -277,6 +277,10 @@ Transport model configs put all objective-specific settings under
          scale: 1.0
          noise_scale: 0.0
 
+For ``objective: edm_diffusion``, ``source.kind: default`` resolves to
+``gaussian``. This is the recommended source for standard EDM sampling
+and training.
+
 For stochastic interpolants, set ``objective: stochastic_interpolant``
 and configure the interpolant schedules:
 
