@@ -95,7 +95,7 @@ def sht_setup(request):
 
 
 def test_idempotency_direct_inverse(sht_setup):
-    """direct followed by inverse returns the original (band-limited) field."""
+    """Direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     tolerance = sht_setup["tolerance"]
@@ -112,7 +112,7 @@ def test_idempotency_direct_inverse(sht_setup):
 
 
 def test_idempotency_inverse_direct(sht_setup):
-    """inverse followed by direct returns the original spectral coefficients."""
+    """Inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     tolerance = sht_setup["tolerance"]
@@ -130,3 +130,18 @@ def test_idempotency_inverse_direct(sht_setup):
         maxdiff = max(maxdiff, torch.abs((ref - got) / ref).max().item())
 
     assert maxdiff < tolerance
+
+
+def test_direct_linearity(sht_setup):
+    """Direct transform is linear. We take advantage of this when calculating the L2 spectral loss."""
+
+    dtype = sht_setup["dtype"]
+    direct = sht_setup["direct"]
+
+    # Pretend target array with shape (b t e v p)
+    target = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
+
+    # Pretend pred array with shape (b t e v p)
+    pred = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
+
+    assert torch.allclose(direct(pred - target), direct(pred) - direct(target))
