@@ -7,12 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .forecaster import BaseForecaster
+from .forecaster import FlexibleForecaster
 from .forecaster import Forecaster
+from .offsets import BaseTaskOffsets
+from .offsets import ForecastOffsets
 from .temporal_downscaler import TemporalDownscaler
 from .timeless import Autoencoder
 
 __all__ = [
     "Autoencoder",
+    "BaseForecaster",
+    "BaseTaskOffsets",
+    "FlexibleForecaster",
+    "ForecastOffsets",
     "Forecaster",
     "TemporalDownscaler",
 ]
