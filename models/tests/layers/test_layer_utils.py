@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 from omegaconf import OmegaConf
 
 from anemoi.models.layers.utils import CheckpointWrapper
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -100,6 +101,22 @@ class TestLayerUtils:
         # Check output shape
         assert output.shape == x.shape
         assert not torch.isnan(output).any()
+
+    @pytest.mark.parametrize(
+        ("num_channels", "mlp_hidden_ratio", "expected"),
+        [
+            (128, 2.67, 342),
+            (1024, 2.67, 2734),
+            (64, 4.0, 256),
+        ],
+    )
+    def test_compute_mlp_hidden_dim(self, num_channels, mlp_hidden_ratio, expected):
+        assert compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio) == expected
+
+    @pytest.mark.parametrize("mlp_hidden_ratio", [0.0, -1.0, float("nan"), float("inf"), float("-inf")])
+    def test_compute_mlp_hidden_dim_invalid_ratio(self, mlp_hidden_ratio):
+        with pytest.raises(ValueError):
+            compute_mlp_hidden_dim(128, mlp_hidden_ratio)
 
 
 class TestCheckpointWrapper:
