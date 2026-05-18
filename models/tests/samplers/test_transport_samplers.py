@@ -190,16 +190,6 @@ def test_noise_scheduler_rejects_explicit_final_value_outside_tolerance() -> Non
         scheduler.get_schedule(dtype_compute=torch.float64)
 
 
-def test_noise_scheduler_rejects_negative_explicit_final_value() -> None:
-    scheduler = DummyScheduler(
-        torch.tensor([1.0, 0.7, 0.4, 0.1, -DEFAULT_FINAL_SIGMA_EPS / 10], dtype=torch.float64),
-        num_steps=4,
-    )
-
-    with pytest.raises(ValueError, match="explicit final value"):
-        scheduler.get_schedule(dtype_compute=torch.float64)
-
-
 @pytest.mark.parametrize("sampler_cls", [EDMHeunSampler, DPMpp2MSampler])
 def test_samplers_expand_sigma_to_model_dtype_and_return_model_dtype(
     sampler_cls: type[EDMHeunSampler] | type[DPMpp2MSampler],

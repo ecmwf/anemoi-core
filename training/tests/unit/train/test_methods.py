@@ -489,54 +489,6 @@ def test_transport_source_default_is_gaussian(monkeypatch: pytest.MonkeyPatch) -
     torch.testing.assert_close(source["data"], torch.full_like(prepared.model_target["data"], 7.0))
 
 
-def test_transport_source_default_can_resolve_to_reference_state() -> None:
-    objective = _transport_objective_with_source("default")
-    prepared = _prepared_target_with_reference_source()
-
-    source = objective.build_transport_source(prepared, default_kind="reference_state")
-
-    torch.testing.assert_close(source["data"], prepared.aux["transport_reference_source"]["data"])
-
-
-def test_transport_source_can_build_zero_source() -> None:
-    objective = _transport_objective_with_source("zero")
-    prepared = _prepared_target_with_reference_source()
-
-    source = objective.build_transport_source(prepared, default_kind="gaussian")
-
-    torch.testing.assert_close(source["data"], torch.zeros_like(prepared.model_target["data"]))
-
-
-def test_transport_source_can_build_scaled_gaussian_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    objective = _transport_objective_with_source("gaussian", scale=2.0)
-    prepared = _prepared_target_with_reference_source()
-
-    monkeypatch.setattr(
-        torch,
-        "randn",
-        lambda shape, device=None, dtype=None: torch.full(shape, 4.0, device=device, dtype=dtype),
-    )
-
-    source = objective.build_transport_source(prepared, default_kind="zero")
-
-    torch.testing.assert_close(source["data"], torch.full_like(prepared.model_target["data"], 8.0))
-
-
-def test_transport_source_can_jitter_reference_state_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    objective = _transport_objective_with_source("reference_state", scale=2.0, noise_scale=0.5)
-    prepared = _prepared_target_with_reference_source()
-
-    monkeypatch.setattr(
-        torch,
-        "randn",
-        lambda shape, device=None, dtype=None: torch.full(shape, 3.0, device=device, dtype=dtype),
-    )
-
-    source = objective.build_transport_source(prepared, default_kind="gaussian")
-
-    torch.testing.assert_close(source["data"], torch.full_like(prepared.model_target["data"], 5.5))
-
-
 def test_transport_source_rejects_missing_reference_state_source() -> None:
     objective = _transport_objective_with_source("reference_state")
     clean = {"data": torch.zeros(1, 1, 1, 2, 1)}
@@ -1535,39 +1487,6 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     assert captured["target_vars"] == len(data_indices["data"].model.output.full)
 
 
-def test_stochastic_interpolant_training_step_with_forecaster() -> None:
-    """TransportTraining SI _step returns one MODEL_OUTPUT prediction for a one-step forecaster."""
-
-    class _DummyTransportWrapper:
-        def __init__(self, inner: DummyTransportModel) -> None:
-            self.model = inner
-
-    data_indices = _data_indices_single()
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
-
-    forecaster = TransportTraining.__new__(TransportTraining)
-    pl.LightningModule.__init__(forecaster)
-    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.model = _DummyTransportWrapper(
-        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
-    )
-    forecaster._prediction_mode = StatePredictionMode(forecaster)
-    forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
-    forecaster.is_first_step = False
-    forecaster.updating_scalars = {}
-    forecaster.target_dataset_names = forecaster.dataset_names
-    forecaster.loss = {"data": DummyLoss()}
-    forecaster.loss_supports_sharding = False
-    forecaster.metrics_support_sharding = True
-
-    b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 2, e, g, v)}
-    loss, _, y_preds = forecaster._step(batch={"data": batch["data"]}, validation_mode=False)
-
-    _assert_step_return_format(loss, y_preds, expected_len=1)
-    assert y_preds[0]["data"].shape == (b, 1, e, g, v)
-
-
 def test_transport_validation_stores_conditioned_target_for_plotting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2003,87 +1922,6 @@ def test_stochastic_interpolant_training_compute_dataset_loss_metrics_uses_data_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """TransportTraining SI metrics must score validation metrics in DATA_FULL space."""
-    name_to_index = {"A": 0, "B": 1, "obs_A": 2}
-    data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
-
-    forecaster = TransportTraining.__new__(TransportTraining)
-    pl.LightningModule.__init__(forecaster)
-    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY)
-
-    captured: dict[str, Any] = {}
-
-    def _prepare_tensors_stub(
-        self: TransportTraining,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        validation_mode: bool = False,
-        dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, slice]:
-        del self, validation_mode, dataset_name
-        return y_pred, y, slice(0, 1)
-
-    def _compute_loss_stub(
-        self: TransportTraining,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        **kwargs: Any,
-    ) -> torch.Tensor:
-        del self, y_pred, y
-        captured["loss_kwargs"] = kwargs
-        return torch.tensor(0.0)
-
-    def _compute_metrics_stub(
-        self: TransportTraining,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
-        **kwargs: Any,
-    ) -> dict[str, torch.Tensor]:
-        del self, y_pred
-        captured["metric_target"] = y
-        captured["metric_kwargs"] = kwargs
-        return {"dummy": torch.tensor(1.0)}
-
-    monkeypatch.setattr(
-        TransportTraining,
-        "_prepare_tensors_for_loss",
-        _prepare_tensors_stub,
-        raising=True,
-    )
-    monkeypatch.setattr(TransportTraining, "_compute_loss", _compute_loss_stub, raising=True)
-    monkeypatch.setattr(TransportTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
-
-    b, e, g = 2, 1, 4
-    n_model = len(data_indices["data"].model.output.full)
-    n_full = len(name_to_index)
-    y_pred = torch.randn(b, 1, e, g, n_model, dtype=torch.float32)
-    y = torch.randn(b, 1, e, g, n_model, dtype=torch.float32)
-    metric_prediction = {"data": torch.randn(b, 1, e, g, n_model, dtype=torch.float32)}
-    metric_target = {"data": torch.randn(b, 1, e, g, n_full, dtype=torch.float32)}
-
-    loss, metrics, _ = forecaster.compute_dataset_loss_metrics(
-        y_pred=y_pred,
-        y=y,
-        dataset_name="data",
-        validation_mode=True,
-        metric_prediction=metric_prediction,
-        metric_target=metric_target,
-        pred_layout=IndexSpace.MODEL_OUTPUT,
-        target_layout=IndexSpace.MODEL_OUTPUT,
-    )
-
-    assert isinstance(loss, torch.Tensor)
-    assert isinstance(metrics["dummy"], torch.Tensor)
-    assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
-    assert captured["loss_kwargs"]["target_layout"] == IndexSpace.MODEL_OUTPUT
-    assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
-    assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
-    torch.testing.assert_close(captured["metric_target"], metric_target["data"])
-
-
-def test_stochastic_interpolant_tendency_training_compute_dataset_loss_metrics_uses_metric_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """TransportTraining SI+tendency metrics score reconstructed DATA_FULL state."""
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
 

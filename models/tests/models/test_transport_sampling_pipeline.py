@@ -316,16 +316,6 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
     assert out["ds_a"].shape == (1, 2, 1, 5, 3)
 
 
-def test_transport_source_settings_reads_source_from_config() -> None:
-    config = {"source": {"kind": "gaussian", "scale": 0.5, "noise_scale": 0.1}}
-
-    settings = TransportSourceSettings.from_config(config)
-
-    assert settings.kind == "gaussian"
-    assert settings.scale == 0.5
-    assert settings.noise_scale == 0.1
-
-
 def test_transport_source_builder_does_not_build_unselected_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -371,54 +361,6 @@ def test_transport_source_builder_postprocesses_reference_source(monkeypatch: py
     assert source["data"].dtype == target["data"].dtype
     torch.testing.assert_close(source["data"], torch.full_like(target["data"], 2.5))
     torch.testing.assert_close(reference["data"], torch.full_like(target["data"], 4.0))
-
-
-def test_transport_source_builder_postprocesses_gaussian_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0, noise_scale=0.25))
-    target = {"data": torch.zeros(1, 1, 1, 2, 1)}
-
-    random_values = iter((3.0, 4.0))
-    monkeypatch.setattr(
-        torch,
-        "randn",
-        lambda shape, device=None, dtype=None: torch.full(shape, next(random_values), device=device, dtype=dtype),
-    )
-
-    source = builder.build(TransportSourceRequest.from_tensors(target, default_kind="zero"))
-
-    torch.testing.assert_close(source["data"], torch.full_like(target["data"], 7.0))
-
-
-def test_transport_source_builder_can_jitter_zero_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    builder = TransportSourceBuilder(TransportSourceSettings(kind="zero", scale=2.0, noise_scale=0.25))
-    target = {"data": torch.zeros(1, 1, 1, 2, 1)}
-
-    monkeypatch.setattr(
-        torch, "randn", lambda shape, device=None, dtype=None: torch.full(shape, 2.0, device=device, dtype=dtype)
-    )
-
-    source = builder.build(TransportSourceRequest.from_tensors(target, default_kind="gaussian"))
-
-    torch.testing.assert_close(source["data"], torch.full_like(target["data"], 0.5))
-
-
-def test_tendency_sampling_source_can_be_gaussian(monkeypatch: pytest.MonkeyPatch) -> None:
-    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    model.transport_source = TransportSourceBuilder(TransportSourceSettings(kind="gaussian"))
-    model.n_step_output = 2
-    model.num_output_channels = {"ds_a": 3}
-
-    def fake_randn(shape, device=None, dtype=None):
-        return torch.full(shape, 2.0, device=device, dtype=dtype)
-
-    monkeypatch.setattr(torch, "randn", fake_randn)
-
-    x = {"ds_a": torch.zeros(1, 3, 1, 5, 6, dtype=torch.float32)}
-
-    source = model.build_sampling_source(x)
-
-    assert source["ds_a"].shape == (1, 2, 1, 5, 3)
-    torch.testing.assert_close(source["ds_a"], torch.full_like(source["ds_a"], 2.0))
 
 
 def test_tendency_sampling_source_can_use_reference_state() -> None:

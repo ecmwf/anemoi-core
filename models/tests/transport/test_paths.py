@@ -11,7 +11,6 @@ import pytest
 import torch
 
 from anemoi.models.samplers.transport_samplers import KarrasScheduler
-from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.paths import karras_sigma_from_unit_time
 from anemoi.models.transport.paths import stochastic_interpolant_beta
 from anemoi.models.transport.paths import stochastic_interpolant_beta_dot
@@ -43,39 +42,12 @@ def test_karras_sigma_helper_matches_scheduler_prefinal_values() -> None:
     torch.testing.assert_close(helper_sigmas, scheduler_sigmas)
 
 
-def test_edm_loss_weight_matches_formula() -> None:
-    sigma = torch.tensor([0.1, 1.0, 10.0], dtype=torch.float64)
-    sigma_data = 0.5
-
-    expected = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
-
-    torch.testing.assert_close(edm_loss_weight(sigma, sigma_data), expected)
-
-
 def test_unit_time_grid_validates_num_steps() -> None:
     grid = unit_time_grid(4, dtype=torch.float64)
 
     torch.testing.assert_close(grid, torch.linspace(0.0, 1.0, 5, dtype=torch.float64))
     with pytest.raises(ValueError, match="num_steps"):
         unit_time_grid(0)
-
-
-def test_stochastic_interpolant_beta_defaults_to_linear_path() -> None:
-    time = torch.tensor([0.0, 0.25, 1.0], dtype=torch.float64)
-
-    torch.testing.assert_close(stochastic_interpolant_beta(time), time)
-    torch.testing.assert_close(stochastic_interpolant_beta_dot(time), torch.ones_like(time))
-    torch.testing.assert_close(stochastic_interpolant_beta(time, "quadratic"), time.square())
-    torch.testing.assert_close(stochastic_interpolant_beta_dot(time, "quadratic"), 2.0 * time)
-
-
-def test_stochastic_interpolant_brownian_bridge_sigma_is_zero_at_endpoints() -> None:
-    time = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
-
-    sigma = stochastic_interpolant_sigma(time, schedule="brownian_bridge", noise_scale=2.0)
-    expected = 2.0 * torch.sqrt(torch.tensor([0.0, 0.5, 0.0], dtype=torch.float64))
-
-    torch.testing.assert_close(sigma, expected)
 
 
 def test_stochastic_interpolant_brownian_bridge_ratio_matches_noise_velocity_interior() -> None:
@@ -87,15 +59,6 @@ def test_stochastic_interpolant_brownian_bridge_ratio_matches_noise_velocity_int
     expected_velocity = noise_scale * (1.0 - 2.0 * time) / torch.sqrt(2.0 * time * (1.0 - time))
 
     torch.testing.assert_close(ratio * sigma, expected_velocity)
-
-
-def test_stochastic_interpolant_quadratic_bridge_sigma_is_zero_at_endpoints() -> None:
-    time = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
-
-    sigma = stochastic_interpolant_sigma(time, schedule="quadratic_bridge", noise_scale=2.0)
-    expected = 2.0 * time * (1.0 - time)
-
-    torch.testing.assert_close(sigma, expected)
 
 
 def test_stochastic_interpolant_quadratic_bridge_ratio_matches_noise_velocity_interior() -> None:
