@@ -32,17 +32,18 @@ The three built-in methods are:
       training:
         ensemble_size_per_device: 4
 
-``DiffusionTraining`` (``anemoi.training.train.methods.diffusion``)
-   Base class for diffusion-based probabilistic forecasters. Applies
-   stepwise pre/post-processors and handles the noise-conditioned
-   forward pass.
+``TransportTraining`` (``anemoi.training.train.methods.transport``)
+   Configurable transport training for EDM diffusion and stochastic-interpolant
+   probabilistic forecasters. Use ``training.prediction_mode`` to select
+   state or tendency targets, and ``training.transport_objective`` to
+   select ``edm_diffusion`` or ``stochastic_interpolant``.
 
 .. note::
 
-   ``EnsembleTraining`` and ``DiffusionTraining`` require the GNN
-   model type to be replaced with a compatible architecture (e.g.
-   GraphTransformer). The plain GNN processor is not supported for
-   these methods.
+   ``EnsembleTraining`` and transport objectives such as EDM diffusion or
+   stochastic interpolants require the GNN model type to be replaced with a
+   compatible architecture (e.g. GraphTransformer). The plain GNN
+   processor is not supported for these methods.
 
 
 .. _ensemble-crps-training:
@@ -229,261 +230,207 @@ A typical config file for CRPS training is:
 
 .. _diffusion-training:
 
-**************************
- Diffusion-based training
-**************************
+****************************
+ Transport objective training
+****************************
 
-This section is intended for users who want to train a diffusion-based
-model and are already familiar with the basic training configurations.
+Transport training covers probabilistic objectives that corrupt an
+endpoint and train a model to recover either the clean endpoint or the
+transport vector field. The supported objectives are ``edm_diffusion`` and
+``stochastic_interpolant``.
 
-The diffusion training requires the following changes to the
-deterministic training:
+Use :class:`~anemoi.training.train.methods.transport.TransportTraining`
+with ``prediction_mode: state`` for state-space targets or
+``prediction_mode: tendency`` for tendency-space targets. The model must
+use :class:`AnemoiTransportModelEncProcDec` or
+:class:`AnemoiTransportTendModelEncProcDec`; the plain GNN model is not
+supported.
 
-**Differences from deterministic training:**
+Top-level configs
+=================
 
--  **Forecaster class**: Use :class:`GraphDiffusionForecaster` (or
-   :class:`GraphDiffusionTendForecaster` for tendency prediction)
-   instead of :class:`GraphForecaster`
+The transport entry points are:
 
--  **Model config**: Use `graphtransformer_diffusion.yaml` or
-   `transformer_diffusion.yaml` (or their `_diffusiontend` variants)
-   instead of the standard configs
+-  ``transport_edm_diffusion.yaml``
+-  ``transport_edm_diffusion_tendency.yaml``
+-  ``transport_stochastic_interpolant.yaml``
+-  ``transport_stochastic_interpolant_tendency.yaml``
 
--  **Training config**: Use `diffusion.yaml` instead of `default.yaml`
+These configs select ``training: edm_diffusion`` or
+``training: stochastic_interpolant`` and set the corresponding
+``training.transport_objective``. Tendency variants additionally select
+``prediction_mode: tendency`` and a tendency model config.
 
--  **Model class**: Uses :class:`AnemoiDiffusionModelEncProcDec` (or
-   :class:`AnemoiDiffusionTendModelEncProcDec`) instead of
-   :class:`AnemoiModelEncProcDec`
+Model configuration
+===================
 
--  **Loss computation**: WeightedMSELoss is recommended for diffusion
-   training as it properly handles weighting according to the noise
-   level.
-
-Changes in model config
-=======================
-
-The config group for the model is set to
-`graphtransformer_diffusion.yaml` or `transformer_diffusion.yaml`, which
-specifies the :class:`AnemoiDiffusionModelEncProcDec` class with
-diffusion-specific components.
-
-Changes in the diffusion model configs:
+Transport model configs put all objective-specific settings under
+``model.model.transport``:
 
 .. code:: yaml
 
    model:
-     _target_: anemoi.models.models.AnemoiDiffusionModelEncProcDec
-     # Diffusion parameters
-     diffusion:
+     _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
+     transport:
+       objective: edm_diffusion
        sigma_data: 1.0
-       noise_channels: 32
-       noise_cond_dim: 16
        sigma_max: 100.0
        sigma_min: 0.02
        rho: 7.0
        noise_embedder:
          _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
-         num_channels: ${model.model.diffusion.noise_channels}
+         num_channels: ${model.model.transport.noise_channels}
          max_period: 1000
-       inference_defaults:
-         noise_scheduler:
-           schedule_type: "karras"
-           sigma_max: 100.0
-           sigma_min: 0.02
-           rho: 7.0
-           num_steps: 50
-         diffusion_sampler:
-           sampler: "heun"
-           S_churn: 0.0
-           S_min: 0.0
-           S_max: .inf
-           S_noise: 1.0
+       source:
+         kind: default
+         scale: 1.0
+         noise_scale: 0.0
 
-The diffusion configuration includes:
+For ``objective: edm_diffusion``, ``source.kind: default`` resolves to
+``gaussian``. This is the recommended source for standard EDM sampling
+and training.
 
--  `sigma_data`: Data standard deviation for preconditioning
--  `noise_channels`: Number of noise channels to inject
--  `noise_cond_dim`: Dimension of noise conditioning
--  `sigma_max` / `sigma_min`: Maximum and minimum noise levels
--  `rho`: Controls the noise schedule distribution
--  `noise_embedder`: Sinusoidal embeddings for noise conditioning
--  `inference_defaults`: Default parameters for noise scheduler and
-   sampler, these are not used during training.
+For stochastic interpolants, set ``objective: stochastic_interpolant``
+and configure the interpolant schedules:
 
 .. code:: yaml
 
-   layer_kernels:
-     LayerNorm:
-       _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-       normalized_shape: ${model.num_channels}
-       condition_shape: 16
-       zero_init: True
-       autocast: false
+   model:
+     model:
+       transport:
+         objective: stochastic_interpolant
+         si_alpha_schedule: linear
+         si_beta_schedule: linear
+         si_sigma_schedule: brownian_bridge
+         si_noise_scale: 1.0
+         source:
+           kind: gaussian
 
-The diffusion model uses conditional layer normalization to condition
-the latent space on the noise level, enabling the model to denoise
-appropriately at different noise scales.
+The available source kinds are ``zero``, ``gaussian``, and
+``reference_state``. ``default`` resolves to the objective's default
+source at training or sampling time. ``scale`` multiplies the source, and
+``noise_scale`` adds additional additive Gaussian noise after the source
+is built.
 
-Inference configuration
-=======================
+Stochastic-interpolant parameters
+=================================
 
-The `inference_defaults` block specifies default parameters for
-sampling:
+The stochastic-interpolant bridge combines a source endpoint, target
+endpoint, and optional bridge noise:
+
+.. math::
+
+   x_s = \alpha(s) x_0 + \beta(s) x_1 + \sigma(s) \epsilon
+
+where ``x_0`` is the selected ``source``, ``x_1`` is the training
+target, and ``epsilon`` is standard Gaussian bridge noise.
+
+-  ``si_alpha_schedule`` controls the source coefficient. Currently,
+   ``linear`` gives ``alpha(s) = 1 - s``.
+-  ``si_beta_schedule`` controls the target coefficient. ``linear``
+   gives ``beta(s) = s`` and ``quadratic`` gives ``beta(s) = s^2``.
+-  ``si_sigma_schedule`` controls the bridge-noise coefficient.
+   ``brownian_bridge`` gives
+   ``sigma(s) = si_noise_scale * sqrt(2 * s * (1 - s))``.
+   The option ``quadratic_bridge`` gives
+   ``sigma(s) = si_noise_scale * s * (1 - s)``, which is zero at
+   both endpoints and has a finite derivative there.
+-  ``si_noise_scale`` scales the stochastic bridge noise. Set it to
+   ``0.0`` for a deterministic bridge.
+-  ``source.noise_scale`` is separate from bridge noise. It adds
+   additional additive Gaussian noise to the source endpoint before the
+   bridge is built.
+
+Flow-matching-like setup
+===============================================
+
+A flow-matching-like training can be set up as a
+stochastic interpolant with a Gaussian source, linear endpoint schedules,
+and no bridge noise:
+
+.. code:: yaml
+
+   training:
+     transport_objective: stochastic_interpolant
+
+   model:
+     model:
+       transport:
+         objective: stochastic_interpolant
+         si_alpha_schedule: linear
+         si_beta_schedule: linear
+         si_sigma_schedule: brownian_bridge
+         si_noise_scale: 0.0
+         source:
+           kind: gaussian
+           scale: 1.0
+           noise_scale: 0.0
+
+Stochastic-interpolant training learns the bridge velocity field. Use
+ODE samplers such as ``euler`` or ``heun`` for sampling. Score-corrected SDE
+sampling is currently not part of this objective.
+
+Training configuration
+======================
+
+The shared training base is ``training/transport.yaml``. Objective
+configs specialize it:
+
+.. code:: yaml
+
+   # training/edm_diffusion.yaml
+   defaults:
+     - transport
+     - _self_
+
+   transport_objective: edm_diffusion
+
+   training_loss:
+     datasets:
+       data:
+         _target_: anemoi.training.losses.WeightedMSELoss
+
+.. code:: yaml
+
+   # training/stochastic_interpolant.yaml
+   defaults:
+     - transport
+     - _self_
+
+   transport_objective: stochastic_interpolant
+
+   training_loss:
+     datasets:
+       data:
+         _target_: anemoi.training.losses.MSELoss
+
+EDM diffusion uses a weighted clean-endpoint objective. Stochastic
+interpolants train the drift/vector field between the selected source
+and target endpoints. With a Gaussian source and ``si_noise_scale: 0``,
+the stochastic-interpolant objective is the deterministic bridge case
+commonly sampled with ODE solvers such as Euler or Heun.
+
+Sampling defaults
+=================
+
+Default sampler settings live under
+``model.model.transport.inference_defaults``:
 
 .. code:: yaml
 
    inference_defaults:
      noise_scheduler:
-       schedule_type: "karras"  # Noise schedule type
-       num_steps: 50           # Number of sampling steps
-       sigma_max: 100.0        # Maximum noise level
-       sigma_min: 0.02         # Minimum noise level
-       rho: 7.0               # Schedule distribution parameter
-     diffusion_sampler:
-       sampler: "heun"         # Sampling algorithm
-       S_churn: 0.0           # Stochasticity parameters
-       S_min: 0.0
-       S_max: .inf
-       S_noise: 1.0
-
-These defaults can be overridden at inference time by passing
-`noise_scheduler_params` and `sampler_params` to the `predict_step`
-method.
-
-Here is an example of how to modify inference settings for a diffusion
-model in your configuration:
-
-.. code:: yaml
-
-   checkpoint: /path/to/your/checkpoint
-   date: 20250101T00:00:00
-   predict_kwargs:
-     noise_scheduler_params:
-       num_steps: 20
-       sigma_max: 90.0
-       sigma_min: 0.03
+       schedule_type: karras
+       sigma_max: 100.0
+       sigma_min: 0.02
        rho: 7.0
-     sampler_params:
-       sampler: "heun"
-       S_churn: 2.5
-       S_min: 0.75
-       S_max: 90
-       S_noise: 1.05
+       num_steps: 50
+     edm_diffusion_sampler:
+       sampler: heun
+     stochastic_interpolant_sampler:
+       sampler: heun
+       num_steps: 50
 
-Changes in training config
-==========================
-
-The training configuration for diffusion models requires changes:
-
-.. code:: yaml
-
-   # Select diffusion model task
-   # For standard diffusion:
-   training_method: anemoi.training.train.methods.DiffusionTraining
-
-   # For tendency-based diffusion:
-   training_method: anemoi.training.train.methods.DiffusionTendencyTraining
-
-   # Standard training configuration remains similar
-   multistep_input: 2
-   rollout:
-     start: 1
-     max: 1
-
-The training method must be set to the appropriate diffusion training class
-to handle the diffusion-specific forward pass with preconditioning and
-noise injection.
-
-Changes in loss computation
-===========================
-
-The diffusion training uses WeightedMSELoss which handles noise weights
-properly:
-
-.. code:: yaml
-
-   training_loss:
-      datasets:
-          your_dataset_name:
-              _target_: anemoi.training.losses.WeightedMSELoss
-
-During training, the :class:`GraphDiffusionForecaster` automatically
-passes the required `weights` based on the noise level to the loss
-function.
-
-Diffusion model variants
-=========================
-
-There are two variants of diffusion models available:
-
-**Standard Diffusion**
-----------------------
-
-Uses `graphtransformer_diffusion.yaml` or `transformer_diffusion.yaml`:
-
--  Predicts the denoised state directly
--  Applies noise to the target state during training
--  Model class: :class:`AnemoiDiffusionModelEncProcDec`
--  Training method: :class:`DiffusionTraining`
--  Use single-step rollout (`rollout.max: 1`)
-
-**Tendency-based Diffusion**
-----------------------------
-
-Uses `graphtransformer_diffusiontend.yaml` or
-`transformer_diffusiontend.yaml`:
-
--  Predicts the tendency (change) between timesteps
--  Applies noise to the tendency rather than the state
--  Model class: :class:`AnemoiDiffusionTendModelEncProcDec`
--  Training method: :class:`DiffusionTendencyTraining`
--  Requires `statistics_tendencies` for normalization
--  Use single-step rollout (`rollout.max: 1`)
-
-Choose the variant based on your specific use case.
-
-Diffusion example config
-=========================
-
-A minimal config file for standard diffusion training:
-
-.. code:: yaml
-
-   defaults:
-   - data: zarr
-   - dataloader: native_grid
-   - diagnostics: evaluation
-   - system: example
-   - graph: multi_scale
-   - model: graphtransformer_diffusion  # Use diffusion model
-   - task: forecaster
-   - training: diffusion                 # Use diffusion training config
-   - _self_
-
-   # Select training method for diffusion
-   training:
-     training_method: anemoi.training.train.methods.DiffusionTraining
-
-   config_validation: True
-
-For tendency-based diffusion, change the model config and model task:
-
-.. code:: yaml
-
-   defaults:
-   - data: zarr
-   - dataloader: native_grid
-   - diagnostics: evaluation
-   - system: example
-   - graph: multi_scale
-   - model: graphtransformer_diffusiontend  # Use tendency diffusion model
-   - task: forecaster
-   - training: diffusion                     # Same training config
-   - _self_
-
-   # Select training method for tendency-based diffusion
-   training:
-     training_method: anemoi.training.train.methods.DiffusionTendencyTraining
-
-   # Ensure statistics_tendencies are available
-   config_validation: True
+These defaults can be overridden at inference time with
+``noise_scheduler_params`` and ``sampler_params`` passed to
+``predict_step``.

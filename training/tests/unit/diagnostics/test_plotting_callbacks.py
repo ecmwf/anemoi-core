@@ -11,6 +11,7 @@
 
 from collections.abc import Callable
 from typing import Any
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -240,6 +241,19 @@ def _identity_post_processor() -> Callable[[torch.Tensor | Any], torch.Tensor | 
     return _call
 
 
+class _IdentityProcessor:
+    """Shape-preserving processor with the small API used by plotting callbacks."""
+
+    processors: ClassVar[dict] = {}
+
+    def __call__(self, x, in_place=False) -> torch.Tensor | Any:
+        del in_place
+        return x.clone() if isinstance(x, torch.Tensor) else x
+
+    def cpu(self) -> "_IdentityProcessor":
+        return self
+
+
 # ---- BasePlotAdditionalMetrics.process: input/output shapes ----
 
 
@@ -281,6 +295,40 @@ def test_process_forecaster_output_shapes():
     assert data.shape == (1 + total_targets + 1, n_ens, nlatlon, nvar), data.shape
     # output_tensor: (output_times, n_step_output, n_ens, nlatlon, nvar) after mask
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
+
+
+def test_plot_sample_uses_transport_conditioned_target_when_enabled():
+    """PlotSample forwards the captured conditioned target as an auxiliary plot tensor when enabled."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data"],
+        plot_transport_conditioned_target=True,
+    )
+
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
+    pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
+    conditioned_target = {"data": torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0)}
+    pl_module._last_transport_conditioned_target = conditioned_target
+
+    batch = {"data": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
+    output = (
+        torch.tensor(0.0),
+        [{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}],
+    )
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+
+    callback.plot = MagicMock()
+    callback.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+
+    plotted_output = callback.plot.call_args.args[3]
+    plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
+    torch.testing.assert_close(plotted_output[1][0]["data"], output[1][0]["data"])
+    torch.testing.assert_close(plotted_auxiliary["data"], conditioned_target["data"])
 
 
 def test_process_time_interpolator_output_shapes():
@@ -448,8 +496,8 @@ def test_plot_loss_temporal_downscaler():
         assert mock_output_figure.call_count == 1
 
 
-def test_plot_loss_diffusion():
-    """PlotLoss._plot with diffusion (forecaster, output_times=1) produces one figure."""
+def test_plot_loss_single_step_transport():
+    """PlotLoss._plot with a one-step transport model produces one figure."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
@@ -503,7 +551,7 @@ def test_plot_loss_diffusion():
             batch_idx=0,
             epoch=0,
         )
-        # Diffusion has output_times=1, so one figure
+        # One-step transport models have output_times=1, so one figure.
         assert mock_output_figure.call_count == 1
 
 
@@ -871,6 +919,47 @@ def test_plots_plot_predicted_multilevel_flat_sample_returns_figure():
 
     assert fig is not None
     assert hasattr(fig, "savefig")
+    fig.clear()
+    plt.close(fig)
+
+
+def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
+    """plot_predicted_multilevel_flat_sample can add the corrupted-target panel."""
+    import matplotlib.pyplot as plt
+
+    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+
+    parameters = {0: ("t2m", False), 1: ("tp", True)}
+    nlatlon, nvar = 12, 2
+    latlons = np.stack(
+        [np.linspace(50, 55, nlatlon), np.linspace(0, 5, nlatlon)],
+        axis=1,
+    )
+    rng = np.random.default_rng()
+    x = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_true = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_pred = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    auxiliary = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+
+    fig = plot_predicted_multilevel_flat_sample(
+        parameters,
+        7,
+        latlons,
+        0.5,
+        x,
+        y_true,
+        y_pred,
+        auxiliary=auxiliary,
+        auxiliary_label="corrupted targets",
+        datashader=False,
+    )
+
+    assert fig is not None
+    plot_titles = [ax.get_title() for ax in fig.axes]
+    assert any(title == "t2m corrupted targets" for title in plot_titles)
+    assert any(title == "tp corrupted targets" for title in plot_titles)
+    assert "tp increment [pred - input]" not in plot_titles
+    assert "tp persist err" not in plot_titles
     fig.clear()
     plt.close(fig)
 

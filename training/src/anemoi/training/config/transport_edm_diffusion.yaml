@@ -1,0 +1,14 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer_transport
+- task: forecaster
+- training: edm_diffusion
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True
