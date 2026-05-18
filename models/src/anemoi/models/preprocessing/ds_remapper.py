@@ -99,6 +99,24 @@ class TopRemapper(BasePreprocessor):
         )
         self.remappers["output"] = self.remapper_output
 
+        # Previous high-res step used by the autoregressive downscaler. It has
+        # the same variables/indices as the output, but should be remapped from
+        # the original non-residual high-res statistics when those were provided
+        # by the datamodule.
+        base_output_statistics = statistics[3] if len(statistics) > 3 else statistics[2]
+        self.remapper_prev = FieldRemapper(
+            config=config,
+            statistics=base_output_statistics,
+            data_indices_ds=data_indices.data.output,
+            dataset="prev_hres",
+            methods=self.methods,
+            default=self.default,
+            remap=self.remap,
+            normalizer=self.normalizer,
+            method_kwargs=self.method_kwargs,
+        )
+        self.remappers["prev_hres"] = self.remapper_prev
+
     def forward(
         self,
         x: torch.Tensor,
@@ -113,7 +131,7 @@ class TopRemapper(BasePreprocessor):
     def transform(self, data, dataset: str, in_place: bool = True):
         try:
             remapper = self.remappers[dataset]
-        except ValueError:
+        except KeyError:
             raise ValueError(f"No remapper found for dataset type: {dataset}")
         return remapper.transform(data, in_place=in_place)
 
@@ -126,7 +144,7 @@ class TopRemapper(BasePreprocessor):
     ):
         try:
             remapper = self.remappers[dataset]
-        except ValueError:
+        except KeyError:
             raise ValueError(f"No remapper found for dataset type: {dataset}")
         return remapper.inverse_transform(
             data,
