@@ -18,6 +18,10 @@ class SkipConnectionSchema(BaseModel):
         description="Timestep index to use for the skip connection. "
         "Defaults to -1, which selects the most recent timestep.",
     )
+    drop: list[str] = Field(
+        [],
+        description="List of prognostic variable names to drop from the skip connection. Defaults to an empty list.",
+    )
 
 
 class TruncationConfigDiskSchema(BaseModel):
@@ -54,6 +58,10 @@ class TruncatedConnectionSchema(BaseModel):
     src_node_weight_attribute: str | None = None
     autocast: bool = False
     row_normalize: bool = False
+    drop: list[str] = Field(
+        [],
+        description="List of prognostic variable names to drop from the skip connection. Defaults to an empty list.",
+    )
     # Deprecated: pass inside truncation_config instead.
     truncation_up_file_path: str | None = None
     truncation_down_file_path: str | None = None

@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
@@ -20,6 +21,7 @@ from torch.nn import Parameter
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -29,12 +31,45 @@ from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.models.layers.spectral_transforms import InverseRegularSHT
 
+LOGGER = logging.getLogger(__name__)
+
+
+def get_prognostic_indices(names: list[str], model_data_indices: IndexCollection) -> list[int]:
+    """Get the indices of prognostic variables from a list of variable names."""
+    assert all(
+        v in model_data_indices.includes for v in names
+    ), "Variable names in 'drop' list have to refer to model variables: {}".format(model_data_indices.includes)
+
+    drop_indices = [model_data_indices.name_to_index[name] for name in names]
+
+    assert all(
+        idx in model_data_indices.prognostic for idx in drop_indices
+    ), "Variable names in 'drop' list have to refer to prognostic variables."
+
+    return drop_indices
+
 
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
 
-    def __init__(self, graph: HeteroData | None = None, **_) -> None:
+    def __init__(
+        self,
+        drop: list[str] | None = None,
+        data_indices: IndexCollection | None = None,
+    ) -> None:
         super().__init__()
+        self.drop_names = drop if drop is not None else []
+
+        if data_indices is None:
+            assert len(self.drop_names) == 0, "Cannot specify variables to drop without data_indices."
+            self.drop_indices = []
+        else:
+            self.drop_indices = get_prognostic_indices(self.drop_names, data_indices.model.input)
+
+            if len(self.drop_indices) > 0:
+                LOGGER.info(
+                    f"{self.__class__.__name__}: Dropping prognostic variables from skip connection: {self.drop_names}"
+                )
 
     @abstractmethod
     def forward(
@@ -50,8 +85,18 @@ class BaseResidualConnection(nn.Module, ABC):
         """
         pass
 
+    def _drop_variables(self, x: torch.Tensor) -> torch.Tensor:
+        """Zero out specified prognostic variables in the input tensor."""
+        if len(self.drop_indices) == 0:
+            return x
+
+        x_skip = x.clone()
+        x_skip[..., self.drop_indices] = 0.0  # Zero out the prognostic variables specified in drop list
+        return x_skip
+
     @staticmethod
     def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
+        """Expand the input tensor along the time dimension if n_step_output is specified."""
         if n_step_output is None:
             return x
         return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1)
@@ -65,8 +110,8 @@ class SkipConnection(BaseResidualConnection):
     This module is used to bypass processing layers and directly pass the latest input forward.
     """
 
-    def __init__(self, step: int = -1, **_) -> None:
-        super().__init__()
+    def __init__(self, step: int = -1, drop: list[str] = [], data_indices: IndexCollection | None = None, **_) -> None:
+        super().__init__(drop=drop, data_indices=data_indices)
         self.step = step
 
     def forward(
@@ -78,6 +123,7 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        x_skip = self._drop_variables(x_skip)
         return self._expand_time(x_skip, n_step_output)
 
 
@@ -111,6 +157,10 @@ class TruncatedConnection(BaseResidualConnection):
         Whether to use automatic mixed precision for the projections.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
+    drop : list[str], optional
+        List of prognostic variable names to drop from the skip connection.
+    data_indices : IndexCollection, optional
+        Data indices object containing variable name to index mapping for the model input.
     truncation_up_file_path : str, optional
         Deprecated path to an ``.npz`` file for the up-projection matrix.
     truncation_down_file_path : str, optional
@@ -153,12 +203,14 @@ class TruncatedConnection(BaseResidualConnection):
         data_node_name: str = "data",
         autocast: bool = False,
         row_normalize: bool = False,
+        drop: list[str] = [],
+        data_indices: IndexCollection | None = None,
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
         truncation_down_file_path: Optional[str] = None,
         **_,
     ) -> None:
-        super().__init__()
+        super().__init__(drop=drop, data_indices=data_indices)
 
         truncation_config = self._normalise_truncation_config(
             truncation_config,
@@ -290,6 +342,7 @@ class TruncatedConnection(BaseResidualConnection):
             x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
         x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
+        x = self._drop_variables(x)
         return self._expand_time(x, n_step_output)
 
 

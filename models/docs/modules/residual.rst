@@ -10,12 +10,18 @@ flow and gradient propagation across network layers. Residual
 connections help mitigate issues such as vanishing gradients and support
 the training of deeper, and more expressive models.
 
-The configurable residual connections link input data to output data.
-The type of residual connection used in a model is specified under the
-``residual`` key in the model configuration YAML. This modular approach
-allows users to select and customize the residual strategy best suited
-for their forecasting task, whether it be a standard skip connection or
-a truncated connection.
+In Anemoi, the type of residual connection used in a model is specified
+under the `residual` key in the model configuration YAML. This modular
+approach allows users to select and customize the residual strategy best
+suited for their forecasting task, whether it be a standard skip
+connection, no connection, or a truncated connection.
+
+By default, the residual connection is applied to all prognostic
+variables. To exclude one or more prognostic variables from the
+connection, list their names under the ``drop`` argument of the residual
+configuration. The listed variables will be zeroed out in the skip
+branch, so the model will be predicting full states rather than increments
+for those variables.
 
 *****************************
  Standard residual (default)
