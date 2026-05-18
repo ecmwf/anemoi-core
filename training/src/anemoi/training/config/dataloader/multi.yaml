@@ -35,6 +35,12 @@ limit_batches:
   validation: null
   test: 20
 
+# choose between "multidataset" and "multidomain" dataloader strategies
+# "multidataset" returns a dictionary of dataset samples and synchronizes them by time index. {a: tensor_a, b: tensor_b, ...}
+# "multidomain" returns a tuple of dataset sample and does not require synchronization. (tensor_a, domain_a)
+strategy:
+  _target_: anemoi.training.data.multidataset.MultiDataset
+
 # ============
 # Multi-Dataset Configuration
 # Define multiple datasets that will be synchronized during training
