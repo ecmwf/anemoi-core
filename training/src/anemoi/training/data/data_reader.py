@@ -396,7 +396,8 @@ class RelativeTimeReader:
             resolved_native_indices[missing_mask] = np.where(within_tolerance, nearest_indices, -1)
             if np.any(within_tolerance) and not self._warned_nearest_time_fallback:
                 LOGGER.warning(
-                    "Mixed-frequency alignment for dataset '%s' fell back to the nearest native timestamp for %d requested "
+                    "Mixed-frequency alignment for dataset '%s' fell back to the nearest native timestamp "
+                    "for %d requested "
                     "times within a %d-second tolerance. Missing exact timestamps may map to a neighbouring "
                     "analysis cycle.",
                     getattr(self.reader, "data", self.reader.__class__.__name__),

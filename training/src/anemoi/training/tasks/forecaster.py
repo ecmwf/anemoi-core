@@ -190,7 +190,8 @@ class Forecaster(BaseTask):
                 batch_position = self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
                 if not 0 <= batch_position < batch.shape[1]:
                     msg = (
-                        f"Mixed-frequency input update for dataset '{dataset_name}' resolved relative time {relative_time} "
+                        f"Mixed-frequency input update for dataset '{dataset_name}' "
+                        f"resolved relative time {relative_time} "
                         f"to batch position {batch_position}, but batch only has {batch.shape[1]} time steps."
                     )
                     raise ValueError(msg)
