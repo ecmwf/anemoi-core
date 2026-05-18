@@ -37,6 +37,9 @@ from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
@@ -79,11 +82,17 @@ class PointWiseMLPProcessorBlock(BaseBlock):
     def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
         super().__init__()
         assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
+        activation = layer_kernels.Activation()
+        if "GLU" in activation.__class__.__name__.upper():
+            raise ValueError(
+                "GLU-based activations are not supported in PointWiseMLPProcessorBlock. "
+                "Use a standard activation (GELU, ReLU, SiLU) via layer_kernels.Activation."
+            )
         layers = [
             layer_kernels.Linear(num_channels, hidden_dim),
             # This pattern has been proven to produce good results in point-wise models
             layer_kernels.LayerNorm(hidden_dim),
-            layer_kernels.Activation(),
+            activation,
         ]
         if num_channels != hidden_dim:
             layers.append(layer_kernels.Linear(hidden_dim, num_channels))
@@ -119,6 +128,7 @@ class TransformerProcessorBlock(BaseBlock):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -144,10 +154,14 @@ class TransformerProcessorBlock(BaseBlock):
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
-        self.mlp = nn.Sequential(
-            layer_kernels.Linear(num_channels, hidden_dim),
-            layer_kernels.Activation(),
-            layer_kernels.Linear(hidden_dim, num_channels),
+        self.mlp = MLP(
+            in_features=num_channels,
+            hidden_dim=hidden_dim,
+            out_features=num_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
         )
 
     def forward(
@@ -190,6 +204,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -204,6 +219,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             dropout_p=dropout_p,
             qk_norm=qk_norm,
             attention_implementation=attention_implementation,
+            mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
@@ -259,6 +275,8 @@ class GraphConvBaseBlock(BaseBlock):
         out_channels: int,
         num_chunks: int,
         mlp_extra_layers: int = 0,
+        mlp_hidden_ratio: float = 1.0,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
         edge_dim: Optional[int] = None,
@@ -276,6 +294,8 @@ class GraphConvBaseBlock(BaseBlock):
             do message passing in X chunks
         mlp_extra_layers : int
             Extra layers in MLP, by default 0
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to out_channels. Default 1.0 preserves existing behaviour.
         update_src_nodes: bool
             Update src if src and dst nodes are given, by default True
         layer_kernels : DotDict
@@ -284,13 +304,16 @@ class GraphConvBaseBlock(BaseBlock):
         """
         super().__init__(**kwargs)
 
+        hidden_dim = compute_mlp_hidden_dim(out_channels, mlp_hidden_ratio)
+
         if edge_dim:
             self.emb_edges = MLP(
                 in_features=edge_dim,
-                hidden_dim=out_channels,
+                hidden_dim=hidden_dim,
                 out_features=out_channels,
                 layer_kernels=layer_kernels,
-                n_extra_layers=mlp_extra_layers,
+                n_extra_layers=mlp_extra_layers + 1,
+                mlp_implementation=mlp_implementation,
             )
         else:
             self.emb_edges = None
@@ -300,10 +323,11 @@ class GraphConvBaseBlock(BaseBlock):
 
         self.node_mlp = MLP(
             in_features=2 * in_channels,
-            hidden_dim=out_channels,
+            hidden_dim=hidden_dim,
             out_features=out_channels,
             layer_kernels=layer_kernels,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
         self.conv = GraphConv(
@@ -311,6 +335,7 @@ class GraphConvBaseBlock(BaseBlock):
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_implementation=mlp_implementation,
         )
 
     @abstractmethod
@@ -460,6 +485,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         attn_channels: Optional[int] = None,
@@ -514,7 +540,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
-        Activation = layer_kernels.Activation
         self.lin_key = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_query = Linear(in_channels, num_heads * self.out_channels_conv)
         self.lin_value = Linear(in_channels, num_heads * self.out_channels_conv)
@@ -529,17 +554,23 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
-        self.node_dst_mlp = nn.Sequential(
-            Linear(out_channels, hidden_dim),
-            Activation(),
-            Linear(hidden_dim, out_channels),
+        self.node_dst_mlp = MLP(
+            in_features=out_channels,
+            hidden_dim=hidden_dim,
+            out_features=out_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
         )
 
         # Optional edge preprocessing MLP
         if edge_pre_mlp:
-            self.edge_pre_mlp = nn.Sequential(
-                Linear(edge_dim, edge_dim),
-                Activation(),
+            self.edge_pre_mlp = build_feedforward_layer(
+                in_features=edge_dim,
+                out_features=edge_dim,
+                layer_kernels=layer_kernels,
+                mlp_implementation="mlp",
             )
         else:
             self.edge_pre_mlp = nn.Identity()
@@ -733,6 +764,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
@@ -780,13 +812,13 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 
-        Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
 
         self.layer_norm_attention_src = LayerNorm(normalized_shape=in_channels)
@@ -794,10 +826,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         if self.update_src_nodes:
             self.layer_norm_mlp_src = LayerNorm(normalized_shape=out_channels)
-            self.node_src_mlp = nn.Sequential(
-                Linear(out_channels, hidden_dim),
-                layer_kernels.Activation(),
-                Linear(hidden_dim, out_channels),
+            self.node_src_mlp = MLP(
+                in_features=out_channels,
+                hidden_dim=hidden_dim,
+                out_features=out_channels,
+                layer_kernels=layer_kernels,
+                n_extra_layers=0,
+                layer_norm=False,
+                mlp_implementation=mlp_implementation,
             )
         else:
             self.layer_norm_mlp_src = nn.Identity()
@@ -899,6 +935,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -941,6 +978,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=update_src_nodes,
             graph_attention_backend=graph_attention_backend,
             edge_pre_mlp=edge_pre_mlp,
