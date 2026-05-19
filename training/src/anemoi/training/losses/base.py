@@ -14,7 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
 from enum import StrEnum
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import torch
 from torch import nn
@@ -144,7 +144,7 @@ class BaseLoss(nn.Module, ABC):
         self,
         out: torch.Tensor,
         squash: bool = True,
-        squash_mode: str = "avg",
+        squash_mode: Literal["avg", "sum"] = "avg",
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Reduce the out of the loss.
@@ -160,7 +160,7 @@ class BaseLoss(nn.Module, ABC):
             Difference tensor, of shape TensorDim
         squash : bool, optional
             Whether to squash the variable dimension, by default True
-        squash_mode : str, optional
+        squash_mode : Literal["avg", "sum"] , optional
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
@@ -300,7 +300,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Literal["avg", "sum"] = "avg",
         **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
@@ -322,7 +322,7 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
-        squash_mode : str, optional
+        squash_mode : Literal["avg", "sum"], optional
             Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
