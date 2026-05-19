@@ -262,8 +262,8 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
-    scalers: list[str] = Field(default_factory=list, example=["variable"])
-    "Scalers to include in loss calculation. Defaults to empty (no scaling)."
+    scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
+    "Scalers to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
@@ -342,7 +342,10 @@ class MultiScaleLossSchema(BaseModel):
     @field_validator("per_scale_loss", mode="before")
     @classmethod
     def add_empty_scalers_to_inner(cls, v: Any) -> Any:
-        """Inject empty scalers for inner loss; scalers flow through the wrapper."""
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
+
+        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
+        """
         if isinstance(v, dict) and "scalers" not in v:
             v["scalers"] = []
         else:
@@ -382,7 +385,10 @@ class TimeAggregateLossWrapperSchema(BaseModel):
     @field_validator("loss_fn", mode="before")
     @classmethod
     def add_empty_scalers_to_inner(cls, v: Any) -> Any:
-        """Inject empty scalers for inner loss; scalers flow through the wrapper."""
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
+
+        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
+        """
         if isinstance(v, dict) and "scalers" not in v:
             v["scalers"] = []
         else:
@@ -446,6 +452,8 @@ class CombinedLossSchema(BaseLossSchema):
 
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
     "CombinedLoss target."
+    scalers: list[str] = Field(default_factory=list, example=["variable"])
+    "Optional top-level scalers propagated to sub-losses that don't define their own."
     losses: list[
         Annotated[
             Annotated[BaseLossSchema, Tag("base")]
