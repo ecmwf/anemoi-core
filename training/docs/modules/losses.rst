@@ -92,6 +92,60 @@ deterministic:
 .. _multiscale-loss-functions:
 
 ***************************
+ Time Aggregate Loss Functions
+***************************
+
+These loss functions encourage the model to produce **temporally consistent** outputs
+i.e. output sequences that are internally coherent over
+time, not just accurate at each individual step.
+
+:class:`~anemoi.training.losses.aggregate.TimeAggregateLossWrapper`
+addresses this by applying a base loss function to *time-aggregated*
+versions of the prediction and target, rather than step-by-step. The
+following aggregations are supported:
+
+.. list-table::
+   :widths: 15 85
+   :header-rows: 1
+
+   -  -  Aggregation
+      -  Description
+
+   -  -  ``mean``
+      -  Mean over the output time window — penalises bias in the
+         temporal average.
+
+   -  -  ``max``
+      -  Maximum over the output time window — penalises errors in peak
+         values.
+
+   -  -  ``min``
+      -  Minimum over the output time window — penalises errors in
+         minimum values.
+
+   -  -  ``diff``
+      -  Consecutive step-to-step differences
+         (``pred[:, 1:] - pred[:, :-1]``) — penalises unrealistic
+         temporal transitions and discontinuities.
+
+The wrapper accumulates the specified loss function evaluated on each aggregation in
+turn and returns the average. Because the ``time_steps`` scaler is
+intentionally excluded from the inner ``loss_fn`` (temporal aggregation
+collapses the time dimension), only spatial and variable scalers should
+be listed there.
+
+.. note::
+
+   ``TimeAggregateLossWrapper`` requires an output time dimension
+   greater than one, as it is not
+   meaningful for single-step tasks.
+
+We strongly recommend using the time aggregate loss when training any
+temporal downscaler. The pre-built config variants ``single_MSE_aggregation``
+and ``ensemble_multiscale_aggregation`` combine it with the primary loss inside a
+:class:`~anemoi.training.losses.combined.CombinedLoss`.
+
+***************************
  Multiscale Loss Functions
 ***************************
 

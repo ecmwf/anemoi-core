@@ -15,6 +15,36 @@ from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
+from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
+
+_TIME_AGG_CFG = {
+    "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
+    "time_aggregation_types": ["mean", "diff"],
+    "loss_fn": {
+        "_target_": "anemoi.training.losses.MSELoss",
+        "scalers": ["node_weights"],
+    },
+}
+
+
+def test_time_aggregate_loss_config_valid() -> None:
+    """TimeAggregateLossWrapperSchema accepts a valid config."""
+    schema = TimeAggregateLossWrapperSchema(**_TIME_AGG_CFG)
+    assert schema.time_aggregation_types == ["mean", "diff"]
+
+
+def test_time_aggregate_loss_config_invalid_agg_type() -> None:
+    """Unknown aggregation type is rejected."""
+    cfg = {**_TIME_AGG_CFG, "time_aggregation_types": ["sum"]}
+    with pytest.raises(ValidationError):
+        TimeAggregateLossWrapperSchema(**cfg)
+
+
+def test_time_aggregate_loss_config_empty_agg_types() -> None:
+    """Empty aggregation list is rejected (min_length=1)."""
+    cfg = {**_TIME_AGG_CFG, "time_aggregation_types": []}
+    with pytest.raises(ValidationError):
+        TimeAggregateLossWrapperSchema(**cfg)
 
 
 def test_optimizer_schema_allows_extra_keys() -> None:
@@ -124,7 +154,6 @@ def test_multiscale_loss_deprecated_loss_matrices_path_with_on_the_fly_config_re
 
 _COMBINED_LOSS_BASE = {
     "_target_": "anemoi.training.losses.combined.CombinedLoss",
-    "scalers": [],
 }
 
 
@@ -132,7 +161,6 @@ def test_combined_loss_with_scalers_valid() -> None:
     CombinedLossSchema(
         **{
             **_COMBINED_LOSS_BASE,
-            "scalers": ["*"],
             "losses": [
                 {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["nan_mask_weights"]},
                 {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["nan_mask_weights"]},

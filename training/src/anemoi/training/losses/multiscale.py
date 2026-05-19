@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import einops
@@ -26,12 +27,12 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import BaseLossWrapper
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MultiscaleLossWrapper(BaseLoss):
-    """Apply the same base loss across progressively smoothed target fields."""
+class MultiscaleLossWrapper(BaseLossWrapper):
 
     name: str = "MultiscaleLossWrapper"
     needs_graph_data: bool = True
@@ -93,7 +94,7 @@ class MultiscaleLossWrapper(BaseLoss):
         loss_matrices : list[Path | str] | None
             Deprecated.  Pass inside *multiscale_config* instead.
         """
-        super().__init__(ignore_nans=ignore_nans)
+        super().__init__(loss=per_scale_loss, ignore_nans=ignore_nans)
 
         _has_matrices = bool(loss_matrices)  # [None] still signals file mode (identity scale)
         if _has_matrices or loss_matrices_path is not None:
@@ -118,8 +119,6 @@ class MultiscaleLossWrapper(BaseLoss):
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
         self.weights = weights
-        self.loss = per_scale_loss
-        self.scaler = self.loss.scaler
         self.supports_sharding = True
         self.mloss = None
         self.projector = SparseProjector(autocast=autocast)
@@ -128,19 +127,9 @@ class MultiscaleLossWrapper(BaseLoss):
     def needs_shard_layout_info(self) -> bool:
         return True
 
-    def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
-        """Update the scaler values for the internal loss.
-
-        Parameters
-        ----------
-        name : str
-            Name of the scaler to update
-        scaler : torch.Tensor
-            New scaler values
-        override : bool, optional
-            Whether to override existing scaler values, by default False
-        """
-        self.loss.update_scaler(name=name, scaler=scaler, override=override)
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """MultiscaleLossWrapper is a leaf: it performs substantive computation."""
+        yield self
 
     def _load_smoothing_matrices(
         self,

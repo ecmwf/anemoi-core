@@ -17,6 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -24,7 +25,7 @@ from anemoi.training.utils.index_space import IndexSpace
 LOGGER = logging.getLogger(__name__)
 
 
-class LossVariableMapper(BaseLoss):
+class LossVariableMapper(BaseLossWrapper):
     """Loss wrapper to filter variables to compute the loss on."""
 
     def __init__(
@@ -52,18 +53,9 @@ class LossVariableMapper(BaseLoss):
                 target_variables,
             ), "predicted and target variables must have the same length for loss computation"
 
-        super().__init__()
+        super().__init__(loss=loss)
 
         self._loss_scaler_specification = {}
-        if not isinstance(loss, BaseLoss):
-            msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
-            raise TypeError(msg)
-        self.loss = loss
-        if hasattr(self.loss, "scaler"):
-            # Share the inner loss scaler so scaler membership and updates remain visible
-            # to training/task utilities that inspect `loss.scaler`.
-            self.scaler = self.loss.scaler
-        self.supports_sharding = getattr(self.loss, "supports_sharding", False)
         self.predicted_variables = list(predicted_variables) if predicted_variables is not None else None
         self.target_variables = list(target_variables) if target_variables is not None else None
         self.data_indices: IndexCollection | None = None
@@ -71,11 +63,6 @@ class LossVariableMapper(BaseLoss):
         self.target_indices_by_layout: dict[IndexSpace, list[int]] = {}
         if data_indices is not None:
             self.set_data_indices(data_indices)
-
-    @property
-    def needs_shard_layout_info(self) -> bool:
-        """Whether the wrapped loss requires explicit shard-layout metadata."""
-        return getattr(self.loss, "needs_shard_layout_info", False)
 
     def _get_predicted_indices_for_scaler_variable_axis(self, variable_size: int) -> list[int] | None:
         if variable_size == 1:
@@ -155,14 +142,10 @@ class LossVariableMapper(BaseLoss):
     @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         # Keep update behavior consistent with add_scaler for VARIABLE-axis scalers.
-        if hasattr(self.loss, "scaler") and name in self.loss.scaler.tensors:
+        if name in self.loss.scaler.tensors:
             dimension = self.loss.scaler.tensors[name][0]
             scaler = self._filter_variable_axis_scaler(dimension, scaler)
         self.loss.update_scaler(name=name, scaler=scaler, override=override)
-
-    @functools.wraps(ScaleTensor.has_scaler_for_dim)
-    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
-        return self.loss.has_scaler_for_dim(dim=dim)
 
     @staticmethod
     def _to_layout(layout: IndexSpace | str, *, layout_name: str) -> IndexSpace:
