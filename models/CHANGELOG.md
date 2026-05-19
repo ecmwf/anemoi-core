@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/models-0.15.1...models-0.16.0) (2026-05-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* introduce mlp implementation for gated FFN (swiglu, ...) ([#943](https://github.com/ecmwf/anemoi-core/issues/943))
+
+### Features
+
+* Introduce mlp implementation for gated FFN (swiglu, ...) ([#943](https://github.com/ecmwf/anemoi-core/issues/943)) ([2ed3417](https://github.com/ecmwf/anemoi-core/commit/2ed3417906423cd8be7ee432138b94606deaacb9))
+
+
+### Bug Fixes
+
+* Changed FFT2D low-pass filter from enabled to disabled by default ([#1075](https://github.com/ecmwf/anemoi-core/issues/1075)) ([336bacf](https://github.com/ecmwf/anemoi-core/commit/336bacf65244039f944076711b1e98466c24249f))
+* **models:** Hierarchical model with multiple datasets ([#1066](https://github.com/ecmwf/anemoi-core/issues/1066)) ([987aa09](https://github.com/ecmwf/anemoi-core/commit/987aa09dba164f3f447e8391a2ea7a3c074fed4e))
+
 ## [0.15.1](https://github.com/ecmwf/anemoi-core/compare/models-0.15.0...models-0.15.1) (2026-05-15)
 
 
