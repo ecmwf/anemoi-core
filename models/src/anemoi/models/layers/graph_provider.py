@@ -12,7 +12,6 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any
 from typing import Optional
 from typing import Union
 
@@ -133,7 +132,7 @@ class StaticGraphProvider(BaseGraphProvider):
     edge indices, and trainable parameters.
     """
 
-    # Version number for the trainable edge feature layout, used to determine if permutation of legacy trainable state is needed on load.
+    # info on trainable layout versioning for migration:
     _TRAINABLE_LAYOUT_VERSION = 1
     _TRAINABLE_LAYOUT_VERSION_KEY = "trainable_layout_version"
 
@@ -184,52 +183,6 @@ class StaticGraphProvider(BaseGraphProvider):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=edge_attr_tensor.shape[0])
 
         self._edge_dim = edge_attr_tensor.shape[1] + trainable_size
-
-    def _permute_legacy_trainable_state(self, trainable: Tensor) -> Tensor:
-        if trainable.shape[0] != self.perm.shape[0]:
-            msg = (
-                "Cannot permute legacy graph-provider trainable tensor: "
-                f"expected first dimension {self.perm.shape[0]}, got {trainable.shape[0]}."
-            )
-            raise RuntimeError(msg)
-
-        return trainable.index_select(0, self.perm.to(device=trainable.device))
-
-    def _load_from_state_dict(
-        self,
-        state_dict: dict[str, Tensor],
-        prefix: str,
-        local_metadata: dict[str, Any],
-        strict: bool,
-        missing_keys: list[str],
-        unexpected_keys: list[str],
-        error_msgs: list[str],
-    ) -> None:
-        layout_version_key = prefix + self._TRAINABLE_LAYOUT_VERSION_KEY
-        trainable_key = prefix + "trainable.trainable"
-
-        if trainable_key in state_dict:
-            layout_version = state_dict.get(layout_version_key, 0)
-            if isinstance(layout_version, Tensor):
-                layout_version = int(layout_version.item())
-            else:
-                layout_version = int(layout_version)
-
-            if layout_version < self._TRAINABLE_LAYOUT_VERSION:
-                LOGGER.info("Permuting legacy trainable edge parameters for %s", prefix.rstrip("."))
-                state_dict[trainable_key] = self._permute_legacy_trainable_state(state_dict[trainable_key])
-
-        state_dict.setdefault(layout_version_key, self.trainable_layout_version.clone())
-
-        super()._load_from_state_dict(
-            state_dict,
-            prefix,
-            local_metadata,
-            strict,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        )
 
     @property
     def edge_dim(self) -> int:

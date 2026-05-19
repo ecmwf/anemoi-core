@@ -26,6 +26,9 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
+trainable_edge_perm_fix_migration = importlib.import_module(
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+).migrate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -90,6 +93,9 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Refresh processor stats from the current dataset if configured.
     model._update_checkpoint_state_dict_for_load(checkpoint)
+
+    # Runtime migration: the graph-provider permutation depends on instantiated provider state.
+    checkpoint = trainable_edge_perm_fix_migration(checkpoint, model)
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
