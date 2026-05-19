@@ -90,7 +90,7 @@ class KernelCRPS(BaseLoss):
         if self.ignore_nans:
             nan_mask = torch.isnan(y_target)
             y_target = y_target.masked_fill(nan_mask, 0.0)
-            # Expand mask for ensemble dimension: (bs, v, latlon) -> (bs, v, latlon, e)
+            # Expand mask for ensemble dimension: (bs, t, v, latlon) -> (bs, t, v, latlon, e=1)
             y_pred = y_pred.masked_fill(nan_mask.unsqueeze(-1), 0.0)
 
         kcrps_ = self._kernel_crps(y_pred, y_target)

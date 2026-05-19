@@ -39,9 +39,9 @@ class RMSELoss(MSELoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, n_outputs, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, n_outputs, lat*lon, n_outputs)
         squash : bool, optional
             Average last dimension, by default True
         scaler_indices: tuple[int,...], optional
