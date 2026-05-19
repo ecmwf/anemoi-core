@@ -146,12 +146,45 @@ class BaseLoss(nn.Module, ABC):
             grid_shard_slice=grid_shard_slice,
         )
 
+    def mask_nans(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> tuple[float, torch.Tensor, torch.Tensor]:
+        """Return the fraction of ignored nan-values in the target and masked  prediction and target tensors.
+
+        Parameters
+        ----------
+        pred : torch.Tensor,
+            Prediction tensor
+        target : torch.Tensor,
+            Target tensor
+
+        Returns
+        -------
+        float, torch.Tensor, torch.Tensor]
+            * The fraction of masked nan-values in the input target
+            * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``
+            * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
+        """
+        if self.ignore_nans:
+            nan_mask = torch.isnan(target)
+            target = target.masked_fill(nan_mask, 0.0)
+            pred = pred.masked_fill(nan_mask, 0.0)
+
+            nan_fraction = float(nan_mask.float().mean())  # no grad
+
+            return nan_fraction, pred, target
+
+        return 0.0, pred, target
+
     def reduce(
         self,
         out: torch.Tensor,
         squash: bool = True,
         squash_mode: Squash_mode = "avg",
         group: ProcessGroup | None = None,
+        nan_fraction: float = 0.0,
     ) -> torch.Tensor:
         """Reduce the out of the loss.
 
@@ -159,6 +192,9 @@ class BaseLoss(nn.Module, ABC):
 
         Irrespective of `squash`, the output is reduced over the
         batch, ensemble and grid dimensions.
+
+        If self.ignore_nans is True, the loss is scaled by the
+         fraction of nan-values in the target.
 
         Parameters
         ----------
@@ -172,6 +208,8 @@ class BaseLoss(nn.Module, ABC):
             If "sum", the last dimension is summed.
         group : ProcessGroup | None, optional
             Distributed group to reduce over, by default None
+        nan_fraction : float, optional
+            Fraction of masked nan values. Used to scale up the loss.
 
         Returns
         -------
@@ -211,6 +249,11 @@ class BaseLoss(nn.Module, ABC):
                 TensorDim.ENSEMBLE_DIM,
             ),
         ).squeeze()
+
+        # Scale the result with the amount of masked nan-values.
+        # This adjusts the lost between steps with varying amounts of nans.
+        if nan_fraction > 0.0:
+            out /= 1 - nan_fraction
 
         return out if group is None else reduce_tensor(out, group)
 
@@ -385,20 +428,14 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
-        if self.ignore_nans:
-            nan_mask = torch.isnan(target)
-            target = target.masked_fill(nan_mask, 0.0)
-            pred = pred.masked_fill(nan_mask, 0.0)
-
-            nan_fraction = float(nan_mask.float().mean())  # no grad
+        nan_fraction, pred, target = self.mask_nans(pred, target)
 
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-        out = self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
-
-        if self.ignore_nans and squash and squash_mode == "avg":
-            # Scale the result with the amount of nans.
-            # This adjusts the lost between steps with varying amounts of nans.
-            out /= 1 - nan_fraction
-
-        return out
+        return self.reduce(
+            out,
+            squash,
+            group=group if is_sharded else None,
+            squash_mode=squash_mode,
+            nan_fraction=nan_fraction,
+        )

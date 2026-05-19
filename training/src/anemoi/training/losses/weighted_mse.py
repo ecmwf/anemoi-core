@@ -68,6 +68,9 @@ class WeightedMSELoss(MSELoss):
             Weighted MSE loss
         """
         is_sharded = grid_shard_slice is not None
+
+        nan_fraction, pred, target = self.mask_nans(pred, target)
+
         out = self.calculate_difference(pred, target)
 
         if weights is not None:
@@ -75,4 +78,10 @@ class WeightedMSELoss(MSELoss):
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
+        return self.reduce(
+            out,
+            squash,
+            group=group if is_sharded else None,
+            squash_mode=squash_mode,
+            nan_fraction=nan_fraction,
+        )

@@ -155,6 +155,8 @@ class SpectralL2Loss(SpectralLoss):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
+        nan_fraction, pred, target = self.mask_nans(pred, target)
+
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
 
@@ -166,7 +168,7 @@ class SpectralL2Loss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction)
 
 
 class LogSpectralDistance(SpectralLoss):
@@ -188,6 +190,8 @@ class LogSpectralDistance(SpectralLoss):
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
+        nan_fraction, pred, target = self.mask_nans(pred, target)
+
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
 
@@ -202,7 +206,9 @@ class LogSpectralDistance(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
+        return torch.sqrt(
+            self.reduce(result, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction) + eps,
+        )
 
 
 class FourierCorrelationLoss(SpectralLoss):
@@ -224,6 +230,8 @@ class FourierCorrelationLoss(SpectralLoss):
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
+        nan_fraction, pred, target = self.mask_nans(pred, target)
+
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
         n_modes = pred_spectral.size(dim=TensorDim.GRID.value)
@@ -242,7 +250,7 @@ class FourierCorrelationLoss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction)
 
 
 class LogFFT2Distance(LogSpectralDistance):
@@ -322,18 +330,14 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
+        nan_fraction, pred, target = self.mask_nans(pred, target)
+
         # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
         tgt_spec = self._to_spectral_flat(target)
 
         pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
-
-        if self.ignore_nans:
-            nan_mask = torch.isnan(tgt_spec)
-            tgt_spec = tgt_spec.masked_fill(nan_mask, 0.0)
-            # Expand mask for ensemble dimension
-            pred_spec = pred_spec.masked_fill(nan_mask.unsqueeze(-1), 0.0)
 
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
@@ -348,7 +352,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction)
 
     @property
     def name(self) -> str:
