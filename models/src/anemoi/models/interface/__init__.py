@@ -59,8 +59,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DictConfig,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: int | dict[str, int],
+        n_step_output: int | dict[str, int],
         graph_data: HeteroData,
         statistics: dict,
         data_indices: dict,
@@ -84,6 +84,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def _build_processors_for_dataset(
         self,
+        dataset_name: str,
         processors_configs: dict,
         statistics: dict,
         data_indices: dict,
@@ -113,6 +114,7 @@ class AnemoiModelInterface(torch.nn.Module):
             statistics,
         )
         pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
+            dataset_name,
             processors_configs,
             data_indices,
             statistics_tendencies,
@@ -133,6 +135,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def _build_tendency_processors(
         self,
+        dataset_name: str,
         processors_configs: dict,
         data_indices: dict,
         statistics_tendencies: dict | None,
@@ -144,7 +147,7 @@ class AnemoiModelInterface(torch.nn.Module):
             return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
 
         lead_times = list(statistics_tendencies.get("lead_times") or [])
-        if self.n_step_output == 1:
+        if self._get_n_step_output(dataset_name) == 1:
             step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
             stats_for_tendencies = step_stats or statistics_tendencies
             return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
@@ -160,6 +163,9 @@ class AnemoiModelInterface(torch.nn.Module):
             post_processors_tendencies.set(lead_time, post_step)
         return pre_processors_tendencies, post_processors_tendencies
 
+    def _get_n_step_output(self, dataset_name: str) -> int:
+        return self.n_step_output[dataset_name] if isinstance(self.n_step_output, dict) else self.n_step_output
+
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
         # Multi-dataset mode: create processors for each dataset
@@ -172,6 +178,7 @@ class AnemoiModelInterface(torch.nn.Module):
         for dataset_name in self.statistics.keys():
             # Build processors for each dataset
             pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
+                dataset_name,
                 data_config[dataset_name].processors,
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],

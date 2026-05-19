@@ -324,11 +324,12 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
             proc: object,
             dataset_name: str,
             lead_times: list[str],
+            expected_output_steps: int,
         ) -> StepwiseProcessors:
             if isinstance(proc, StepwiseProcessors):
                 return proc
             assert (
-                self.n_step_output == 1
+                expected_output_steps == 1
             ), "Per-step tendency processors are required for multi-output diffusion tendency models."
             lead_time = lead_times[0]
             wrapped = StepwiseProcessors([lead_time])
@@ -344,10 +345,11 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
             dataset_stats = stats.get(dataset_name) if isinstance(stats, dict) else None
             assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
             lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
+            expected_output_steps = self.n_step_output_by_dataset[dataset_name]
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
             assert (
-                len(lead_times) == self.n_step_output
-            ), f"Expected {self.n_step_output} tendency statistics entries, got {len(lead_times)}."
+                len(lead_times) == expected_output_steps
+            ), f"Expected {expected_output_steps} tendency statistics entries, got {len(lead_times)}."
             assert all(
                 lead_time in dataset_stats for lead_time in lead_times
             ), "Missing tendency statistics for one or more output steps."
@@ -361,10 +363,10 @@ class DiffusionTendencyTraining(BaseDiffusionTraining):
 
             pre_tend = pre_processors_tendencies[dataset_name]
             post_tend = post_processors_tendencies[dataset_name]
-            pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
-            post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
+            pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times, expected_output_steps)
+            post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times, expected_output_steps)
             assert (
-                len(pre_tend) == self.n_step_output and len(post_tend) == self.n_step_output
+                len(pre_tend) == expected_output_steps and len(post_tend) == expected_output_steps
             ), "Per-step tendency processors must match n_step_output."
             assert all(
                 proc is not None for proc in pre_tend

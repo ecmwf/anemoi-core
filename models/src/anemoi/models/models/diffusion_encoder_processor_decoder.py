@@ -48,8 +48,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: int | dict[str, int],
+        n_step_output: int | dict[str, int],
         graph_data: HeteroData,
     ) -> None:
 
@@ -177,13 +177,13 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         return x_data_latent, None, grid_shard_sizes
 
-    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
+    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype, dataset_name: str):
         x_out = einops.rearrange(
             x_out,
             "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
             batch=batch_size,
             ensemble=ensemble_size,
-            time=self.n_step_output,
+            time=self._get_n_step_output(dataset_name),
         ).to(dtype=dtype)
 
         return x_out
@@ -424,7 +424,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x_out.dtype
+                x_out,
+                x_skip_dict[dataset_name],
+                batch_size,
+                ensemble_size,
+                x_out.dtype,
+                dataset_name,
             )
 
         return x_out_dict
@@ -479,7 +484,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
@@ -511,7 +516,12 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x = x[
+                :,
+                0 : (n_step_input[dataset_name] if isinstance(n_step_input, dict) else n_step_input),
+                None,
+                ...,
+            ]  # add dummy ensemble dimension as 3rd index
 
             if model_comm_group is not None:
                 shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
@@ -578,7 +588,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         noise_scheduler_params: Optional[dict] = None,
@@ -727,7 +737,13 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
 
             # Initialize output with noise
             batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
-            shape = (batch_size, self.n_step_output, ensemble_size, grid_size, self.num_output_channels[dataset_name])
+            shape = (
+                batch_size,
+                self._get_n_step_output(dataset_name),
+                ensemble_size,
+                grid_size,
+                self.num_output_channels[dataset_name],
+            )
             y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigma_i.dtype) * sigma_i[0]
 
         # Build diffusion sampler config dict from all inference defaults
@@ -769,7 +785,7 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
+                "input_timesteps": self._get_n_step_input(dataset),
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
@@ -785,8 +801,8 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: int | dict[str, int],
+        n_step_output: int | dict[str, int],
         graph_data: HeteroData,
     ) -> None:
         model_config = DotDict(model_config)
@@ -804,7 +820,9 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
         if self.condition_on_residual:
-            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
+            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self._get_n_step_output(
+                dataset_name
+            )
         return input_dim
 
     @staticmethod
@@ -834,9 +852,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
-            ..., self._internal_input_idx[dataset_name]
-        ]
+        x_skip = self.residual[dataset_name](
+            x,
+            grid_shard_sizes,
+            model_comm_group,
+            n_step_output=self._get_n_step_output(dataset_name),
+        )[..., self._internal_input_idx[dataset_name]]
         assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
         x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
@@ -1011,7 +1032,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
@@ -1027,7 +1048,12 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x_in = x[
+                :,
+                0 : (n_step_input[dataset_name] if isinstance(n_step_input, dict) else n_step_input),
+                None,
+                ...,
+            ]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1:, None, ...]  # keep time dim and add dummy ensemble dimension
 
             if model_comm_group is not None:
@@ -1075,7 +1101,7 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             assert post_tend is not None, "Tendency processors must be provided per dataset."
             if not isinstance(post_tend, StepwiseProcessors):
                 assert (
-                    self.n_step_output == 1
+                    self._get_n_step_output(dataset_name) == 1
                 ), "Per-step tendency processors must be provided for multiple output steps."
                 post_tend = [post_tend]
             assert (
@@ -1131,7 +1157,10 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         for dataset_name, in_x in x.items():
             grid_shard_sizes_i = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
             x_skip = self.residual[dataset_name](
-                in_x, grid_shard_sizes_i, model_comm_group, n_step_output=self.n_step_output
+                in_x,
+                grid_shard_sizes_i,
+                model_comm_group,
+                n_step_output=self._get_n_step_output(dataset_name),
             )
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             # x_skip.shape: (bs, time, ens, latlon, nvar)
