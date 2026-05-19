@@ -14,6 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
 from enum import StrEnum
+from typing import Any
 from typing import ClassVar
 from typing import Literal
 
@@ -274,6 +275,52 @@ class BaseLoss(nn.Module, ABC):
         torch.Tensor
             Weighted loss
         """
+
+
+class BaseLossWrapper(BaseLoss):
+    """Transparent wrapper around a single inner loss.
+
+    By default, all scaler and metadata methods are delegated to the
+    wrapped loss so that the wrapper behaves as if it *were* the inner
+    loss from the perspective of ``CombinedLoss`` and the scaler
+    machinery.  Subclasses only need to override ``forward``.
+    """
+
+    def __init__(self, loss: BaseLoss, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if not isinstance(loss, BaseLoss):
+            msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
+            raise TypeError(msg)
+        self.loss = loss
+        # Share the inner loss's scaler so that scaler additions/updates
+        # applied to this wrapper are visible to the actual loss computation.
+        self.scaler = self.loss.scaler
+        self.supports_sharding = getattr(self.loss, "supports_sharding", True)
+
+    # -- scaler delegation --------------------------------------------------
+
+    @functools.wraps(ScaleTensor.add_scaler)
+    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
+        self.loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
+
+    @functools.wraps(ScaleTensor.update_scaler)
+    def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
+        self.loss.update_scaler(name=name, scaler=scaler, override=override)
+
+    @functools.wraps(ScaleTensor.has_scaler_for_dim)
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return self.loss.has_scaler_for_dim(dim=dim)
+
+    # -- metadata delegation ------------------------------------------------
+
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Delegate to the wrapped loss."""
+        return getattr(self.loss, "needs_shard_layout_info", False)
+
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Yield leaf losses from the wrapped loss."""
+        yield from self.loss.iter_leaf_losses()
 
 
 class FunctionalLoss(BaseLoss):
