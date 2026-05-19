@@ -328,6 +328,13 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
 
         pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
+
+        if self.ignore_nans:
+            nan_mask = torch.isnan(tgt_spec)
+            tgt_spec = tgt_spec.masked_fill(nan_mask, 0.0)
+            # Expand mask for ensemble dimension
+            pred_spec = pred_spec.masked_fill(nan_mask.unsqueeze(-1), 0.0)
+
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
                 crps = self._kernel_crps(pred_spec, tgt_spec)
