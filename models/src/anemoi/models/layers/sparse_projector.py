@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 
 
@@ -54,8 +56,25 @@ class SparseProjector(torch.nn.Module):
         torch.Tensor
             Projected tensor of shape ``[..., dst_nodes, vars]``.
         """
-        input_shape = batch.shape
-        batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = provider.get_edges(device=batch.device)
-        batch = self(batch, projection_matrix)
-        return batch.reshape(*input_shape[:-2], *batch.shape[-2:])
+        return apply_sparse_projector_with_reshaping(self, batch, provider)
+
+
+def _projection_matrix(
+    projection: object | torch.Tensor,
+    device: torch.device,
+) -> torch.Tensor:
+    if isinstance(projection, torch.Tensor):
+        return projection.to(device=device)
+    return projection.get_edges(device=device)
+
+
+def apply_sparse_projector_with_reshaping(
+    projector: SparseProjector,
+    x: torch.Tensor,
+    projection: object | torch.Tensor,
+) -> torch.Tensor:
+    """Project trailing ``[grid, variables]`` dimensions."""
+    input_shape = x.shape
+    x = x.reshape(-1, *input_shape[-2:])
+    x = projector(x, _projection_matrix(projection, x.device))
+    return x.reshape(*input_shape[:-2], *x.shape[-2:])

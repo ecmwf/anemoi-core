@@ -13,6 +13,7 @@ from pathlib import Path
 
 import einops
 import torch
+from omegaconf import OmegaConf
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
@@ -28,6 +29,14 @@ from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _normalise_mapping(config: object | None) -> dict:
+    if config is None:
+        return {}
+    if OmegaConf.is_config(config):
+        return dict(OmegaConf.to_container(config, resolve=True))
+    return dict(config)
 
 
 class MultiscaleLossWrapper(BaseLoss):
@@ -157,13 +166,7 @@ class MultiscaleLossWrapper(BaseLoss):
             LOGGER.info("No multiscale_config specified, using single scale without smoothing")
             return [None]
 
-        from omegaconf import OmegaConf
-
-        cfg = (
-            OmegaConf.to_container(multiscale_config, resolve=True)
-            if OmegaConf.is_config(multiscale_config)
-            else dict(multiscale_config)
-        )
+        cfg = _normalise_mapping(multiscale_config)
 
         if "loss_matrices" in cfg:
             from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema

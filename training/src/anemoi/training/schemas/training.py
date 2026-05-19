@@ -424,6 +424,24 @@ class SpectralLossSchema(BaseLossSchema):
     """Optional ``(start, end)`` slice to select a subset of nodes before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
+    projection_autocast: bool = False
+    """Use automatic mixed precision for sparse projection."""
+
+    @model_validator(mode="after")
+    def check_no_top_level_projection_config(self) -> Self:
+        unsupported_projection_keys = {
+            "projection_matrix",
+            "projection_edges_name",
+            "projection_edge_weight_attribute",
+            "projection_src_node_weight_attribute",
+            "projection_row_normalize",
+        }
+        extra = self.model_extra or {}
+        unsupported = sorted(set(extra) & unsupported_projection_keys)
+        if unsupported:
+            msg = f"Pass projection settings inside 'projection_config', not as top-level keys: {unsupported}."
+            raise ValueError(msg)
+        return self
 
     class Config(BaseModel.Config):
         """Override to allow extra parameters for spectral transforms."""

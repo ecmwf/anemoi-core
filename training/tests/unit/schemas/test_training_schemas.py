@@ -15,6 +15,8 @@ from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
+from anemoi.training.schemas.training import SpectralLossSchema
+from anemoi.training.schemas.training import SpectralProjectionConfigSchema
 
 
 def test_optimizer_schema_allows_extra_keys() -> None:
@@ -119,6 +121,46 @@ def test_multiscale_loss_deprecated_loss_matrices_path_with_on_the_fly_config_re
                 "loss_matrices_path": "/some/path",
                 "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG,
             },
+        )
+
+
+def test_spectral_projection_config_matrix_valid() -> None:
+    SpectralProjectionConfigSchema(matrix_path="/path/to/projection.npz")
+
+
+def test_spectral_projection_config_edges_valid() -> None:
+    SpectralProjectionConfigSchema(edges_name=("data", "to", "projection"), edge_weight_attribute="gauss_weight")
+
+
+def test_spectral_projection_config_target_grid_valid() -> None:
+    SpectralProjectionConfigSchema(
+        node_builder={"_target_": "anemoi.graphs.nodes.LatLonNodes"},
+        num_nearest_neighbours=4,
+        sigma=0.1,
+    )
+
+
+def test_spectral_projection_config_rejects_mixed_modes() -> None:
+    with pytest.raises(ValidationError):
+        SpectralProjectionConfigSchema(
+            matrix_path="/path/to/projection.npz",
+            edges_name=("data", "to", "projection"),
+        )
+
+
+def test_spectral_projection_config_rejects_unsupported_keys() -> None:
+    with pytest.raises(ValidationError):
+        SpectralProjectionConfigSchema(file_path="/path/to/projection.npz")
+
+
+def test_spectral_loss_rejects_top_level_projection_keys() -> None:
+    with pytest.raises(ValidationError):
+        SpectralLossSchema(
+            _target_="anemoi.training.losses.spectral.SpectralCRPSLoss",
+            transform="fft2d",
+            x_dim=8,
+            y_dim=6,
+            projection_matrix="/path/to/projection.npz",
         )
 
 

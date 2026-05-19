@@ -12,6 +12,8 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import create_projection_graph_provider
+from anemoi.models.layers.graph_provider import normalize_projection_edges_name
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
@@ -62,6 +64,43 @@ def test_projection_graph_provider_accepts_int32_edge_index() -> None:
     assert matrix.shape == (graph["dst"].num_nodes, graph["src"].num_nodes)
     row_sums = matrix.sum(dim=1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
+
+
+def test_create_projection_graph_provider_from_graph() -> None:
+    graph = HeteroData()
+    graph["src"].num_nodes = 2
+    graph["dst"].num_nodes = 2
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1], [0, 1]])
+    graph[("src", "to", "dst")].gauss_weight = torch.ones(2)
+
+    provider = create_projection_graph_provider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="gauss_weight",
+    )
+
+    assert torch.allclose(provider.get_edges().to_dense(), torch.eye(2))
+
+
+def test_normalize_projection_edges_name_accepts_common_forms() -> None:
+    assert normalize_projection_edges_name(["src", "to", "dst"]) == ("src", "to", "dst")
+    assert normalize_projection_edges_name(["src", "dst"]) == ("src", "to", "dst")
+    assert normalize_projection_edges_name("src/to/dst") == ("src", "to", "dst")
+    assert normalize_projection_edges_name("src/dst") == ("src", "to", "dst")
+
+    with pytest.raises(ValueError, match="2 or 3"):
+        normalize_projection_edges_name(["src"])
+
+
+def test_create_projection_graph_provider_rejects_mixed_file_and_graph() -> None:
+    graph = HeteroData()
+
+    with pytest.raises(ValueError, match="either file_path or graph"):
+        create_projection_graph_provider(
+            graph=graph,
+            edges_name=("src", "to", "dst"),
+            file_path="projection.npz",
+        )
 
 
 def _make_graph_with_edges() -> HeteroData:

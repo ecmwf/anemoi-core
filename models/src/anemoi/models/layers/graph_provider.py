@@ -94,6 +94,40 @@ def normalize_projection_edges_name(
     raise ValueError(f"edges_name must be str, tuple, list, or None, got {type(edges_name)}")
 
 
+def create_projection_graph_provider(
+    *,
+    graph: HeteroData | None = None,
+    edges_name: str | tuple[str, str, str] | list[str] | None = None,
+    file_path: str | Path | None = None,
+    edge_weight_attribute: str | None = None,
+    src_node_weight_attribute: str | None = None,
+    row_normalize: bool = False,
+) -> "ProjectionGraphProvider":
+    """Create a projection graph provider from resolved inputs."""
+    if file_path is not None:
+        if graph is not None or edges_name is not None:
+            msg = "Projection graph provider accepts either file_path or graph and edges_name."
+            raise ValueError(msg)
+        return ProjectionGraphProvider(
+            file_path=file_path,
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
+            row_normalize=row_normalize,
+        )
+
+    if graph is None or edges_name is None:
+        msg = "Projection graph provider requires either file_path or graph and edges_name."
+        raise ValueError(msg)
+
+    return ProjectionGraphProvider(
+        graph=graph,
+        edges_name=normalize_projection_edges_name(edges_name),
+        edge_weight_attribute=edge_weight_attribute,
+        src_node_weight_attribute=src_node_weight_attribute,
+        row_normalize=row_normalize,
+    )
+
+
 class BaseGraphProvider(nn.Module, ABC):
     """Base class for graph edge providers.
 
@@ -477,11 +511,17 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
         if file_path is not None:
             if src_node_weight_attribute is not None:
-                msg = f"Building ProjectionGraphProvider from file, so src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+                msg = (
+                    "Building ProjectionGraphProvider from file, so "
+                    f"src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
+                )
                 LOGGER.warning(msg)
 
             if edge_weight_attribute is not None:
-                msg = f"Building ProjectionGraphProvider from file, so edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+                msg = (
+                    "Building ProjectionGraphProvider from file, so "
+                    f"edge_weight_attribute='{edge_weight_attribute}' will be ignored."
+                )
                 LOGGER.warning(msg)
             self._build_from_file(file_path, row_normalize)
         else:
@@ -683,7 +723,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
             raise ValueError("projection config must specify at most one of 'matrix_path' or 'edges_name', not both")
 
         if has_matrix:
-            return cls(file_path=config["matrix_path"])
+            return cls(file_path=config["matrix_path"], row_normalize=bool(config.get("row_normalize", False)))
 
         if has_edges:
             if graph_data is None:
