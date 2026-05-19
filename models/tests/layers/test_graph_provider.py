@@ -11,6 +11,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
@@ -61,3 +62,47 @@ def test_projection_graph_provider_accepts_int32_edge_index() -> None:
     assert matrix.shape == (graph["dst"].num_nodes, graph["src"].num_nodes)
     row_sums = matrix.sum(dim=1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
+
+
+def _make_static_graph_provider() -> StaticGraphProvider:
+    graph = HeteroData()
+    graph.edge_index = torch.tensor([[0, 1, 2, 0], [1, 0, 1, 0]], dtype=torch.long)
+    graph.edge_attr = torch.tensor([[0.0], [1.0], [2.0], [3.0]], dtype=torch.float32)
+
+    return StaticGraphProvider(
+        graph=graph,
+        edge_attributes=["edge_attr"],
+        src_size=3,
+        dst_size=2,
+        trainable_size=2,
+    )
+
+
+def test_static_graph_provider_permutes_legacy_trainable_state_on_load() -> None:
+    provider = _make_static_graph_provider()
+    legacy_trainable = torch.tensor(
+        [[10.0, 11.0], [20.0, 21.0], [30.0, 31.0], [40.0, 41.0]],
+        dtype=torch.float32,
+    )
+    legacy_state_dict = {"trainable.trainable": legacy_trainable.clone()}
+
+    provider.load_state_dict(legacy_state_dict, strict=True)
+
+    expected = legacy_trainable.index_select(0, provider.perm)
+    assert torch.equal(provider.trainable.trainable, expected)
+
+
+def test_static_graph_provider_does_not_repermute_current_trainable_state() -> None:
+    provider = _make_static_graph_provider()
+    current_trainable = torch.tensor(
+        [[100.0, 101.0], [200.0, 201.0], [300.0, 301.0], [400.0, 401.0]],
+        dtype=torch.float32,
+    )
+    provider.trainable.trainable.data.copy_(current_trainable)
+
+    state_dict = provider.state_dict()
+
+    reloaded_provider = _make_static_graph_provider()
+    reloaded_provider.load_state_dict(state_dict, strict=True)
+
+    assert torch.equal(reloaded_provider.trainable.trainable, current_trainable)
