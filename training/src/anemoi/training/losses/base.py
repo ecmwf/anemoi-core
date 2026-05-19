@@ -48,11 +48,6 @@ class BaseLoss(nn.Module, ABC):
     ) -> None:
         """Node- and feature_weighted Loss.
 
-        Exposes:
-        - self.avg_function: torch.mean
-        - self.sum_function: torch.sum
-        depending on the value of `ignore_nans`
-
         Registers:
         - self.scaler: ScaleTensor modified with `add_scaler` and `update_scaler`
 
@@ -72,8 +67,6 @@ class BaseLoss(nn.Module, ABC):
 
         self.add_module("scaler", ScaleTensor())
 
-        self.avg_function = torch.mean
-        self.sum_function = torch.sum
         self.ignore_nans = ignore_nans
 
         self.supports_sharding = True
@@ -186,9 +179,9 @@ class BaseLoss(nn.Module, ABC):
         """
         if squash:
             if squash_mode == "avg":
-                out = self.avg_function(out, dim=TensorDim.VARIABLE, keepdim=True)
+                out = torch.mean(out, dim=TensorDim.VARIABLE, keepdim=True)
             elif squash_mode == "sum":
-                out = self.sum_function(out, dim=TensorDim.VARIABLE, keepdim=True)
+                out = torch.sum(out, dim=TensorDim.VARIABLE, keepdim=True)
             else:
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
@@ -196,7 +189,7 @@ class BaseLoss(nn.Module, ABC):
         # here the grid and time dimension are summed because
         # 1. the normalisation over grid points is handled in the node weighting
         # 2. the normalization over output steps is handled by the time_step scaler
-        space_time_summed = self.sum_function(
+        space_time_summed = torch.sum(
             out,
             dim=(
                 TensorDim.TIME,
@@ -204,7 +197,7 @@ class BaseLoss(nn.Module, ABC):
             ),
             keepdim=True,
         )
-        out = self.avg_function(
+        out = torch.mean(
             space_time_summed,
             dim=(
                 TensorDim.BATCH_SIZE,
