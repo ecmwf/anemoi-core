@@ -16,6 +16,7 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import Squash_mode
 
 LOGGER = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class CRPS(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "sum",
+        squash_mode: Squash_mode = "sum",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 

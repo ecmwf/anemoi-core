@@ -13,6 +13,7 @@ import logging
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class RMSELoss(MSELoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         """Calculates the RMSE loss.
 

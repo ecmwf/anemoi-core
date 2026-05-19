@@ -35,6 +35,7 @@ from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.kcrps import CRPS
 from anemoi.training.losses.kcrps import CRPSBackend
 from anemoi.training.utils.enums import TensorDim
@@ -147,7 +148,7 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
@@ -181,7 +182,7 @@ class LogSpectralDistance(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -217,7 +218,7 @@ class FourierCorrelationLoss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -316,7 +317,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
