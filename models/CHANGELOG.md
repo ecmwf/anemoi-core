@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.15.1](https://github.com/ecmwf/anemoi-core/compare/models-0.15.0...models-0.15.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* Include anemoi-graphs as models dependancy ([#1119](https://github.com/ecmwf/anemoi-core/issues/1119)) ([538e89c](https://github.com/ecmwf/anemoi-core/commit/538e89c711d6537c8ff0782d1f729a9f2ba34889))
+
+## [0.15.0](https://github.com/ecmwf/anemoi-core/compare/models-0.14.1...models-0.15.0) (2026-05-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** Consolidate CRPS losses ([#1094](https://github.com/ecmwf/anemoi-core/issues/1094))
+* **training:** Configurable weight averaging (exponential moving average (EMA), ...) ([#743](https://github.com/ecmwf/anemoi-core/issues/743))
+
+### Features
+
+* Graph for skipped and multiscale suggestions ([#1052](https://github.com/ecmwf/anemoi-core/issues/1052)) ([a5eeaef](https://github.com/ecmwf/anemoi-core/commit/a5eeaef1615906974f684e39197f17be7fe9afb4))
+* **models:** Learnable Residual Connections ([#1048](https://github.com/ecmwf/anemoi-core/issues/1048)) ([99c63eb](https://github.com/ecmwf/anemoi-core/commit/99c63eb4abf126bdaecf8759175a0da254c68ea1))
+* **models:** Runtime env vars to override attention backends ([#1091](https://github.com/ecmwf/anemoi-core/issues/1091)) ([c1d8395](https://github.com/ecmwf/anemoi-core/commit/c1d83955eda1d75001d09f2b686fb0a388218ab6))
+* **training:** Configurable weight averaging (exponential moving average (EMA), ...) ([#743](https://github.com/ecmwf/anemoi-core/issues/743)) ([8713d12](https://github.com/ecmwf/anemoi-core/commit/8713d1243df0a4d51249227b1100d42c631e5415))
+* **training:** Consolidate CRPS losses ([#1094](https://github.com/ecmwf/anemoi-core/issues/1094)) ([58df693](https://github.com/ecmwf/anemoi-core/commit/58df69317eee301d56a480fa2da9251ae299e535))
+
+
+### Bug Fixes
+
+* Schemas for learnable residual connections. ([#1106](https://github.com/ecmwf/anemoi-core/issues/1106)) ([fa4ed91](https://github.com/ecmwf/anemoi-core/commit/fa4ed912cd8aa911f6d668da5e8202c7d4683e39))
+
 ## [0.14.1](https://github.com/ecmwf/anemoi-core/compare/models-0.14.0...models-0.14.1) (2026-04-23)
 
 
