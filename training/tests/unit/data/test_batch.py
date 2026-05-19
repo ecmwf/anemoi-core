@@ -15,7 +15,7 @@ import torch
 from anemoi.training.data.batch import BOUNDARIES_META_KEY
 from anemoi.training.data.batch import STATIC_COORDS_META_KEY
 from anemoi.training.data.batch import Batch
-from anemoi.training.data.batch import DatasetView
+from anemoi.training.data.batch import SourceView
 from anemoi.models.data.tensor_layout import TensorLayout
 
 
@@ -63,7 +63,7 @@ def test_batch_basic_construction_and_access() -> None:
 
     # Rich per-dataset view available via .view().
     view = batch["a"]
-    assert isinstance(view, DatasetView)
+    assert isinstance(view, SourceView)
     assert view.name == "a"
     assert view.data is data["a"]
     assert view.coordinates is coordinates["a"]
@@ -259,6 +259,53 @@ def test_with_data_supports_multiple_datasets() -> None:
     assert new_batch.coordinates["b"] is coords_b
 
 
+def test_batch_apply_uses_dataset_processor_and_preserves_envelope() -> None:
+    coords_ref = _make_coordinates()
+    layout = _gridded_layout()
+    batch = Batch(
+        data={"a": torch.zeros(2, 1, 1, 4, 2)},
+        coordinates={"a": coords_ref},
+        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        layouts={"a": layout},
+    )
+
+    seen_layouts = []
+
+    def processor(tensor: torch.Tensor, *, layout: TensorLayout) -> torch.Tensor:
+        seen_layouts.append(layout)
+        return tensor + 1
+
+    result = batch.apply({"a": processor})
+
+    assert torch.equal(result.data["a"], torch.ones(2, 1, 1, 4, 2))
+    assert seen_layouts == [layout]
+    assert result.coordinates is batch.coordinates
+    assert result.coordinates["a"] is coords_ref
+    assert result.metadata is batch.metadata
+
+
+def test_batch_apply_handles_sparse_list_payloads() -> None:
+    layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    batch = Batch(
+        data={"obs": [torch.zeros(1, 5, 3), torch.ones(1, 7, 3)]},
+        layouts={"obs": layout},
+    )
+
+    seen_shapes = []
+
+    def processor(tensor: torch.Tensor, *, layout: TensorLayout) -> torch.Tensor:
+        seen_shapes.append(tuple(tensor.shape))
+        assert layout.time_in_grid
+        return tensor + 2
+
+    result = batch.apply({"obs": processor})
+
+    assert isinstance(result.data["obs"], list)
+    assert seen_shapes == [(1, 5, 3), (1, 7, 3)]
+    assert torch.equal(result.data["obs"][0], torch.full((1, 5, 3), 2.0))
+    assert torch.equal(result.data["obs"][1], torch.full((1, 7, 3), 3.0))
+
+
 # ---------------------------------------------------------------- node_coords
 
 
@@ -420,3 +467,52 @@ def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
     assert batch.data["grid"].shape == (2, 1, 1, 4, 3)
     assert batch.layouts["grid"] == sample_layout.with_batch_dim()
     assert batch.layouts["grid"].batch == 0
+
+
+def test_batch_select_time_updates_sparse_envelope() -> None:
+    """Selecting sparse time slices must also update coords, timedeltas and boundaries."""
+    layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+
+    data = [
+        torch.arange(1 * 5 * 2, dtype=torch.float32).reshape(1, 5, 2),
+        torch.arange(1 * 6 * 2, dtype=torch.float32).reshape(1, 6, 2),
+    ]
+    coordinates = [
+        torch.arange(5 * 2, dtype=torch.float32).reshape(5, 2),
+        torch.arange(6 * 2, dtype=torch.float32).reshape(6, 2),
+    ]
+    timedeltas = [
+        torch.arange(5, dtype=torch.float32),
+        torch.arange(6, dtype=torch.float32),
+    ]
+    boundaries = [
+        (slice(0, 2), slice(2, 5)),
+        (slice(0, 1), slice(1, 6)),
+    ]
+
+    batch = Batch(
+        data={"obs": data},
+        coordinates={"obs": coordinates},
+        timedeltas={"obs": timedeltas},
+        metadata={"obs": {BOUNDARIES_META_KEY: boundaries}},
+        layouts={"obs": layout},
+    )
+
+    selected = batch.select(time={"obs": [1]})
+
+    assert isinstance(selected.data["obs"], list)
+    assert selected.data["obs"][0].shape == (1, 3, 2)
+    assert selected.data["obs"][1].shape == (1, 5, 2)
+
+    assert isinstance(selected.coordinates["obs"], list)
+    assert selected.coordinates["obs"][0].shape == (3, 2)
+    assert selected.coordinates["obs"][1].shape == (5, 2)
+
+    assert isinstance(selected.timedeltas["obs"], list)
+    assert selected.timedeltas["obs"][0].shape == (3,)
+    assert selected.timedeltas["obs"][1].shape == (5,)
+
+    assert selected.metadata["obs"][BOUNDARIES_META_KEY] == [
+        (slice(0, 3),),
+        (slice(0, 5),),
+    ]

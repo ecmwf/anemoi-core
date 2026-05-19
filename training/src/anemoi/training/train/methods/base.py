@@ -809,8 +809,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
 
-        # Batch normalization
-        batch = self._normalize_batch(batch)
+        # Batch normalization (the underlying ``batch.data`` dict should be mutated in-place)
+        batch = batch.apply(self.model.pre_processors)
 
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
@@ -876,36 +876,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> Batch:
         """Transfer the :class:`Batch` to ``device`` (skipping static coords)."""
         return batch.to(device, non_blocking=True)
-
-    def _normalize_batch(self, batch: Batch) -> Batch:
-        """Normalize batch for training and validation before every step.
-
-        Parameters
-        ----------
-        batch : Batch
-            Batch to prepare
-
-        Returns
-        -------
-        Batch
-            Normalized batch (the underlying ``batch.data`` dict is mutated
-            in-place).
-        """
-        assert isinstance(batch, Batch), "batch must be a Batch instance"
-        for dataset_name in batch.data:
-            pre_processor = self.model.pre_processors[dataset_name]
-            payload = batch.data[dataset_name]
-            layout = batch.layouts.get(dataset_name)
-            # Sparse observation datasets carry their per-sample tensors as
-            # ``list[Tensor]`` (varying ``N_i``). Apply the pre-processor to
-            # each entry independently rather than to the list as a whole.
-            # The stored layout already matches per-sample tensors (no batch
-            # axis), so we pass it through unchanged.
-            if isinstance(payload, list):
-                batch.data[dataset_name] = [pre_processor(t, layout=layout) for t in payload]
-            else:
-                batch.data[dataset_name] = pre_processor(payload, layout=layout)
-        return batch
 
     def _prepare_loss_scalers(self) -> None:
         """Prepare scalers for training and validation before every step."""

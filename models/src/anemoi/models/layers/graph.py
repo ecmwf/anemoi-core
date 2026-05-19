@@ -112,6 +112,10 @@ class NamedNodesAttributes(nn.Module):
 
         return self.trainable_tensors[name](batch_size)
 
+    def __contains__(self, name: str) -> bool:
+        """Check if a node group exists in the named nodes attributes."""
+        return name in self.trainable_tensors and self.num_trainable_parameters[name] > 0
+
     def __repr__(self) -> str:
         names = sorted(
             set(self.num_nodes) | set(self.num_trainable_parameters) | set(self.trainable_tensors),

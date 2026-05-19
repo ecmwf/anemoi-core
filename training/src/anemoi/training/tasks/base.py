@@ -150,7 +150,7 @@ class BaseTask(ABC):
         var_indices = {
             dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names
         }
-        new_batch = batch.select_time(time_indices).select_vars(var_indices)
+        new_batch = batch.select(time=time_indices, variables=var_indices)
         for dataset_name, payload in new_batch.data.items():
             LOGGER.debug(
                 "SHAPE: x[%s] = %s",
@@ -181,7 +181,7 @@ class BaseTask(ABC):
         time_indices = self.get_batch_output_indices(**kwargs)
         time_indices = normalize_time_indices(time_indices)
 
-        new_batch = batch.select_time(time_indices)
+        new_batch = batch.select(time=time_indices)
         for dataset_name, payload in new_batch.data.items():
             LOGGER.debug(
                 "SHAPE: y[%s] = %s",

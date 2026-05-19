@@ -299,8 +299,8 @@ class FunctionalLoss(BaseLoss):
 
     def forward(
         self,
-        pred: "DatasetView",
-        target: "DatasetView",
+        pred: "SourceView",
+        target: "SourceView",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,

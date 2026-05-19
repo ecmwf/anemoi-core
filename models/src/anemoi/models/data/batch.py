@@ -10,16 +10,20 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Mapping
 from collections.abc import Sequence
+from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
 
 import torch
 from torch.utils.data import default_collate
+
+from anemoi.models.data.dataset_view import SourceView, create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
-from anemoi.models.data.dataset_view import DatasetView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +35,9 @@ STATIC_COORDS_META_KEY = "static_coords"
 # as a ``list[tuple[slice, ...]]`` (one entry per batch sample). Untouched by
 # device transfer / pinning since ``slice`` is not a tensor.
 BOUNDARIES_META_KEY = "boundaries"
+
+
+IndicesType = slice | Sequence[int] | int
 
 
 def _to_device(value, device, *, non_blocking: bool):
@@ -49,6 +56,12 @@ def _pin_memory(value):
     if isinstance(value, list):
         return [_pin_memory(v) for v in value]
     return value
+
+def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
+    """Broadcast a non-dict value to a dict with the same value for each key."""
+    if isinstance(value, dict):
+        return value
+    return {key: value for key in keys}
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +161,7 @@ class Batch:
         lines.append(")")
         return "\n".join(lines)
 
-    def __getitem__(self, dataset_name: str) -> "DatasetView":
+    def __getitem__(self, dataset_name: str) -> "SourceView":
         """Return a per-dataset view bundling data, coordinates, layout and metadata."""
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
@@ -164,7 +177,7 @@ class Batch:
 
         per_dataset_meta = self.metadata.get(dataset_name) if isinstance(self.metadata.get(dataset_name), dict) else None
         boundaries = per_dataset_meta.get(BOUNDARIES_META_KEY) if per_dataset_meta else None
-        return DatasetView(
+        return create_source_view(
             name=dataset_name,
             data=self.data[dataset_name],
             coordinates=self.coordinates.get(dataset_name),
@@ -255,7 +268,7 @@ class Batch:
             layouts=self.layouts,
         )
 
-    def with_data(self, new_data: dict[str, torch.Tensor]) -> "Batch":
+    def with_data(self, new_data: dict[str, torch.Tensor | list[torch.Tensor]]) -> "Batch":
         """Return a new :class:`Batch` with ``data`` replaced by ``new_data``.
 
         ``coordinates``, ``timedeltas`` and ``metadata`` are shared by
@@ -266,7 +279,7 @@ class Batch:
 
         Parameters
         ----------
-        new_data : dict[str, torch.Tensor]
+        new_data : dict[str, torch.Tensor | list[torch.Tensor]]
             Replacement data tensors. Must cover the same dataset names
             as ``self.data``.
 
@@ -300,34 +313,47 @@ class Batch:
             layouts={name: self.layouts[name] for name in new_data_keys},
         )
 
-    def select_time(self, indices: "slice | Sequence[int] | int") -> "Batch":
-        """Return a new :class:`Batch` with each dataset restricted to ``indices``.
-
-        Delegates per dataset to :meth:`DatasetView.select_time`, which
-        dispatches on ``layout.time_in_grid`` to handle gridded and
-        sparse observation datasets uniformly.
-        """
+    def apply(
+        self,
+        func: Mapping[str, Callable[..., torch.Tensor]] | Callable[..., torch.Tensor],
+        **kwargs: Any
+    ) -> "Batch":
+        """Return a new batch with one processor applied per dataset."""
         new_data = {}
-        new_coords = dict(self.coordinates)
-        new_timedeltas = dict(self.timedeltas)
-        new_metadata = dict(self.metadata)
-
         for name in self.dataset_names:
-            view = self[name].select_time(indices)
-            new_data[name] = view.data
-            if view.coordinates is not None and name in self.coordinates:
-                new_coords[name] = view.coordinates
-            if view.timedeltas is not None and name in self.timedeltas:
-                new_timedeltas[name] = view.timedeltas
-            if view.boundaries is not None:
-                # Mirror the updated boundaries back into per-dataset metadata.
-                per_ds = dict(new_metadata.get(name, {})) if isinstance(new_metadata.get(name), dict) else {}
-                per_ds[BOUNDARIES_META_KEY] = view.boundaries
-                new_metadata[name] = per_ds
+            if name not in func:
+                msg = f"No function provided for dataset {name!r}."
+                raise KeyError(msg)
+            new_data[name] = self[name].apply(func[name], **kwargs).data
+
+        return self.with_data(new_data)
+
+    def _update_source(self, source_name: str, source_view: SourceView) -> "Batch":
+        """Return a new batch with one dataset replaced from a ``SourceView``."""
+        new_data = {**self.data, source_name: source_view.data}
+
+        new_coordinates = dict(self.coordinates)
+        if source_view.coordinates is None:
+            new_coordinates.pop(source_name, None)
+        else:
+            new_coordinates[source_name] = source_view.coordinates
+
+        new_timedeltas = dict(self.timedeltas)
+        if source_view.timedeltas is None:
+            new_timedeltas.pop(source_name, None)
+        else:
+            new_timedeltas[source_name] = source_view.timedeltas
+
+        new_metadata = dict(self.metadata)
+        if source_view.boundaries is not None:
+            per_dataset_meta = new_metadata.get(source_name)
+            per_dataset_meta = dict(per_dataset_meta) if isinstance(per_dataset_meta, dict) else {}
+            per_dataset_meta[BOUNDARIES_META_KEY] = source_view.boundaries
+            new_metadata[source_name] = per_dataset_meta
 
         return Batch(
             data=new_data,
-            coordinates=new_coords,
+            coordinates=new_coordinates,
             metadata=new_metadata,
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
@@ -335,18 +361,21 @@ class Batch:
             layouts=self.layouts,
         )
 
-    def select_vars(self, indices_per_dataset: dict[str, Sequence[int] | torch.Tensor | slice]) -> "Batch":
-        """Return a new :class:`Batch` with per-dataset variable indexing applied.
+    def select(self, **kwargs) -> "Batch":
+        """Return a new :class:`Batch` with per-dataset selection applied."""
+        per_source_indices = defaultdict(dict)
+        for dim, indices in kwargs.items():
+            # if indices is not a dict, broadcast the same indexing to every dataset.
+            indices_dict = _broadcast_to_dict(indices, self.dataset_names)
+            for source_name, idx in indices_dict.items():
+                per_source_indices[source_name][dim] = idx
 
-        Datasets absent from ``indices_per_dataset`` pass through unchanged.
-        """
-        new_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
-        for name in self.dataset_names:
-            if name in indices_per_dataset:
-                new_data[name] = self[name].select_vars(indices_per_dataset[name]).data
-            else:
-                new_data[name] = self.data[name]
-        return self.with_data(new_data)
+        batch = self
+        for source_name, per_source_idx in per_source_indices.items():
+            selected_source = batch[source_name].select(**per_source_idx)
+            batch = batch._update_source(source_name, selected_source)
+
+        return batch
 
     @staticmethod
     def collate(
