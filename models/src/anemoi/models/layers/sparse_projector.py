@@ -38,3 +38,24 @@ class SparseProjector(torch.nn.Module):
             for i in range(x.shape[0]):
                 out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
         return torch.stack(out)
+
+    def apply_with_provider(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
+        """Apply projection via *provider*, handling arbitrary leading dimensions.
+
+        Parameters
+        ----------
+        batch:
+            Input tensor of shape ``[..., nodes, vars]``.
+        provider:
+            Object with a ``get_edges(device=...)`` method returning the sparse matrix.
+
+        Returns
+        -------
+        torch.Tensor
+            Projected tensor of shape ``[..., dst_nodes, vars]``.
+        """
+        input_shape = batch.shape
+        batch = batch.reshape(-1, *input_shape[-2:])
+        projection_matrix = provider.get_edges(device=batch.device)
+        batch = self(batch, projection_matrix)
+        return batch.reshape(*input_shape[:-2], *batch.shape[-2:])
