@@ -16,6 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -133,6 +134,13 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_num_groups = ens_comm_subgroup_num_groups
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
+    @property
+    def plot_adapter(self) -> EnsemblePlotAdapterWrapper:
+        """Wrap the task's plot adapter with ensemble handling."""
+        if not hasattr(self, "_ensemble_plot_adapter"):
+            self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
+        return self._ensemble_plot_adapter
+
     def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
         x = {}
@@ -174,7 +182,7 @@ class EnsembleTraining(BaseTrainingModule):
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=TensorDim.ENSEMBLE_DIM,
-            shapes=[y_pred.shape] * self.ens_comm_subgroup_size,
+            sizes=[y_pred.size(TensorDim.ENSEMBLE_DIM)] * self.ens_comm_subgroup_size,
             mgroup=self.ens_comm_subgroup,
         )
 
@@ -182,8 +190,6 @@ class EnsembleTraining(BaseTrainingModule):
             y_pred_ens,
             y,
             grid_shard_slice=self.grid_shard_slice[dataset_name],
-            grid_dim=self.grid_dim,
-            grid_shard_shape=self.grid_shard_shapes,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
@@ -218,7 +224,7 @@ class EnsembleTraining(BaseTrainingModule):
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 
