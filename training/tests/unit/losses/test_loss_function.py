@@ -565,6 +565,7 @@ def test_spectral_crps_with_target_without_ensemble_dim() -> None:
     grid = x_dim * y_dim
 
     pred = torch.randn(bs, 1, ens, grid, nvars)
+    pred.requires_grad_()
     target = torch.randn(bs, 1, grid, nvars)
     target[..., 0, 0] = torch.nan
 
@@ -588,6 +589,9 @@ def test_spectral_crps_with_target_without_ensemble_dim() -> None:
     out_total = loss(pred, target, squash=True)
     assert out_total.numel() == 1, "squash=True should return scalar CRPS"
     assert torch.isfinite(out_total).all(), "Expected finite scalar loss with ignore_nans=True"
+
+    (grad,) = torch.autograd.grad(out_total, pred, retain_graph=True)
+    assert torch.isfinite(grad).all(), "Expected finite gradients"
 
 
 def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
