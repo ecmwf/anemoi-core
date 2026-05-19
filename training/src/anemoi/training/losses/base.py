@@ -333,10 +333,21 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
+        nan_fraction = 0.
         if self.ignore_nans:
             nan_mask = torch.isnan(target)
             target = target.masked_fill(nan_mask, 0.0)
             pred = pred.masked_fill(nan_mask, 0.0)
+
+            nan_fraction = float(nan_mask.float().mean()) # no grad
+
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
+        out = self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
+
+        if squash and squash_mode == "avg":
+            # Scale the result with the amount of nans.
+            # This adjusts the lost between steps with varying amounts of nans.
+            out /= (1 - nan_fraction)
+
+        return out
