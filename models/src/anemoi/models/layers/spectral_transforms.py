@@ -55,7 +55,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
-        apply_filter: bool = True,
+        apply_filter: bool = False,
         nodes_slice: tuple[int, int | None] | None = None,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
@@ -72,9 +72,6 @@ class FFT2D(SpectralTransform):
             size of the spatial dimension y of the original data in 2D
         apply_filter: bool
             Apply low-pass filter to ignore frequencies beyond the Nyquist limit
-        nodes_slice: tuple[int, int] | None
-            Optional slice `(start, end)` to select a subset of nodes for the FFT.
-            If None, all nodes are used.
         patch_size: tuple[int, int] | None
             Optional patch size `(patch_y, patch_x)` for patch-wise FFT.
             If None, FFT is applied on the full `(y, x)` field.
@@ -94,9 +91,6 @@ class FFT2D(SpectralTransform):
         self.patch_padding = patch_padding
         self.patch_pad_y = 0
         self.patch_pad_x = 0
-        nodes_slice = nodes_slice or (0, None)  # we don't want einops to silently fail
-        # by slicing random parts of the input
-        self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
 
         if self.patch_size is not None:
@@ -132,23 +126,16 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
-    def prepare_for_fft(self, data: torch.Tensor):
-        """Prepare data for FFT by selecting nodes and reshaping."""
-
-        # select nodes based on provided nodes_slice
-        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
-
-        # reshape to 2D
+    def prepare_for_fft(self, data: torch.Tensor) -> torch.Tensor:
+        """Reshape data from flat ``(nodes, vars)`` to ``(y, x, vars)``."""
         var = data.shape[-1]
         try:
-            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+            return einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
         except Exception as e:
             raise einops.EinopsError(
                 f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
                 f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
             ) from e
-
-        return data
 
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
@@ -377,11 +364,22 @@ class InverseRegularSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
-    **kwargs : Any
-        Additional keyword arguments.
+    **kwargs : dict
+        Additional keyword arguments (ignored).
     """
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        """Initialize InverseRegularSHT.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
         super().__init__()
         self.nlat = nlat
         self.nlon = 2 * nlat
@@ -403,11 +401,22 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
-    **kwargs : Any
-        Additional keyword arguments.
+    **kwargs : dict
+        Additional keyword arguments (ignored).
     """
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        """Initialize InverseOctahedralSHT.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]

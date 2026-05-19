@@ -62,9 +62,17 @@ reference it in the config as follows:
 
 The following probabilistic loss functions are available by default:
 
--  ``KernelCRPSLoss``: Kernel CRPS loss.
--  ``AlmostFairKernelCRPSLoss``: Almost fair Kernel CRPS loss see `Lang
-   et al. (2024) <http://arxiv.org/abs/2412.15832>`_.
+-  ``CRPS``: Kernel CRPS loss for ensemble predictions. ``alpha=0`` gives
+   standard CRPS, ``alpha=1`` gives fair CRPS, and values between 0 and 1
+   give the almost fair CRPS formulation (`Lang et al. (2024)
+   <http://arxiv.org/abs/2412.15832>`_). The default ``alpha: 0.95``
+   combines 5% standard CRPS with 95% fair CRPS.
+   The ``backend`` option can be set to:
+
+   - ``naive``: simple loop over unordered ensemble-member pairs, avoiding
+     materialization of the full pairwise tensor.
+   - ``stable``: materializes pairwise tensors and uses the numerically
+     stable all-pairs formulation.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
    handle noise weights
 
@@ -78,7 +86,7 @@ deterministic:
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.kcrps.KernelCRPSLoss
+            _target_: anemoi.training.losses.CRPS
             # loss function kwargs here
 
 .. _multiscale-loss-functions:
@@ -87,11 +95,12 @@ deterministic:
  Multiscale Loss Functions
 ***************************
 
-The ``MultiscaleLossWrapper`` wraps any base loss (e.g.
-``AlmostFairKernelCRPS``) and evaluates it at multiple spatial scales
-by progressively smoothing both predictions and targets. Each scale
-loss is computed on the *residual* between successive smoothing levels,
-so coarser scales capture large-scale errors and finer scales capture
+The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
+presented in <https://arxiv.org/abs/2506.10868>. It wraps any base loss
+(e.g. ``CRPS``) and evaluates it at multiple spatial scales by
+progressively smoothing both predictions and targets. Each scale loss is
+computed on the *residual* between successive smoothing levels, so
+coarser scales capture large-scale errors and finer scales capture
 small-scale structure.
 
 The number of weights must equal the number of smoothing levels. A final
@@ -117,11 +126,11 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
                base_sigma: 0.1
                scale_factor: 2                 # neighbours and sigma double each level
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
-               alpha: 1.0
+               alpha: 0.95
 
 File-based mode (load precomputed ``.npz`` matrices from disk):
 
@@ -140,7 +149,7 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
                   - filter_O96_w=gaussian_d=2.0x.npz
                   - null                                # full resolution (no smoothing)
             per_scale_loss:
-               _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+               _target_: anemoi.training.losses.CRPS
                scalers: ['node_weights']
                ignore_nans: False
                no_autocast: True
@@ -183,6 +192,90 @@ Supported transforms include:
    SHT-based transforms expect a flattened reduced-grid ordering:
    ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
    shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
+
+Spectral projections
+--------------------
+
+Before the spectral transform is applied, an optional sparse projection can remap
+the input field from its native (possibly unstructured) grid to the regular 2D grid
+expected by the transform. This is configured via the ``projection_config`` key and
+works with *any* spectral loss class (``SpectralCRPSLoss``, ``SpectralL2Loss``,
+``LogSpectralDistance``, ``FourierCorrelationLoss``, …).
+
+Two modes are available:
+
+- **From file** (``matrix_path``): load a precomputed sparse projection matrix from
+  an ``.npz`` file. This is the most efficient option when the same projection is
+  reused across many training runs.
+- **From graph**: derive the projection at training startup from the model graph.
+  The target grid can come from an existing edge set (``edges_name``) or be built
+  from scratch using any ``anemoi.graphs`` node builder (``node_builder`` +
+  ``num_nearest_neighbours`` + ``sigma``).
+
+Example: spectral CRPS with a precomputed projection matrix
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The typical setup for a limited-area model whose native grid is unstructured: the
+projection matrix (generated offline) maps grid points to the ``[y_dim, x_dim]``
+regular array expected by FFT2D.
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+         projection_config:
+           matrix_path: /path/to/projection.npz
+         # nodes_slice: [0, 32768] # stretched-grid case, need to select y*x points first
+
+Example: spectral L2 loss with a graph-derived projection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The projection can also be built at training startup directly from the model graph.
+Use ``edges_name`` to reuse an existing edge set, or ``node_builder`` to define the
+target grid from scratch (here a regular lat/lon grid) and let Anemoi compute
+Gaussian-weighted nearest-neighbour weights.
+
+.. code-block:: yaml
+
+   # Option A: reuse an existing graph edge set
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralL2Loss  # any spectral loss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+         projection_config:
+           edges_name: data/to/target_grid  # "src/rel/dst" or [src, rel, dst]
+
+.. code-block:: yaml
+
+   # Option B: build the target grid on the fly with a node builder
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralL2Loss  # any spectral loss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+         projection_config:
+           node_builder:
+             _target_: anemoi.graphs.nodes.LatLonNodes
+             # latitudes/longitudes define the regular target grid, e.g.:
+             #   import numpy as np
+             #   lats = np.repeat(np.linspace(90, -90, y_dim), x_dim)
+             #   lons = np.tile(np.linspace(0, 360, x_dim, endpoint=False), y_dim)
+             latitudes: [...]   # y_dim * x_dim values
+             longitudes: [...]  # y_dim * x_dim values
+             name: projection_target
+           num_nearest_neighbours: 4
+           sigma: 0.5
+           row_normalize: false
 
 Spectral kernel CRPS
 --------------------
@@ -456,32 +549,10 @@ Validation metrics as defined in the config file at
 ``config.training.validation_metrics`` follow the same initialisation
 behaviour as the loss function, but can be a list. In this case all
 losses are calculated and logged as a dictionary with the corresponding
-name
+name.
 
-Scaling Validation Losses
-=========================
-
-Validation metrics can **not** by default be scaled by scalers across
-the variable dimension, but can be by all other scalers. If you want to
-scale a validation metric by the variable weights, it must be added to
-`config.training.scale_validation_metrics`.
-
-These metrics are then kept in the normalised, preprocessed space, and
-thus the indexing of scalers aligns with the indexing of the tensors.
-
-By default, only `all` is kept in the normalised space and scaled.
-
-.. code:: yaml
-
-   # List of validation metrics to keep in normalised space, and scalers to be applied
-   # Use '*' in reference all metrics, or a list of metric names.
-   # Unlike above, variable scaling is possible due to these metrics being
-   # calculated in the same way as the training loss, within the model space.
-   scale_validation_metrics:
-   scalers_to_apply: ['variable']
-   metrics:
-      - 'all'
-      # - "*"
+Validation metrics can **not** be scaled by scalers across
+the variable dimension, but can be by all other scalers.
 
 ***********************
  Custom Loss Functions

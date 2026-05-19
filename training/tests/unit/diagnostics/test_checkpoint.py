@@ -11,6 +11,7 @@
 import datetime
 import shutil
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -94,6 +95,84 @@ def callback(tmp_path: str, checkpoint_settings: dict) -> AnemoiCheckpoint:
     )
     callback.dirpath = tmp_path
     return callback
+
+
+def test_on_train_start_initializes_timer(tmp_path: Path) -> None:
+    """Regression test for #952: on_train_start must initialize _last_time_checked via super().
+
+    Without the super() call, _last_time_checked stays None and every time-based checkpoint
+    is silently skipped because on_train_batch_end short-circuits on `prev_time_check is None`.
+    """
+    import time
+
+    dirpath = str(tmp_path) + "/test_timer_init"
+    callback = AnemoiCheckpoint(
+        filename="{step}",
+        save_last=True,
+        train_time_interval=datetime.timedelta(seconds=60),
+        save_top_k=1,
+        monitor="step",
+        mode="max",
+        dirpath=dirpath,
+    )
+
+    # Before on_train_start fires, the timer must be uninitialised
+    assert callback._last_time_checked is None, "_last_time_checked should be None before on_train_start"
+
+    trainer = MagicMock()
+    trainer.is_global_zero = False
+    pl_module = MagicMock()
+    before = time.monotonic()
+    callback.on_train_start(trainer, pl_module)
+    after = time.monotonic()
+
+    assert (
+        callback._last_time_checked is not None
+    ), "_last_time_checked is still None after on_train_start — super().on_train_start() is probably missing"
+    assert (
+        before <= callback._last_time_checked <= after
+    ), "_last_time_checked value is outside the expected time window"
+
+
+def test_time_based_checkpoint_skip_logic_after_interval(tmp_path: Path) -> None:
+    """Verify that after on_train_start + elapsed interval, skip_time evaluates to False.
+
+    This directly simulates the check inside ModelCheckpoint.on_train_batch_end and
+    confirms that the timer initialised by on_train_start works correctly.
+    """
+    import time
+
+    interval = datetime.timedelta(seconds=0.05)  # 50 ms
+    dirpath = str(tmp_path) + "/checkpoint_test"
+    callback = AnemoiCheckpoint(
+        filename="{step}",
+        save_last=True,
+        train_time_interval=interval,
+        save_top_k=1,
+        monitor="step",
+        mode="max",
+        dirpath=dirpath,
+    )
+    trainer = MagicMock()
+    trainer.is_global_zero = False
+    pl_module = MagicMock()
+    callback.on_train_start(trainer, pl_module)
+    # Simulate the skip_time check from on_train_batch_end BEFORE the interval passes
+    now = time.monotonic()
+    prev = callback._last_time_checked
+    skip_time_before = prev is None or (now - prev) < interval.total_seconds()
+    assert skip_time_before is True, "Checkpoint should be skipped immediately after start"
+
+    # Wait longer than the interval
+    time.sleep(0.1)  # 100 ms > 50 ms
+
+    # Simulate the skip_time check AFTER the interval has passed
+    now = time.monotonic()
+    skip_time_after = prev is None or (now - prev) < interval.total_seconds()
+    assert skip_time_after is False, (
+        "Checkpoint should NOT be skipped after the interval has elapsed — "
+        "if this fails, _last_time_checked was never set (super() missing)"
+    )
 
 
 @pytest.fixture

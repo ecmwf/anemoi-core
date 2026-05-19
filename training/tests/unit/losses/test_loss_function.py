@@ -14,10 +14,9 @@ from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses import AlmostFairKernelCRPS
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
-from anemoi.training.losses import KernelCRPS
 from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
@@ -31,7 +30,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
-losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, KernelCRPS, AlmostFairKernelCRPS, WeightedMSELoss]
+losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
 spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
 losses += spectral_losses
 
@@ -43,6 +42,47 @@ losses += spectral_losses
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
     loss = loss_cls(x_dim=4, y_dim=4) if loss_cls in spectral_losses else loss_cls()
     assert isinstance(loss, BaseLoss)
+
+
+def _expected_crps(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
+    ens_size = preds.shape[-1]
+    mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)
+    pair_sum = torch.zeros_like(mae)
+    for i in range(ens_size - 1):
+        pair_sum += torch.sum(torch.abs(preds[..., i].unsqueeze(-1) - preds[..., i + 1 :]), dim=-1)
+    coef = -(alpha / (ens_size * (ens_size - 1)) + (1.0 - alpha) / (ens_size**2))
+    return mae + coef * pair_sum
+
+
+def test_crps_defaults_to_almost_fair_stable_backend() -> None:
+    loss = CRPS()
+    assert loss.alpha == 0.95
+    assert loss.backend == "stable"
+    assert loss.name == "crps0.95"
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.5, 0.95, 1.0])
+def test_crps_backends_match_expected_formula(alpha: float) -> None:
+    preds = torch.randn(2, 2, 3, 4, 5, dtype=torch.float64)
+    targets = torch.randn(2, 2, 3, 4, dtype=torch.float64)
+
+    expected = _expected_crps(preds, targets, alpha)
+    naive = CRPS(alpha=alpha, backend="naive")._kernel_crps(preds, targets)
+    stable = CRPS(alpha=alpha, backend="stable")._kernel_crps(preds, targets)
+
+    torch.testing.assert_close(naive, expected)
+    torch.testing.assert_close(stable, expected)
+
+
+@pytest.mark.parametrize("alpha", [-0.1, 1.1])
+def test_crps_rejects_invalid_alpha(alpha: float) -> None:
+    with pytest.raises(ValueError, match="alpha must be in the range"):
+        CRPS(alpha=alpha)
+
+
+def test_crps_rejects_invalid_backend() -> None:
+    with pytest.raises(ValueError, match="Unknown CRPS backend"):
+        CRPS(backend="unknown")  # type: ignore[arg-type]
 
 
 @pytest.fixture
@@ -531,10 +571,7 @@ def test_spectral_crps_projection_from_file(transform: str, mocker: MockerFixtur
     pred = torch.randn(bs, 1, ens, grid, nvars)
     target = torch.randn(bs, 1, 1, grid, nvars)
 
-    # Create a mock sparse matrix (e.g., identity)
     sparse_mat = eye(grid, format="csr")
-
-    # Mock scipy.sparse.load_npz to return our sparse matrix
     mocker.patch("scipy.sparse.load_npz", return_value=sparse_mat)
 
     loss = get_loss_function(
@@ -712,6 +749,111 @@ def test_spectral_crps_projection_uses_sharded_layout(mocker: MockerFixture) -> 
 
     assert out.shape == (nvars,)
     assert all_to_all.call_count == 4
+
+
+def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> None:
+    """Projection must be applied: a non-square matrix (n_src→n_dst) is used, FFT2D.
+
+    FFT2D is configured for n_dst. If projection is skipped the reshape raises EinopsError.
+    """
+    import numpy as np
+    from scipy.sparse import csr_matrix
+
+    n_src, x_dim, y_dim = 12, 4, 2  # 12 input nodes, project down to 8
+    n_dst = x_dim * y_dim
+    bs, nvars = 1, 2
+
+    # Simple non-square projection: first n_dst rows of identity (drop last 4 nodes)
+    proj = csr_matrix(np.eye(n_dst, n_src, dtype=np.float32))
+    mocker.patch("scipy.sparse.load_npz", return_value=proj)
+
+    loss = SpectralL2Loss(
+        transform="fft2d",
+        x_dim=x_dim,
+        y_dim=y_dim,
+        projection_config={"matrix_path": "/fake/path.npz"},
+    )
+
+    pred = torch.randn(bs, 1, 1, n_src, nvars)
+    target = torch.randn(bs, 1, 1, n_src, nvars)
+    result = loss(pred, target)
+    assert result.numel() == 1
+
+
+def test_spectral_loss_nodes_slice_actually_applied() -> None:
+    """nodes_slice must be applied: input has 2x the expected nodes, slice selects half.
+
+    If nodes_slice is skipped FFT2D fails to reshape the oversized spatial dimension.
+    """
+    x_dim, y_dim = 4, 2  # FFT2D expects 8 nodes
+    n_total = 16  # input has 16 nodes; slice=(0, 8) should reduce to 8
+    bs, nvars = 1, 2
+
+    loss = SpectralL2Loss(
+        transform="fft2d",
+        x_dim=x_dim,
+        y_dim=y_dim,
+        nodes_slice=(0, 8),
+    )
+
+    pred = torch.randn(bs, 1, 1, n_total, nvars)
+    target = torch.randn(bs, 1, 1, n_total, nvars)
+    result = loss(pred, target)
+    assert result.numel() == 1
+
+
+def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture) -> None:
+    """Projection that outputs wrong node count should raise on FFT2D reshape."""
+    import numpy as np
+    from scipy.sparse import csr_matrix
+
+    n_src, x_dim, y_dim = 12, 4, 2  # FFT2D expects 8 nodes
+    n_wrong = 10  # projection outputs 10 nodes, not 8
+    proj = csr_matrix(np.eye(n_wrong, n_src, dtype=np.float32))
+    mocker.patch("scipy.sparse.load_npz", return_value=proj)
+
+    loss = SpectralL2Loss(
+        transform="fft2d",
+        x_dim=x_dim,
+        y_dim=y_dim,
+        projection_config={"matrix_path": "/fake/path.npz"},
+    )
+    pred = torch.randn(1, 1, 1, n_src, 2)
+    target = torch.randn(1, 1, 1, n_src, 2)
+    with pytest.raises(einops.EinopsError):
+        loss(pred, target)
+
+
+def test_spectral_loss_nodes_slice_out_of_bounds_raises() -> None:
+    """nodes_slice that requests more nodes than available should raise."""
+    x_dim, y_dim = 4, 2  # expects 8 nodes
+    n_total = 6  # fewer nodes than slice end requests
+
+    loss = SpectralL2Loss(
+        transform="fft2d",
+        x_dim=x_dim,
+        y_dim=y_dim,
+        nodes_slice=(0, 8),  # requests 8 nodes but only 6 exist
+    )
+    pred = torch.randn(1, 1, 1, n_total, 2)
+    target = torch.randn(1, 1, 1, n_total, 2)
+
+    with pytest.raises(einops.EinopsError):
+        loss(pred, target)
+
+
+def test_spectral_loss_ambiguous_projection_config_raises() -> None:
+    """Specifying both matrix_path and edges_name in projection_config should raise."""
+    with pytest.raises(ValueError, match="at most one of"):
+        SpectralL2Loss(
+            transform="fft2d",
+            x_dim=4,
+            y_dim=2,
+            projection_config={
+                "matrix_path": "/fake/path.npz",
+                "edges_name": ("data", "to", "target"),
+            },
+        )
 
 
 def test_spectral_crps_with_target_without_ensemble_dim() -> None:

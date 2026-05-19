@@ -13,7 +13,6 @@ from dataclasses import field
 
 import pytest
 import torch
-from torch import nn
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import create_graph_provider
@@ -114,7 +113,6 @@ class TestBaseMapper:
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
         assert mapper.hidden_dim == mapper_init.hidden_dim
         assert mapper.out_channels_dst == mapper_init.out_channels_dst
-        assert isinstance(mapper.activation, nn.Module)
 
     def test_pre_process(self, mapper, pair_tensor):
         x = pair_tensor

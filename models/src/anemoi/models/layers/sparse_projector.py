@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import torch
 
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
-
 
 class SparseProjector(torch.nn.Module):
     """Applies sparse projection matrix to input tensors.
@@ -43,20 +41,37 @@ class SparseProjector(torch.nn.Module):
                 out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
         return torch.stack(out)
 
+    def apply_with_provider(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
+        """Apply projection via *provider*, handling arbitrary leading dimensions.
+
+        Parameters
+        ----------
+        batch:
+            Input tensor of shape ``[..., nodes, vars]``.
+        provider:
+            Object with a ``get_edges(device=...)`` method returning the sparse matrix.
+
+        Returns
+        -------
+        torch.Tensor
+            Projected tensor of shape ``[..., dst_nodes, vars]``.
+        """
+        return apply_sparse_projector_with_reshaping(self, batch, provider)
+
 
 def _projection_matrix(
-    projection: ProjectionGraphProvider | torch.Tensor,
+    projection: object | torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
-    if isinstance(projection, ProjectionGraphProvider):
-        return projection.get_edges(device=device)
-    return projection.to(device=device)
+    if isinstance(projection, torch.Tensor):
+        return projection.to(device=device)
+    return projection.get_edges(device=device)
 
 
 def apply_sparse_projector_with_reshaping(
     projector: SparseProjector,
     x: torch.Tensor,
-    projection: ProjectionGraphProvider | torch.Tensor,
+    projection: object | torch.Tensor,
 ) -> torch.Tensor:
     """Project trailing ``[grid, variables]`` dimensions."""
     input_shape = x.shape

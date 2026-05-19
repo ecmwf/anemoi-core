@@ -245,8 +245,7 @@ ScalerSchema = (
 
 
 class ImplementedLossesUsingBaseLossSchema(StrEnum):
-    kcrps = "anemoi.training.losses.kcrps.KernelCRPS"
-    afkcrps = "anemoi.training.losses.kcrps.AlmostFairKernelCRPS"
+    crps = "anemoi.training.losses.CRPS"
     rmse = "anemoi.training.losses.RMSELoss"
     mse = "anemoi.training.losses.MSELoss"
     weighted_mse = "anemoi.training.losses.WeightedMSELoss"
@@ -265,24 +264,19 @@ class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
     scalers: list[str] = Field(example=["variable"])  # TODO(Mario): Validate scalers are defined
-    "Scalars to include in loss calculation"
+    "Scalers to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
     target_variables: list[str] | None = None
 
 
-class KernelCRPSSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.kcrps.KernelCRPS"] = Field(..., alias="_target_")
-    fair: bool = True
-    "Calculate a 'fair' (unbiased) score - ensemble variance component weighted by (ens-size-1)^-1"
-
-
-class AlmostFairKernelCRPSSchema(BaseLossSchema):
-    target_: Literal["anemoi.training.losses.kcrps.AlmostFairKernelCRPS"] = Field(..., alias="_target_")
-    alpha: float = 1.0
-    """Factor for linear combination of fair (unbiased, ensemble variance component
-    weighted by (ens-size-1)^-1) and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)"""
+class CRPSSchema(BaseLossSchema):
+    alpha: float = Field(default=0.95, ge=0.0, le=1.0)
+    """Factor for linear combination of fair CRPS and standard CRPS.
+    Values between 0 and 1 give the almost fair CRPS formulation."""
+    backend: Literal["naive", "stable"] = "stable"
+    "Backend used for the point-wise CRPS calculation."
     no_autocast: bool = True
     "Deactivate autocast for the kernel CRPS calculation"
 
@@ -337,7 +331,7 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
 
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: AlmostFairKernelCRPSSchema | KernelCRPSSchema | BaseLossSchema
+    per_scale_loss: CRPSSchema | BaseLossSchema
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     # Deprecated: pass inside multiscale_config instead.
@@ -358,53 +352,80 @@ class MultiScaleLossSchema(BaseModel):
         return self
 
 
-class SpectralProjectionConfigSchema(BaseModel):
-    """File, graph-edge, or on-the-fly graph config for spectral-loss projection."""
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    matrix_path: str | None = None
-    edges_name: tuple[str, str, str] | None = None
-    projection_node_name: str = "projection"
-    grid: str | None = None
-    target_grid: str | None = None
-    node_builder: dict[str, Any] | None = None
-    num_nearest_neighbours: PositiveInt = 3
-    sigma: float = 1.0
-    edge_weight_attribute: str | None = None
-    src_node_weight_attribute: str | None = None
-    row_normalize: bool = False
-
-    @model_validator(mode="after")
-    def check_single_projection_mode(self) -> Self:
-        target_grid_fields = {"grid", "target_grid", "node_builder"}
-        modes = []
-        if self.matrix_path is not None:
-            modes.append("matrix_path")
-        if self.edges_name is not None:
-            modes.append("edges_name")
-        if any(getattr(self, field) is not None for field in target_grid_fields):
-            modes.append("target_grid")
-
-        if len(modes) != 1:
-            msg = "projection_config must specify exactly one of 'matrix_path', 'edges_name', or target grid fields."
-            raise ValueError(msg)
-        return self
-
-
 class HuberLossSchema(BaseLossSchema):
     delta: float = 1.0
     "Threshold for Huber loss."
 
 
+class SpectralProjectionConfigSchema(BaseModel):
+    """Configuration for sparse projection applied before the spectral transform.
+
+    Exactly one mode must be configured:
+
+    - **File mode**: provide ``matrix_path``.
+    - **Edge mode**: provide ``edges_name``.
+    - **Target-grid mode**: provide ``num_nearest_neighbours`` and ``sigma``
+      together with either ``grid`` or ``node_builder``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # --- file mode ---
+    matrix_path: str | None = None
+
+    # --- edge mode ---
+    edges_name: str | tuple[str, str, str] | None = None
+
+    # --- target-grid mode ---
+    num_nearest_neighbours: int | None = None
+    sigma: float | None = None
+    grid: str | None = None
+    node_builder: dict | None = None
+    target_node_name: str = "target_grid"
+
+    # --- shared (edge and target-grid modes) ---
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+    @model_validator(mode="after")
+    def check_mode(self) -> Self:
+        has_matrix = self.matrix_path is not None
+        has_edges = self.edges_name is not None
+        has_target_grid = self.num_nearest_neighbours is not None
+
+        if has_matrix and has_edges:
+            msg = "projection_config: 'matrix_path' and 'edges_name' are mutually exclusive"
+            raise ValueError(msg)
+        if has_matrix and has_target_grid:
+            msg = "projection_config: 'matrix_path' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if has_edges and has_target_grid:
+            msg = "projection_config: 'edges_name' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if not (has_matrix or has_edges or has_target_grid):
+            msg = "projection_config must specify 'matrix_path', 'edges_name', or target-grid keys"
+            raise ValueError(msg)
+        if has_target_grid and self.sigma is None:
+            msg = "projection_config: target-grid mode requires 'sigma'"
+            raise ValueError(msg)
+        if has_target_grid and self.grid is None and self.node_builder is None:
+            msg = "projection_config: target-grid mode requires 'grid' or 'node_builder'"
+            raise ValueError(msg)
+        return self
+
+
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
     nodes_slice: tuple[int, int | None] | None = None
+    """Optional ``(start, end)`` slice to select a subset of nodes before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
+    """Optional sparse projection applied to the data before the spectral transform."""
     projection_autocast: bool = False
+    """Use automatic mixed precision for sparse projection."""
 
     @model_validator(mode="after")
     def check_no_top_level_projection_config(self) -> Self:
@@ -428,9 +449,39 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
+def _loss_discriminator(v: Any) -> str:
+    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
+    if target == "anemoi.training.losses.combined.CombinedLoss":
+        return "combined"
+    if target == "anemoi.training.losses.MultiscaleLossWrapper":
+        return "multiscale"
+    if target == "anemoi.training.losses.CRPS":
+        return "crps"
+    if target in {
+        "anemoi.training.losses.spectral.FourierCorrelationLoss",
+        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.LogFFT2Distance",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.SpectralL2Loss",
+    }:
+        return "spectral"
+    if target == "anemoi.training.losses.HuberLoss":
+        return "huber"
+    return "base"
+
+
 class CombinedLossSchema(BaseLossSchema):
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
-    losses: list[MultiScaleLossSchema | SpectralLossSchema | BaseLossSchema] = Field(min_length=1)
+    losses: list[
+        Annotated[
+            Annotated[BaseLossSchema, Tag("base")]
+            | Annotated[HuberLossSchema, Tag("huber")]
+            | Annotated[CRPSSchema, Tag("crps")]
+            | Annotated[SpectralLossSchema, Tag("spectral")]
+            | Annotated[MultiScaleLossSchema, Tag("multiscale")],
+            Discriminator(_loss_discriminator),
+        ]
+    ] = Field(min_length=1)
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
@@ -464,35 +515,11 @@ class CombinedLossSchema(BaseLossSchema):
         return self
 
 
-def _loss_discriminator(v: Any) -> str:
-    target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
-    if target == "anemoi.training.losses.combined.CombinedLoss":
-        return "combined"
-    if target == "anemoi.training.losses.MultiscaleLossWrapper":
-        return "multiscale"
-    if target == "anemoi.training.losses.kcrps.AlmostFairKernelCRPS":
-        return "almost_fair"
-    if target == "anemoi.training.losses.kcrps.KernelCRPS":
-        return "kernel"
-    if target in {
-        "anemoi.training.losses.spectral.FourierCorrelationLoss",
-        "anemoi.training.losses.spectral.LogSpectralDistance",
-        "anemoi.training.losses.spectral.LogFFT2Distance",
-        "anemoi.training.losses.spectral.SpectralCRPSLoss",
-        "anemoi.training.losses.spectral.SpectralL2Loss",
-    }:
-        return "spectral"
-    if target == "anemoi.training.losses.HuberLoss":
-        return "huber"
-    return "base"
-
-
 LossSchemas = Annotated[
     Annotated[BaseLossSchema, Tag("base")]
     | Annotated[HuberLossSchema, Tag("huber")]
     | Annotated[CombinedLossSchema, Tag("combined")]
-    | Annotated[AlmostFairKernelCRPSSchema, Tag("almost_fair")]
-    | Annotated[KernelCRPSSchema, Tag("kernel")]
+    | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

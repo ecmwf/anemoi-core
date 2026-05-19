@@ -31,54 +31,6 @@ from anemoi.models.layers.graph import TrainableTensor
 LOGGER = logging.getLogger(__name__)
 
 
-def normalize_projection_edges_name(
-    edges_name: tuple[str, str, str] | list[str] | None,
-) -> tuple[str, str, str] | None:
-    """Convert a projection edge name to a tuple."""
-    if edges_name is None:
-        return None
-    edges_name = tuple(edges_name)
-    if len(edges_name) != 3:
-        msg = "Projection edge name must contain source, relation, and target."
-        raise ValueError(msg)
-    return (edges_name[0], edges_name[1], edges_name[2])
-
-
-def create_projection_graph_provider(
-    *,
-    graph: HeteroData | None = None,
-    edges_name: tuple[str, str, str] | list[str] | None = None,
-    file_path: str | Path | None = None,
-    edge_weight_attribute: str | None = None,
-    src_node_weight_attribute: str | None = None,
-    row_normalize: bool = False,
-) -> "ProjectionGraphProvider":
-    """Create a projection graph provider from resolved inputs."""
-    edges_name = normalize_projection_edges_name(edges_name)
-    if file_path is not None:
-        if graph is not None or edges_name is not None:
-            msg = "Projection graph provider accepts either file_path or graph and edges_name."
-            raise ValueError(msg)
-        return ProjectionGraphProvider(
-            file_path=file_path,
-            edge_weight_attribute=edge_weight_attribute,
-            src_node_weight_attribute=src_node_weight_attribute,
-            row_normalize=row_normalize,
-        )
-
-    if graph is None or edges_name is None:
-        msg = "Projection graph provider requires either file_path or graph and edges_name."
-        raise ValueError(msg)
-
-    return ProjectionGraphProvider(
-        graph=graph,
-        edges_name=edges_name,
-        edge_weight_attribute=edge_weight_attribute,
-        src_node_weight_attribute=src_node_weight_attribute,
-        row_normalize=row_normalize,
-    )
-
-
 def create_graph_provider(
     graph: Optional[HeteroData] = None,
     edge_attributes: Optional[list[str]] = None,
@@ -119,6 +71,61 @@ def create_graph_provider(
         )
     else:
         return NoOpGraphProvider()
+
+
+def normalize_projection_edges_name(
+    edges_name: str | tuple[str, str, str] | list[str] | None,
+) -> tuple[str, str, str]:
+    if edges_name is None:
+        raise ValueError("edges_name must be provided")
+    if isinstance(edges_name, (tuple, list)):
+        if len(edges_name) == 3:
+            return (edges_name[0], edges_name[1], edges_name[2])
+        if len(edges_name) == 2:
+            return (edges_name[0], "to", edges_name[1])
+        raise ValueError(f"edges_name tuple must have 2 or 3 elements, got {len(edges_name)}")
+    if isinstance(edges_name, str):
+        parts = edges_name.split("/")
+        if len(parts) == 3:
+            return tuple(parts)
+        if len(parts) == 2:
+            return (parts[0], "to", parts[1])
+        raise ValueError(f"edges_name string must have 2 or 3 slash-separated parts, got {len(parts)}")
+    raise ValueError(f"edges_name must be str, tuple, list, or None, got {type(edges_name)}")
+
+
+def create_projection_graph_provider(
+    *,
+    graph: HeteroData | None = None,
+    edges_name: str | tuple[str, str, str] | list[str] | None = None,
+    file_path: str | Path | None = None,
+    edge_weight_attribute: str | None = None,
+    src_node_weight_attribute: str | None = None,
+    row_normalize: bool = False,
+) -> "ProjectionGraphProvider":
+    """Create a projection graph provider from resolved inputs."""
+    if file_path is not None:
+        if graph is not None or edges_name is not None:
+            msg = "Projection graph provider accepts either file_path or graph and edges_name."
+            raise ValueError(msg)
+        return ProjectionGraphProvider(
+            file_path=file_path,
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
+            row_normalize=row_normalize,
+        )
+
+    if graph is None or edges_name is None:
+        msg = "Projection graph provider requires either file_path or graph and edges_name."
+        raise ValueError(msg)
+
+    return ProjectionGraphProvider(
+        graph=graph,
+        edges_name=normalize_projection_edges_name(edges_name),
+        edge_weight_attribute=edge_weight_attribute,
+        src_node_weight_attribute=src_node_weight_attribute,
+        row_normalize=row_normalize,
+    )
 
 
 class BaseGraphProvider(nn.Module, ABC):
@@ -658,3 +665,94 @@ class ProjectionGraphProvider(BaseGraphProvider):
             # sparse tensors can't be registered as buffers with ddp, so move on demand
             self.projection_matrix = self.projection_matrix.to(device)
         return self.projection_matrix
+
+    @classmethod
+    def from_config(
+        cls,
+        config: object,
+        graph_data: Optional[HeteroData] = None,
+        data_node_name: str = "data",
+    ) -> Optional["ProjectionGraphProvider"]:
+        """Create a provider from a config mapping, or return ``None`` for empty config.
+
+        The construction mode is determined by which keys are present in *config*:
+
+        - ``matrix_path`` → file mode (no *graph_data* needed).
+        - ``edges_name`` → edge mode (*graph_data* required).
+        - ``num_nearest_neighbours`` + ``grid``/``node_builder`` → target-grid
+          mode; a KNN subgraph is built on the fly (*graph_data* required).
+
+        Parameters
+        ----------
+        config:
+            ``None``, OmegaConf config, or plain mapping.
+        graph_data:
+            Full model graph; required for edge and target-grid modes.
+        data_node_name:
+            Node type in *graph_data* holding data-grid coordinates.
+
+        Returns
+        -------
+        ProjectionGraphProvider | None
+            ``None`` when *config* is empty or ``None``.
+
+        Raises
+        ------
+        ValueError
+            On ambiguous config or when *graph_data* is required but missing.
+        """
+        # --- normalise to plain dict ---
+        if config is None:
+            return None
+        try:
+            from omegaconf import OmegaConf
+
+            if OmegaConf.is_config(config):
+                config = OmegaConf.to_container(config, resolve=True)
+        except ImportError:
+            pass
+        if not isinstance(config, dict):
+            config = dict(config)
+        if not config:
+            return None
+
+        has_matrix = "matrix_path" in config and config["matrix_path"] is not None
+        has_edges = "edges_name" in config and config["edges_name"] is not None
+
+        if has_matrix and has_edges:
+            raise ValueError("projection config must specify at most one of 'matrix_path' or 'edges_name', not both")
+
+        if has_matrix:
+            return cls(file_path=config["matrix_path"], row_normalize=bool(config.get("row_normalize", False)))
+
+        if has_edges:
+            if graph_data is None:
+                raise ValueError("graph_data is required for projection mode 'edges'")
+            return cls(
+                graph=graph_data,
+                edges_name=normalize_projection_edges_name(config["edges_name"]),
+                edge_weight_attribute=config.get("edge_weight_attribute"),
+                src_node_weight_attribute=config.get("src_node_weight_attribute"),
+                row_normalize=bool(config.get("row_normalize", False)),
+            )
+
+        # target-grid mode
+        if not ({"num_nearest_neighbours", "grid", "node_builder"} & config.keys()):
+            raise ValueError(
+                "projection config must specify 'matrix_path', 'edges_name', or target-grid "
+                "keys ('num_nearest_neighbours' with 'grid' or 'node_builder')"
+            )
+        if graph_data is None:
+            raise ValueError("graph_data is required for projection mode 'target_grid'")
+
+        from anemoi.graphs.builders import build_node_to_node_projection_subgraph
+
+        target_node_name = config.get("target_node_name", "target_grid")
+        subgraph = build_node_to_node_projection_subgraph(graph_data, data_node_name, target_node_name, config)
+        return cls(
+            graph=subgraph,
+            edges_name=(data_node_name, "to", target_node_name),
+            edge_weight_attribute=config.get("edge_weight_attribute"),
+            src_node_weight_attribute=config.get("src_node_weight_attribute"),
+            row_normalize=bool(config.get("row_normalize", False)),
+        )

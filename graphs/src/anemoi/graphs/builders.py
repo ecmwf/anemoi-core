@@ -7,7 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Helpers for building small projection subgraphs from compact configs."""
+"""Helpers for building small projection subgraphs from compact configs.
+
+These are used by model/loss components that own their own subgraphs rather
+than relying on projection edges merged into the main graph.
+"""
 
 from __future__ import annotations
 
@@ -32,6 +36,11 @@ def _data_subgraph(graph_data: HeteroData, data_node_name: str) -> HeteroData:
     subgraph[data_node_name].x = graph_data[data_node_name].x
     subgraph[data_node_name].num_nodes = graph_data[data_node_name].num_nodes
     return subgraph
+
+
+def _copy_node(subgraph: HeteroData, graph_data: HeteroData, node_name: str) -> None:
+    subgraph[node_name].x = graph_data[node_name].x
+    subgraph[node_name].num_nodes = graph_data[node_name].num_nodes
 
 
 def _update_graph(subgraph: HeteroData, config: Mapping[str, Any]) -> HeteroData:
@@ -115,24 +124,27 @@ def build_node_to_node_projection_subgraph(
     )
     sigma = target_node_config.get("sigma", 1.0) if sigma is None else sigma
 
+    subgraph = _data_subgraph(graph_data, source_node_name)
     nodes = {}
-    needs_target_node = target_node_name != source_node_name or target_node_config.get("node_builder") is not None
-    needs_target_node = needs_target_node or any(target_node_config.get(key) is not None for key in target_grid_keys)
-    if needs_target_node:
-        node_builder_cfg = _node_builder_config(
-            target_node_config,
-            grid_keys=target_grid_keys,
-            missing_message=f"Config for node '{target_node_name}' must specify a grid or node_builder.",
-        )
-        nodes[target_node_name] = {"node_builder": node_builder_cfg}
+    target_from_config = target_node_config.get("node_builder") is not None or any(
+        target_node_config.get(key) is not None for key in target_grid_keys
+    )
+
+    if target_node_name != source_node_name:
+        if target_node_name in graph_data.node_types and not target_from_config:
+            _copy_node(subgraph, graph_data, target_node_name)
+        else:
+            node_builder_cfg = _node_builder_config(
+                target_node_config,
+                grid_keys=target_grid_keys,
+                missing_message=f"Config for node '{target_node_name}' must specify a grid or node_builder.",
+            )
+            nodes[target_node_name] = {"node_builder": node_builder_cfg}
 
     edges = [_knn_edge_cfg(source_node_name, target_node_name, num_nearest_neighbours, sigma)]
     if reverse:
         edges.append(_knn_edge_cfg(target_node_name, source_node_name, num_nearest_neighbours, sigma))
-    return _update_graph(
-        _data_subgraph(graph_data, source_node_name),
-        {"nodes": nodes, "edges": edges},
-    )
+    return _update_graph(subgraph, {"nodes": nodes, "edges": edges})
 
 
 def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
@@ -140,7 +152,7 @@ def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
 
     Accepts either an already-explicit ``smoothers`` mapping or a compact
     geometric-progression spec (``num_scales``, ``base_num_nearest_neighbours``,
-    ``base_sigma``, …).
+    ``base_sigma``, ...).
     """
     if OmegaConf.is_config(cfg):
         cfg = OmegaConf.to_container(cfg, resolve=True)
@@ -165,3 +177,33 @@ def _expand_smoother_config(cfg: dict | Any) -> dict[str, dict]:
             "sigma": round(base_sigma * factor, 5),
         }
     return smoothers
+
+
+def build_truncation_subgraph(
+    graph_data: HeteroData,
+    data_node_name: str,
+    truncation_config: Mapping | Any,
+) -> HeteroData:
+    """Build a subgraph containing data nodes and a coarser truncation grid."""
+    return build_node_to_node_projection_subgraph(
+        graph_data,
+        data_node_name,
+        "truncation",
+        truncation_config,
+        target_grid_keys=("grid", "truncation_grid"),
+        reverse=True,
+    )
+
+
+def build_smoother_subgraph(
+    graph_data: HeteroData,
+    data_node_name: str,
+    smoother_config: Mapping | Any,
+) -> HeteroData:
+    """Build a subgraph with self-loop smoother edges over data nodes."""
+    return build_node_to_node_projection_subgraph(
+        graph_data,
+        data_node_name,
+        data_node_name,
+        smoother_config,
+    )

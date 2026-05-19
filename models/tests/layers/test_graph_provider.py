@@ -82,11 +82,14 @@ def test_create_projection_graph_provider_from_graph() -> None:
     assert torch.allclose(provider.get_edges().to_dense(), torch.eye(2))
 
 
-def test_normalize_projection_edges_name_requires_triplet() -> None:
+def test_normalize_projection_edges_name_accepts_common_forms() -> None:
     assert normalize_projection_edges_name(["src", "to", "dst"]) == ("src", "to", "dst")
+    assert normalize_projection_edges_name(["src", "dst"]) == ("src", "to", "dst")
+    assert normalize_projection_edges_name("src/to/dst") == ("src", "to", "dst")
+    assert normalize_projection_edges_name("src/dst") == ("src", "to", "dst")
 
-    with pytest.raises(ValueError, match="source, relation, and target"):
-        normalize_projection_edges_name(["src", "dst"])
+    with pytest.raises(ValueError, match="2 or 3"):
+        normalize_projection_edges_name(["src"])
 
 
 def test_create_projection_graph_provider_rejects_mixed_file_and_graph() -> None:
@@ -98,3 +101,58 @@ def test_create_projection_graph_provider_rejects_mixed_file_and_graph() -> None
             edges_name=("src", "to", "dst"),
             file_path="projection.npz",
         )
+
+
+def _make_graph_with_edges() -> HeteroData:
+    graph = HeteroData()
+    graph["data"].num_nodes = 3
+    graph["target"].num_nodes = 2
+    edge_index = torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]])
+    edge_weight = torch.tensor([0.25, 0.75, 0.6, 0.4])
+    graph[("data", "to", "target")].edge_index = edge_index
+    graph[("data", "to", "target")].gauss_weight = edge_weight
+    return graph
+
+
+def test_from_config_returns_none_for_none() -> None:
+    assert ProjectionGraphProvider.from_config(None) is None
+
+
+def test_from_config_returns_none_for_empty_dict() -> None:
+    assert ProjectionGraphProvider.from_config({}) is None
+
+
+def test_from_config_file_mode(mocker) -> None:
+    from scipy.sparse import eye
+
+    mocker.patch("scipy.sparse.load_npz", return_value=eye(3, format="csr"))
+    provider = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz"})
+    assert isinstance(provider, ProjectionGraphProvider)
+
+
+def test_from_config_edges_mode() -> None:
+    graph = _make_graph_with_edges()
+    provider = ProjectionGraphProvider.from_config(
+        {"edges_name": ("data", "to", "target"), "edge_weight_attribute": "gauss_weight"},
+        graph_data=graph,
+    )
+    assert isinstance(provider, ProjectionGraphProvider)
+    matrix = provider.get_edges().to_dense()
+    assert matrix.shape == (2, 3)
+
+
+def test_from_config_edges_mode_requires_graph_data() -> None:
+    with pytest.raises(ValueError, match="graph_data is required"):
+        ProjectionGraphProvider.from_config({"edges_name": ("data", "to", "target")})
+
+
+def test_from_config_ambiguous_raises() -> None:
+    with pytest.raises(ValueError, match="at most one of"):
+        ProjectionGraphProvider.from_config(
+            {"matrix_path": "/fake/path.npz", "edges_name": ("data", "to", "target")},
+        )
+
+
+def test_from_config_invalid_raises() -> None:
+    with pytest.raises(ValueError, match="must specify"):
+        ProjectionGraphProvider.from_config({"unknown_key": "value"})
