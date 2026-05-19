@@ -2,6 +2,7 @@
 defaults:
   - scalers: global
   - optimization: default
+  - weight_averaging: null
 
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
@@ -18,16 +19,6 @@ deterministic: False
 # miscellaneous
 precision: 16-mixed
 
-# multistep input
-# 1 = single step scheme, X(t-1) used to predict X(t)
-# k > 1: multistep scheme, uses [X(t-k), X(t-k+1), ... X(t-1)] to predict X(t)
-multistep_input: 2
-
-# multistep output
-# 1 = single step output scheme, single model forward predicts X(t)
-# l > 1: multistep output scheme, single model forward predicts [X(t), X(t+1), ... X(t+l-1)]
-multistep_output: 1
-
 # gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
 # the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
@@ -39,15 +30,8 @@ gradient_clip:
   val: 32.
   algorithm: value
 
-# stochastic weight averaging
-# https://pytorch.org/blog/stochastic-weight-averaging-in-pytorch/
-swa:
-  enabled: False
-  lr: 1.e-4
-
-
 # select model
-model_task: anemoi.training.train.tasks.GraphEnsForecaster
+training_method: anemoi.training.train.methods.EnsembleTraining
 
 # number of ensemble members per device
 ensemble_size_per_device: 4
@@ -74,14 +58,13 @@ training_loss:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       _target_: anemoi.training.losses.MultiscaleLossWrapper
-      loss_matrices_path: ${system.input.loss_matrices_path}
-      loss_matrices: [null]
+      # Disk mode:   multiscale_config: {loss_matrices_path: /path, loss_matrices: ["file.npz", null]}
+      # On-the-fly:  multiscale_config: {num_scales: 4, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
+      multiscale_config: null  # null = single scale, no smoothing
       weights: [1.0]
 
-      keep_batch_sharded: ${model.keep_batch_sharded}
-
       per_scale_loss:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+        _target_: anemoi.training.losses.CRPS
         scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
 
         # Scalers to include in loss calculation
@@ -105,7 +88,7 @@ validation_metrics:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       fkcrps:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+        _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
         ignore_nans: False
         alpha: 1.0
@@ -113,14 +96,11 @@ validation_metrics:
       multiscale:
         _target_: anemoi.training.losses.MultiscaleLossWrapper
 
-        loss_matrices_path: ${system.input.loss_matrices_path}
-        loss_matrices: [null]
+        multiscale_config: null
         weights: [1.0]
 
-        keep_batch_sharded: ${model.keep_batch_sharded}
-
         per_scale_loss:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+          _target_: anemoi.training.losses.CRPS
           scalers: ['node_weights', 'time_steps']
 
           # Scalers to include in loss calculation
@@ -169,14 +149,6 @@ metrics:
       - t_850
       - u_850
       - v_850
-
-# length of the "rollout" window (see Keisler's paper)
-rollout:
-  start: 1
-  # increase rollout every n epochs
-  epoch_increment: 0
-  # maximum rollout to use
-  max: 1
 
 # Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
