@@ -334,6 +334,10 @@ class BaseLossWrapper(BaseLoss):
         if not isinstance(loss, BaseLoss):
             msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
             raise TypeError(msg)
+        if self.ignore_nans != loss.ignore_nans:
+            msg = "BaseLossWrapper.ignore_nans and BaseLoss.ignore_nans missmatch."
+            msg += f" {self.ignore_nans} != {loss.ignore_nans}"
+            raise ValueError(msg)
         self.loss = loss
         # Share the inner loss's scaler so that scaler additions/updates
         # applied to this wrapper are visible to the actual loss computation.
