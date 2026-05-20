@@ -248,6 +248,7 @@ class ForecastStepDataset(BaseAnemoiReader):
 
         if isinstance(step_frequency, str):
             from anemoi.utils.dates import frequency_to_timedelta
+
             self._step_frequency = frequency_to_timedelta(step_frequency)
         else:
             self._step_frequency = step_frequency
@@ -262,9 +263,7 @@ class ForecastStepDataset(BaseAnemoiReader):
 
         actual_steps = self.data.shape[3]
         if actual_steps < forecast_steps:
-            msg = (
-                f"Dataset has {actual_steps} forecast steps but config requests {forecast_steps}."
-            )
+            msg = f"Dataset has {actual_steps} forecast steps but config requests {forecast_steps}."
             raise ValueError(msg)
 
     @property
