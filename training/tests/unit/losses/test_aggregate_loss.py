@@ -289,7 +289,7 @@ def test_default_no_ignore_nans() -> None:
     target[..., 0, 0] = torch.nan
 
     result = wrapper(pred, target)
-    assert not torch.isfinite(result).all(), "Expected nan in loss with ignore_nans=False"
+    assert torch.isnan(result).any(), "Expected nan in loss with ignore_nans=False"
 
 
 # ---------------------------------------------------------------------------

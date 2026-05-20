@@ -577,3 +577,32 @@ def test_spectral_crps_with_target_without_ensemble_dim() -> None:
 
     out_total = loss(pred, target, squash=True)
     assert out_total.numel() == 1, "squash=True should return scalar CRPS"
+
+
+def test_mse_ignore_nans() -> None:
+    """MSELoss should ignore NaNs with ignore_nans=True."""
+    pred = torch.randn(3, 4, 5, 6, 7)
+    pred.requires_grad_()
+    target = torch.randn(3, 4, 5, 6, 7)
+    target[..., 0, 0] = torch.nan
+
+    loss = MSELoss(ignore_nans=True)
+
+    out = loss(pred, target)
+    assert torch.isfinite(out).all(), "Expected finite loss with ignore_nans=True"
+
+    (grad,) = torch.autograd.grad(out, pred, retain_graph=True)
+    assert torch.isfinite(grad).all(), "Expected finite gradients"
+
+
+def test_mse_nans() -> None:
+    """MSELoss should propagate NaNs with ignore_nans=False."""
+    pred = torch.randn(3, 4, 5, 6, 7)
+    pred.requires_grad_()
+    target = torch.randn(3, 4, 5, 6, 7)
+    target[..., 0, 0] = torch.nan
+
+    loss = MSELoss(ignore_nans=False)
+
+    out = loss(pred, target)
+    assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"
