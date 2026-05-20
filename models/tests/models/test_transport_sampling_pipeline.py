@@ -182,9 +182,9 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
     )
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3, "ds_b": 4}
-    model.transport_objective = EDMDiffusionModelObjective()
+    model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
-    model.forward_network = lambda *_args, **_kwargs: None
+    model._forward_transport_network = lambda *_args, **_kwargs: None
 
     monkeypatch.setitem(transport_samplers.NOISE_SCHEDULERS, "dummy", DummyScheduler)
     monkeypatch.setitem(transport_samplers.DIFFUSION_SAMPLERS, "dummy", DummySampler)
@@ -230,15 +230,15 @@ def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
             )
 
     model = _transport_model_stub()
-    model.transport_objective = StochasticInterpolantModelObjective()
+    model.transport_model_objective = StochasticInterpolantModelObjective()
     model.inference_defaults = SimpleNamespace(noise_scheduler={"num_steps": 3})
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3}
-    model.forward_network = lambda _x, y, *_args, **_kwargs: y
+    model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     model.build_sampling_source = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
             x["ds_a"].shape[0],
-            1,
+            model.n_step_output,
             x["ds_a"].shape[2],
             x["ds_a"].shape[-2],
             model.num_output_channels["ds_a"],
@@ -289,15 +289,15 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
             )
 
     model = _transport_model_stub()
-    model.transport_objective = StochasticInterpolantModelObjective()
+    model.transport_model_objective = StochasticInterpolantModelObjective()
     model.inference_defaults = SimpleNamespace()
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3}
-    model.forward_network = lambda _x, y, *_args, **_kwargs: y
+    model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     model.build_sampling_source = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
             x["ds_a"].shape[0],
-            1,
+            model.n_step_output,
             x["ds_a"].shape[2],
             x["ds_a"].shape[-2],
             model.num_output_channels["ds_a"],
@@ -390,8 +390,9 @@ def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None
     interpolant = {"data": torch.full((1, 1, 1, 2, 1), 2.0)}
     time_level = {"data": torch.full_like(interpolant["data"], 0.25)}
     drift = {"data": torch.full_like(interpolant["data"], 0.5)}
+    marker = object()
 
-    def _forward_network(
+    def _forward_transport_network(
         _x: dict[str, torch.Tensor],
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
@@ -399,15 +400,17 @@ def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None
     ) -> dict[str, torch.Tensor]:
         assert conditioned_target is interpolant
         assert condition is time_level
+        assert _kwargs["marker"] is marker
         return drift
 
-    model = SimpleNamespace(forward_network=_forward_network)
+    model = SimpleNamespace(_forward_transport_network=_forward_transport_network)
 
     out = StochasticInterpolantModelObjective().forward(
         model,
         {"data": torch.zeros_like(interpolant["data"])},
         interpolant,
         time_level,
+        marker=marker,
     )
 
     assert out is drift
@@ -436,7 +439,7 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
     )
     model.n_step_output = 2
     model.num_output_channels = {"dataset_a": 3, "dataset_b": 2}
-    model.transport_objective = EDMDiffusionModelObjective()
+    model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
 
     def _network(
@@ -461,7 +464,7 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
             out[dataset_name] = 0.8 * target_data + 0.02 * condition_data
         return out
 
-    model.forward_network = _network
+    model._forward_transport_network = _network
 
     x = {
         "dataset_a": torch.randn(2, 3, 1, 5, 4, dtype=torch.float32),

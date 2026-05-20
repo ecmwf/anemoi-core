@@ -37,18 +37,6 @@ def _get_default_num_steps(model: Any, fallback: int = 50) -> int:
     return int(noise_scheduler_config.get("num_steps", fallback))
 
 
-def _expand_source_to_output_steps(
-    source: dict[str, torch.Tensor],
-    n_step_output: int,
-) -> dict[str, torch.Tensor]:
-    out = {}
-    for dataset_name, source_data in source.items():
-        if source_data.shape[1] == 1 and n_step_output > 1:
-            source_data = source_data.expand(-1, n_step_output, -1, -1, -1)
-        out[dataset_name] = source_data
-    return out
-
-
 class TransportModelObjective:
     """How a transport model runs its forward pass and inference sampler."""
 
@@ -60,6 +48,7 @@ class TransportModelObjective:
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
         raise NotImplementedError
 
@@ -87,14 +76,16 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
-        pred = model.forward_network(
+        pred = model._forward_transport_network(
             x,
             {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
             c_noise,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            **kwargs,
         )
         return {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
 
@@ -128,7 +119,6 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             x,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
-            default_kind="gaussian",
         )
         sigmas, y_init = {}, {}
         for dataset_name in x:
@@ -186,7 +176,7 @@ class EDMDiffusionModelObjective(TransportModelObjective):
     def _get_preconditioning(
         model: Any,
         sigma: dict[str, torch.Tensor],
-        sigma_data: torch.Tensor,
+        sigma_data: float,
     ) -> tuple[
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
@@ -227,13 +217,15 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         time_level: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
-        return model.forward_network(
+        return model._forward_transport_network(
             x,
             interpolant_state,
             time_level,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            **kwargs,
         )
 
     def sample(
@@ -257,19 +249,12 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         actual_sampler = si_sampler_config.pop("sampler", "heun")
         num_steps = si_sampler_config.pop("num_steps", _get_default_num_steps(model))
 
-        source = kwargs.get("source", kwargs.get("reference_state"))
-        if source is None:
-            if not hasattr(model, "build_sampling_source"):
-                raise ValueError("Stochastic-interpolant sampling requires a sampling source.")
-            source = model.build_sampling_source(
-                x,
-                model_comm_group=model_comm_group,
-                grid_shard_sizes=grid_shard_sizes,
-            )
-        y_init = _expand_source_to_output_steps(source, model.n_step_output)
-        y_init = {
-            dataset_name: source_data.to(device=x[dataset_name].device) for dataset_name, source_data in y_init.items()
-        }
+        source = model.build_sampling_source(
+            x,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+        )
+        y_init = source
 
         times = unit_time_grid(int(num_steps), device=x_device, dtype=torch.float64)
 

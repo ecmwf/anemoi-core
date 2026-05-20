@@ -68,7 +68,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
         self.inference_defaults = transport_params.inference_defaults
-        self.transport_objective = get_transport_model_objective(transport_params.objective)
+        self.transport_model_objective = get_transport_model_objective(transport_params.objective)
 
         super().__init__(
             model_config=model_config,
@@ -217,8 +217,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
         for dataset_name in x:
-            # Keep conditioning width independent of n_step_output. The same
-            # transport noise/time embedding is shared across all output steps.
+            # The same transport noise/time embedding is shared across all output steps.
             noise_cond = noise_cond_base[:, None, :, None, :]
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
                 noise_cond, dataset_name=dataset_name, edge_conditioning=False
@@ -243,16 +242,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        return self.transport_objective.forward(
+        return self.transport_model_objective.forward(
             self,
             x,
             conditioned_target,
             condition,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            **kwargs,
         )
 
-    def forward_network(
+    def _forward_transport_network(
         self,
         x: dict[str, torch.Tensor],
         conditioned_target: dict[str, torch.Tensor],
@@ -614,7 +614,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run the sampler selected by the transport objective."""
-        return self.transport_objective.sample(
+        return self.transport_model_objective.sample(
             self,
             x,
             model_comm_group=model_comm_group,
