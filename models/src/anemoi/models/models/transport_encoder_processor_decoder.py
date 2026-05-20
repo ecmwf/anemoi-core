@@ -497,7 +497,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
-            source_factories={
+            custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
                     x,
                     data_indices=self.data_indices,
@@ -923,7 +923,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
-            source_factories={
+            custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
                     x,
                     data_indices=self.data_indices,

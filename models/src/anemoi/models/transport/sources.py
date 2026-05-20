@@ -105,18 +105,17 @@ class TransportSourceRequest:
 
     specs: dict[str, TransportSourceSpec]
     default_kind: str
-    source_factories: dict[str, TransportSourceFactory] = field(default_factory=dict)
+    custom_source_factories: dict[str, TransportSourceFactory] = field(default_factory=dict)
     model_comm_group: Optional[ProcessGroup] = None
     allowed_kinds: frozenset[str] | None = None
     error_context: str = "transport source"
 
-    def __post_init__(self) -> None:
-        factories = {
+    def source_factories(self) -> dict[str, TransportSourceFactory]:
+        return {
             "zero": lambda: self._zero(self.specs),
             "gaussian": lambda: self._gaussian(self.specs, model_comm_group=self.model_comm_group),
+            **self.custom_source_factories,
         }
-        factories.update(self.source_factories)
-        object.__setattr__(self, "source_factories", factories)
 
     @classmethod
     def from_tensors(
@@ -124,7 +123,7 @@ class TransportSourceRequest:
         tensors: dict[str, torch.Tensor],
         *,
         default_kind: str,
-        source_factories: dict[str, TransportSourceFactory] | None = None,
+        custom_source_factories: dict[str, TransportSourceFactory] | None = None,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         allowed_kinds: frozenset[str] | None = None,
@@ -139,7 +138,7 @@ class TransportSourceRequest:
                 for name, tensor in tensors.items()
             },
             default_kind=default_kind,
-            source_factories={} if source_factories is None else source_factories,
+            custom_source_factories={} if custom_source_factories is None else custom_source_factories,
             model_comm_group=model_comm_group,
             allowed_kinds=allowed_kinds,
             error_context=error_context,
@@ -194,16 +193,21 @@ class TransportSourceBuilder:
 
     def build(self, request: TransportSourceRequest) -> dict[str, torch.Tensor]:
         kind = self.resolve_kind(request.default_kind)
-        allowed_kinds = request.allowed_kinds or (TRANSPORT_SOURCE_KINDS | frozenset(request.source_factories))
+        source_factories = request.source_factories()
+        allowed_kinds = request.allowed_kinds or (TRANSPORT_SOURCE_KINDS | frozenset(source_factories))
         if kind not in allowed_kinds:
             msg = f"Transport source kind '{kind}' is not valid for {request.error_context}."
             raise ValueError(msg)
 
-        source_factory = self._source_factory(kind, request)
+        source_factory = self._source_factory(kind, source_factories)
         return self._postprocess_source(self._scale_source(source_factory()), request)
 
-    def _source_factory(self, kind: str, request: TransportSourceRequest) -> TransportSourceFactory:
-        source_factory = request.source_factories.get(kind)
+    def _source_factory(
+        self,
+        kind: str,
+        source_factories: dict[str, TransportSourceFactory],
+    ) -> TransportSourceFactory:
+        source_factory = source_factories.get(kind)
         if source_factory is not None:
             return source_factory
 

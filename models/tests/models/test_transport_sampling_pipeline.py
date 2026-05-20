@@ -334,7 +334,7 @@ def test_transport_source_builder_does_not_build_unselected_reference(
         TransportSourceRequest.from_tensors(
             target,
             default_kind="reference_state",
-            source_factories={"reference_state": reference_source_factory},
+            custom_source_factories={"reference_state": reference_source_factory},
         )
     )
 
@@ -354,7 +354,7 @@ def test_transport_source_builder_postprocesses_reference_source(monkeypatch: py
         TransportSourceRequest.from_tensors(
             target,
             default_kind="gaussian",
-            source_factories={"reference_state": lambda: reference},
+            custom_source_factories={"reference_state": lambda: reference},
         )
     )
 
