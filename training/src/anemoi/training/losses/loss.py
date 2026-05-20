@@ -27,6 +27,8 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
+NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
+WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -104,6 +106,38 @@ def _extract_constructor_context(
     return context.for_loss_class(get_class(target))
 
 
+def _propagate_combined_scalers(loss_config: dict, scalers_to_include: list) -> None:
+    """Propagate parent scalers to CombinedLoss sub-losses that don't specify their own."""
+    for sub_loss in loss_config.get("losses", []):
+        if (
+            isinstance(sub_loss, dict)
+            and "scalers" not in sub_loss
+            and "MultiscaleLossWrapper" not in sub_loss.get("_target_", "")
+        ):
+            sub_loss["scalers"] = list(scalers_to_include)
+
+
+def _build_wrapped_loss(
+    loss_config: dict,
+    scalers_to_include: list,
+    scalers: dict[str, TENSOR_SPEC] | None,
+    data_indices: "IndexCollection | None",
+) -> BaseLoss:
+    """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
+    inner_loss_config = loss_config.pop("loss_fn")
+    inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
+    wrapper = instantiate(loss_config, loss_fn=inner_loss)
+    # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
+    if scalers_to_include and scalers:
+        resolved = (
+            [s for s in scalers if f"!{s}" not in scalers_to_include]
+            if "*" in scalers_to_include
+            else list(scalers_to_include)
+        )
+        _apply_scalers(wrapper, resolved, scalers, data_indices)
+    return wrapper
+
+
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
@@ -155,9 +189,14 @@ def get_loss_function(
     target_variables = loss_config.pop("target_variables", None)
 
     graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
+    target = loss_config.get("_target_")
 
-    per_scale_loss_config = loss_config.pop("per_scale_loss", None)
-    if per_scale_loss_config is not None:
+    # For CombinedLoss, propagate parent scalers to sub-losses that don't specify their own.
+    if "CombinedLoss" in (target or "") and scalers_to_include:
+        _propagate_combined_scalers(loss_config, scalers_to_include)
+
+    if target in NESTED_LOSSES:
+        per_scale_loss_config = loss_config.pop("per_scale_loss")
         per_scale_loss = get_loss_function(
             OmegaConf.create(per_scale_loss_config),
             scalers,
@@ -173,13 +212,22 @@ def get_loss_function(
             **_graph_data_kwargs(target_cls, graph_data, graph_extra),
         )
 
-    if scalers is None:
-        scalers = {}
+    if target in WRAPPED_LOSSES:
+        return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices)
+
+    scalers = scalers or {}
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
     available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
+    # If the target class requests AVAILABLE_SCALERS (e.g. CombinedLoss), always
+    # pass the full unfiltered scalers so child losses can control their own.
+    if (
+        hasattr(target_cls, "factory_context_keys")
+        and LossFactoryContextKey.AVAILABLE_SCALERS in target_cls.factory_context_keys
+    ):
+        available_scalers = scalers
     factory_context = LossFactoryContext(
         available_scalers=available_scalers,
         data_indices=data_indices,
