@@ -24,7 +24,14 @@ class FakeZarr5D:
     Uses orthogonal (zarr-style) indexing, not numpy broadcast indexing.
     """
 
-    def __init__(self, num_inits: int = 4, variables: int = 3, ensemble: int = 2, steps: int = 24, gridpoints: int = 10):
+    def __init__(
+        self,
+        num_inits: int = 4,
+        variables: int = 3,
+        ensemble: int = 2,
+        steps: int = 24,
+        gridpoints: int = 10,
+    ):
         self._shape = (num_inits, variables, ensemble, steps, gridpoints)
         self._data = np.random.default_rng(42).standard_normal(self._shape).astype(np.float32)
         self._dates = np.array(
@@ -105,7 +112,13 @@ def _make_forecast_step_dataset(
 ) -> ForecastStepDataset:
     """Create a ForecastStepDataset with a fake 5D zarr backend."""
     dataset = ForecastStepDataset.__new__(ForecastStepDataset)
-    dataset.data = FakeZarr5D(num_inits=num_inits, variables=variables, ensemble=ensemble, steps=steps, gridpoints=gridpoints)
+    dataset.data = FakeZarr5D(
+        num_inits=num_inits,
+        variables=variables,
+        ensemble=ensemble,
+        steps=steps,
+        gridpoints=gridpoints,
+    )
 
     dataset._forecast_steps = forecast_steps
 
@@ -199,7 +212,14 @@ class TestForecastStepDatasetGetSample:
     """Test get_sample method."""
 
     def test_get_sample_with_list_indices(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         # Request steps 2,3,4 from the first initialization
         sample = ds.get_sample(time_indices=[2, 3, 4], grid_shard_indices=slice(None))
         # Output shape: (steps, ensemble, gridpoints, variables)
@@ -207,29 +227,64 @@ class TestForecastStepDatasetGetSample:
         assert isinstance(sample, torch.Tensor)
 
     def test_get_sample_with_slice_indices(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         sample = ds.get_sample(time_indices=slice(0, 5), grid_shard_indices=slice(None))
         assert sample.shape == (5, 2, 10, 3)
 
     def test_get_sample_second_initialization(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         # Virtual indices 24-26 map to init_idx=1, step_indices=[0,1,2]
         sample = ds.get_sample(time_indices=[24, 25, 26], grid_shard_indices=slice(None))
         assert sample.shape == (3, 2, 10, 3)
 
     def test_get_sample_with_grid_shard_slice(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         sample = ds.get_sample(time_indices=[0, 1], grid_shard_indices=slice(0, 5))
         assert sample.shape == (2, 2, 5, 3)
 
     def test_get_sample_with_grid_shard_array(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         grid_indices = np.array([0, 2, 4, 6, 8])
         sample = ds.get_sample(time_indices=[0, 1, 2], grid_shard_indices=grid_indices)
         assert sample.shape == (3, 2, 5, 3)
 
     def test_get_sample_returns_correct_data(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         sample = ds.get_sample(time_indices=[0, 1, 2], grid_shard_indices=slice(None))
 
         # Verify data matches what we'd get from the underlying fake zarr
@@ -240,7 +295,14 @@ class TestForecastStepDatasetGetSample:
         np.testing.assert_allclose(sample.numpy(), expected, rtol=1e-6)
 
     def test_get_sample_none_grid_indices(self) -> None:
-        ds = _make_forecast_step_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24)
+        ds = _make_forecast_step_dataset(
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
+        )
         sample = ds.get_sample(time_indices=[0, 1], grid_shard_indices=None)
         assert sample.shape == (2, 2, 10, 3)
 
