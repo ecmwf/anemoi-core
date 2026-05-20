@@ -189,9 +189,6 @@ class BaseLoss(nn.Module, ABC):
         Irrespective of `squash`, the output is reduced over the
         batch, ensemble and grid dimensions.
 
-        If self.ignore_nans is True, the loss is scaled by the
-         fraction of nan-values in the target.
-
         Parameters
         ----------
         out : torch.Tensor
