@@ -57,6 +57,15 @@ class RestrictEdgeLengthSchema(BaseModel):
     "Boolean mask attribute on target nodes. Only edges whose target is True under this mask will be post-processed. Default to None"
 
 
+class RemoveSelfEdgesSchema(BaseModel):
+    target_: Literal["anemoi.graphs.processors.RemoveSelfEdges"] = Field(..., alias="_target_")
+    "Post processor to remove self edges."
+    source_name: str
+    "Source nodes of edges to be post-processed."
+    target_name: str
+    "Target nodes of edges to be post-processed."
+
+
 class SortEdgeIndexSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.processors.SortEdgeIndexBySourceNodes",
@@ -68,6 +77,10 @@ class SortEdgeIndexSchema(BaseModel):
 
 
 ProcessorSchemas = Annotated[
-    RemoveUnconnectedNodesSchema | SubsetNodesInAreaSchema | RestrictEdgeLengthSchema | SortEdgeIndexSchema,
+    RemoveUnconnectedNodesSchema
+    | SubsetNodesInAreaSchema
+    | RestrictEdgeLengthSchema
+    | RemoveSelfEdgesSchema
+    | SortEdgeIndexSchema,
     Field(discriminator="target_"),
 ]

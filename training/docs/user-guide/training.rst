@@ -41,7 +41,8 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
--  Choose the model task and model type from :ref:`Models <Models>`.
+-  Choose the task (see :doc:`tasks`), training method
+   (see :doc:`training-methods`), and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
 
@@ -389,10 +390,14 @@ properties of the forecast and is configured for each dataset separately.
 
 For ensemble training, the following loss functions are available:
 
--  **Kernel CRPS**: Continuous Ranked Probability Score using kernel
-   density estimation
--  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
-   the number of ensemble members used.
+-  **CRPS**: Kernel Continuous Ranked Probability Score for ensemble
+   predictions. ``alpha=0`` gives standard CRPS, ``alpha=1`` gives fair
+   CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
+   The default ``alpha: 0.95`` combines 5% standard CRPS with 95% fair
+   CRPS. The ``naive`` backend uses a simple loop over unordered
+   ensemble-member pairs and avoids materializing the full pairwise tensor.
+   The ``stable`` backend materializes pairwise tensors and uses the
+   numerically stable all-pairs formulation.
 
 .. _loss-function-scaling:
 
@@ -618,3 +623,66 @@ frozen and only the encoder and decoder will be trained:
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
+
+****************************
+ Precision and BLAS Backend
+****************************
+
+Anemoi supports Lightning's native mixed precision training as well as the option to select a preferred BLAS backend
+to be used by PyTorch. For example:
+
+.. code:: yaml
+
+   training:
+      precision: bf16-mixed
+      preferred_blas_backend: "cublas"
+
+Note that both entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
+default selection of PyTorch.
+
+******************
+ Weight Averaging
+******************
+
+Weight averaging is a technique to improve model generalization by
+averaging model weights during training. Anemoi Training supports weight
+averaging methods through PyTorch Lightning callbacks:
+
+-  **Exponential Moving Average (EMA)**: Maintains an exponential moving
+      average of model weights, which can lead to smoother convergence
+      and better generalization.
+
+      .. code:: yaml
+
+         weight_averaging:
+            _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+            decay: 0.999
+
+      The ``decay`` parameter (typically between 0.99 and 0.9999)
+      controls the smoothing factor. Higher values give more weight to
+      historical weights, resulting in a more stable average. By
+      default, the decay is set to 0.999.
+
+-  **Stochastic Weight Averaging (SWA)**: Averages weights from multiple
+      points along the training trajectory, typically resulting in wider
+      optima and improved generalization.
+
+      .. code:: yaml
+
+         weight_averaging:
+            _target_: pytorch_lightning.callbacks.StochasticWeightAveraging
+            swa_lrs: 1.e-4
+
+      The ``swa_lrs`` parameter specifies the learning rate to use
+      during the SWA phase. By default, the learning rate is set to
+      1e-4. Additional parameters can be configured as described in the
+      [PyTorch Lightning
+      documentation](https://lightning.ai/docs/pytorch/latest/api/lightning.pytorch.callbacks.StochasticWeightAveraging.html#lightning.pytorch.callbacks.StochasticWeightAveraging)
+
+By default, weight averaging is disabled. To explicitly disable it or to
+override a parent configuration, set ``weight_averaging`` to null.
+
+.. note::
+
+   Weight averaging is only supported in PyTorch Lightning 2.6 and later
+   versions.

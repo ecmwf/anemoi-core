@@ -13,15 +13,25 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.combined import CombinedLoss
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
+    import numpy as np
 
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.base import BaseLoss
 
 LOGGER = logging.getLogger(__name__)
+
+
+def reduce_to_last_dim(x: np.ndarray) -> np.ndarray:
+    """Sum all dimensions of *x* except the last one."""
+    if x.ndim > 1:
+        return x.sum(axis=tuple(range(x.ndim - 1)))
+    return x
 
 
 def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dict[str, float]:
@@ -44,16 +54,29 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     # https://github.com/ecmwf/anemoi-core/pull/723#discussion_r2597831922
     if isinstance(loss, CombinedLoss):
         variable_scaling = {}
+        key_count_by_name: dict[str, int] = {}
         for sub_loss in loss.losses:
-            variable_scaling[sub_loss.__class__.__name__] = print_variable_scaling(sub_loss, data_indices)
+            base_key = sub_loss.__class__.__name__
+            key_count_by_name[base_key] = key_count_by_name.get(base_key, 0) + 1
+            suffix = "" if key_count_by_name[base_key] == 1 else f"_{key_count_by_name[base_key]}"
+            variable_scaling[f"{base_key}{suffix}"] = print_variable_scaling(sub_loss, data_indices)
         return variable_scaling
 
-    variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim)).reshape(-1)
+    if isinstance(loss, LossVariableMapper):
+        subset_vars = enumerate(loss.predicted_variables)
+        # LossVariableMapper forwards scalers to its inner loss, so get scaling from there
+        scaler_source = loss.loss.scaler
+    elif isinstance(loss, BaseLossWrapper):
+        return print_variable_scaling(loss.loss, data_indices)
+    else:
+        subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
+        scaler_source = loss.scaler
+
+    variable_scaling = scaler_source.subset_by_dim(TensorDim.VARIABLE).get_scaler(len(TensorDim)).reshape(-1)
     log_text = f"Final Variable Scaling in {loss.__class__.__name__}: "
     scaling_values, scaling_sum = {}, 0.0
-
-    for idx, name in enumerate(data_indices.model.output.name_to_index.keys()):
-        value = float(variable_scaling[idx])
+    for idx, name in subset_vars:
+        value = float(variable_scaling[idx]) if idx < variable_scaling.shape[0] else 1.0
         log_text += f"{name}: {value:.4g}, "
         scaling_values[name] = value
         scaling_sum += value

@@ -59,8 +59,6 @@ training:
       end: 2020
       trajectory: ${dataloader.model_run_info}
 
-validation_rollout: 1 # number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks
-
 validation:
   datasets:
     data:

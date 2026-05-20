@@ -42,9 +42,8 @@ class MemorySnapshotRecorder(Callback):
         self.num_steps = steps + self.warmup
         self.status = False
 
-    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         del pl_module
-        # Access batch_size from the dataloader directly
         train_dataloader = trainer.train_dataloader
         if isinstance(train_dataloader, list):
             train_dataloader = train_dataloader[0]
