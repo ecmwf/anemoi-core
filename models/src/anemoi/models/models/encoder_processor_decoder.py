@@ -189,7 +189,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dtype: torch.dtype,
         dataset_name: str,
     ):
-        x_out = target.unflatten_data_2d(x_out).clone().to(dtype=dtype)
+        x_out = target.unflatten_data_2d(x_out)
+
+        if isinstance(x_out, list):
+            x_out = [x.clone().to(dtype=dtype) for x in x_out]
+        else:
+            x_out = x_out.clone().to(dtype=dtype)
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
@@ -200,11 +205,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
             x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
-        for bounding in self.boundings[dataset_name]:
-            # bounding performed in the order specified in the config file
-            x_out = bounding(x_out)
-
-        return x_out if target.is_static else [x_out]
+        return x_out
 
     def _assert_valid_sharding(
         self,
@@ -404,8 +405,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dtype=x_out.dtype, 
                 dataset_name=dataset_name,
             )
-        
-        return target.with_data(x_out_dict)
+
+        pred = target.with_data(x_out_dict)
+        pred = pred.apply(self.boundings)
+        return pred
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():

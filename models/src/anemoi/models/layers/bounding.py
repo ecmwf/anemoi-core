@@ -310,21 +310,21 @@ def _build_dataset_boundings(
     model_config: Any,
     data_indices: Any,
     statistics: dict | None,
-) -> nn.ModuleList:
+) -> nn.Sequential:
     """Build the list of model-output bounding modules from configuration.
 
     This is a thin factory over Hydra's ``instantiate`` that reads the iterable
     ``model_config.model.bounding`` and instantiates each entry while injecting
     the common keyword arguments required by bounding modules:
     ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
-    is returned as an ``nn.ModuleList`` preserving the order of the config.
+    is returned as an ``nn.Sequential`` preserving the order of the config.
 
     Parameters
     ----------
     model_config : Any
         Object with a ``model`` attribute containing an iterable ``bounding``
         (e.g. a list of Hydra configs). If absent or empty, an empty
-        ``nn.ModuleList`` is returned.
+        ``nn.Sequential`` is returned.
     data_indices : Any
         Object providing the mappings:
         ``data_indices.model.output.name_to_index`` and
@@ -344,16 +344,15 @@ def _build_dataset_boundings(
 
     bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
 
-    return nn.ModuleList(
-        [
+    return nn.Sequential(
+        *(
             instantiate(
-                cfg,
-                name_to_index=data_indices.model.output.name_to_index,
-                statistics=statistics,
-                name_to_index_stats=data_indices.data.input.name_to_index,
-            )
-            for cfg in bounding_cfgs
-        ]
+            cfg,
+            name_to_index=data_indices.model.output.name_to_index,
+            statistics=statistics,
+            name_to_index_stats=data_indices.data.input.name_to_index,
+        )
+        for cfg in bounding_cfgs)
     )
 
 
@@ -361,7 +360,7 @@ def build_boundings(
     model_config: Any,
     data_indices: Any,
     statistics: dict | None,
-) -> nn.ModuleDict:
+) -> nn.ModuleDict[str, nn.Sequential]:
     """Build the model-output bounding modules from configuration.
 
     This is a thin factory that creates a ``nn.ModuleDict`` of bounding

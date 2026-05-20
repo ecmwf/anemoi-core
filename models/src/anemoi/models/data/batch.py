@@ -319,14 +319,11 @@ class Batch:
         **kwargs: Any
     ) -> "Batch":
         """Return a new batch with one processor applied per dataset."""
-        new_data = {}
         for name in self.dataset_names:
             if name not in func:
                 msg = f"No function provided for dataset {name!r}."
                 raise KeyError(msg)
-            new_data[name] = self[name].apply(func[name], **kwargs).data
-
-        return self.with_data(new_data)
+            self[name].apply(func[name], **kwargs)
 
     def _update_source(self, source_name: str, source_view: SourceView) -> "Batch":
         """Return a new batch with one dataset replaced from a ``SourceView``."""

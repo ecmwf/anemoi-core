@@ -15,6 +15,7 @@ from dataclasses import replace as dataclass_replace
 from typing import Any
 
 import einops
+import numpy as np
 import torch
 
 from anemoi.models.data.tensor_layout import TensorLayout
@@ -159,9 +160,11 @@ class GriddedSourceView(SourceView):
             time=num_out_times
         )
 
-    def apply(self, func: Callable[..., torch.Tensor], **kwargs: Any) -> "GriddedSourceView":
+    def apply(self, func: Callable[..., torch.Tensor], include_layout: bool = False, **kwargs: Any) -> "GriddedSourceView":
         """Return a new view with ``func`` applied to the data payload."""
-        new_data = func(self.data, layout=self.layout, **kwargs)
+        if include_layout:
+            kwargs["layout"] = self.layout
+        new_data = func(self.data, **kwargs)
         return dataclass_replace(self, data=new_data)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSourceView":
@@ -239,9 +242,11 @@ class TabularSourceView(SourceView):
         latlon_coords = torch.cat(self.coordinates, dim=0)
         return latlon_coords
 
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> torch.Tensor:
-        # TODO: implement unflattening for batch_size > 1
-        return data_2d
+    def unflatten_data_2d(self, data_2d: torch.Tensor) -> list[torch.Tensor]:
+        assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
+        batch_sizes = [data.shape[self.layout.grid] for data in self.data]
+        batch_starts = np.cumsum([0] + batch_sizes[:-1])
+        return [data_2d.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
 
     def apply(self, func: Callable[..., torch.Tensor], **kwargs: Any) -> "TabularSourceView":
         """Return a new view with ``func`` applied to the data payload."""

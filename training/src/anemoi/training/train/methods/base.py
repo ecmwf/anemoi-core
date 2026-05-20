@@ -810,7 +810,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch = self._setup_batch_sharding(batch)
 
         # Batch normalization (the underlying ``batch.data`` dict should be mutated in-place)
-        batch = batch.apply(self.model.pre_processors)
+        batch = batch.apply(self.model.pre_processors, include_layout=True)
 
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
