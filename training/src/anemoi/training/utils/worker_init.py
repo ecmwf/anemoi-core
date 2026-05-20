@@ -10,7 +10,8 @@
 
 import logging
 
-from numcodecs.blosc import set_nthreads, get_nthreads
+from numcodecs.blosc import get_nthreads
+from numcodecs.blosc import set_nthreads
 from torch.utils.data import get_worker_info
 
 from anemoi.training.schemas.base_schema import BaseSchema
