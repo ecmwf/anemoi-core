@@ -264,7 +264,7 @@ def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None
 def test_ignore_nans_flag() -> None:
     inner = _make_loss()
     inner.ignore_nans = True
-    wrapper = TimeAggregateLossWrapper(["mean"], inner, ignore_nans=True)
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
     assert wrapper.ignore_nans
 
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)

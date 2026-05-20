@@ -334,7 +334,8 @@ class BaseLossWrapper(BaseLoss):
         if not isinstance(loss, BaseLoss):
             msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
             raise TypeError(msg)
-        if self.ignore_nans != loss.ignore_nans:
+        self.ignore_nans = loss.ignore_nans or self.ignore_nans
+        if self.ignore_nans and not loss.ignore_nans:
             msg = "BaseLossWrapper.ignore_nans and BaseLoss.ignore_nans missmatch."
             msg += f" {self.ignore_nans} != {loss.ignore_nans}"
             raise ValueError(msg)
