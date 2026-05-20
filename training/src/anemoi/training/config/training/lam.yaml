@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: lam
+  - training_loss: single
   - optimization: default
   - weight_averaging: null
 
@@ -48,19 +49,6 @@ strategy:
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
-# loss function for the model
-training_loss:
-  datasets:
-    data: # user-defined key in data
-      # loss class to initialise
-      _target_: anemoi.training.losses.MSELoss
-      # Scalers to include in loss calculation
-      # A selection of available scalers are listed in training/scalers/scalers.yaml
-      # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-      # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
-      ignore_nans: False
-
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
 # and logged according to their name.
@@ -76,7 +64,6 @@ validation_metrics:
         # Cannot scale over the variable dimension due to possible remappings.
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-        # Use the `scale_validation_metrics` section to variable scale.
         scalers: ["node_weights", "time_steps"]
         # other kwargs
         ignore_nans: True

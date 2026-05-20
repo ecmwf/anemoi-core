@@ -1,0 +1,19 @@
+datasets:
+  data:
+    _target_: anemoi.training.losses.combined.CombinedLoss
+    ignore_nans: False
+    # loss_weights: [n_timesteps / (n_timesteps + n_agg_ops), n_agg_ops / (n_timesteps + n_agg_ops)]
+    # Each sub-loss averages internally (raw over timesteps, aggregate over agg ops).
+    # These weights re-scale so the total matches: sum_all / (n_timesteps + n_agg_ops).
+    # Example for 6 timesteps and 4 agg ops: [0.6, 0.4]
+    loss_weights: [0.6, 0.4]
+    losses:
+      - _target_: anemoi.training.losses.MSELoss
+        scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+        ignore_nans: False
+      - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+        scalers: ['pressure_level', 'general_variable', 'node_weights']
+        time_aggregation_types: [mean, max, min, diff]
+        loss_fn:
+          _target_: anemoi.training.losses.MSELoss
+          ignore_nans: False
