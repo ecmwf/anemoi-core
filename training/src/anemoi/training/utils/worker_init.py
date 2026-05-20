@@ -10,7 +10,7 @@
 
 import logging
 
-from numcodecs.blosc import set_nthreads as blosc_set_nthreads
+from numcodecs.blosc import set_nthreads, get_nthreads
 from torch.utils.data import get_worker_info
 
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -37,9 +37,12 @@ def worker_init_func(worker_id: int, dataloader_config: BaseSchema) -> None:
 
     """
     # read the dataloader config to set the number of threads blosc should use when decompressing zarr chunks.
-    blosc_num_threads = dataloader_config.get("blosc_num_threads", 1)
-    blosc_set_nthreads(blosc_num_threads)
-    LOGGER.debug("Set number of threads used by Blosc to %d.", blosc_num_threads)
+    blosc_num_threads = dataloader_config.get("blosc_num_threads", None)
+    if blosc_num_threads is not None:
+        set_nthreads(blosc_num_threads)
+        LOGGER.info("Set number of threads used by Blosc to %d.", blosc_num_threads)
+    else:
+        LOGGER.info("Using Blosc default number of threads (%d) for decompression.", get_nthreads())
 
     worker_info = get_worker_info()  # information specific to each worker process
     if worker_info is None:

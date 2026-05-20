@@ -135,5 +135,5 @@ class DataLoaderSchema(PydanticBaseModel):
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used."
-    blosc_num_threads: PositiveInt | None = Field(default=1)
+    blosc_num_threads: PositiveInt | None = Field(default=None)
     "Sets how many threads used when decompressing Zarr chunks. If None, the thread count will be determined by Blosc."
