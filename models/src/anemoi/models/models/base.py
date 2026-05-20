@@ -191,7 +191,11 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+        if self.is_dataset_static[dataset_name]:
+            return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+        
+        # time is already part of the grid dimension
+        return self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
@@ -227,7 +231,11 @@ class BaseGraphModel(nn.Module):
             return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
-        return self.n_step_output * self.num_output_channels[dataset_name]
+        if self.is_dataset_static[dataset_name]:
+            return self.n_step_output * self.num_output_channels[dataset_name]
+        
+        # time is already part of the grid dimension
+        return self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
