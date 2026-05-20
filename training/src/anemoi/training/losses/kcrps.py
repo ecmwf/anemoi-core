@@ -160,7 +160,7 @@ class CRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
-        nan_fraction, y_pred, y_target = self.mask_nans(y_pred, y_target)
+        y_pred, y_target = self.mask_nans(y_pred, y_target)
 
         y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
@@ -174,13 +174,7 @@ class CRPS(BaseLoss):
         crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
         crps = self.scale(crps, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(
-            crps,
-            squash=squash,
-            squash_mode=squash_mode,
-            group=group if is_sharded else None,
-            nan_fraction=nan_fraction,
-        )
+        return self.reduce(crps, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
 
     @property
     def name(self) -> str:
