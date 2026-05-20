@@ -1,0 +1,86 @@
+prefetch_factor: 2
+pin_memory: True
+
+# ============
+# read_group_size:
+#   Form subgroups of model comm groups that read data together.
+#   Each reader in the group only reads 1/read_group_size of the data
+#   which is then all-gathered between the group.
+#   This can reduce CPU memory usage as well as increase dataloader throughput.
+#   The number of GPUs per model must be divisible by read_group_size.
+#   To disable, set to 1.
+# ============
+read_group_size: ${system.hardware.num_gpus_per_model}
+
+num_workers:
+  training: 8
+  validation: 8
+  test: 8
+batch_size:
+  training: 2
+  validation: 4
+  test: 4
+
+# ============
+# Default effective batch_size for training is 16
+# For the o96 resolution, default per-gpu batch_size is 2 (8 gpus required)
+# The global lr is calculated as:
+# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+# Assuming a constant effective batch_size, any change in the per_gpu batch_size
+# should come with a rescaling of the local_lr to keep a constant global_lr
+# ============
+
+# runs only N training batches [N = integer | null]
+# if null then we run through all the batches
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+
+# ============
+# ForecastStepDataset configuration
+# The 5D zarr has shape (num_inits, variables, ensemble, forecast_steps, gridpoints).
+# forecast_steps: number of lead-time steps to use per initialization.
+# step_frequency: temporal spacing between consecutive forecast steps.
+# Trajectories are implicit per initialization — no separate trajectory config needed.
+# ============
+
+# Pointers to datasets and model run info
+dataset: ${system.input.dataset}
+forecast_steps: 120
+step_frequency: 1h
+
+training:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
+      start: null
+      end: 2020
+      forecast_steps: ${dataloader.forecast_steps}
+      step_frequency: ${dataloader.step_frequency}
+
+validation:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
+      start: 2021
+      end: 2021
+      forecast_steps: ${dataloader.forecast_steps}
+      step_frequency: ${dataloader.step_frequency}
+
+test:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+        drop: []
+      start: 2022
+      forecast_steps: ${dataloader.forecast_steps}
+      step_frequency: ${dataloader.step_frequency}

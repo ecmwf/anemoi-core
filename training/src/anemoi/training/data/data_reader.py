@@ -222,6 +222,131 @@ class NativeGridDataset(BaseAnemoiReader):
         return False
 
 
+class ForecastStepDataset(BaseAnemoiReader):
+    """Dataset reader for 5D zarrs with an explicit forecast-step dimension.
+
+    Expected zarr shape: ``(num_inits, variables, ensemble, forecast_steps, gridpoints)``.
+
+    This reader virtualizes the dataset as a flat time series of length
+    ``num_inits * forecast_steps`` so that the rest of the training pipeline
+    (tasks, usable indices, multidataset) works unchanged.  Trajectory
+    boundaries are automatically placed at initialization boundaries so
+    that samples never cross forecasts.
+    """
+
+    def __init__(
+        self,
+        forecast_steps: int,
+        step_frequency: str | datetime.timedelta = "1h",
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
+        start: datetime.datetime | int | None = None,
+        end: datetime.datetime | int | None = None,
+    ):
+        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
+        self._forecast_steps = forecast_steps
+
+        if isinstance(step_frequency, str):
+            from anemoi.utils.dates import frequency_to_timedelta
+            self._step_frequency = frequency_to_timedelta(step_frequency)
+        else:
+            self._step_frequency = step_frequency
+
+        # Validate shape: expect 5D (inits, vars, ensemble, steps, grid)
+        if len(self.data.shape) != 5:
+            msg = (
+                f"ForecastStepDataset expects a 5D zarr "
+                f"(inits, variables, ensemble, steps, gridpoints), got shape {self.data.shape}"
+            )
+            raise ValueError(msg)
+
+        actual_steps = self.data.shape[3]
+        if actual_steps < forecast_steps:
+            msg = (
+                f"Dataset has {actual_steps} forecast steps but config requests {forecast_steps}."
+            )
+            raise ValueError(msg)
+
+    @property
+    def num_initializations(self) -> int:
+        """Number of forecast initializations in the dataset."""
+        return self.data.shape[0]
+
+    @property
+    def frequency(self) -> datetime.timedelta:
+        """Virtual frequency = step frequency (e.g. 1h)."""
+        return self._step_frequency
+
+    @property
+    def dates(self) -> np.ndarray:
+        """Virtual flat dates array of length num_inits * forecast_steps."""
+        init_dates = super().dates  # shape (num_inits,)
+        # Expand each init date into forecast_steps consecutive dates
+        step_offsets = np.array(
+            [np.timedelta64(int(self._step_frequency.total_seconds() * i), "s") for i in range(self._forecast_steps)],
+        )
+        # Outer addition: (num_inits, 1) + (1, forecast_steps) -> (num_inits, forecast_steps)
+        all_dates = init_dates[:, None] + step_offsets[None, :]
+        return all_dates.ravel()
+
+    @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return self.data.shape[4]
+
+    @property
+    def has_trajectories(self) -> bool:
+        """Return whether the dataset has trajectories."""
+        return True
+
+    @property
+    def trajectory_ids(self) -> np.ndarray:
+        """Each virtual index maps to its initialization index."""
+        return np.repeat(np.arange(self.num_initializations), self._forecast_steps)
+
+    def get_sample(
+        self,
+        time_indices: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        """Get a sample from the 5D dataset.
+
+        Maps virtual flat time indices to (init_index, step_indices) and
+        loads from the 5D zarr.
+        """
+        # Convert TimeIndices to a flat array of ints
+        if isinstance(time_indices, slice):
+            indices = np.arange(*time_indices.indices(self.num_initializations * self._forecast_steps))
+        elif isinstance(time_indices, (list, tuple)):
+            indices = np.array(time_indices)
+        else:
+            indices = np.asarray(time_indices)
+
+        # All indices must belong to the same initialization
+        init_idx = indices[0] // self._forecast_steps
+        step_indices = indices - init_idx * self._forecast_steps
+
+        # Load from 5D zarr: (1, variables, ensemble, steps, gridpoints)
+        if isinstance(grid_shard_indices, slice):
+            x = self.data[init_idx, :, :, step_indices.tolist(), grid_shard_indices]
+        else:
+            x = self.data[init_idx, :, :, step_indices.tolist(), :]
+            if grid_shard_indices is not None:
+                x = x[..., grid_shard_indices]
+
+        # x shape: (variables, ensemble, num_requested_steps, gridpoints)
+        x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
+        return torch.from_numpy(x)
+
+    def tree(self, prefix: str = "") -> Tree:
+        tree = super().tree(prefix)
+        tree.add(f"Forecast steps: {self._forecast_steps}")
+        tree.add(f"Step frequency: {self._step_frequency}")
+        tree.add(f"Num initializations: {self.num_initializations}")
+        tree.add(f"Virtual length: {self.num_initializations * self._forecast_steps}")
+        return tree
+
+
 class TrajectoryDataset(BaseAnemoiReader):
     """Trajectory dataset."""
 
@@ -262,6 +387,16 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
+    forecast_steps = dataset_config.pop("forecast_steps", None)
+    step_frequency = dataset_config.pop("step_frequency", None)
+
+    if forecast_steps is not None:
+        LOGGER.info("Creating ForecastStepDataset...")
+        kwargs = {"forecast_steps": forecast_steps}
+        if step_frequency is not None:
+            kwargs["step_frequency"] = step_frequency
+        return ForecastStepDataset(**dataset_config, **kwargs)
+
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating TrajectoryDataset...")
         return TrajectoryDataset(
