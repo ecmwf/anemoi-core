@@ -86,7 +86,8 @@ class SpectralLoss(BaseLoss):
         transform
             Spectral transform type.
         ignore_nans
-            Whether to ignore NaNs in the loss computation.
+            Spectral losses cannot handle missing values;
+            ignore_nans must be False.
         scalers
             Kept for Hydra/config backwards compatibility. This module does not
             consume this argument directly (scaling is handled by BaseLoss).
@@ -156,8 +157,6 @@ class SpectralL2Loss(SpectralLoss):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        nan_fraction, pred, target = self.mask_nans(pred, target)
-
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
 
@@ -169,7 +168,7 @@ class SpectralL2Loss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogSpectralDistance(SpectralLoss):
@@ -191,8 +190,6 @@ class LogSpectralDistance(SpectralLoss):
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
-        nan_fraction, pred, target = self.mask_nans(pred, target)
-
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
 
@@ -207,9 +204,7 @@ class LogSpectralDistance(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return torch.sqrt(
-            self.reduce(result, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction) + eps,
-        )
+        return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
 
 
 class FourierCorrelationLoss(SpectralLoss):
@@ -231,8 +226,6 @@ class FourierCorrelationLoss(SpectralLoss):
         group = group if is_sharded else None
         eps = torch.finfo(pred.dtype).eps
 
-        nan_fraction, pred, target = self.mask_nans(pred, target)
-
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
         n_modes = pred_spectral.size(dim=TensorDim.GRID.value)
@@ -251,7 +244,7 @@ class FourierCorrelationLoss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogFFT2Distance(LogSpectralDistance):
@@ -331,15 +324,12 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        nan_fraction, pred, target = self.mask_nans(pred, target)
-
         # → [..., modes, vars]
         pred_spec = self._to_spectral_flat(pred)
         tgt_spec = self._to_spectral_flat(target)
 
         pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
-
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
                 crps = self._kernel_crps(pred_spec, tgt_spec)
@@ -353,7 +343,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode, nan_fraction=nan_fraction)
+        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
 
     @property
     def name(self) -> str:
