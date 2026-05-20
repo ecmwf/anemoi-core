@@ -154,8 +154,6 @@ class AsyncPlotExecutor(BasePlotExecutor):
         self._executor.shutdown(wait=False, cancel_futures=True)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.loop_thread.join()
-        self.loop_thread._stop()
-        self.loop_thread._delete()
 
 
 class BasePlotCallback(Callback, ABC):
