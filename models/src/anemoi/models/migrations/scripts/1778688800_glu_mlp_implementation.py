@@ -8,37 +8,28 @@
 # nor does it submit to any jurisdiction.
 
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import MigrationContext
 from anemoi.models.migrations import MigrationMetadata
 
 # DO NOT CHANGE -->
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "0.15.0",
+        "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
     },
 )
 # <-- END DO NOT CHANGE
 
 
-def migrate_setup(context: MigrationContext) -> None:
-    """Migrate setup callback to be run before loading the checkpoint.
-
-    Parameters
-    ----------
-    context : MigrationContext
-       A MigrationContext instance
-    """
-    context.delete_attribute("anemoi.training.schemas.training.SWA")
-
-
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint.
 
-    Renames the removed ``training.swa`` config key to ``training.weight_averaging``.
-    Any previously-configured SWA is silently disabled; users who want weight
-    averaging on a migrated checkpoint should re-enable it via the new
-    ``weight_averaging`` Hydra-instantiate config.
+    ``GraphTransformerBaseBlock.node_dst_mlp`` and
+    ``GraphTransformerMapperBlock.node_src_mlp`` were bare ``nn.Sequential``
+    modules and are now ``MLP`` instances whose layers live under an inner
+    ``.mlp`` sequential. This inserts the extra path component.
+
+    Before: ``*.node_dst_mlp.0.weight``
+    After:  ``*.node_dst_mlp.mlp.0.weight``
 
     Parameters
     ----------
@@ -50,7 +41,12 @@ def migrate(ckpt: CkptType) -> CkptType:
     CkptType
         The migrated checkpoint dict.
     """
-    training = ckpt["hyper_parameters"]["config"].training
-    training.pop("swa", None)
-    training.weight_averaging = None
+    state_dict = ckpt["state_dict"]
+    renames = {
+        k: k.replace(".node_dst_mlp.", ".node_dst_mlp.mlp.").replace(".node_src_mlp.", ".node_src_mlp.mlp.")
+        for k in list(state_dict)
+        if ".node_dst_mlp." in k or ".node_src_mlp." in k
+    }
+    for old_key, new_key in renames.items():
+        state_dict[new_key] = state_dict.pop(old_key)
     return ckpt
