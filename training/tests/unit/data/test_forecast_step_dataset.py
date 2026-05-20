@@ -124,6 +124,7 @@ def _make_forecast_step_dataset(
 
     if isinstance(step_frequency, str):
         from anemoi.utils.dates import frequency_to_timedelta
+
         dataset._step_frequency = frequency_to_timedelta(step_frequency)
     else:
         dataset._step_frequency = step_frequency
@@ -322,8 +323,13 @@ class TestForecastStepDatasetValidation:
             resolution = "o96"
             name_to_index = {"a": 0, "b": 1, "c": 2}
             missing = set()
-            def metadata(self): return {}
-            def supporting_arrays(self): return {}
+
+            def metadata(self):
+                return {}
+
+            def supporting_arrays(self):
+                return {}
+
             statistics = {}
 
         with pytest.raises(ValueError, match="expects a 5D zarr"):
@@ -384,7 +390,8 @@ class TestCreateDatasetWithForecastSteps:
         fake_zarr = FakeZarr5D(num_inits=10, variables=3, ensemble=2, steps=24, gridpoints=10)
 
         with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake_zarr):
-            from anemoi.training.data.data_reader import NativeGridDataset, create_dataset
+            from anemoi.training.data.data_reader import NativeGridDataset
+            from anemoi.training.data.data_reader import create_dataset
 
             config = {
                 "dataset_config": {"dataset": "fake.zarr"},
