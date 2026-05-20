@@ -93,7 +93,12 @@ class SpectralLoss(BaseLoss):
         kwargs
             Additional arguments for the spectral transform.
         """
+        assert not ignore_nans, (
+            "Spectral losses cannot handle missing values; "
+            "ignore_nans must be False"
+        )
         BaseLoss.__init__(self, ignore_nans=ignore_nans)
+        
 
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
