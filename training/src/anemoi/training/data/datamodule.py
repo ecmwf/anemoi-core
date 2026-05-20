@@ -10,6 +10,7 @@
 
 import logging
 from functools import cached_property
+from functools import partial
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -155,7 +156,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             batch_size=self.config.dataloader.batch_size[stage],
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
-            worker_init_fn=worker_init_func,
+            worker_init_fn=partial(worker_init_func, dataloader_config=self.config.dataloader),
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=True,
             **extra,
