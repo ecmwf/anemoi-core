@@ -250,23 +250,40 @@ def lam_config_with_graph(
     return cfg, urls
 
 
+def _get_multiscale_cfgs(training_loss_cfg: DictConfig) -> list[DictConfig]:
+    """Extract multiscale_config dicts that contain loss_matrices."""
+    multiscale_cfg = training_loss_cfg.get("multiscale_config")
+    if multiscale_cfg is not None and "loss_matrices" in multiscale_cfg:
+        return [multiscale_cfg]
+    if "losses" in training_loss_cfg:
+        results = []
+        for sub_loss in training_loss_cfg.losses:
+            mc = sub_loss.get("multiscale_config")
+            if mc is not None and "loss_matrices" in mc:
+                results.append(mc)
+        return results
+    return []
+
+
 def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
     url_loss_matrices = cfg.system.input.loss_matrices_path
     tmp_path_loss_matrices = None
 
     training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
     for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        multiscale_cfg = training_loss_cfg.get("multiscale_config")
-        if multiscale_cfg is None:
-            continue
-        for file in multiscale_cfg.get("loss_matrices") or []:
-            if file is not None:
-                tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+        multiscale_cfgs = _get_multiscale_cfgs(training_loss_cfg)
+
+        for multiscale_cfg in multiscale_cfgs:
+            for file in multiscale_cfg.get("loss_matrices") or []:
+                if file is not None:
+                    tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+            if tmp_path_loss_matrices is not None:
+                OmegaConf.set_struct(multiscale_cfg, False)
+                multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
         if tmp_path_loss_matrices is not None:
             resolved_path = str(Path(tmp_path_loss_matrices).parent)
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-            OmegaConf.set_struct(multiscale_cfg, False)
-            multiscale_cfg.loss_matrices_path = resolved_path
 
             val_multiscale_cfg = cfg.training.validation_metrics.datasets[dataset_name].multiscale.multiscale_config
             OmegaConf.set_struct(val_multiscale_cfg, False)
