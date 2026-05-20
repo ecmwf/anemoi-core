@@ -524,13 +524,6 @@ def test_octahedral_sht_loss() -> None:
         _ = loss(pred_wrong, target_wrong, squash=True)
 
 
-def _expected_octahedral_points(truncation: int) -> int:
-    # full globe reduced-octahedral points for ecTrans definition
-    # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
-    # full globe doubles:        => 4*(T+1)*(T+10)
-    return 4 * (truncation + 1) * (truncation + 10)
-
-
 def test_spectral_crps_fft_and_dct() -> None:
     bs, ens, nvars = 2, 5, 3
     x_dim, y_dim = 8, 6
