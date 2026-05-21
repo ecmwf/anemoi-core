@@ -213,6 +213,71 @@ class AttributeFromTargetNode(BaseEdgeAttributeFromNodeBuilder):
     nodes_axis = NodesAxis.TARGET
 
 
+class FloatAttributeFromSourceNode(BaseEdgeAttributeBuilder):
+    """Copy a continuous (float) attribute from the source node to each edge.
+
+    Unlike ``AttributeFromSourceNode`` (which returns booleans), this class
+    supports float dtypes and optional normalisation.  Use it to propagate a
+    per-node scalar feature — such as elevation or gradient magnitude — onto
+    the outgoing edges of that node so the GNN edge MLP can use it.
+
+    Example use: register ``z_orog`` on data nodes, then add this attribute
+    to encoder edges (data → hidden) so the encoder sees each input data
+    node's elevation.
+
+    Parameters
+    ----------
+    node_attr_name : str
+        Name of the node attribute to copy (must exist on the source nodes).
+    norm : str | None
+        Optional normalisation applied edge-wise after copying.
+    """
+
+    def __init__(self, node_attr_name: str, norm: str | None = None, dtype: str = "float32") -> None:
+        self.node_attr_name = node_attr_name
+        super().__init__(norm=norm, dtype=dtype)
+
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        # x_j = source node feature (PyG MessagePassing convention)
+        assert x_j is not None, (
+            f"FloatAttributeFromSourceNode: attribute '{self.node_attr_name}' "
+            "not found on source nodes."
+        )
+        return x_j
+
+
+class FloatAttributeFromTargetNode(BaseEdgeAttributeBuilder):
+    """Copy a continuous (float) attribute from the target node to each edge.
+
+    Symmetric counterpart to ``FloatAttributeFromSourceNode``.  Use it to
+    give each incoming edge the target node's terrain feature, so the GNN
+    decoder can condition reconstruction on the target data node's elevation.
+
+    Example use: register ``z_orog`` on data nodes, then add this attribute
+    to decoder edges (hidden → data) so the decoder knows the elevation of the
+    data node it is reconstructing.
+
+    Parameters
+    ----------
+    node_attr_name : str
+        Name of the node attribute to copy (must exist on the target nodes).
+    norm : str | None
+        Optional normalisation applied edge-wise after copying.
+    """
+
+    def __init__(self, node_attr_name: str, norm: str | None = None, dtype: str = "float32") -> None:
+        self.node_attr_name = node_attr_name
+        super().__init__(norm=norm, dtype=dtype)
+
+    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        # x_i = target node feature (PyG MessagePassing convention)
+        assert x_i is not None, (
+            f"FloatAttributeFromTargetNode: attribute '{self.node_attr_name}' "
+            "not found on target nodes."
+        )
+        return x_i
+
+
 class RadialBasisFeatures(EdgeLength):
     """Radial basis features from edge distances using Gaussian RBFs.
 

@@ -51,6 +51,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
+        self.dataset_names = list(data_indices.keys())
 
         model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
@@ -318,8 +319,8 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
 
             ## Downscale
             for i in range(0, self.num_hidden - 1):
-                src_hidden_name = self._graph_hidden_names[i]
-                dst_hidden_name = self._graph_hidden_names[i + 1]
+                src_hidden_name = self._graph_name_hidden[i]
+                dst_hidden_name = self._graph_name_hidden[i + 1]
 
                 ## Processing at same level
                 if self.level_process:

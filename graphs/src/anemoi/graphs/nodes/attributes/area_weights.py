@@ -445,3 +445,137 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
         ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
         data = torch.from_numpy(self._read_data(nodes))
         return self.post_process(data)
+
+
+class OrogElevationAttribute(BaseNodeAttribute):
+    """Per-node raw elevation (metres) interpolated from a NetCDF orography file.
+
+    Reads the same orography NetCDF used by ``AdaptiveOrographyTriNodes`` and
+    interpolates the elevation field to the node coordinates.  Can be registered
+    on both data nodes and hidden nodes and is used as a static node feature that
+    the model can access via edge attributes (e.g. ``FloatAttributeFromTargetNode``).
+
+    Parameters
+    ----------
+    orography_path : str
+        Path to the NetCDF orography file.
+    norm : str | None
+        Normalisation applied after interpolation.  ``"unit-max"`` scales to
+        [0, 1] by the global maximum; ``None`` leaves values in metres.
+    """
+
+    def __init__(
+        self,
+        orography_path: str,
+        norm: str | None = "unit-max",
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm=norm, dtype=dtype)
+        self.orography_path = orography_path
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        from anemoi.graphs.generate.utils import compute_orography_elevation
+
+        latlons_rad = nodes.x.cpu().numpy()  # (N, 2) radians
+        elev = compute_orography_elevation(self.orography_path, latlons_rad)
+        return torch.from_numpy(elev.astype(np.float32))
+
+
+class OrogGradientAttribute(BaseNodeAttribute):
+    """Per-node normalised orography gradient magnitude from a NetCDF file.
+
+    Returns ``clip(|∇z|_node / percentile(|∇z|, percentile_clip), 0, 1)`` —
+    a value in [0, 1] where 0 = flat and 1 = steepest ``percentile_clip``% of
+    terrain.  This is the raw gradient feature used as an encoder edge attribute
+    in Step E; it is distinct from ``OrogGradientWeights`` which applies the
+    ``1 + alpha * ...`` loss-weight transformation.
+
+    Parameters
+    ----------
+    orography_path : str
+        Path to the NetCDF orography file.
+    percentile_clip : float
+        Percentile of the gradient distribution that maps to 1.0.
+    norm : str | None
+        Additional normalisation on top of the clipped ratio.
+    """
+
+    def __init__(
+        self,
+        orography_path: str,
+        percentile_clip: float = 95.0,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm=norm, dtype=dtype)
+        assert 0 < percentile_clip <= 100
+        self.orography_path = orography_path
+        self.percentile_clip = percentile_clip
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        from anemoi.graphs.generate.utils import compute_orography_gradient
+
+        latlons_rad = nodes.x.cpu().numpy()  # (N, 2) radians
+        g = compute_orography_gradient(self.orography_path, latlons_rad)
+
+        positive = g[g > 0]
+        p_clip = float(np.percentile(positive, self.percentile_clip)) if positive.size else 1.0
+        g_norm = np.clip(g / max(p_clip, 1e-10), 0.0, 1.0).astype(np.float32)
+        return torch.from_numpy(g_norm)
+
+
+class OrogGradientWeights(BaseNodeAttribute):
+    """Per-node loss weights based on orography gradient from a NetCDF file.
+
+    Loads the orography gradient from the same NetCDF file used to build the
+    adaptive hidden mesh, interpolates it to the data node coordinates, then
+    maps it to a weight:
+
+        w(node) = 1 + alpha * clip(|∇z|_node / percentile(|∇z|, percentile_clip), 0, 1)
+
+    Flat nodes → w ≈ 1.0 (unchanged loss contribution).
+    Ridge nodes → w ≈ 1.0 + alpha (amplified loss contribution).
+
+    Parameters
+    ----------
+    orography_path : str
+        Path to the same NetCDF orography file used by the node builder
+        (e.g. ``realch1_orography.nc``).
+    alpha : float
+        Amplification factor for steep nodes.  Ridge nodes receive up to
+        ``1 + alpha`` times the baseline loss weight.
+    percentile_clip : float
+        Percentile of the gradient distribution that maps to weight
+        ``1 + alpha``.  Gradients above this value are clipped.
+    norm : str | None
+        Optional additional normalisation applied on top of the
+        ``1 + alpha * ...`` formula.
+    """
+
+    def __init__(
+        self,
+        orography_path: str,
+        alpha: float = 2.0,
+        percentile_clip: float = 95.0,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(norm=norm, dtype=dtype)
+        assert alpha >= 0, f"alpha must be non-negative, got {alpha}"
+        assert 0 < percentile_clip <= 100, f"percentile_clip must be in (0, 100], got {percentile_clip}"
+        self.orography_path = orography_path
+        self.alpha = alpha
+        self.percentile_clip = percentile_clip
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        from anemoi.graphs.generate.utils import compute_orography_gradient
+
+        latlons_rad = nodes.x.cpu().numpy()  # (N, 2) radians
+        g = compute_orography_gradient(self.orography_path, latlons_rad)
+
+        positive = g[g > 0]
+        p_clip = float(np.percentile(positive, self.percentile_clip)) if positive.size else 1.0
+        g_norm = np.clip(g / max(p_clip, 1e-10), 0.0, 1.0)
+
+        w = (1.0 + self.alpha * g_norm).astype(np.float32)
+        return torch.from_numpy(w)

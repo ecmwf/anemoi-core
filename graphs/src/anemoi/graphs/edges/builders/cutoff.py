@@ -317,3 +317,117 @@ class ReversedCutOffEdges(CutOffEdges):
     ) -> torch.Tensor:
         edge_index = torch.flip(edge_index, [0])
         return super().undo_masking_edge_index(edge_index, source_nodes, target_nodes)
+
+
+class RandomSampledCutOffEdges(CutOffEdges):
+    """Cut-off edges with random subsampling of neighbours within the radius.
+
+    For each target node, first finds all source nodes within ``cutoff_distance_km``
+    (or ``cutoff_factor`` × reference distance), then randomly samples up to
+    ``num_neighbours`` of them.  Unlike KNN, this gives each target node a
+    statistically uniform sample of the full neighbourhood rather than only the
+    nearest nodes — important when source density varies (e.g. dense LAM fine mesh
+    feeding a sparse coarse mesh).
+
+    In regions where fewer than ``num_neighbours`` source nodes fall inside the
+    radius, all available nodes are kept (no padding).
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    cutoff_factor : float | None
+        Factor to multiply the grid reference distance to get the cut-off radius.
+        Mutually exclusive with cutoff_distance_km.
+    cutoff_distance_km : float | None
+        Cutoff radius in kilometers. Mutually exclusive with cutoff_factor.
+    num_neighbours : int
+        Number of source nodes to sample per target node.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+    random_seed : int
+        Seed for the random number generator (ensures reproducible graphs).
+    """
+
+    def __init__(
+        self,
+        source_name: str,
+        target_name: str,
+        num_neighbours: int,
+        cutoff_factor: float | None = None,
+        cutoff_distance_km: float | None = None,
+        source_mask_attr_name: str | None = None,
+        target_mask_attr_name: str | None = None,
+        random_seed: int = 42,
+    ) -> None:
+        # Pass a large max_num_neighbours so CutOff collects ALL candidates first;
+        # we do the subsampling ourselves afterwards.
+        super().__init__(
+            source_name=source_name,
+            target_name=target_name,
+            cutoff_factor=cutoff_factor,
+            cutoff_distance_km=cutoff_distance_km,
+            source_mask_attr_name=source_mask_attr_name,
+            target_mask_attr_name=target_mask_attr_name,
+            max_num_neighbours=100_000,
+        )
+        assert isinstance(num_neighbours, int) and num_neighbours > 0, \
+            "num_neighbours must be a positive integer."
+        self.num_neighbours = num_neighbours
+        self.random_seed = random_seed
+
+    def _random_subsample_adj_matrix(self, adj_matrix):
+        """Randomly subsample up to num_neighbours source nodes per target node."""
+        rng = np.random.default_rng(self.random_seed)
+        rows, cols, data = adj_matrix.row, adj_matrix.col, adj_matrix.data
+
+        keep_rows, keep_cols, keep_data = [], [], []
+        # group by target node (row in adj_matrix = target)
+        if len(rows) == 0:
+            return adj_matrix
+        order = np.argsort(rows, kind="stable")
+        sorted_rows = rows[order]
+        boundaries = np.concatenate(([0], np.where(np.diff(sorted_rows) != 0)[0] + 1, [len(sorted_rows)]))
+        for i in range(len(boundaries) - 1):
+            start, end = boundaries[i], boundaries[i + 1]
+            seg = order[start:end]
+            if len(seg) <= self.num_neighbours:
+                chosen = seg
+            else:
+                chosen = rng.choice(seg, size=self.num_neighbours, replace=False)
+            keep_rows.append(rows[chosen])
+            keep_cols.append(cols[chosen])
+            keep_data.append(data[chosen])
+
+        if not keep_rows:
+            return adj_matrix
+        keep_rows = np.concatenate(keep_rows)
+        keep_cols = np.concatenate(keep_cols)
+        keep_data = np.concatenate(keep_data)
+        return coo_matrix((keep_data, (keep_rows, keep_cols)), shape=adj_matrix.shape)
+
+    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor):
+        nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
+        nearest_neighbour.fit(source_coords.cpu())
+        adj_matrix = nearest_neighbour.radius_neighbors_graph(
+            target_coords.cpu(), radius=self.radius, mode="distance"
+        ).tocoo()
+        adj_matrix = self._random_subsample_adj_matrix(adj_matrix)
+        return adj_matrix
+
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
+        radius_km = self.radius * EARTH_RADIUS
+        LOGGER.info(
+            "Using RandomSampledCutOff-Edges (radius=%.1f km, num_neighbours=%d) between %s and %s.",
+            radius_km,
+            self.num_neighbours,
+            self.source_name,
+            self.target_name,
+        )
+        # Call grandparent compute_edge_index (BaseDistanceEdgeBuilders), bypassing
+        # CutOffEdges.compute_edge_index which only adds logging and then calls super().
+        return super().compute_edge_index(source_nodes=source_nodes, target_nodes=target_nodes)

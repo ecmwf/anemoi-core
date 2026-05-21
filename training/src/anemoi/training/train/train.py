@@ -288,6 +288,8 @@ class AnemoiTrainer(ABC):
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",  # load to CPU before distributed init; prevents CUDA device-binding
+                    # errors when num_gpus_per_model > 1 (each rank only sees its assigned GPU at this point)
                 )
 
             model.data_indices = self.data_indices

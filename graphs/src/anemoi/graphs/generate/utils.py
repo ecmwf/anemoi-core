@@ -7,9 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import numpy as np
 import scipy
 from typeguard import typechecked
+
+LOGGER = logging.getLogger(__name__)
+
+_EARTH_RADIUS_M = 6_371_000.0
+_OROG_VAR_NAMES = ("orog", "z", "orography", "hsurf", "topography", "fi")
 
 
 def get_coordinates_ordering(coords: np.ndarray) -> np.ndarray:
@@ -105,3 +112,156 @@ def selection_matrix(idx: np.ndarray, num_diagonals: int) -> scipy.sparse.csr_ma
         diagonal matrix with ones at selected indices (idx,idx).
     """
     return scipy.sparse.csr_matrix((np.ones(len(idx)), (idx, idx)), dtype=bool, shape=(num_diagonals, num_diagonals))
+
+
+def compute_orography_gradient(orography_path: str, coords_rad: np.ndarray) -> np.ndarray:
+    """Interpolate orographic slope magnitude (m/m) to arbitrary node coordinates.
+
+    Loads the orography from a NetCDF file, computes the 2-D gradient on the
+    regular lat/lon grid using finite differences, then linearly interpolates
+    the gradient magnitude to the requested coordinates.
+
+    Parameters
+    ----------
+    orography_path : str
+        Path to a NetCDF file containing a 2-D orography field.  The variable
+        must be named one of: orog, z, orography, hsurf, topography, fi
+        (case-insensitive).  Geopotential values (> 10 000 J/kg) are
+        automatically converted to metres using g = 9.806 65 m/s².
+    coords_rad : np.ndarray, shape (N, 2)
+        Node coordinates [lat, lon] in radians.
+
+    Returns
+    -------
+    np.ndarray, shape (N,)
+        Gradient magnitude (m/m) at each node coordinate.
+
+    Raises
+    ------
+    ValueError
+        If the orography variable or its lat/lon dimensions cannot be found.
+    """
+    import xarray as xr
+    from scipy.interpolate import RegularGridInterpolator
+
+    ds = xr.open_dataset(orography_path)
+    orog_var = next((v for v in ds.data_vars if v.lower() in _OROG_VAR_NAMES), None)
+    if orog_var is None:
+        raise ValueError(
+            f"Cannot find orography variable in {orography_path}. "
+            f"Expected one of {_OROG_VAR_NAMES}. Found: {list(ds.data_vars)}"
+        )
+    orog_da = ds[orog_var].squeeze()
+
+    lat_dim = next((d for d in orog_da.dims if "lat" in d.lower()), None)
+    lon_dim = next((d for d in orog_da.dims if "lon" in d.lower()), None)
+    if lat_dim is None or lon_dim is None:
+        raise ValueError(
+            f"Cannot identify lat/lon dimensions in {orog_var}. Dims: {orog_da.dims}"
+        )
+
+    lat_vals = orog_da[lat_dim].values.astype(float)
+    lon_vals = orog_da[lon_dim].values.astype(float)
+    orog_vals = orog_da.values.astype(float)
+
+    if lat_vals[0] > lat_vals[-1]:
+        lat_vals = lat_vals[::-1]
+        orog_vals = orog_vals[::-1, :]
+
+    if np.abs(orog_vals).max() > 10_000:
+        LOGGER.debug("Geopotential detected (max=%.0f J/kg), converting to metres.", orog_vals.max())
+        orog_vals = orog_vals / 9.80665
+
+    dlat_m = np.deg2rad(np.gradient(lat_vals)) * _EARTH_RADIUS_M
+    cos_lat = np.cos(np.deg2rad(lat_vals))
+    dlon_m = (
+        np.deg2rad(np.gradient(lon_vals))[np.newaxis, :]
+        * _EARTH_RADIUS_M
+        * cos_lat[:, np.newaxis]
+    )
+
+    grad_lat = np.gradient(orog_vals, axis=0)
+    grad_lon = np.gradient(orog_vals, axis=1)
+
+    eps = 1e-10
+    grad_magnitude = np.sqrt(
+        (grad_lat / (np.abs(dlat_m[:, np.newaxis]) + eps)) ** 2
+        + (grad_lon / (np.abs(dlon_m) + eps)) ** 2
+    )
+
+    interp = RegularGridInterpolator(
+        (lat_vals, lon_vals),
+        grad_magnitude,
+        method="linear",
+        bounds_error=False,
+        fill_value=0.0,
+    )
+    return interp(np.rad2deg(coords_rad))
+
+
+def compute_orography_elevation(orography_path: str, coords_rad: np.ndarray) -> np.ndarray:
+    """Interpolate raw orographic elevation (metres) to arbitrary node coordinates.
+
+    Loads the orography from a NetCDF file and linearly interpolates the elevation
+    field to the requested coordinates.  Geopotential values are automatically
+    converted to metres.
+
+    Parameters
+    ----------
+    orography_path : str
+        Path to a NetCDF file containing a 2-D orography field.  The variable
+        must be named one of: orog, z, orography, hsurf, topography, fi.
+        Geopotential values (> 10 000 J/kg) are converted to metres using
+        g = 9.806 65 m/s².
+    coords_rad : np.ndarray, shape (N, 2)
+        Node coordinates [lat, lon] in radians.
+
+    Returns
+    -------
+    np.ndarray, shape (N,)
+        Elevation (metres) at each node coordinate.
+
+    Raises
+    ------
+    ValueError
+        If the orography variable or its lat/lon dimensions cannot be found.
+    """
+    import xarray as xr
+    from scipy.interpolate import RegularGridInterpolator
+
+    ds = xr.open_dataset(orography_path)
+    orog_var = next((v for v in ds.data_vars if v.lower() in _OROG_VAR_NAMES), None)
+    if orog_var is None:
+        raise ValueError(
+            f"Cannot find orography variable in {orography_path}. "
+            f"Expected one of {_OROG_VAR_NAMES}. Found: {list(ds.data_vars)}"
+        )
+    orog_da = ds[orog_var].squeeze()
+
+    lat_dim = next((d for d in orog_da.dims if "lat" in d.lower()), None)
+    lon_dim = next((d for d in orog_da.dims if "lon" in d.lower()), None)
+    if lat_dim is None or lon_dim is None:
+        raise ValueError(
+            f"Cannot identify lat/lon dimensions in {orog_var}. Dims: {orog_da.dims}"
+        )
+
+    lat_vals = orog_da[lat_dim].values.astype(float)
+    lon_vals = orog_da[lon_dim].values.astype(float)
+    orog_vals = orog_da.values.astype(float)
+
+    if lat_vals[0] > lat_vals[-1]:
+        lat_vals = lat_vals[::-1]
+        orog_vals = orog_vals[::-1, :]
+
+    if np.abs(orog_vals).max() > 10_000:
+        LOGGER.debug("Geopotential detected (max=%.0f J/kg), converting to metres.", orog_vals.max())
+        orog_vals = orog_vals / 9.80665
+
+    interp = RegularGridInterpolator(
+        (lat_vals, lon_vals),
+        orog_vals,
+        method="linear",
+        bounds_error=False,
+        fill_value=0.0,
+    )
+    return interp(np.rad2deg(coords_rad))

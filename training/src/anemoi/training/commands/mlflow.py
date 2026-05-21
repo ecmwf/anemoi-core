@@ -265,8 +265,9 @@ class MlFlow(Command):
                 auth.authenticate()
 
                 info = auth.user_info()
-                extra_tags["sync.user"] = info.name
-                extra_tags["sync.username"] = info.username
+                if info is not None:
+                    extra_tags["sync.user"] = info.name
+                    extra_tags["sync.username"] = info.username
 
             health_check(args.destination)
 

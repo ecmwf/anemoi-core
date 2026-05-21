@@ -62,13 +62,9 @@ from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
 
 try:
     import mlflow_export_import.common.utils as mlflow_utils
-    from mlflow_export_import.client.client_utils import create_http_client
     from mlflow_export_import.common import utils
-    from mlflow_export_import.run.export_run import _get_metrics_with_steps
-    from mlflow_export_import.run.export_run import _inputs_to_dict
-    from mlflow_export_import.run.import_run import _import_inputs
     from mlflow_export_import.run.run_data_importer import _log_data
-    from mlflow_export_import.run.run_data_importer import _log_metrics
+    from mlflow_export_import.run.run_data_importer import log_metrics as _log_metrics
 
 except ImportError:
     msg = (
@@ -76,6 +72,30 @@ except ImportError:
         "Please install it from https://github.com/mlflow/mlflow-export-import"
     )
     raise ImportError(msg) from None
+
+
+def _get_metrics_with_steps(client: mlflow.MlflowClient, run: mlflow.entities.Run) -> dict:
+    """Replicate mlflow_export_import.run.export_run.RunExporter._get_metrics_with_steps."""
+    metrics_with_steps = {}
+    for metric in run.data.metrics.keys():
+        metric_history = client.get_metric_history(run.info.run_id, metric)
+        lst = [mlflow_utils.strip_underscores(m) for m in metric_history]
+        for x in lst:
+            x.pop("key", None)
+        metrics_with_steps[metric] = lst
+    return metrics_with_steps
+
+
+def _inputs_to_dict(inputs: Any) -> list:
+    """Convert run inputs to a list of dicts (best-effort; returns [] if not supported)."""
+    try:
+        return [mlflow_utils.strip_underscores(i) for i in inputs.dataset_inputs]
+    except AttributeError:
+        return []
+
+
+def _import_inputs(http_client: Any, src_run_dct: dict, dst_run_id: str) -> None:
+    """Import dataset inputs — not supported in mlflow-export-import 1.2.0, so this is a no-op."""
 
 LOGGER = logging.getLogger(__name__)
 
@@ -350,7 +370,6 @@ class MlFlowSync:
         """Sync an offline run to the destination tracking uri."""
         src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
         dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
-        http_client = create_http_client(dest_mlflow_client)
         # GET SOURCE RUN ##
         run = src_mlflow_client.get_run(self.run_id)
         server2server = self._check_source_tracking_uri()
@@ -419,7 +438,10 @@ class MlFlowSync:
             },
         }
 
-        src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
+        try:
+            src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
+        except AttributeError:
+            src_run_dct["inputs"]["model_inputs"] = []
 
         if self.log_model:
             from mlflow_export_import.logged_model.import_logged_model import import_logged_model
@@ -451,7 +473,7 @@ class MlFlowSync:
                 src_user_id,
                 self.extra_tags,
             )
-            _import_inputs(http_client, src_run_dct, dst_run_id)
+            _import_inputs(None, src_run_dct, dst_run_id)
 
             mlflow.set_tracking_uri(self.dest_tracking_uri)
             dest_mlflow_client.log_artifacts(dst_run_id, artifact_path)

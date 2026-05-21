@@ -206,3 +206,9 @@ class StretchedTriNodes(StretchedIcosahedronNodes):
             lam_resolution=max(self.resolutions),
             area_mask_builder=self.area_mask_builder,
         )
+
+
+# Make AdaptiveOrographyTriNodes visible to MultiScaleEdges.get_edge_builder_class,
+# which resolves the node type by importing this module and calling getattr().
+# AdaptiveOrographyTriNodes defines multi_scale_edge_cls so the lookup succeeds.
+from anemoi.graphs.nodes.builders.from_adaptive import AdaptiveOrographyTriNodes  # noqa: E402, F401

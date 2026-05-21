@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .builders.cutoff import CutOffEdges
+from .builders.cutoff import RandomSampledCutOffEdges
 from .builders.cutoff import ReversedCutOffEdges
 from .builders.healpix import HEALPixMultiScaleEdges
 from .builders.icon import ICONTopologicalDecoderEdges
@@ -22,6 +23,7 @@ __all__ = [
     "CutOffEdges",
     "HEALPixMultiScaleEdges",
     "MultiScaleEdges",
+    "RandomSampledCutOffEdges",
     "ReversedCutOffEdges",
     "ReversedKNNEdges",
     "ICONTopologicalProcessorEdges",
