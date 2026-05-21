@@ -56,24 +56,25 @@ def test_fail_init_wrong_margin(margin: int):
 def test_fit(graph_with_nodes: HeteroData, mask: str):
     """Test AreaMaskBuilder fit."""
     mask_builder = AreaMaskBuilder("test_nodes", mask_attr_name=mask)
-    assert mask_builder._ref_vectors is None
+    assert hasattr(mask_builder, "_backend")
+    assert getattr(mask_builder._backend, "_ref_vectors") is None
 
     mask_builder.fit(graph_with_nodes)
 
-    assert mask_builder._ref_vectors is not None
+    assert getattr(mask_builder._backend, "_ref_vectors") is not None
     if TORCH_CLUSTER_AVAILABLE:
-        assert mask_builder._ref_vectors.shape[1] == 3
-        assert isinstance(mask_builder._ref_vectors, torch.Tensor)
+        assert mask_builder._backend._ref_vectors.shape[1] == 3
+        assert isinstance(mask_builder._backend._ref_vectors, torch.Tensor)
     else:
-        assert mask_builder._kdtree is not None
-        assert isinstance(mask_builder._kdtree, cKDTree)
+        assert mask_builder._backend._kdtree is not None
+        assert isinstance(mask_builder._backend._kdtree, cKDTree)
 
 
 def test_get_reference_coords_with_mask(graph_with_nodes: HeteroData):
     """Test AreaMaskBuilder reference coordinate extraction with mask attribute."""
     mask_builder = AreaMaskBuilder("test_nodes", mask_attr_name="interior_mask")
 
-    coords_rad = mask_builder.get_reference_coords(graph_with_nodes)
+    coords_rad = mask_builder._get_reference_coords(graph_with_nodes)
 
     assert coords_rad.shape[0] == 2
 
@@ -83,7 +84,7 @@ def test_get_reference_coords_fail_missing_mask(graph_with_nodes: HeteroData):
     mask_builder = AreaMaskBuilder("test_nodes", mask_attr_name="wrong_mask")
 
     with pytest.raises(AssertionError):
-        mask_builder.get_reference_coords(graph_with_nodes)
+        mask_builder._get_reference_coords(graph_with_nodes)
 
 
 def test_fit_fail(graph_with_nodes):
