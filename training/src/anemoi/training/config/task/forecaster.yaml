@@ -10,6 +10,6 @@ rollout:
   epoch_increment: 0
   # maximum rollout to use
   maximum: 1
-  # number of rollout steps to use for validation
 
+# number of rollout steps to use for validation, or null to use the training rollout
 validation_rollout: 1
