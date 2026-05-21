@@ -12,7 +12,7 @@ from functools import cached_property
 import numpy as np
 from hydra.utils import instantiate
 
-from anemoi.datasets.data import open_dataset
+from anemoi.datasets import open_dataset
 from anemoi.training.data.datamodule.singledatamodule import AnemoiDatasetsDataModule
 from anemoi.training.data.dataset.downscalingdataset import DownscalingDataset
 from anemoi.training.data.grid_indices import BaseGridIndices
