@@ -9,22 +9,22 @@
 
 from enum import Enum
 from functools import partial
-from typing import Annotated
-from typing import Any
-from typing import Literal
-
-from pydantic import AfterValidator
-from pydantic import Discriminator
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import PositiveInt
-from pydantic import field_validator
-from pydantic import model_validator
-from typing_extensions import Self
+from typing import Annotated, Any, Literal
 
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
+from pydantic import (
+    AfterValidator,
+    ConfigDict,
+    Discriminator,
+    Field,
+    NonNegativeFloat,
+    NonNegativeInt,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
+from typing_extensions import Self
 
 
 class GradientClip(BaseModel):
@@ -36,6 +36,15 @@ class GradientClip(BaseModel):
         example="value",
     )
     "The gradient clipping algorithm to use"
+
+
+class GenericSchema(BaseModel):
+    """Generic Hydra instantiation schema with a required _target_ and arbitrary extra fields."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    target_: str = Field(alias="_target_")
+    """Hydra target class or function to instantiate."""
 
 
 class WeightAveragingSchema(GenericSchema):
