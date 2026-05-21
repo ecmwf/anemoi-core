@@ -16,9 +16,22 @@ from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
 
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
+from anemoi.models.layers.block import MLP
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
+
+
+def _conditional_layer_kernels(condition_shape: int):
+    return load_layer_kernels(
+        {
+            "LayerNorm": {
+                "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+                "condition_shape": condition_shape,
+            }
+        }
+    )
 
 
 @pytest.fixture
@@ -74,7 +87,7 @@ def test_TransformerMapperBlock_init(mapper_block):
     assert isinstance(block.layer_norm_attention_src, nn.LayerNorm)
     assert isinstance(block.layer_norm_attention_dst, nn.LayerNorm)
     assert isinstance(block.layer_norm_mlp, nn.LayerNorm)
-    assert isinstance(block.mlp, nn.Sequential)
+    assert isinstance(block.mlp, MLP)
     assert isinstance(block.attention, MultiHeadCrossAttention)
 
 
@@ -82,7 +95,6 @@ def test_TransformerMapperBlock_init(mapper_block):
     factor_attention_heads=st.integers(min_value=1, max_value=10),
     hidden_dim=st.integers(min_value=1, max_value=100),
     num_heads=st.integers(min_value=1, max_value=10),
-    shapes=st.lists(st.integers(min_value=1, max_value=10), min_size=3, max_size=3),
     batch_size=st.integers(min_value=1, max_value=40),
     dropout_p=st.floats(min_value=0.01, max_value=1.0),
 )
@@ -91,7 +103,6 @@ def test_forward_output(
     factor_attention_heads,
     hidden_dim,
     num_heads,
-    shapes,
     batch_size,
     dropout_p,
 ):
@@ -109,7 +120,49 @@ def test_forward_output(
     )
 
     x = torch.randn((batch_size, num_channels))  # .to(torch.float16, non_blocking=True)
-    output, _ = block.forward((x, x), shapes, batch_size)
+    shape_info = BipartiteGraphShardInfo(src_nodes=[batch_size], dst_nodes=[batch_size])
+    output, _ = block.forward((x, x), shape_info, batch_size)
     assert isinstance(output[0], torch.Tensor)
     assert isinstance(output[1], torch.Tensor)
     assert output[1].shape == (batch_size, num_channels)
+
+
+def test_forward_output_with_conditioning():
+    condition_shape = 6
+    num_channels = 8
+    hidden_dim = 16
+    num_src_nodes = 3
+    num_dst_nodes = 5
+
+    block = TransformerMapperBlock(
+        num_channels=num_channels,
+        hidden_dim=hidden_dim,
+        num_heads=2,
+        window_size=None,
+        dropout_p=0.0,
+        layer_kernels=_conditional_layer_kernels(condition_shape),
+        attention_implementation="scaled_dot_product_attention",
+        softcap=None,
+        qk_norm=False,
+    )
+
+    x = (
+        torch.randn((num_src_nodes, num_channels)),
+        torch.randn((num_dst_nodes, num_channels)),
+    )
+    cond = (
+        torch.randn((num_src_nodes, condition_shape)),
+        torch.randn((num_dst_nodes, condition_shape)),
+    )
+
+    output, _ = block.forward(
+        x,
+        BipartiteGraphShardInfo(src_nodes=[num_src_nodes], dst_nodes=[num_dst_nodes]),
+        batch_size=1,
+        cond=cond,
+    )
+
+    assert isinstance(output[0], torch.Tensor)
+    assert isinstance(output[1], torch.Tensor)
+    assert output[0].shape == (num_src_nodes, num_channels)
+    assert output[1].shape == (num_dst_nodes, num_channels)
