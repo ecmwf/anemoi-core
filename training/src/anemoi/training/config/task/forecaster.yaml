@@ -12,4 +12,4 @@ rollout:
   maximum: 1
 
 # number of rollout steps to use for validation, or null to use the training rollout
-validation_rollout: 1
+validation_rollout: null
