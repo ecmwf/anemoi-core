@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import numpy as np
 import pytest
 import torch
 from scipy.spatial import cKDTree
@@ -45,7 +46,7 @@ def test_chord_threshold():
     assert mask_builder._chord_threshold == pytest.approx(expected)
 
 
-@pytest.mark.parametrize("margin", [-1, "120", None])
+@pytest.mark.parametrize("margin", [-1, 0, "120", None])
 def test_fail_init_wrong_margin(margin: int):
     """Test AreaMaskBuilder initialization with invalid margin."""
     with pytest.raises(AssertionError):
@@ -57,7 +58,6 @@ def test_fit(graph_with_nodes: HeteroData, mask: str):
     """Test AreaMaskBuilder fit."""
     mask_builder = AreaMaskBuilder("test_nodes", mask_attr_name=mask)
     assert hasattr(mask_builder, "_backend")
-    assert getattr(mask_builder._backend, "_ref_vectors") is None
 
     mask_builder.fit(graph_with_nodes)
 
@@ -70,21 +70,12 @@ def test_fit(graph_with_nodes: HeteroData, mask: str):
         assert isinstance(mask_builder._backend._kdtree, cKDTree)
 
 
-def test_get_reference_coords_with_mask(graph_with_nodes: HeteroData):
-    """Test AreaMaskBuilder reference coordinate extraction with mask attribute."""
-    mask_builder = AreaMaskBuilder("test_nodes", mask_attr_name="interior_mask")
-
-    coords_rad = mask_builder._get_reference_coords(graph_with_nodes)
-
-    assert coords_rad.shape[0] == 2
-
-
-def test_get_reference_coords_fail_missing_mask(graph_with_nodes: HeteroData):
+def test_fit_fail_missing_mask_attribute(graph_with_nodes: HeteroData):
     """Test AreaMaskBuilder fails when mask attribute is missing."""
     mask_builder = AreaMaskBuilder("test_nodes", mask_attr_name="wrong_mask")
 
     with pytest.raises(AssertionError):
-        mask_builder._get_reference_coords(graph_with_nodes)
+        mask_builder.fit(graph_with_nodes)
 
 
 def test_fit_fail(graph_with_nodes):
@@ -102,8 +93,23 @@ def test_get_mask(graph_with_nodes: HeteroData):
     query_coords_rad = graph_with_nodes["test_nodes"].x.cpu().numpy()
     mask = mask_builder.get_mask(query_coords_rad)
 
+    assert isinstance(mask, np.ndarray)
+    assert mask.dtype == np.bool_
     assert mask.shape == (graph_with_nodes["test_nodes"].num_nodes,)
     assert mask.all()
+
+
+def test_get_mask_respects_reference_mask(graph_with_nodes: HeteroData):
+    """Test AreaMaskBuilder get_mask uses only masked-in references."""
+    mask_builder = AreaMaskBuilder("test_nodes", margin_radius_km=100, mask_attr_name="interior_mask")
+    mask_builder.fit(graph_with_nodes)
+
+    masked_out_ref = graph_with_nodes["test_nodes"].x[0].cpu().numpy()
+    masked_in_ref = graph_with_nodes["test_nodes"].x[5].cpu().numpy()
+    query = np.stack([masked_out_ref, masked_in_ref], axis=0)
+    mask = mask_builder.get_mask(query)
+
+    assert mask.tolist() == [False, True]
 
 
 def test_get_mask_fail_not_fitted(graph_with_nodes: HeteroData):
