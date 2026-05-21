@@ -9,11 +9,11 @@
 
 """S3-compatible checkpoint source.
 
-Downloads checkpoint data from an S3 bucket using boto3, then loads
-it into the pipeline context. Supports AWS S3 and S3-compatible stores
-(MinIO, Ceph, EWC).
-
-boto3 is imported lazily to avoid hard dependency at module level.
+Downloads checkpoint data from an S3 bucket, then loads it into the
+pipeline context. Supports AWS S3 and S3-compatible stores (MinIO,
+Ceph, EWC) via ``anemoi.utils.remote.s3.s3_client``, which handles
+endpoint URLs, credentials, and per-bucket configuration from
+``~/.config/anemoi/settings.toml``.
 
 Example
 -------
@@ -47,20 +47,19 @@ class S3Source(CheckpointSource):
     """Checkpoint source for S3-compatible storage.
 
     Downloads a checkpoint file from an S3 bucket to a temporary location,
-    loads it with PyTorch, and cleans up the temporary file. Credential
-    resolution is delegated entirely to boto3 (environment variables,
-    config files, IAM roles, etc.).
+    loads it with PyTorch, and cleans up the temporary file. S3 client
+    creation is delegated to ``anemoi.utils.remote.s3.s3_client``, which
+    handles endpoint URLs, credentials, and per-bucket configuration from
+    ``~/.config/anemoi/settings.toml``.
 
     Parameters
     ----------
     url : str or None
         S3 URL in ``s3://bucket/key`` format. If None, the URL is read
         from ``context.config["url"]`` at process time.
-    endpoint_url : str or None
-        Custom S3 endpoint URL for S3-compatible stores (MinIO, Ceph, EWC).
-        If None, boto3 uses the default AWS endpoint.
-    verify : bool or None
-        Whether to verify SSL certificates. If None, uses boto3 defaults.
+    region : str or None
+        AWS region for the bucket. If None, anemoi-utils resolves the
+        endpoint from its ``object-storage`` config section.
 
     Examples
     --------
@@ -72,12 +71,10 @@ class S3Source(CheckpointSource):
     def __init__(
         self,
         url: str | None = None,
-        endpoint_url: str | None = None,
-        verify: bool | None = None,
+        region: str | None = None,
     ) -> None:
         self.url = url
-        self.endpoint_url = endpoint_url
-        self.verify = verify
+        self.region = region
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from S3.
@@ -162,22 +159,22 @@ class S3Source(CheckpointSource):
         return url
 
     def _create_s3_client(self, bucket: str, key: str) -> object:
-        """Create boto3 S3 client with configured options."""
+        """Create S3 client via anemoi-utils.
+
+        Uses ``anemoi.utils.remote.s3.s3_client`` which provides:
+        - Per-bucket endpoint/credential config from settings.toml
+        - Thread-safe client caching
+        - Anonymous access fallback when no credentials are found
+        """
         from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 
         try:
-            import boto3
+            from anemoi.utils.remote.s3 import s3_client
         except ImportError as e:
-            msg = "boto3 is required for S3 downloads. Install with: pip install boto3"
+            msg = "anemoi-utils with S3 support is required. Install with: pip install anemoi-utils[remote]"
             raise CheckpointSourceError(msg, f"s3://{bucket}/{key}") from e
 
-        client_kwargs: dict = {}
-        if self.endpoint_url is not None:
-            client_kwargs["endpoint_url"] = self.endpoint_url
-        if self.verify is not None:
-            client_kwargs["verify"] = self.verify
-
-        return boto3.client("s3", **client_kwargs)
+        return s3_client(bucket, region=self.region)
 
     async def _download_from_s3(self, s3_client: object, bucket: str, key: str, tmp_path: Path) -> None:
         """Download file from S3, translating boto errors to checkpoint exceptions."""
@@ -196,7 +193,7 @@ class S3Source(CheckpointSource):
         except ClientError as e:
             self._handle_client_error(e, bucket, key)
         except EndpointConnectionError as e:
-            msg = f"Could not connect to S3 endpoint: {self.endpoint_url or 'AWS default'}"
+            msg = f"Could not connect to S3 endpoint for bucket '{bucket}'"
             s3_path = f"s3://{bucket}/{key}"
             raise CheckpointSourceError(msg, s3_path) from e
 

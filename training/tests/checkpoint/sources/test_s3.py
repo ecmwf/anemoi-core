@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.s3 import S3Source
@@ -43,7 +44,7 @@ async def test_s3_source_parses_s3_url() -> None:
 
     mock_client.download_file.side_effect = fake_download
 
-    with patch("boto3.client", return_value=mock_client):
+    with patch("anemoi.utils.remote.s3.s3_client", return_value=mock_client):
         await source.process(context)
         mock_client.download_file.assert_called_once()
         call_args = mock_client.download_file.call_args
@@ -62,7 +63,7 @@ async def test_s3_source_raises_not_found_for_missing_key() -> None:
     mock_client = MagicMock()
     mock_client.download_file.side_effect = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
 
-    with patch("boto3.client", return_value=mock_client), pytest.raises(CheckpointNotFoundError):
+    with patch("anemoi.utils.remote.s3.s3_client", return_value=mock_client), pytest.raises(CheckpointNotFoundError):
         await source.process(context)
 
 
@@ -79,5 +80,5 @@ async def test_s3_source_cleans_up_temp_file_on_failure() -> None:
 
     mock_client.download_file.side_effect = fake_download
 
-    with patch("boto3.client", return_value=mock_client), pytest.raises(Exception):  # noqa: B017, PT011
+    with patch("anemoi.utils.remote.s3.s3_client", return_value=mock_client), pytest.raises(CheckpointLoadError):
         await source.process(context)
