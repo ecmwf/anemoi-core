@@ -18,7 +18,8 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian, latlon_rad_to_cartesian_np
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
 class AreaMaskBuilder:
     """Area mask Builder.
-    
+
     Class to build a mask based on a radius search using the similarity of the Euclidean chord length between
     two points on the unit sphere and their great-circle distance.
 
