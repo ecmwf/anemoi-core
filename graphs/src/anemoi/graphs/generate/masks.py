@@ -44,7 +44,7 @@ class _TorchClusterAreaMaskBackend:
 
         if isinstance(coords_rad, np.ndarray):
             coords_rad = torch.from_numpy(coords_rad)
-            
+
         coords_rad = coords_rad.to(self.device)
 
         query_vectors = latlon_rad_to_cartesian(coords_rad)
