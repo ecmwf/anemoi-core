@@ -1376,6 +1376,16 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
 
     captured: dict[str, Any] = {}
 
+    def _prepare_tensors_stub(
+        self: DiffusionTendencyTraining,
+        y_pred: torch.Tensor,
+        y: torch.Tensor,
+        validation_mode: bool = False,
+        dataset_name: str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, slice]:
+        del self, validation_mode, dataset_name
+        return y_pred, y, slice(0, 1)
+
     def _compute_loss_stub(
         self: EnsembleTraining,
         y_pred: torch.Tensor,
@@ -1396,6 +1406,7 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
         captured["metric_kwargs"] = kwargs
         return {"dummy": torch.tensor(1.0)}
 
+    monkeypatch.setattr(EnsembleTraining, "_prepare_tensors_for_loss", _prepare_tensors_stub, raising=True)
     monkeypatch.setattr(EnsembleTraining, "_compute_loss", _compute_loss_stub, raising=True)
     monkeypatch.setattr(EnsembleTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
 

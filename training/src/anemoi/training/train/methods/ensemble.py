@@ -178,6 +178,7 @@ class EnsembleTraining(BaseTrainingModule):
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=TensorDim.ENSEMBLE_DIM,
@@ -185,10 +186,17 @@ class EnsembleTraining(BaseTrainingModule):
             mgroup=self.ens_comm_subgroup,
         )
 
-        loss = self._compute_loss(
+        y_pred_ens_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred_ens,
             y,
-            grid_shard_slice=self.grid_shard_slice[dataset_name],
+            validation_mode=validation_mode,
+            dataset_name=dataset_name,
+        )
+
+        loss = self._compute_loss(
+            y_pred_ens_full,
+            y_full,
+            grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
@@ -198,11 +206,11 @@ class EnsembleTraining(BaseTrainingModule):
         metrics_next = {}
         if validation_mode:
             metrics_next = self._compute_metrics(
-                y_pred_ens,
-                y,
+                y_pred_ens_full,
+                y_full,
                 rollout_step=rollout_step,
                 dataset_name=dataset_name,
-                grid_shard_slice=self.grid_shard_slice[dataset_name],
+                grid_shard_slice=grid_shard_slice,
                 pred_layout=pred_layout,
                 target_layout=target_layout,
             )
