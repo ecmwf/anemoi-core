@@ -15,10 +15,10 @@ from importlib.util import find_spec
 import numpy as np
 import torch
 from scipy.spatial import cKDTree
-from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian, latlon_rad_to_cartesian_np
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,13 +26,25 @@ TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
 
 class AreaMaskBuilder:
-    """Class to build a mask based on a radius search using the similarity of the Euclidean chord length between
+    """Area mask Builder.
+    
+    Class to build a mask based on a radius search using the similarity of the Euclidean chord length between
     two points on the unit sphere and their great-circle distance.
 
     If torch_cluster is available: all calculations are done as torch tensors!
         * use_gpu = True: Calculations are done on the GPU
         * use_gpu = False: Calculations are done on the CPU (seems to be fasted from the benchmarks)
+
     Else falling back to scipy.spatial.cKDTree (on CPU)
+
+    Methods
+    -------
+    fit_coords(coords_rad: np.ndarray)
+        Fit the KNN model to the coordinates in radians.
+    fit(graph: HeteroData)
+        Fit the KNN model to the reference nodes.
+    get_mask(coords_rad: np.ndarray) -> np.ndarray
+        Get the mask for the nodes based on the distance to the reference nodes.
     """
 
     def __init__(
@@ -42,8 +54,10 @@ class AreaMaskBuilder:
         mask_attr_name: str | None = None,
         use_gpu: bool = False,
     ):
-        """Initialisation of the RadiusMaskBuilder
-        The use_gpu optional argument is introduced for testing, but is actually never set to True when used by anemoi-graphs' CLI
+        """Initialisation of the AreaMaskBuilder.
+
+        The use_gpu optional argument is introduced for testing, but is actually never set to True
+        when used by anemoi-graphs' CLI.
         """
         assert isinstance(margin_radius_km, (int, float)), "The margin radius must be a number."
         assert margin_radius_km > 0, "The margin radius must be positive."
@@ -57,62 +71,19 @@ class AreaMaskBuilder:
 
         self.use_gpu = use_gpu
         if use_gpu and not torch.cuda.is_available():
-            LOGGER.warning("No GPU available falling back to CPU")
+            LOGGER.warning(f"{self.__class__.__name__}: No GPU available falling back to CPU")
             self.use_gpu = False
+
         if use_gpu and not TORCH_CLUSTER_AVAILABLE:
-            LOGGER.warning("The 'torch-cluster library is not installed, cannot use the GPU. Falling back scipy + CPU")
+            LOGGER.warning(
+                f"{self.__class__.__name__}: The 'torch-cluster' library is not installed, cannot use the GPU. Falling back to scipy + CPU"
+            )
             self.use_gpu = False
 
     @property
     def _chord_threshold(self) -> float:
         """Euclidean chord length threshold equivalent to margin_radius_km."""
         return float(2 * np.sin(self.margin_radius_km / (2 * EARTH_RADIUS)))
-
-    @staticmethod
-    def _to_unit_sphere_torch(coords_rad: torch.Tensor) -> torch.Tensor:
-        """Convert (lat, lon) in radians to 3D unit-sphere coordinates as torch.Tensors.
-
-        Parameters
-        ----------
-        coords_rad : torch.Tensor of shape (N, 2)
-            Latitude and longitude in radians.
-
-        Returns
-        -------
-        torch.Tensor of shape (N, 3)
-            Unit-sphere Cartesian coordinates, in float64.
-        """
-        LOGGER.debug(f"coords_rad is on device: {coords_rad.device}")
-        # TODO: We can cast to torch.float32 for larger chunksize (faster computations)
-        # But then graphs old graphs are not 100% reproducable (typically have 3 ~ 5 more points at the mask boundary)
-        coords_rad = coords_rad.to(torch.float64)
-        lat, lon = coords_rad[:, 0], coords_rad[:, 1]
-        x = torch.cos(lat) * torch.cos(lon)
-        y = torch.cos(lat) * torch.sin(lon)
-        z = torch.sin(lat)
-        return torch.stack([x, y, z], dim=1)
-
-    @staticmethod
-    def _to_unit_sphere(coords_rad: np.ndarray) -> np.ndarray:
-        """Convert (lat, lon) in radians to 3D unit-sphere coordinates as numpy.ndarrays.
-
-        Parameters
-        ----------
-        coords_rad : numpy.ndarray of shape (N, 2)
-            Latitude and longitude in radians.
-
-        Returns
-        -------
-        numpy.ndarray of shape (N, 3)
-            Unit-sphere Cartesian coordinates, in float64.
-        """
-        LOGGER.debug(f"coords_rad is on device: {coords_rad.device}")
-        lat, lon = coords_rad[:, 0], coords_rad[:, 1]
-        LOGGER.debug(f"lat.dtype = {lat.dtype}")
-        x = np.cos(lat) * np.cos(lon)
-        y = np.cos(lat) * np.sin(lon)
-        z = np.sin(lat)
-        return np.stack([x, y, z], axis=1)
 
     def get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
         """Retrieve coordinates from the reference nodes (kept on device).
@@ -150,9 +121,9 @@ class AreaMaskBuilder:
             Latitude and longitude of the reference nodes in radians.
         """
         if TORCH_CLUSTER_AVAILABLE:
-            self._ref_vectors = self._to_unit_sphere_torch(coords_rad)
+            self._ref_vectors = latlon_rad_to_cartesian(coords_rad)
         else:
-            self._ref_vectors = self._to_unit_sphere(coords_rad)
+            self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad)
             self._kdtree = cKDTree(self._ref_vectors)
 
     def fit(self, graph: HeteroData) -> None:
@@ -213,7 +184,7 @@ class AreaMaskBuilder:
 
             assert self._ref_vectors is not None, "The model must be fitted before calling get_mask."
 
-            query_vectors = self._to_unit_sphere_torch(
+            query_vectors = latlon_rad_to_cartesian(
                 torch.from_numpy(coords_rad).to(self._ref_vectors.device)
             )  # (N_query, 3)
             LOGGER.debug(
@@ -234,7 +205,7 @@ class AreaMaskBuilder:
             LOGGER.debug("Using cKDTree")
 
             assert self._kdtree is not None, "The model must be fitted before calling get_mask."
-            query_vectors = self._to_unit_sphere(coords_rad)
+            query_vectors = latlon_rad_to_cartesian_np(coords_rad)
             LOGGER.debug("Reference vectors are on cpu, query vectors are one cpu")
             counts = self._kdtree.query_ball_point(
                 query_vectors, r=self._chord_threshold, workers=-1, return_length=True
