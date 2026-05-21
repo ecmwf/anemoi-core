@@ -15,7 +15,6 @@ from importlib.util import find_spec
 import numpy as np
 import torch
 from scipy.spatial import cKDTree
-from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
