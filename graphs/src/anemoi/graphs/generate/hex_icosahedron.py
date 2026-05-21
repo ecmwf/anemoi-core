@@ -49,6 +49,7 @@ def create_hex_nodes(
 
     if area_mask_builder is not None:
         area_mask = area_mask_builder.get_mask(coords_rad)
+        area_mask = area_mask.cpu().numpy()
         node_ordering = node_ordering[area_mask[node_ordering]]
 
     graph = create_nx_graph_from_hex_coords(nodes, node_ordering)

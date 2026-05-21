@@ -10,6 +10,7 @@
 import networkx as nx
 import numpy as np
 import pytest
+import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import MultiScaleEdges
@@ -127,7 +128,7 @@ class TestMultiScaleEdgesStretched:
         graph = HeteroData()
         node_builder = StretchedTriNodes(4, 6, "hidden", None, None)
         node_builder.area_mask_builder = AreaMaskBuilder("hidden", 400)
-        node_builder.area_mask_builder.fit_coords(np.array([[0, 0]]))
+        node_builder.area_mask_builder.fit_coords(torch.from_numpy(np.array([[0, 0]])))
         # We are considering a 400km radius circle centered at (0, 0) as the area of
         # interest for the stretched graph.
 
@@ -147,7 +148,7 @@ class TestMultiScaleEdgesStretched:
     def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):
         nodes = tri_graph["hidden"]
         all_points_mask_builder = AreaMaskBuilder("all_nodes", 1.0)
-        all_points_mask_builder.fit_coords(nodes.x.detach().cpu().numpy())
+        all_points_mask_builder.fit_coords(nodes.x.detach().cpu())
 
         fast_edges = tri_icosahedron.add_1_hop_edges(
             nodes_coords_rad=nodes["x"],

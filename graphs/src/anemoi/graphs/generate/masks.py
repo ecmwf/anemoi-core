@@ -37,12 +37,17 @@ class _TorchClusterAreaMaskBackend:
     def fit(self, coords_rad: torch.Tensor) -> None:
         self._ref_vectors = latlon_rad_to_cartesian(coords_rad.to(self.device))
 
-    def get_mask(self, coords_rad: np.ndarray, chord_threshold: float) -> np.ndarray:
+    def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
         from torch_geometric.nn import radius
 
         assert self._ref_vectors is not None, "The model must be fitted before calling get_mask."
 
-        query_vectors = latlon_rad_to_cartesian(torch.from_numpy(coords_rad).to(self._ref_vectors.device))
+        if isinstance(coords_rad, np.ndarray):
+            coords_rad = torch.from_numpy(coords_rad)
+            
+        coords_rad = coords_rad.to(self.device)
+
+        query_vectors = latlon_rad_to_cartesian(coords_rad)
         LOGGER.debug(
             "Reference vectors are on %s, query vectors are on %s",
             self._ref_vectors.device,
@@ -57,7 +62,7 @@ class _TorchClusterAreaMaskBackend:
 
         mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
         mask[edge_index[0]] = True
-        return mask.cpu().numpy()
+        return mask.cpu()
 
 
 class _KDTreeAreaMaskBackend:
@@ -71,13 +76,16 @@ class _KDTreeAreaMaskBackend:
         self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.cpu().numpy())
         self._kdtree = cKDTree(self._ref_vectors)
 
-    def get_mask(self, coords_rad: np.ndarray, chord_threshold: float) -> np.ndarray:
+    def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
         assert self._kdtree is not None, "The model must be fitted before calling get_mask."
+
+        if isinstance(coords_rad, torch.Tensor):
+            coords_rad = coords_rad.cpu().numpy()
 
         query_vectors = latlon_rad_to_cartesian_np(coords_rad)
         LOGGER.debug("Reference vectors are on cpu, query vectors are on cpu")
         counts = self._kdtree.query_ball_point(query_vectors, r=chord_threshold, workers=-1, return_length=True)
-        return counts > 0
+        return torch.from_numpy(counts > 0)
 
 
 class AreaMaskBuilder:
@@ -89,7 +97,7 @@ class AreaMaskBuilder:
 
     Methods
     -------
-    fit_coords(coords_rad: np.ndarray)
+    fit_coords(coords_rad: torch.Tensor)
         Fit the KNN model to the coordinates in radians.
     fit(graph: HeteroData)
         Fit the KNN model to the reference nodes.
@@ -113,7 +121,7 @@ class AreaMaskBuilder:
 
         self.device = get_distributed_device()
         if TORCH_CLUSTER_AVAILABLE:
-            self._backend = _TorchClusterAreaMaskBackend(self.device)
+            self._backend = _TorchClusterAreaMaskBackend(device=self.device)
         else:
             self._backend = _KDTreeAreaMaskBackend()
 
@@ -188,7 +196,7 @@ class AreaMaskBuilder:
             reference_mask_str,
         )
 
-    def get_mask(self, coords_rad: np.ndarray) -> np.ndarray:
+    def get_mask(self, coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor:
         """Compute a mask based on the distance to the reference nodes.
 
         For each query node, checks whether it lies within margin_radius_km of
@@ -196,12 +204,12 @@ class AreaMaskBuilder:
 
         Parameters
         ----------
-        coords_rad : np.ndarray of shape (N_query, 2)
+        coords_rad : torch.Tensor or np.ndarray of shape (N_query, 2)
             Latitude and longitude of the query nodes in radians.
 
         Returns
         -------
-        np.ndarray of shape (N_query,)
+        torch.Tensor of shape (N_query,)
             Boolean mask, True where the query node is within margin_radius_km
             of at least one reference node.
         """

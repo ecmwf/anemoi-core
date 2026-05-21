@@ -52,6 +52,7 @@ def create_tri_nodes(
 
     if area_mask_builder is not None:
         area_mask = area_mask_builder.get_mask(coords_rad)
+        area_mask = area_mask.cpu().numpy()
         node_ordering = node_ordering[area_mask[node_ordering]]
 
     # Creates the graph, with the nodes sorted by latitude and longitude.
@@ -94,6 +95,7 @@ def create_stretched_tri_nodes(
 
     # Define the low resolution outside AOI mask
     base_area_mask = ~area_mask_builder.get_mask(base_coords_rad)
+    base_area_mask = base_area_mask.cpu().numpy()
 
     # Get the high resolution nodes
     coords_rad = get_latlon_coords_icosphere(lam_resolution)
@@ -103,6 +105,7 @@ def create_stretched_tri_nodes(
 
     # Define the high resolution inside AOI mask
     lam_area_mask = area_mask_builder.get_mask(coords_rad)
+    lam_area_mask = lam_area_mask.cpu().numpy()
 
     # Pad the low resolution ~(AOI mask) to match the high resolution AOI mask
     base_area_mask_padded = np.pad(base_area_mask, (0, len(lam_area_mask) - len(base_area_mask)), mode="constant")
@@ -237,6 +240,7 @@ def add_edges_to_nx_graph(
         # Limit area of mesh points.
         if area_mask_builder is not None:
             area_mask = area_mask_builder.get_mask(r_vertices_rad)
+            area_mask = area_mask.cpu().numpy()
             valid_nodes = np.where(area_mask)[0]
         else:
             valid_nodes = None
