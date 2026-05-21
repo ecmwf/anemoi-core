@@ -318,12 +318,17 @@ class Batch:
         func: Mapping[str, Callable[..., torch.Tensor]] | Callable[..., torch.Tensor],
         **kwargs: Any
     ) -> "Batch":
-        """Return a new batch with one processor applied per dataset."""
+        """Return a new batch with one processor applied per dataset(.data).
+        The coordinates, timedeltas and metadata are shared with the
+        receiver via `with_data`.
+        """
+        new_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         for name in self.dataset_names:
             if name not in func:
                 msg = f"No function provided for dataset {name!r}."
                 raise KeyError(msg)
-            self[name].apply(func[name], **kwargs)
+            new_data[name] = self[name].apply(func[name], **kwargs).data
+        return self.with_data(new_data)
 
     def _update_source(self, source_name: str, source_view: SourceView) -> "Batch":
         """Return a new batch with one dataset replaced from a ``SourceView``."""
@@ -434,8 +439,6 @@ class Batch:
             # ``ObservationDataReader._unpack_sample``). Gridded samples
             # never carry it, so this is a self-describing dispatch.
             is_sparse = BOUNDARIES_META_KEY in sample_meta
-            LOGGER.info("Metadata for %s: %s", name, sample_meta)
-            LOGGER.info("IS %s A SPARSE DATASET? %s", name, is_sparse)
 
             if is_sparse:
                 if name in static:

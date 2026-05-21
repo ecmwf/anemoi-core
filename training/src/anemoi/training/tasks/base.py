@@ -143,9 +143,9 @@ class BaseTask(ABC):
             sharing coords and metadata by reference.
         """
         time_indices = self.get_batch_input_indices()
-        LOGGER.info("Input time indices before normalization: %s -- type %s", time_indices, type(time_indices))
+        LOGGER.debug("Input time indices before normalization: %s -- type %s", time_indices, type(time_indices))
         time_indices = normalize_time_indices(time_indices)
-        LOGGER.info("Normalized time indices: %s -- type %s", time_indices, type(time_indices))
+        LOGGER.debug("Normalized time indices: %s -- type %s", time_indices, type(time_indices))
 
         var_indices = {
             dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names
