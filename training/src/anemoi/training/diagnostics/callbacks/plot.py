@@ -127,18 +127,18 @@ class AsyncPlotExecutor(BasePlotExecutor):
 
     def __init__(self) -> None:
         self._executor = ThreadPoolExecutor(max_workers=1)
-        self.loop: asyncio.AbstractEventLoop | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_ready = threading.Event()
-        self.loop_thread = threading.Thread(target=self._start_event_loop, daemon=True)
-        self.loop_thread.start()
+        self._loop_thread = threading.Thread(target=self._start_event_loop, daemon=True)
+        self._loop_thread.start()
         self._loop_ready.wait()  # block until the loop is running before returning
 
     def _start_event_loop(self) -> None:
         """Start the event loop in the background thread."""
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.call_soon(self._loop_ready.set)  # signal after the loop is running
-        self.loop.run_forever()
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.call_soon(self._loop_ready.set)  # signal after the loop is running
+        self._loop.run_forever()
 
     async def _submit(self, fn: Any, trainer: pl.Trainer, args: tuple, kwargs: dict) -> None:
         """Coroutine that runs *fn* via _run in the thread-pool executor."""
@@ -147,13 +147,13 @@ class AsyncPlotExecutor(BasePlotExecutor):
 
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
         """Schedule *fn(trainer, *args, **kwargs)* to run asynchronously."""
-        asyncio.run_coroutine_threadsafe(self._submit(fn, trainer, args, kwargs), self.loop)
+        asyncio.run_coroutine_threadsafe(self._submit(fn, trainer, args, kwargs), self._loop)
 
     def shutdown(self) -> None:
         """Shut down the executor and stop the event loop."""
         self._executor.shutdown(wait=False, cancel_futures=True)
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        self.loop_thread.join()
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._loop_thread.join()
 
 
 class BasePlotCallback(Callback, ABC):
@@ -187,7 +187,6 @@ class BasePlotCallback(Callback, ABC):
 
         init_plot_settings()
 
-        self._error: BaseException = None
         self.datashader_plotting = plotting_settings.datashader
         self.projection_kind = plotting_settings.projection_kind
         self.asynchronous = plotting_settings.asynchronous
@@ -290,7 +289,6 @@ class BasePlotCallback(Callback, ABC):
         return data
 
     @abstractmethod
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -520,7 +518,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
         return trainable_modules
 
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -705,7 +702,6 @@ class PlotLoss(BasePerBatchPlotCallback):
             legend_patches,
         )
 
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -991,7 +987,6 @@ class PlotSample(BasePlotAdditionalMetrics):
             self.precip_and_related_fields,
         )
 
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -1215,7 +1210,6 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self.parameters = parameters
         self.min_delta = min_delta
 
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -1331,7 +1325,6 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             self.precip_and_related_fields,
         )
 
-    @rank_zero_only
     def _plot(
         self,
         trainer: pl.Trainer,
