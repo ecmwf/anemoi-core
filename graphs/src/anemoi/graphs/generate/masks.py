@@ -20,6 +20,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +54,6 @@ class AreaMaskBuilder:
         reference_node_name: str,
         margin_radius_km: float = 100,
         mask_attr_name: str | None = None,
-        use_gpu: bool = False,
     ):
         """Initialisation of the AreaMaskBuilder.
 
@@ -70,16 +70,7 @@ class AreaMaskBuilder:
         self._ref_vectors: torch.Tensor | np.ndarray | None = None
         self._kdtree: cKDTree | None = None
 
-        self.use_gpu = use_gpu
-        if use_gpu and not torch.cuda.is_available():
-            LOGGER.warning(f"{self.__class__.__name__}: No GPU available falling back to CPU")
-            self.use_gpu = False
-
-        if use_gpu and not TORCH_CLUSTER_AVAILABLE:
-            LOGGER.warning(
-                f"{self.__class__.__name__}: The 'torch-cluster' library is not installed, cannot use the GPU. Falling back to scipy + CPU"
-            )
-            self.use_gpu = False
+        self.device = get_distributed_device()
 
     @property
     def _chord_threshold(self) -> float:
@@ -142,12 +133,10 @@ class AreaMaskBuilder:
         coords_rad = self.get_reference_coords(
             graph
         )  # This is always a torch.Tensor | when cluster is available coords_rad lives on the GPU
-        if not TORCH_CLUSTER_AVAILABLE:
-            self.fit_coords(coords_rad.cpu().numpy())
-        elif not self.use_gpu:
-            self.fit_coords(coords_rad.cpu())
+        if TORCH_CLUSTER_AVAILABLE:
+            self.fit_coords(coords_rad.to(self.device))
         else:
-            self.fit_coords(coords_rad)
+            self.fit_coords(coords_rad.cpu().numpy())
 
         LOGGER.info(
             'Fitting %s with %d reference nodes from "%s".',
