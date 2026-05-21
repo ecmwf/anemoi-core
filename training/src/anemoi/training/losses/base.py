@@ -187,8 +187,22 @@ class BaseLoss(nn.Module, ABC):
             If squash_mode is not one of ['avg', 'sum']
         """
         if isinstance(out, list):
-            assert len(out) == 1, "Multiple outputs not supported yet"
-            out = out[0]
+            # We have a sparse (obs) batch, so `out` is a list of tensors (one for each sample in the batch).
+            # The tensors can have different shapes (obs counts) and cannot be stacked
+            # so we reduce each independently and average => batch mean.
+            per_sample = [
+                self.reduce(
+                    o,
+                    squash=squash,
+                    tensor_layout=tensor_layout,
+                    squash_mode=squash_mode,
+                    group=None,
+                )
+                for o in out
+            ]
+            stacked = torch.stack(per_sample) if len(per_sample) > 1 else per_sample[0].unsqueeze(0)
+            reduced = stacked.mean()
+            return reduced if group is None else reduce_tensor(reduced, group)
         if squash:
             if squash_mode == "avg":
                 out = self.avg_function(out, dim=tensor_layout.grid, keepdim=True)

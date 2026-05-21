@@ -275,7 +275,7 @@ def test_batch_apply_uses_dataset_processor_and_preserves_envelope() -> None:
         seen_layouts.append(layout)
         return tensor + 1
 
-    result = batch.apply({"a": processor})
+    result = batch.apply({"a": processor}, include_layout=True)
 
     assert torch.equal(result.data["a"], torch.ones(2, 1, 1, 4, 2))
     assert seen_layouts == [layout]
@@ -298,7 +298,7 @@ def test_batch_apply_handles_sparse_list_payloads() -> None:
         assert layout.time_in_grid
         return tensor + 2
 
-    result = batch.apply({"obs": processor})
+    result = batch.apply({"obs": processor}, include_layout=True)
 
     assert isinstance(result.data["obs"], list)
     assert seen_shapes == [(1, 5, 3), (1, 7, 3)]

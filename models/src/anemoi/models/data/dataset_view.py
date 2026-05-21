@@ -248,9 +248,11 @@ class TabularSourceView(SourceView):
         batch_starts = np.cumsum([0] + batch_sizes[:-1])
         return [data_2d.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
 
-    def apply(self, func: Callable[..., torch.Tensor], **kwargs: Any) -> "TabularSourceView":
+    def apply(self, func: Callable[..., torch.Tensor], include_layout: bool = False, **kwargs: Any) -> "TabularSourceView":
         """Return a new view with ``func`` applied to the data payload."""
-        new_data = [func(tensor, layout=self.layout, **kwargs) for tensor in self.data]
+        if include_layout:
+            kwargs["layout"] = self.layout
+        new_data = [func(tensor, **kwargs) for tensor in self.data]
         return dataclass_replace(self, data=new_data)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":
