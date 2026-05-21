@@ -167,3 +167,77 @@ def test_mutual_knn_sklearn_fallback_heterogeneous(monkeypatch, graph_with_two_n
     fallback = builder.compute_edge_index(src, tgt)
 
     assert _edge_set(primary) == _edge_set(fallback)
+
+
+def test_schema_validates_mutual_knn():
+    """A MutualKNNEdges block validates against the edge builder schema union."""
+    from pydantic import TypeAdapter
+
+    from anemoi.graphs.schemas.edge_schemas import EdgeBuilderSchemas
+
+    adapter = TypeAdapter(EdgeBuilderSchemas)
+    model = adapter.validate_python(
+        {
+            "_target_": "anemoi.graphs.edges.MutualKNNEdges",
+            "num_nearest_neighbours": 3,
+            "reversed_num_nearest_neighbours": 5,
+        }
+    )
+    assert model.num_nearest_neighbours == 3
+    assert model.reversed_num_nearest_neighbours == 5
+
+
+def test_schema_rejects_invalid_mutual_knn():
+    """An invalid MutualKNNEdges block fails schema validation."""
+    from pydantic import TypeAdapter
+    from pydantic import ValidationError
+
+    from anemoi.graphs.schemas.edge_schemas import EdgeBuilderSchemas
+
+    adapter = TypeAdapter(EdgeBuilderSchemas)
+    with pytest.raises(ValidationError):
+        adapter.validate_python({"_target_": "anemoi.graphs.edges.MutualKNNEdges", "num_nearest_neighbours": -1})
+
+
+def test_mutual_knn_graph_creation(tmp_path, mock_grids_path):
+    """An end-to-end recipe using MutualKNNEdges builds a graph via GraphCreator."""
+    import yaml
+
+    from anemoi.graphs.create import GraphCreator
+
+    grids_path, _ = mock_grids_path
+    cfg = {
+        "nodes": {
+            "test_nodes": {
+                "node_builder": {
+                    "_target_": "anemoi.graphs.nodes.NPZFileNodes",
+                    "npz_file": grids_path + "/grid-o16.npz",
+                },
+            },
+        },
+        "edges": [
+            {
+                "source_name": "test_nodes",
+                "target_name": "test_nodes",
+                "edge_builders": [
+                    {
+                        "_target_": "anemoi.graphs.edges.MutualKNNEdges",
+                        "num_nearest_neighbours": 3,
+                    },
+                ],
+            },
+        ],
+    }
+    # The same edge-builder block fed to GraphCreator also passes recipe-schema validation.
+    from pydantic import TypeAdapter
+
+    from anemoi.graphs.schemas.edge_schemas import EdgeBuilderSchemas
+
+    TypeAdapter(EdgeBuilderSchemas).validate_python(cfg["edges"][0]["edge_builders"][0])
+
+    config_path = tmp_path / "mutual_knn_config.yaml"
+    with config_path.open("w") as file:
+        yaml.dump(cfg, file)
+
+    graph = GraphCreator(config=config_path).create()
+    assert ("test_nodes", "to", "test_nodes") in graph.edge_types
