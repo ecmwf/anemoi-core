@@ -84,6 +84,10 @@ class NativeDatasetSchema(BaseModel):
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
+    forecast_steps: PositiveInt | None = Field(default=None)
+    "Number of lead-time steps to use per initialization (for ForecastStepDataset)."
+    step_frequency: Frequency | str | None = Field(default=None)
+    "Temporal spacing between consecutive forecast steps (for ForecastStepDataset)."
 
 
 class TrajectorySchema(PydanticBaseModel):
