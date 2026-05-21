@@ -43,7 +43,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.training.data.batch import Batch
+from anemoi.models.data.batch import Batch
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

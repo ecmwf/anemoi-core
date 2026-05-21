@@ -12,10 +12,10 @@ from __future__ import annotations
 import pytest
 import torch
 
-from anemoi.training.data.batch import BOUNDARIES_META_KEY
-from anemoi.training.data.batch import STATIC_COORDS_META_KEY
-from anemoi.training.data.batch import Batch
-from anemoi.training.data.batch import SourceView
+from anemoi.models.data.batch import BOUNDARIES_META_KEY
+from anemoi.models.data.batch import STATIC_COORDS_META_KEY
+from anemoi.models.data.batch import Batch
+from anemoi.models.data.batch import SourceView
 from anemoi.models.data.tensor_layout import TensorLayout
 
 
@@ -342,7 +342,7 @@ def test_node_coords_returns_none_for_sparse_coordinates() -> None:
 
 
 def test_tensor_layout_with_batch_dim_shifts_positive_axes() -> None:
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     shifted = layout.with_batch_dim()
@@ -354,7 +354,7 @@ def test_tensor_layout_with_batch_dim_shifts_positive_axes() -> None:
 
 
 def test_tensor_layout_without_batch_dim_is_inverse() -> None:
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3, time_in_grid=False)
     roundtrip = layout.with_batch_dim().without_batch_dim()
@@ -362,7 +362,7 @@ def test_tensor_layout_without_batch_dim_is_inverse() -> None:
 
 
 def test_tensor_layout_without_batch_dim_sparse_roundtrip() -> None:
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
     roundtrip = layout.with_batch_dim().without_batch_dim()
@@ -370,14 +370,14 @@ def test_tensor_layout_without_batch_dim_sparse_roundtrip() -> None:
 
 
 def test_tensor_layout_without_batch_dim_noop_when_already_unset() -> None:
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     layout = TensorLayout(ensemble=0, grid=1, variables=2)
     assert layout.without_batch_dim() is layout
 
 
 def test_tensor_layout_repr_elides_none_fields() -> None:
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     r = repr(TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True))
     assert "ensemble=0" in r
@@ -389,7 +389,7 @@ def test_tensor_layout_repr_elides_none_fields() -> None:
 
 
 def test_batch_repr_summarises_per_dataset() -> None:
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     batch = Batch(
         data={"grid": torch.zeros(2, 1, 1, 4, 3), "obs": [torch.zeros(1, 5, 3), torch.zeros(1, 7, 3)]},
@@ -409,7 +409,7 @@ def test_batch_repr_summarises_per_dataset() -> None:
 
 def test_batch_collate_rejects_invalid_layout_position() -> None:
     """Layouts that point at a non-existent axis must be rejected by collate."""
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     samples = [
         {"a": {"data": torch.zeros(2, 3), "layout": TensorLayout(grid=0, variables=5)}},
@@ -425,7 +425,7 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
     keeps its per-sample shape ``(1, N_i, V)``), so the batch dim is the
     list itself — no new tensor axis is added.
     """
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     sample_layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
     # Sparse samples are tagged via the ``boundaries`` metadata key; without
@@ -455,7 +455,7 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
 
 def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
     """Gridded (stacked) datasets get their layout shifted by ``with_batch_dim``."""
-    from anemoi.training.data.batch import TensorLayout
+    from anemoi.models.data.batch import TensorLayout
 
     sample_layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     samples = [

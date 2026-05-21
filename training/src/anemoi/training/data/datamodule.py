@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.batch import Batch
+from anemoi.models.data.batch import Batch
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices

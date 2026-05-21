@@ -321,7 +321,7 @@ class MultiDataset(IterableDataset):
 
         Each value is a dict ``{"data": tensor, "coordinates": (N, 2) tensor,
         ...}`` so that the dataloader's collate function can build a
-        :class:`anemoi.training.data.batch.Batch`. Sparse observation
+        :class:`anemoi.models.data.batch.Batch`. Sparse observation
         readers additionally include a ``"timedeltas"`` tensor and a
         ``"metadata": {"boundaries": ...}`` entry.
         """
