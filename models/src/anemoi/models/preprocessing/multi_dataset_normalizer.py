@@ -20,6 +20,8 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
 
 LOGGER = logging.getLogger(__name__)
+
+
 class TopNormalizer(BasePreprocessor):
     """Top-level normalizer for input, output data."""
 
@@ -50,7 +52,7 @@ class TopNormalizer(BasePreprocessor):
             data_indices_ds=data_indices.data.input[0],
             dataset="input_lres",
         )
-        self.normalizers["input_lres"] = self.normalizer_input 
+        self.normalizers["input_lres"] = self.normalizer_input
 
         self.normalizer_input_hres = FieldNormalizer(
             config=config,
@@ -96,9 +98,7 @@ class TopNormalizer(BasePreprocessor):
             normalizer = self.normalizers[dataset]
         except ValueError:
             raise ValueError(f"No normalizer found for dataset type: {dataset}")
-        return normalizer.inverse_transform(
-            data, in_place=in_place, data_index=data_index
-        )
+        return normalizer.inverse_transform(data, in_place=in_place, data_index=data_index)
 
 
 class FieldNormalizer(nn.Module):
@@ -164,18 +164,14 @@ class FieldNormalizer(nn.Module):
             if m == "mean-std":
                 LOGGER.debug(f"Normalizing: {name} is mean-std-normalised.")
                 if stdev[i] < (mean[i] * 1e-6):
-                    warnings.warn(
-                        f"Normalizing: the field seems to have only one value {mean[i]}"
-                    )
+                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
                 _norm_mul[i] = 1 / stdev[i]
                 _norm_add[i] = -mean[i] / stdev[i]
 
             elif m == "std":
                 LOGGER.debug(f"Normalizing: {name} is std-normalised.")
                 if stdev[i] < (mean[i] * 1e-6):
-                    warnings.warn(
-                        f"Normalizing: the field seems to have only one value {mean[i]}"
-                    )
+                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
                 _norm_mul[i] = 1 / stdev[i]
                 _norm_add[i] = 0
 
@@ -183,9 +179,7 @@ class FieldNormalizer(nn.Module):
                 LOGGER.debug(f"Normalizing: {name} is min-max-normalised to [0, 1].")
                 x = maximum[i] - minimum[i]
                 if x < 1e-9:
-                    warnings.warn(
-                        f"Normalizing: the field {name} seems to have only one value {maximum[i]}."
-                    )
+                    warnings.warn(f"Normalizing: the field {name} seems to have only one value {maximum[i]}.")
                 _norm_mul[i] = 1 / x
                 _norm_add[i] = -minimum[i] / x
 
@@ -202,9 +196,7 @@ class FieldNormalizer(nn.Module):
         # register buffer - this will ensure they get copied to the correct device(s)
         self.register_buffer("_norm_mul", torch.from_numpy(_norm_mul), persistent=True)
         self.register_buffer("_norm_add", torch.from_numpy(_norm_add), persistent=True)
-        self.register_buffer(
-            f"_{self.dataset}_idx", data_indices_ds.full, persistent=True
-        )
+        self.register_buffer(f"_{self.dataset}_idx", data_indices_ds.full, persistent=True)
 
     def transform(
         self,
@@ -238,13 +230,9 @@ class FieldNormalizer(nn.Module):
 
         dataset_idx = getattr(self, (f"_{self.dataset}_idx"))
         if data_index is not None:
-            x[..., :] = (
-                x[..., :] * self._norm_mul[data_index] + self._norm_add[data_index]
-            )
+            x[..., :] = x[..., :] * self._norm_mul[data_index] + self._norm_add[data_index]
         elif x.shape[-1] == len(dataset_idx):
-            x[..., :] = (
-                x[..., :] * self._norm_mul[dataset_idx] + self._norm_add[dataset_idx]
-            )
+            x[..., :] = x[..., :] * self._norm_mul[dataset_idx] + self._norm_add[dataset_idx]
         else:
             x[..., :] = x[..., :] * self._norm_mul + self._norm_add
         return x
@@ -288,13 +276,9 @@ class FieldNormalizer(nn.Module):
 
         dataset_idx = getattr(self, (f"_{self.dataset}_idx"))
         if data_index is not None:
-            x[..., :] = (x[..., :] - self._norm_add[data_index]) / self._norm_mul[
-                data_index
-            ]
+            x[..., :] = (x[..., :] - self._norm_add[data_index]) / self._norm_mul[data_index]
         elif x.shape[-1] == len(dataset_idx):
-            x[..., :] = (x[..., :] - self._norm_add[dataset_idx]) / self._norm_mul[
-                dataset_idx
-            ]
+            x[..., :] = (x[..., :] - self._norm_add[dataset_idx]) / self._norm_mul[dataset_idx]
         else:
             x[..., :] = (x[..., :] - self._norm_add) / self._norm_mul
         return x

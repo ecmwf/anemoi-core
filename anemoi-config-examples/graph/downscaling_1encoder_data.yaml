@@ -46,9 +46,9 @@ edges:
 
 attributes:
   nodes:
-    area_weight: 
+    area_weight:
       _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
-      norm: unit-max 
+      norm: unit-max
   edges:
     edge_length:
       _target_: anemoi.graphs.edges.attributes.EdgeLength

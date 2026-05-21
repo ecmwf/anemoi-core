@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .downscalingdatamodule import DownscalingAnemoiDatasetsDataModule
 from .ensdatamodule import AnemoiEnsDatasetsDataModule
 from .singledatamodule import AnemoiDatasetsDataModule
-from .downscalingdatamodule import DownscalingAnemoiDatasetsDataModule
 
 __all__ = [
     "AnemoiDatasetsDataModule",

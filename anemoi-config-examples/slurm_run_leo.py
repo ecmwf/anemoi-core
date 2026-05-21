@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
-import subprocess
-import logging
-from pathlib import Path
 import os
-from datetime import datetime
+from pathlib import Path
 
-from anemoi.training.run_manage.slurm_job import get_date_folder, SlurmJob
+from anemoi.training.run_manage.slurm_job import SlurmJob
+from anemoi.training.run_manage.slurm_job import get_date_folder
 
 hres = "o320"
 
@@ -14,15 +12,15 @@ TRAINING_ITERATIONS = 1e6
 CONFIG = f"hindcast_{hres}_1encoder"
 RUN_NAME = f"{hres}_1encoder_{TRAINING_ITERATIONS:.0e}_{get_date_folder()}"
 max_steps = 72
-STEPS = list(range(0, max_steps+1, 12))
+STEPS = list(range(0, max_steps + 1, 12))
 STEPS_STR = str(STEPS).replace(" ", "")
 RESIDUAL_STATISTICS = f"{hres}_dict_0_72.npy"
 TRAINING_ITERATIONS = int(TRAINING_ITERATIONS)
 TRAINING_APPROACH = "probabilistic_high_noise"
-#DATASET_X = "downscaling-od-cf-enfh-0001-mars-o320-2003-2023-12h-v3.zarr"
-#lres_gaussian_layer = False
-#input_at_high_res = True
-#lres_std_noise = 0.1
+# DATASET_X = "downscaling-od-cf-enfh-0001-mars-o320-2003-2023-12h-v3.zarr"
+# lres_gaussian_layer = False
+# input_at_high_res = True
+# lres_std_noise = 0.1
 
 
 # gpus
@@ -40,11 +38,10 @@ TRAINING_PARAMS = {
         f"dataloader.steps={STEPS_STR}",
         f"hardware.files.residual_statistics={RESIDUAL_STATISTICS}",
         f"training.approach={TRAINING_APPROACH}",
-        #f"hardware.files.dataset_x={DATASET_X}",
-        #f"training.lres_gaussian_layer={lres_gaussian_layer}",
-       # f"training.input_at_high_res={input_at_high_res}",
-       # f"training.lres_std_noise={lres_std_noise}",
-
+        # f"hardware.files.dataset_x={DATASET_X}",
+        # f"training.lres_gaussian_layer={lres_gaussian_layer}",
+        # f"training.input_at_high_res={input_at_high_res}",
+        # f"training.lres_std_noise={lres_std_noise}",
     ],
 }
 

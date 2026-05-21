@@ -39,35 +39,23 @@ class AnemoiProfiler(AnemoiTrainer):
     def __init__(self, config: DictConfig) -> None:
         super().__init__(config)
 
-    def print_report(
-        self, title: str, dataframe: pd.DataFrame, color: str = "white", emoji: str = ""
-    ) -> None:
+    def print_report(self, title: str, dataframe: pd.DataFrame, color: str = "white", emoji: str = "") -> None:
         if title == "Model Summary":
             console.print(f"[bold {color}]{title}[/bold {color}]", f":{emoji}:")
             console.print(dataframe, end="\n\n")
         else:
             console.print(f"[bold {color}]{title}[/bold {color}]", f":{emoji}:")
-            console.print(
-                dataframe.to_markdown(headers="keys", tablefmt="psql"), end="\n\n"
-            )
+            console.print(dataframe.to_markdown(headers="keys", tablefmt="psql"), end="\n\n")
 
     @staticmethod
     def print_title() -> None:
-        console.print(
-            "[bold magenta] Benchmark Profiler Summary [/bold magenta]!", ":book:"
-        )
+        console.print("[bold magenta] Benchmark Profiler Summary [/bold magenta]!", ":book:")
 
     @staticmethod
     def print_metadata() -> None:
-        console.print(
-            f"[bold blue] SLURM NODE(s) {os.getenv('SLURM_JOB_NODELIST', '')} [/bold blue]!"
-        )
-        console.print(
-            f"[bold blue] SLURM JOB ID {os.getenv('SLURM_JOB_ID', '')} [/bold blue]!"
-        )
-        console.print(
-            f"[bold blue] TIMESTAMP {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!"
-        )
+        console.print(f"[bold blue] SLURM NODE(s) {os.getenv('SLURM_JOB_NODELIST', '')} [/bold blue]!")
+        console.print(f"[bold blue] SLURM JOB ID {os.getenv('SLURM_JOB_ID', '')} [/bold blue]!")
+        console.print(f"[bold blue] TIMESTAMP {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S')} [/bold blue]!")
 
     @rank_zero_only
     def print_benchmark_profiler_report(
@@ -85,25 +73,17 @@ class AnemoiProfiler(AnemoiTrainer):
             warnings.warn(
                 "INFO: Time Report metrics represent single-node metrics (not multi-node aggregated metrics)",
             )
-            warnings.warn(
-                "INFO: Metrics with a * symbol, represent the value after aggregating all steps"
-            )
-            self.print_report(
-                "Time Profiling", time_metrics_df, color="green", emoji="alarm_clock"
-            )
+            warnings.warn("INFO: Metrics with a * symbol, represent the value after aggregating all steps")
+            self.print_report("Time Profiling", time_metrics_df, color="green", emoji="alarm_clock")
 
         if speed_metrics_df is not None:
             warnings.warn(
                 "INFO: Speed Report metrics are single-node metrics (not multi-node aggregated metrics)",
             )
-            self.print_report(
-                "Speed Profiling", speed_metrics_df, color="yellow", emoji="racing_car"
-            )
+            self.print_report("Speed Profiling", speed_metrics_df, color="yellow", emoji="racing_car")
 
         if memory_metrics_df is not None:
-            warnings.warn(
-                "INFO: Memory Report metrics represent metrics aggregated across all nodes"
-            )
+            warnings.warn("INFO: Memory Report metrics represent metrics aggregated across all nodes")
             self.print_report(
                 "Memory Profiling",
                 memory_metrics_df,
@@ -120,12 +100,8 @@ class AnemoiProfiler(AnemoiTrainer):
             )
 
         if model_summary is not None:
-            self.print_report(
-                "Model Summary", model_summary, color="Orange", emoji="robot"
-            )
-            num_gpus = (
-                self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes
-            )
+            self.print_report("Model Summary", model_summary, color="Orange", emoji="robot")
+            num_gpus = self.config.hardware.num_gpus_per_node * self.config.hardware.num_nodes
             if num_gpus > 1:
                 LOGGER.info("Model Summary displays the stats for a single GPU.")
 
@@ -159,9 +135,7 @@ class AnemoiProfiler(AnemoiTrainer):
             return None
 
     def _get_logger(self) -> dict[str, Logger]:
-        if (self.config.diagnostics.log.wandb.enabled) and (
-            not self.config.diagnostics.log.wandb.offline
-        ):
+        if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
             logger_info = {"logger_name": "wandb", "logger": self.wandb_logger}
         elif self.config.diagnostics.log.tensorboard.enabled:
             logger_info = {
@@ -210,16 +184,12 @@ class AnemoiProfiler(AnemoiTrainer):
     def model_summary(self) -> str:
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
             model = self.model
-            return self.profiler.get_model_summary(
-                model=model, example_input_array=self.example_input_array
-            )
+            return self.profiler.get_model_summary(model=model, example_input_array=self.example_input_array)
         return None
 
     @rank_zero_only
     def export_to_logger(self) -> None:
-        if (self.config.diagnostics.log.wandb.enabled) and (
-            not self.config.diagnostics.log.wandb.offline
-        ):
+        if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
             self.to_wandb()
 
         elif self.config.diagnostics.log.mlflow.enabled:
@@ -243,9 +213,7 @@ class AnemoiProfiler(AnemoiTrainer):
         # we won't push them as artifacts extra_files.extend(self.profiler.dirpath.glob("*.json"))
         return extra_files
 
-    def _log_reports_to_mlflow(
-        self, run_id: str, data: pd.DataFrame, artifact_file: str, report_fname: str
-    ) -> None:
+    def _log_reports_to_mlflow(self, run_id: str, data: pd.DataFrame, artifact_file: str, report_fname: str) -> None:
         self.mlflow_logger.experiment.log_table(
             run_id=run_id,
             data=data,
@@ -301,9 +269,7 @@ class AnemoiProfiler(AnemoiTrainer):
                     self.mlflow_logger.experiment.log_artifact(run_id, artifact_path)
 
         if self.config.diagnostics.benchmark_profiler.model_summary.enabled:
-            self.mlflow_logger.experiment.log_artifact(
-                run_id, self.profiler.model_summary_fname
-            )
+            self.mlflow_logger.experiment.log_artifact(run_id, self.profiler.model_summary_fname)
 
     @rank_zero_only
     def to_wandb(self) -> None:
@@ -321,21 +287,11 @@ class AnemoiProfiler(AnemoiTrainer):
             resume=self.run_dict["id"],
         )
 
-        logger.experiment.log(
-            {"speed_metrics_report": wandb.Table(dataframe=self.speed_profile)}
-        )
-        logger.experiment.log(
-            {"memory_metrics_report": wandb.Table(dataframe=self.system_profile)}
-        )
-        logger.experiment.log(
-            {"time_metrics_report": wandb.Table(dataframe=self.time_profile)}
-        )
-        logger.experiment.log(
-            {"memory_metrics_report": wandb.Table(dataframe=self.memory_profile)}
-        )
-        logger.experiment.log(
-            {"model_summary_report": wandb.Table(dataframe=self.model_summary)}
-        )
+        logger.experiment.log({"speed_metrics_report": wandb.Table(dataframe=self.speed_profile)})
+        logger.experiment.log({"memory_metrics_report": wandb.Table(dataframe=self.system_profile)})
+        logger.experiment.log({"time_metrics_report": wandb.Table(dataframe=self.time_profile)})
+        logger.experiment.log({"memory_metrics_report": wandb.Table(dataframe=self.memory_profile)})
+        logger.experiment.log({"model_summary_report": wandb.Table(dataframe=self.model_summary)})
         with Path("report.html").open("w") as f:
             logger.experiment.log({"reports_benchmark_profiler": wandb.Html(f)})
         logger.experiment.finish()
@@ -347,9 +303,7 @@ class AnemoiProfiler(AnemoiTrainer):
         )
         callbacks = super().callbacks
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
-            from anemoi.training.diagnostics.callbacks.profiler import (
-                MemorySnapshotRecorder,
-            )
+            from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
             from anemoi.training.diagnostics.profilers import check_torch_version
 
             available = check_torch_version()
@@ -393,25 +347,17 @@ class AnemoiProfiler(AnemoiTrainer):
         """Update the paths in the configuration."""
         super()._update_paths()
 
-        if (
-            self.run_id
-        ):  # when using mlflow only rank0 will have a run_id except when resuming runs
+        if self.run_id:  # when using mlflow only rank0 will have a run_id except when resuming runs
             # Multi-gpu new runs or forked runs - only rank 0
             # Multi-gpu resumed runs - all ranks
-            self.config.hardware.paths.profiler = Path(
-                self.config.hardware.paths.profiler, self.run_id
-            )
+            self.config.hardware.paths.profiler = Path(self.config.hardware.paths.profiler, self.run_id)
         elif self.config.training.fork_run_id:
             parent_run = self.config.training.fork_run_id
-            self.config.hardware.paths.profiler = Path(
-                self.config.hardware.paths.profiler, parent_run
-            )
+            self.config.hardware.paths.profiler = Path(self.config.hardware.paths.profiler, parent_run)
         LOGGER.info("Profiler path: %s", self.config.hardware.paths.profiler)
 
     def _close_logger(self) -> None:
-        if (self.config.diagnostics.log.wandb.enabled) and (
-            not self.config.diagnostics.log.wandb.offline
-        ):
+        if (self.config.diagnostics.log.wandb.enabled) and (not self.config.diagnostics.log.wandb.offline):
             # We need to close the W&B logger to be able to read the System Metrics
             self.wandb_logger.experiment.finish()
 
