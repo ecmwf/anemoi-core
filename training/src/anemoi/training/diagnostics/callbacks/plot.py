@@ -96,7 +96,7 @@ class BasePlotExecutor(ABC):
             import os
 
             LOGGER.exception(traceback.format_exc())
-            self.shutdown()
+            self.shutdown(wait=False)
             os._exit(1)
 
     @abstractmethod
@@ -104,7 +104,7 @@ class BasePlotExecutor(ABC):
         """Schedule *fn(trainer, *args, **kwargs)* for execution."""
 
     @abstractmethod
-    def shutdown(self) -> None:
+    def shutdown(self, wait: bool = True) -> None:
         """Release any resources held by the executor."""
 
 
@@ -114,7 +114,7 @@ class SyncPlotExecutor(BasePlotExecutor):
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
         self._run(fn, trainer, *args, **kwargs)
 
-    def shutdown(self) -> None:
+    def shutdown(self, wait: bool = True) -> None:
         pass
 
 
@@ -149,11 +149,21 @@ class AsyncPlotExecutor(BasePlotExecutor):
         """Schedule *fn(trainer, *args, **kwargs)* to run asynchronously."""
         asyncio.run_coroutine_threadsafe(self._submit(fn, trainer, args, kwargs), self._loop)
 
-    def shutdown(self) -> None:
-        """Shut down the executor and stop the event loop."""
-        self._executor.shutdown(wait=False, cancel_futures=True)
+    def shutdown(self, wait: bool = True) -> None:
+        """Shut down the executor and stop the event loop.
+
+        Parameters
+        ----------
+        wait : bool
+            If True (default), block until all pending plot tasks finish before
+            stopping the loop — prevents "Task was destroyed but it is pending!"
+            warnings on normal teardown.  Set to False when called from an error
+            handler running on the background thread itself (to avoid deadlock).
+        """
+        self._executor.shutdown(wait=wait, cancel_futures=not wait)
         self._loop.call_soon_threadsafe(self._loop.stop)
-        self._loop_thread.join()
+        if wait:
+            self._loop_thread.join()
 
 
 class BasePlotCallback(Callback, ABC):
