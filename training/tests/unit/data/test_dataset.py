@@ -436,3 +436,28 @@ def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> N
     )
 
     assert cfg.dataset_config == {"invalid_key": "not-supported"}
+
+
+def test_worker_init_func_sets_blosc_num_threads() -> None:
+    """Test that worker_init_func sets the Blosc thread count when blosc_num_threads is provided."""
+    from unittest.mock import MagicMock
+    from unittest.mock import patch
+
+    from numcodecs.blosc import get_nthreads
+    from numcodecs.blosc import set_nthreads
+
+    from anemoi.training.utils.worker_init import worker_init_func
+
+    initial_threads = 8
+    set_nthreads(initial_threads)
+
+    mock_dataset = MagicMock()
+    mock_worker_info = MagicMock()
+    mock_worker_info.num_workers = 1
+    mock_worker_info.dataset = mock_dataset
+
+    with patch("anemoi.training.utils.worker_init.get_worker_info", return_value=mock_worker_info):
+        worker_init_func(worker_id=0, blosc_num_threads=1)
+
+    assert get_nthreads() != initial_threads, f"Expected blosc nthreads!=initial_threads, got {get_nthreads()}"
+    assert get_nthreads() == 1, f"Expected blosc nthreads=1, got {get_nthreads()}"
