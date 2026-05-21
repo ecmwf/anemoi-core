@@ -1,4 +1,4 @@
-# TODO list
+# TODO list
 branch: feat/richer-batch
 
 ### General
@@ -12,7 +12,7 @@ branch: feat/richer-batch
 - [ ] Update ensemble
 - [ ] Update diffusion/transport
 
-### Batch
+### Batch
 - [ ] Add more information like `ds.metadata` (as variable_metadata ??), `ds.statistics`, ...
 - [ ] Split current `Batch` into `data` + `spec`. The motivation is to pass the target spec to the `model.forward()`. Another alternative would be implement an `empty()` to return a batch without the data.
 - [ ] We currently have `apply()` as a batch method, would be something similar to use with 2 batches. Motivation: loss function -> `loss(y, y_pred)`.
