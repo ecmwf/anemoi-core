@@ -20,7 +20,7 @@ branch: feat/richer-batch
 - [ ] Introduce `SingletonSourceView` to avoid `torch.cat` operation with lists of one dataset.
 
 ### Evaluation
-- [ ] Update scalers to work over variable dims
+- [ ] Update scalers. Use `TensorLayout` from the batch instead of the `TensorDim`.
 - [ ] Validation metrics
 - [ ] Callbacks
 
