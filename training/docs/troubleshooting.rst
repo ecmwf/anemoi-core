@@ -58,6 +58,29 @@ the metadata stored in the checkpoint using
 
    anemoi-utils metadata checkpoint.ckpt --remove --output output.ckpt
 
+****************
+ Miscellaneous errors
+****************
+
+1. Error during blosc decompression
+========================================
+
+If you encounter this error during runtime
+
+.. code:: bash
+
+   File "numcodecs/blosc.pyx", line 585, in numcodecs.blosc.Blosc.decode
+   File "numcodecs/blosc.pyx", line 414, in numcodecs.blosc.decompress
+   RuntimeError: error during blosc decompression: 0
+
+You can set the number of threads used by blosc to 1 to avoid this error.
+This can be done by setting the following config value:
+
+.. code:: yaml
+
+   dataloader:
+       blosc_num_threads: 1
+
 ***********************************
  PyTorch Lightning Debugging Tools
 ***********************************

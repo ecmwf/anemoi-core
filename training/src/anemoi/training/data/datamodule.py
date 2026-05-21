@@ -156,7 +156,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             batch_size=self.config.dataloader.batch_size[stage],
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
-            worker_init_fn=partial(worker_init_func, dataloader_config=self.config.dataloader),
+            worker_init_fn=partial(worker_init_func, blosc_num_threads=self.config.dataloader.blosc_num_threads),
             prefetch_factor=self.config.dataloader.prefetch_factor,
             persistent_workers=True,
             **extra,
