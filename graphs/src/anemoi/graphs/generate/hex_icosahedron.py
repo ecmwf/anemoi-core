@@ -12,13 +12,13 @@ import h3
 import networkx as nx
 import numpy as np
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
 
 def create_hex_nodes(
     resolution: int,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> tuple[nx.Graph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedron.
 
@@ -29,8 +29,8 @@ def create_hex_nodes(
     ----------
     resolution : int
         Level of mesh resolution to consider.
-    area_mask_builder : KNNAreaMaskBuilder, optional
-        KNNAreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
+    area_mask_builder : AreaMaskBuilder, optional
+        AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
 
     Returns
     -------

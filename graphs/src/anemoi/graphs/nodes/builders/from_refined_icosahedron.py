@@ -71,7 +71,7 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
 
     Attributes
     ----------
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         The area of interest mask builder.
     """
 
@@ -129,7 +129,7 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
 
     Parameters
     ----------
-    area_mask_builder: KNNAreaMaskBuilder
+    area_mask_builder: AreaMaskBuilder
         The area of interest mask builder.
     """
 
@@ -148,7 +148,7 @@ class LimitedAreaHexNodes(LimitedAreaIcosahedralNodes):
 
     Parameters
     ----------
-    area_mask_builder: KNNAreaMaskBuilder
+    area_mask_builder: AreaMaskBuilder
         The area of interest mask builder.
     """
 
@@ -166,7 +166,7 @@ class StretchedIcosahedronNodes(LimitedAreaIcosahedralNodes, ABC):
 
     Attributes
     ----------
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         The area of interest mask builder.
     """
 

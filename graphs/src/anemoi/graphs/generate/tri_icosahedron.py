@@ -16,7 +16,7 @@ import numpy as np
 import trimesh
 from sklearn.neighbors import BallTree
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_tri_nodes(
-    resolution: int, area_mask_builder: KNNAreaMaskBuilder | None = None
+    resolution: int, area_mask_builder: AreaMaskBuilder | None = None
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedron.
 
@@ -34,8 +34,8 @@ def create_tri_nodes(
     ----------
     resolution : int
         Level of mesh resolution to consider.
-    area_mask_builder : KNNAreaMaskBuilder
-        KNNAreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
+    area_mask_builder : AreaMaskBuilder
+        AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
 
     Returns
     -------
@@ -63,7 +63,7 @@ def create_tri_nodes(
 def create_stretched_tri_nodes(
     base_resolution: int,
     lam_resolution: int,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
     """Creates a global mesh with 2 levels of resolution.
 
@@ -76,7 +76,7 @@ def create_stretched_tri_nodes(
         Global resolution level.
     lam_resolution : int
         Local resolution level.
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         NearestNeighbors with the cloud of points to limit the mesh area.
 
     Returns
@@ -154,7 +154,7 @@ def add_1_hop_edges(
     node_resolutions: list[int],
     edge_resolutions: list[int],
     node_ordering: list[int],
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> np.ndarray:
     """Adds edges for x_hops = 1 relying on trimesh only."""
 
@@ -200,7 +200,7 @@ def add_edges_to_nx_graph(
     graph: nx.DiGraph,
     resolutions: list[int],
     x_hops: int = 1,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> nx.DiGraph:
     """Adds the edges to the graph.
 
@@ -215,7 +215,7 @@ def add_edges_to_nx_graph(
         Levels of mesh refinement levels to consider.
     x_hops : int, optional
         Number of hops between 2 nodes to consider them neighbours, by default 1.
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         NearestNeighbors with the cloud of points to limit the mesh area, by default None.
 
     Returns

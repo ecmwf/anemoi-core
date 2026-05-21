@@ -14,7 +14,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges import MultiScaleEdges
 from anemoi.graphs.generate import tri_icosahedron
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.nodes import HexNodes
 from anemoi.graphs.nodes import StretchedTriNodes
 from anemoi.graphs.nodes import TriNodes
@@ -126,7 +126,7 @@ class TestMultiScaleEdgesStretched:
         """Return a HeteroData object with stretched Tri nodes."""
         graph = HeteroData()
         node_builder = StretchedTriNodes(4, 6, "hidden", None, None)
-        node_builder.area_mask_builder = KNNAreaMaskBuilder("hidden", 400)
+        node_builder.area_mask_builder = AreaMaskBuilder("hidden", 400)
         node_builder.area_mask_builder.fit_coords(np.array([[0, 0]]))
         # We are considering a 400km radius circle centered at (0, 0) as the area of
         # interest for the stretched graph.
@@ -146,7 +146,7 @@ class TestMultiScaleEdgesStretched:
     @pytest.mark.parametrize("edge_resolutions", [[1], [0, 1, 2, 3, 4, 5, 6], [4, 6], [6]])
     def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):
         nodes = tri_graph["hidden"]
-        all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
+        all_points_mask_builder = AreaMaskBuilder("all_nodes", 1.0)
         all_points_mask_builder.fit_coords(nodes.x.detach().cpu().numpy())
 
         fast_edges = tri_icosahedron.add_1_hop_edges(
