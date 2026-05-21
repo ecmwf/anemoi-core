@@ -42,6 +42,7 @@ class EdmSettings:
     sigma_data: float = 1.0
     sigma_max: float = 100.0
     sigma_min: float = 0.02
+    rho: float = 7.0
 
     @classmethod
     def from_config(cls, config: Any) -> EdmSettings:
@@ -49,6 +50,7 @@ class EdmSettings:
             sigma_data=float(_get_config_value(config, "sigma_data", cls.sigma_data)),
             sigma_max=float(_get_config_value(config, "sigma_max", cls.sigma_max)),
             sigma_min=float(_get_config_value(config, "sigma_min", cls.sigma_min)),
+            rho=float(_get_config_value(config, "rho", cls.rho)),
         )
 
 

@@ -186,7 +186,7 @@ class TransportSourceBuilder:
 
     @property
     def noise_scale(self) -> float:
-        return float(getattr(self.settings, "noise_scale", 0.0))
+        return float(self.settings.noise_scale)
 
     def resolve_kind(self, default_kind: str) -> str:
         return default_kind if self.kind == "default" else self.kind

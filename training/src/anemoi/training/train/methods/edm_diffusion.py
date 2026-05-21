@@ -52,9 +52,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
 
     @property
     def _rho(self) -> float:
-        if hasattr(self.module, "rho"):
-            return self.module.rho
-        return self.module.config.model.model.transport.rho
+        return self.module.model.model.edm.rho
 
     def forward(
         self,

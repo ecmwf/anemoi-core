@@ -873,7 +873,6 @@ def test_edm_transport_training_step_with_forecaster() -> None:
     )
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = EDMDiffusionTransportObjective(forecaster)
-    forecaster.rho = _CFG_DIFFUSION.model.model.transport.rho
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
@@ -1358,7 +1357,6 @@ def test_edm_transport_training_uses_data_full_target_layout(
     )
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = EDMDiffusionTransportObjective(forecaster)
-    forecaster.rho = _CFG_DIFFUSION.model.model.transport.rho
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
     forecaster.target_dataset_names = forecaster.dataset_names
