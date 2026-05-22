@@ -15,6 +15,13 @@ configuration as training, so all data loading, normalisation, and
 diagnostics callbacks behave identically.  No optimizer state is
 created and no gradients are computed.
 
+.. warning::
+
+   A checkpoint **must** be specified via ``training.run_id``,
+   ``training.fork_run_id``, or ``system.input.warm_start``.  Omitting
+   all three raises a :exc:`RuntimeError` immediately — evaluation on a
+   randomly-initialised model is almost certainly a user error.
+
 ***********************
  Differences from train
 ***********************
@@ -40,18 +47,39 @@ passed to the evaluator trainer.
  Checkpoint loading
 **************************
 
-The evaluator follows the same checkpoint-loading logic as training:
+A checkpoint source must be configured before evaluation starts.  Three
+cases are recognised, in priority order:
 
-- If ``config.training.load_weights_only`` is ``True``, only the model
-  weights are restored from the checkpoint.  The Lightning checkpoint
-  connector is not called again during ``trainer.validate()``, avoiding
-  a redundant second load.
-- Otherwise, ``ckpt_path`` is set to ``self.last_checkpoint`` and
-  PyTorch Lightning restores the full training state (model weights,
-  optimizer state, epoch counter, etc.) before validation begins.
+1. **``system.input.warm_start``** — load from an explicit file path.
+   Raises :exc:`FileNotFoundError` if the file does not exist.  Takes
+   precedence over ``run_id`` / ``fork_run_id`` when both are set.
 
-To point the evaluator at a specific checkpoint set
-``config.system.input.warm_start`` as you would for a training restart.
+2. **``training.run_id`` or ``training.fork_run_id``** — resolve the
+   last checkpoint automatically as
+   ``<checkpoints.root>/<run_id>/last.ckpt``.  Raises
+   :exc:`RuntimeError` if the file is not found.
+
+3. **Neither set** — raises :exc:`RuntimeError` immediately with a
+   descriptive message (unlike training, where a fresh start is valid).
+
+Once a checkpoint path is resolved, two loading modes are available:
+
+- **``load_weights_only: True``** (recommended for evaluation) — model
+  weights are loaded once during model initialisation; ``ckpt_path=None``
+  is passed to ``trainer.validate()`` to avoid a redundant second load
+  and to skip restoring optimizer/scheduler state.
+- **``load_weights_only: False``** — PyTorch Lightning restores the full
+  training state (weights, optimizer, epoch counter) before validation.
+
+**************************
+ Checkpointing and weight averaging
+**************************
+
+Checkpointing callbacks (:class:`~anemoi.training.diagnostics.callbacks.checkpoint.AnemoiCheckpoint`)
+and weight-averaging callbacks (SWA / EMA) are **automatically disabled**
+during evaluation regardless of what the diagnostics config says.
+Evaluation is a read-only operation on a trained model and should never
+write new checkpoint files or update model weights.
 
 ***********************************
  Passing overrides via the CLI
@@ -69,6 +97,13 @@ the ``train`` command:
 This makes it straightforward to, for example, enable plots that were
 disabled during training, or evaluate on a different date range by
 overriding the dataset split.
+
+A minimal override file covering the most common evaluation settings is
+provided below.  Save it and pass it with ``--config-dir`` / ``--config-name``,
+or copy the individual keys into your own config:
+
+.. literalinclude:: yaml/config_evaluate.yaml
+   :language: yaml
 
 ***********************************
  Distributed evaluation
