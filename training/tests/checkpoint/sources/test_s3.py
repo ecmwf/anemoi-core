@@ -131,3 +131,40 @@ async def test_s3_source_cleans_up_temp_file_on_failure() -> None:
     fake_module = _fake_anemoi_utils_s3(fake_download)
     with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
         await source.process(context)
+
+
+@pytest.mark.network
+@pytest.mark.asyncio
+async def test_s3_source_downloads_from_real_public_bucket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end check against a real public S3 bucket via obstore.
+
+    Skips when obstore (or anemoi-utils[s3]) is unavailable. Uses the
+    public NOAA GHCN bucket because it is signature-free, small, and
+    requires no credentials.
+    """
+    pytest.importorskip("obstore")
+    pytest.importorskip("anemoi.utils.remote.s3")
+
+    # anemoi-utils needs explicit anonymous config for unsigned buckets.
+    config_dir = tmp_path / ".config" / "anemoi"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.toml").write_text(
+        '[object-storage."noaa-ghcn-pds"]\n'
+        'endpoint_url = ""\n'
+        'access_key_id = ""\n'
+        'secret_access_key = ""\n'
+        'region = "us-east-1"\n'
+        "skip_signature = true\n",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # The NOAA file is a CSV, not a torch checkpoint - only exercise the
+    # download path, not the torch.load step. Calling _download_from_s3
+    # directly tests the anemoi-utils wiring without needing a valid ckpt.
+    target = tmp_path / "ghcn.csv"
+    await S3Source._download_from_s3("s3://noaa-ghcn-pds/csv/by_year/1763.csv", target)
+    assert target.stat().st_size > 0
+    assert "ID,DATE,ELEMENT" in target.read_text()[:80]

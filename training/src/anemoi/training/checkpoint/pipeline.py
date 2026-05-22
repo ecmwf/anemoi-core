@@ -30,7 +30,6 @@ Example
 >>> # Build a pipeline manually
 >>> pipeline = CheckpointPipeline([
 ...     LocalSource(path='/tmp/checkpoint.pt'),
-...     # Add a loading strategy here
 ... ])
 >>>
 >>> # Or build from Hydra config
@@ -39,8 +38,6 @@ Example
 ...     'stages': [
 ...         {'_target_': 'anemoi.training.checkpoint.sources.LocalSource',
 ...          'path': '/tmp/checkpoint.pt'},
-...         {'_target_': 'anemoi.training.checkpoint.loading.LoadingStrategy',
-...          'strict': False}
 ...     ]
 ... })
 >>> pipeline = CheckpointPipeline.from_config(config)
