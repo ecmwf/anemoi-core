@@ -343,7 +343,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
     def _interpolate_to_high_res(self, x, grid_shard_shapes=None, model_comm_group=None):
 
         if grid_shard_shapes is not None:
-            shard_shapes = self._get_shard_shapes(x, 0, grid_shard_shapes, model_comm_group)
+            shard_shapes = self._get_shard_shapes(x, -2, grid_shard_shapes, model_comm_group) # [bs·ens, **latlon**, nvar]
             # grid-sharded input: reshard to channel-shards to apply truncation
             x = shard_channels(x, shard_shapes, model_comm_group)  # we get the full sequence here
 
@@ -583,7 +583,7 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         hres_grid_shard_shapes = None
         if model_comm_group is not None:
             lres_shard_shapes = get_shard_shapes(x_in, -2, model_comm_group)
-            x = shard_tensor(x, -2, lres_shard_shapes, model_comm_group)
+            x_in = shard_tensor(x_in, -2, lres_shard_shapes, model_comm_group)
             lres_grid_shard_shapes = [shape[-2] for shape in lres_shard_shapes]
 
             hres_shard_shapes = get_shard_shapes(x_in_hres, -2, model_comm_group)
