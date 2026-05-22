@@ -9,11 +9,11 @@
 
 """S3-compatible checkpoint source.
 
-Downloads checkpoint data from an S3 bucket using boto3, then loads
-it into the pipeline context. Supports AWS S3 and S3-compatible stores
-(MinIO, Ceph, EWC).
-
-boto3 is imported lazily to avoid hard dependency at module level.
+Downloads checkpoint data from an S3 bucket via
+``anemoi.utils.remote.s3.download_file``, which is backed by obstore and
+handles endpoint URLs, credentials, and per-bucket configuration from
+``~/.config/anemoi/settings.toml``. Supports AWS S3 and S3-compatible
+stores (MinIO, Ceph, EWC).
 
 Example
 -------
@@ -31,7 +31,6 @@ import pickle
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Any
 from urllib.parse import urlparse
 
 import torch
@@ -48,20 +47,16 @@ class S3Source(CheckpointSource):
     """Checkpoint source for S3-compatible storage.
 
     Downloads a checkpoint file from an S3 bucket to a temporary location,
-    loads it with PyTorch, and cleans up the temporary file. Credential
-    resolution is delegated entirely to boto3 (environment variables,
-    config files, IAM roles, etc.).
+    loads it with PyTorch, and cleans up the temporary file. Download is
+    delegated to ``anemoi.utils.remote.s3.download_file`` (obstore-backed),
+    which handles endpoint URLs, credentials, and per-bucket configuration
+    from ``~/.config/anemoi/settings.toml``.
 
     Parameters
     ----------
     url : str or None
         S3 URL in ``s3://bucket/key`` format. If None, the URL is read
         from ``context.config["url"]`` at process time.
-    endpoint_url : str or None
-        Custom S3 endpoint URL for S3-compatible stores (MinIO, Ceph, EWC).
-        If None, boto3 uses the default AWS endpoint.
-    verify : bool or None
-        Whether to verify SSL certificates. If None, uses boto3 defaults.
 
     Examples
     --------
@@ -70,15 +65,8 @@ class S3Source(CheckpointSource):
     >>> result = await source.process(context)
     """
 
-    def __init__(
-        self,
-        url: str | None = None,
-        endpoint_url: str | None = None,
-        verify: bool | None = None,
-    ) -> None:
+    def __init__(self, url: str | None = None) -> None:
         self.url = url
-        self.endpoint_url = endpoint_url
-        self.verify = verify
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Download and load a checkpoint from S3.
@@ -98,19 +86,41 @@ class S3Source(CheckpointSource):
         Raises
         ------
         CheckpointNotFoundError
-            If the S3 object does not exist (NoSuchKey/NoSuchBucket)
+            If the S3 object does not exist.
         CheckpointSourceError
-            If download fails (credentials, network, etc.)
+            If download fails (credentials, network, missing optional dep).
         CheckpointLoadError
-            If the downloaded file cannot be loaded by PyTorch
+            If the downloaded file cannot be loaded by PyTorch.
         """
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+
         url = self._resolve_url(context)
         bucket, key = self._parse_s3_url(url)
 
-        LOGGER.info("Downloading checkpoint from s3://%s/%s", bucket, key)
+        LOGGER.info("Downloading checkpoint from %s", url)
 
-        raw_data = await self._download_and_load(bucket, key)
-        self._load_and_populate(context, raw_data)
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
+            tmp_path = Path(tmp_fd.name)
+
+        try:
+            await self._download_from_s3(url, tmp_path)
+
+            try:
+                raw_data = await asyncio.to_thread(
+                    torch.load,
+                    tmp_path,
+                    weights_only=False,
+                    map_location="cpu",
+                )
+            except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
+                raise CheckpointLoadError(tmp_path, e) from e
+
+            self._load_and_populate(context, raw_data)
+
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+                LOGGER.debug("Cleaned up temporary file %s", tmp_path)
 
         context.update_metadata(
             source_type="s3",
@@ -122,7 +132,7 @@ class S3Source(CheckpointSource):
         return context
 
     def _resolve_url(self, context: CheckpointContext) -> str:
-        """Resolve S3 URL from constructor argument or context config."""
+        """Resolve S3 URL from constructor or context config."""
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
         url = self.url
@@ -132,87 +142,44 @@ class S3Source(CheckpointSource):
                 url = config.get("url")
             elif hasattr(config, "url"):
                 url = config.url
-        if url is None:
-            msg = "S3Source requires a URL. Set url= in constructor or context.config['url']."
-            raise CheckpointConfigError(msg)
+            if url is None:
+                msg = "S3Source requires a URL. Set url= in constructor or context.config['url']."
+                raise CheckpointConfigError(msg)
         return url
 
-    async def _download_and_load(self, bucket: str, key: str) -> dict:
-        """Download from S3 to a temp file, load with PyTorch, clean up."""
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-
-        s3_client = self._create_s3_client()
-
-        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as tmp_fd:
-            tmp_path = Path(tmp_fd.name)
-
-        try:
-            self._download_file(s3_client, bucket, key, tmp_path)
-
-            try:
-                return await asyncio.to_thread(
-                    torch.load,
-                    tmp_path,
-                    weights_only=False,
-                    map_location="cpu",
-                )
-            except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
-                raise CheckpointLoadError(tmp_path, e) from e
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
-                LOGGER.debug("Cleaned up temporary file %s", tmp_path)
-
-    def _create_s3_client(self) -> Any:
-        """Create a boto3 S3 client with configured endpoint and SSL settings."""
-        from anemoi.training.checkpoint.exceptions import CheckpointSourceError
-
-        try:
-            import boto3
-        except ImportError as e:
-            msg = "boto3 is required for S3 downloads. Install with: pip install boto3"
-            raise CheckpointSourceError(msg) from e
-
-        client_kwargs: dict = {}
-        if self.endpoint_url is not None:
-            client_kwargs["endpoint_url"] = self.endpoint_url
-        if self.verify is not None:
-            client_kwargs["verify"] = self.verify
-
-        return boto3.client("s3", **client_kwargs)
-
     @staticmethod
-    def _download_file(s3_client: Any, bucket: str, key: str, tmp_path: Path) -> None:
-        """Download a file from S3, translating boto errors to checkpoint exceptions."""
+    async def _download_from_s3(url: str, tmp_path: Path) -> None:
+        """Download an S3 object to ``tmp_path`` via anemoi-utils.
+
+        Maps obstore/anemoi-utils errors to checkpoint exception types.
+        """
         from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
         from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 
         try:
-            from botocore.exceptions import ClientError
-            from botocore.exceptions import EndpointConnectionError
-            from botocore.exceptions import NoCredentialsError
+            from anemoi.utils.remote.s3 import download_file
         except ImportError as e:
-            msg = "boto3/botocore is required for S3 downloads"
-            raise CheckpointSourceError(msg) from e
+            msg = "S3Source requires anemoi-utils[s3]: pip install 'anemoi-utils[s3]'"
+            raise CheckpointSourceError(msg, url) from e
 
-        s3_path = f"s3://{bucket}/{key}"
         try:
-            s3_client.download_file(bucket, key, str(tmp_path))
-        except NoCredentialsError as e:
-            msg = f"S3 credentials not found for {s3_path}"
-            raise CheckpointSourceError(msg) from e
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code in {"NoSuchBucket", "NoSuchKey", "404"}:
-                raise CheckpointNotFoundError(s3_path) from e
-            if error_code in {"AccessDenied", "403"}:
-                msg = f"Access denied to {s3_path}"
-                raise CheckpointSourceError(msg) from e
-            msg = f"S3 download failed for {s3_path}: {e}"
-            raise CheckpointSourceError(msg) from e
-        except EndpointConnectionError as e:
-            msg = "Could not connect to S3 endpoint"
-            raise CheckpointSourceError(msg) from e
+            await asyncio.to_thread(
+                download_file,
+                url,
+                str(tmp_path),
+                True,  # overwrite — tmp file already exists
+                False,  # resume
+                0,  # verbosity
+            )
+        except FileNotFoundError as e:
+            raise CheckpointNotFoundError(url) from e
+        except ImportError as e:
+            # obstore is imported lazily inside anemoi-utils download_file
+            msg = f"S3 download requires obstore (pip install 'anemoi-utils[s3]'): {e}"
+            raise CheckpointSourceError(msg, url) from e
+        except (OSError, ValueError, RuntimeError) as e:
+            msg = f"S3 download failed for {url}: {e}"
+            raise CheckpointSourceError(msg, url) from e
 
     @staticmethod
     def _parse_s3_url(url: str) -> tuple[str, str]:
