@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.combined import CombinedLoss
-from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 
@@ -61,13 +61,12 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
             variable_scaling[f"{base_key}{suffix}"] = print_variable_scaling(sub_loss, data_indices)
         return variable_scaling
 
-    if isinstance(loss, MultiscaleLossWrapper):
-        return print_variable_scaling(loss.loss, data_indices)
-
     if isinstance(loss, LossVariableMapper):
         subset_vars = enumerate(loss.predicted_variables)
         # LossVariableMapper forwards scalers to its inner loss, so get scaling from there
         scaler_source = loss.loss.scaler
+    elif isinstance(loss, BaseLossWrapper):
+        return print_variable_scaling(loss.loss, data_indices)
     else:
         subset_vars = enumerate(data_indices.model.output.name_to_index.keys())
         scaler_source = loss.scaler
@@ -76,7 +75,7 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     log_text = f"Final Variable Scaling in {loss.__class__.__name__}: "
     scaling_values, scaling_sum = {}, 0.0
     for idx, name in subset_vars:
-        value = float(variable_scaling[idx])
+        value = float(variable_scaling[idx]) if idx < variable_scaling.shape[0] else 1.0
         log_text += f"{name}: {value:.4g}, "
         scaling_values[name] = value
         scaling_sum += value
