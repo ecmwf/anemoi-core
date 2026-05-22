@@ -559,6 +559,8 @@ class AnemoiTrainer:
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
             profiler=self.profiler,
+            # Pass enable_checkpointing so it doesn't default to True and create unwanted checkpoints
+            enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )

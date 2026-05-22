@@ -298,9 +298,12 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar.target_ = (
-            ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
-        )
+        progress_bar_target = ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
+        # Use "_target_" key for DictConfig, target_ attribute for ProgressBarSchema (avoid junk keys that break hydra.instantiate)
+        try:
+            self.config.diagnostics.progress_bar["_target_"] = progress_bar_target
+        except TypeError:
+            self.config.diagnostics.progress_bar.target_ = progress_bar_target
         callbacks = super().callbacks
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
