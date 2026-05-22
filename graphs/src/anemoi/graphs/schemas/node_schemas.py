@@ -11,12 +11,14 @@
 import logging
 from pathlib import Path  # noqa: TC003
 from typing import Annotated
+from typing import List
 from typing import Literal
 from typing import Optional
 
 from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -125,24 +127,61 @@ class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
     reference_node_name: str  # TODO(Helen): Discuss check that reference nodes exists in the config
     "Name of the reference nodes in the graph to consider for the Area Mask."
     mask_attr_name: Optional[str]  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
-    "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
+    "Name of a node attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
+    "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
+
+
+class StretchedLamRegionSchema(BaseModel):
+    """Schema for a single AOI region entry within a multi resolution AOI stretched icosahedral node config."""
+
+    lam_resolution: PositiveInt
+    "Refinement level of the mesh for this AOI region."
+    reference_node_name: str
+    "Name of the reference nodes in the graph to consider for the AOI region mask."
+    mask_attr_name: Optional[str] = None
+    "Name of a node attribute to mask the reference nodes for this AOI, if desired. Defaults to consider all reference nodes."
+    margin_radius_km: PositiveFloat = Field(default=100.0, example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
 
 
 class StretchedIcosahdralNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.StretchedTriNodes"] = Field(..., alias="_target_")
-    "Class implementation for nodes based on iterative refinements of an icosahedron with 2 different resolutions."
+    "Class implementation for nodes based on iterative refinements of an icosahedron with one or more resolution areas."
     global_resolution: PositiveInt
     "Refinement level of the mesh on the global area."
-    lam_resolution: PositiveInt
-    "Refinement level of the mesh on the local area."
-    reference_node_name: str
-    "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: Optional[str]
-    "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
-    margin_radius_km: PositiveFloat = Field(example=100.0)
-    "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
+    lam_resolution: Optional[PositiveInt] = None
+    "Refinement level of the mesh on the local area. Required when lam_regions is not provided."
+    reference_node_name: Optional[str] = None
+    "Name of the reference nodes in the graph to consider for the Area Mask. Required when lam_regions is not provided."
+    mask_attr_name: Optional[str] = None
+    "Single resolution mode only: Node attribute name used to mask the reference nodes; uses all reference nodes when absent."
+    margin_radius_km: PositiveFloat = Field(default=100.0, example=100.0)
+    "Single resolution mode only: Maximum distance to the reference nodes to consider a node as valid, in kilometres."
+    lam_regions: Optional[List[StretchedLamRegionSchema]] = None
+    "List of LAM region configs for multi resolution mode. Mutually exclusive with lam_resolution / reference_node_name."
+
+    @model_validator(mode="after")
+    def check_single_or_multi_region(self) -> "StretchedIcosahdralNodeSchema":
+        """Validate that either single resolution or multi resolution parameters are provided, not both."""
+        if self.lam_regions is not None:
+            if (
+                self.lam_resolution is not None
+                or self.reference_node_name is not None
+                or self.mask_attr_name is not None
+                or "margin_radius_km" in self.__fields_set__
+            ):
+                raise ValueError(
+                    "Use either lam_regions or all of (lam_resolution, reference_node_name, mask_attr_name, margin_radius_km), not both."
+                )
+            if len(self.lam_regions) == 0:
+                raise ValueError("lam_regions must contain at least one region.")
+        else:
+            if self.lam_resolution is None:
+                raise ValueError("lam_resolution is required when lam_regions is not provided.")
+            if self.reference_node_name is None:
+                raise ValueError("reference_node_name is required when lam_regions is not provided.")
+        return self
 
 
 NodeBuilderSchemas = Annotated[
