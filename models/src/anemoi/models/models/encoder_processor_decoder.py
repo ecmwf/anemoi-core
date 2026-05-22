@@ -74,9 +74,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         # Decoder hidden -> data
+        # Only build a decoder for datasets that have a hidden->dataset edge in the graph.
+        # Forcing-only datasets (e.g. atmos_data) have no decoder edge and are skipped.
+        self.decoder_dataset_names = [
+            name for name in self.dataset_names
+            if (self._graph_name_hidden, "to", name) in self._graph_data.edge_types
+        ]
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
+        for dataset_name in self.decoder_dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
@@ -289,9 +295,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if self.latent_skip:
             x_latent = x_latent_proc + x_latent
 
-        # Decoder
+        # Decoder — only for datasets with a hidden->dataset edge
         x_out_dict = {}
-        for dataset_name in dataset_names:
+        for dataset_name in [n for n in dataset_names if n in self.decoder_dataset_names]:
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
                 dataset_name

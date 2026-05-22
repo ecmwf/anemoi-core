@@ -276,7 +276,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_latent = x_latent_proc + x_latent
 
         x_out_dict = {}
-        for dataset_name in dataset_names:
+        for dataset_name in [n for n in dataset_names if n in self.decoder_dataset_names]:
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
                 dataset_name

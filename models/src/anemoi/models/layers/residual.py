@@ -554,14 +554,34 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         x_skip = x_skip * (1 - f.unsqueeze(-1))
         return walias * x + (1 - walias) * self.x_isht(x_skip)
 
-    def _apply_truncation(self, x_last: torch.Tensor) -> torch.Tensor:
+    def _apply_truncation(
+        self,
+        x_last: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+    ) -> torch.Tensor:
+        from anemoi.models.distributed.graph import gather_tensor, shard_tensor
+
         x_last = einops.rearrange(x_last, "... values var -> ... var values")
-        x_last[..., self._truncation_input_idx, :] = self.lpass_filter(x_last[..., self._truncation_input_idx, :])
+        x_trunc = x_last[..., self._truncation_input_idx, :]
+        if grid_shard_sizes is not None and model_comm_group is not None:
+            # Spectral transform requires the full grid; gather across model-parallel ranks first
+            x_trunc = gather_tensor(x_trunc, dim=-1, sizes=grid_shard_sizes, mgroup=model_comm_group)
+            x_trunc = self.lpass_filter(x_trunc)
+            x_trunc = shard_tensor(x_trunc, dim=-1, sizes=grid_shard_sizes, mgroup=model_comm_group)
+        else:
+            x_trunc = self.lpass_filter(x_trunc)
+        x_last[..., self._truncation_input_idx, :] = x_trunc
         return einops.rearrange(x_last, "... var values -> ... values var")
 
-    def _learnable(self, x_last: torch.Tensor) -> torch.Tensor:
+    def _learnable(
+        self,
+        x_last: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+    ) -> torch.Tensor:
         if self.truncate:
-            x_last = self._apply_truncation(x_last)
+            x_last = self._apply_truncation(x_last, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group)
 
         weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
         weight = einops.rearrange(weight, "... var values -> ... values var")
@@ -581,5 +601,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         x_last = x[:, -1, ...]
         out = torch.zeros_like(x_last)
-        out[..., self._internal_input_idx] = self._learnable(x_last)
+        out[..., self._internal_input_idx] = self._learnable(
+            x_last, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
+        )
         return self._expand_time(out, n_step_output)

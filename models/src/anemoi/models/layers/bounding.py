@@ -344,15 +344,24 @@ def _build_dataset_boundings(
 
     bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
 
+    name_to_index = data_indices.model.output.name_to_index
+    # Only instantiate boundings whose target variables all exist in this dataset's output index.
+    # This allows a shared bounding config to be used in multi-dataset setups where some datasets
+    # (e.g. forcing-only datasets) have no prognostic outputs and therefore no matching variables.
+    valid_cfgs = [
+        cfg for cfg in bounding_cfgs
+        if all(var in name_to_index for var in getattr(cfg, "variables", []))
+    ]
+
     return nn.ModuleList(
         [
             instantiate(
                 cfg,
-                name_to_index=data_indices.model.output.name_to_index,
+                name_to_index=name_to_index,
                 statistics=statistics,
                 name_to_index_stats=data_indices.data.input.name_to_index,
             )
-            for cfg in bounding_cfgs
+            for cfg in valid_cfgs
         ]
     )
 

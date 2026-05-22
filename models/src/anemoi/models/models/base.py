@@ -244,10 +244,14 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
+        # Support per-dataset residual configs: if residual_config has a key matching
+        # a dataset name, use that config for that dataset; otherwise use the shared config.
+        is_per_dataset = any(k in residual_config for k in self.dataset_names)
         for dataset_name in self.dataset_names:
+            cfg = residual_config[dataset_name] if is_per_dataset else residual_config
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
-                residual_config,
+                cfg,
                 graph=self._graph_data,
                 data_node_name=data_node_name,
                 statistics=self.statistics[dataset_name],

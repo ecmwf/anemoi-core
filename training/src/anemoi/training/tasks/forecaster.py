@@ -195,6 +195,10 @@ class Forecaster(BaseTask):
     ) -> dict[str, torch.Tensor]:
         """Advance the input state for the next rollout step."""
         for dataset_name in x:
+            if dataset_name not in y_pred:
+                # Forcing-only datasets have no decoder output; their input is taken
+                # entirely from the batch (external forcings), not from model predictions.
+                continue
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
                 y_pred[dataset_name],
