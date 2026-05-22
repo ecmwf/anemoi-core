@@ -128,6 +128,37 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     return model
 
 
+def _extract_variables_metadata_from_checkpoint(ckpt_path: Path | str) -> dict | None:
+    """Extract per-dataset variables_metadata from a checkpoint's metadata_inference.
+
+    Parameters
+    ----------
+    ckpt_path : Path | str
+        Path to the checkpoint file.
+
+    Returns
+    -------
+    dict | None
+        A dict mapping dataset names to their variables_metadata dicts, or None if
+        the checkpoint does not contain variables_metadata for any dataset.
+    """
+    checkpoint = torch.load(ckpt_path, weights_only=False, map_location="cpu")
+    metadata_inference = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
+
+    dataset_names = metadata_inference.get("dataset_names", [])
+    if not dataset_names:
+        return None
+
+    ckpt_variables_metadata = {}
+    for dataset_name in dataset_names:
+        ds_inference = metadata_inference.get(dataset_name, {})
+        vm = ds_inference.get("variables_metadata")
+        if vm is not None:
+            ckpt_variables_metadata[dataset_name] = vm
+
+    return ckpt_variables_metadata or None
+
+
 def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
     """Recursively freezes the parameters of a submodule with the specified name.
 

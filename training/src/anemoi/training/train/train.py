@@ -45,6 +45,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils.checkpoint import _extract_variables_metadata_from_checkpoint
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -306,6 +307,64 @@ class AnemoiTrainer(ABC):
         if initialized_datasets:
             LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
+    def _validate_transfer_learning_units(
+        self,
+    ) -> None:
+        """Validate variable unit compatibility between checkpoint and current dataset.
+
+        Loads the variables_metadata from the checkpoint's metadata_inference and compares
+        units with the current dataset's variables_metadata. Only variables present in both
+        are checked.
+
+        Raises
+        ------
+        ValueError
+            If any common variable has incompatible units between checkpoint and dataset.
+
+        Warns
+        -----
+        If variables_metadata is missing from either the checkpoint or the current dataset,
+        a warning is logged and the check is skipped.
+        """
+        from anemoi.transform.variables import Variable
+
+        if self.last_checkpoint is None:
+            return
+
+        ckpt_variables_metadata = _extract_variables_metadata_from_checkpoint(self.last_checkpoint)
+
+        if ckpt_variables_metadata is None:
+            LOGGER.warning(
+                "Checkpoint does not contain variables_metadata. Skipping unit compatibility check.",
+            )
+            return
+
+        for dataset_name, ckpt_var_meta in ckpt_variables_metadata.items():
+            dataset_metadata = self.datamodule.metadata.get(dataset_name, {})
+            ds_var_meta = dataset_metadata.get("variables_metadata")
+
+            if ds_var_meta is None:
+                LOGGER.warning(
+                    "Dataset '%s' does not contain variables_metadata. "
+                    "Skipping unit compatibility check for this dataset.",
+                    dataset_name,
+                )
+                continue
+
+            # Only check variables present in both
+            common_variables = set(ckpt_var_meta.keys()) & set(ds_var_meta.keys())
+            if not common_variables:
+                continue
+
+            ckpt_vars = {name: Variable.from_dict(name, ckpt_var_meta[name]) for name in common_variables}
+            ds_vars = {name: Variable.from_dict(name, ds_var_meta[name]) for name in common_variables}
+
+            try:
+                Variable.check_compatibility(ckpt_vars, ds_vars)
+            except ValueError:
+                LOGGER.exception("Incompatible units found between checkpoint and dataset '%s'", dataset_name)
+                raise
+
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
@@ -322,6 +381,9 @@ class AnemoiTrainer(ABC):
 
         training_method = get_class(self.config.training.training_method)
         model = training_method(**kwargs)  # Task -> pl.LightningModule
+
+        # Validate variable units between checkpoint and current dataset (before loading weights)
+        self._validate_transfer_learning_units()
 
         # Load the model weights
         if self.load_weights_only:

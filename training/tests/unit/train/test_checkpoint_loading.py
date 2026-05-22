@@ -349,3 +349,200 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     # Assert: compare_variables was called for ERA5
     assert len(era5_index.compare_called_with) == 1
     # Method completes without error (CERRA is silently ignored)
+
+
+# --- Tests for _validate_transfer_learning_units ---
+
+
+def _make_checkpoint_with_variables_metadata(
+    path: Path,
+    variables_metadata_per_dataset: dict[str, dict[str, dict[str, str]]],
+) -> None:
+    """Create a minimal checkpoint file with variables_metadata in metadata_inference."""
+    dataset_names = list(variables_metadata_per_dataset.keys())
+    metadata_inference = {"dataset_names": dataset_names}
+    for ds_name, var_meta in variables_metadata_per_dataset.items():
+        metadata_inference[ds_name] = {"variables_metadata": var_meta}
+
+    checkpoint = {
+        "hyper_parameters": {
+            "metadata": {"metadata_inference": metadata_inference},
+        },
+    }
+    torch.save(checkpoint, path)
+
+
+def test_validate_transfer_learning_units_compatible(tmp_path: Path) -> None:
+    """Test that compatible units pass without error."""
+    ckpt_path = tmp_path / "ckpt.pt"
+    _make_checkpoint_with_variables_metadata(
+        ckpt_path,
+        {
+            "era5": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    )
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        last_checkpoint=ckpt_path,
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+
+    # Should not raise
+    AnemoiTrainer._validate_transfer_learning_units(trainer)
+
+
+def test_validate_transfer_learning_units_incompatible(tmp_path: Path) -> None:
+    """Test that incompatible units raise ValueError."""
+    ckpt_path = tmp_path / "ckpt.pt"
+    _make_checkpoint_with_variables_metadata(
+        ckpt_path,
+        {
+            "era5": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    )
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        last_checkpoint=ckpt_path,
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+
+    with pytest.raises(ValueError, match="Units are not compatible"):
+        AnemoiTrainer._validate_transfer_learning_units(trainer)
+
+
+def test_validate_transfer_learning_units_missing_checkpoint_metadata(tmp_path: Path) -> None:
+    """Test that missing checkpoint variables_metadata produces a warning but no error."""
+    ckpt_path = tmp_path / "ckpt.pt"
+    # Checkpoint without variables_metadata
+    checkpoint = {"hyper_parameters": {"metadata": {"metadata_inference": {"dataset_names": ["era5"], "era5": {}}}}}
+    torch.save(checkpoint, ckpt_path)
+
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        last_checkpoint=ckpt_path,
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+
+    # Should not raise, just warn
+    AnemoiTrainer._validate_transfer_learning_units(trainer)
+
+
+def test_validate_transfer_learning_units_no_checkpoint() -> None:
+    """Test that no checkpoint means no check."""
+    trainer = SimpleNamespace(
+        last_checkpoint=None,
+        datamodule=SimpleNamespace(metadata={}),
+    )
+
+    # Should not raise
+    AnemoiTrainer._validate_transfer_learning_units(trainer)
+
+
+def test_validate_transfer_learning_units_missing_dataset_metadata(tmp_path: Path) -> None:
+    """Test that missing dataset variables_metadata produces a warning but no error."""
+    ckpt_path = tmp_path / "ckpt.pt"
+    _make_checkpoint_with_variables_metadata(
+        ckpt_path,
+        {
+            "era5": {
+                "t2m": {"units": "K"},
+            },
+        },
+    )
+    datamodule_metadata = {
+        "era5": {},  # No variables_metadata
+    }
+    trainer = SimpleNamespace(
+        last_checkpoint=ckpt_path,
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+
+    # Should not raise, just warn
+    AnemoiTrainer._validate_transfer_learning_units(trainer)
+
+
+def test_validate_transfer_learning_units_only_common_variables_checked(tmp_path: Path) -> None:
+    """Test that only variables present in both datasets are compared."""
+    ckpt_path = tmp_path / "ckpt.pt"
+    _make_checkpoint_with_variables_metadata(
+        ckpt_path,
+        {
+            "era5": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    )
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+                "v10": {"units": "m s**-1"},  # Different variable, not in checkpoint
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        last_checkpoint=ckpt_path,
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+
+    # Should not raise: only t2m is common and has compatible units
+    AnemoiTrainer._validate_transfer_learning_units(trainer)
+
+
+def test_validate_transfer_learning_units_dataset_not_in_checkpoint(tmp_path: Path) -> None:
+    """Test that datasets present in config but not in checkpoint are skipped."""
+    ckpt_path = tmp_path / "ckpt.pt"
+    _make_checkpoint_with_variables_metadata(
+        ckpt_path,
+        {
+            "era5": {
+                "t2m": {"units": "K"},
+            },
+        },
+    )
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+            },
+        },
+        "cerra": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},  # Different unit, but dataset not in checkpoint
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        last_checkpoint=ckpt_path,
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+
+    # Should not raise: cerra is not in checkpoint
+    AnemoiTrainer._validate_transfer_learning_units(trainer)
