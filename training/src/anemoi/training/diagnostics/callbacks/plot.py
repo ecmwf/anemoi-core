@@ -226,7 +226,7 @@ class BasePlotCallback(Callback, ABC):
 
             self.loop.call_soon_threadsafe(self.loop.stop)
             self.loop_thread.join()
-            self.loop_thread._stop()
+            # Step 3: Close the asyncio event loop
             self.loop_thread._delete()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
