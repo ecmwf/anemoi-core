@@ -13,12 +13,14 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
+from enum import StrEnum
+from typing import Any
+from typing import ClassVar
 
 import torch
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
@@ -26,12 +28,26 @@ from anemoi.training.utils.enums import TensorDim
 LOGGER = logging.getLogger(__name__)
 
 
+class LossFactoryContextKey(StrEnum):
+    """Named constructor-context inputs that selected loss classes can request."""
+
+    AVAILABLE_SCALERS = "available_scalers"
+    DATA_INDICES = "data_indices"
+
+
 class BaseLoss(nn.Module, ABC):
     """Base loss."""
 
+    # Most losses are built from config alone. Subclasses can list any
+    # extra inputs they need from get_loss_function() here.
+    factory_context_keys: ClassVar[frozenset[LossFactoryContextKey | str]] = frozenset()
     scaler: ScaleTensor
+    needs_graph_data: bool = False
 
-    def __init__(self, ignore_nans: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_nans: bool = False,
+    ) -> None:
         """Node- and feature_weighted Loss.
 
         Exposes:
@@ -72,8 +88,9 @@ class BaseLoss(nn.Module, ABC):
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         self.scaler.update_scaler(name=name, scaler=scaler, override=override)
 
-    def set_data_indices(self, data_indices: IndexCollection) -> None:
-        """Hook to set the data indices for the loss."""
+    @functools.wraps(ScaleTensor.has_scaler_for_dim)
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return self.scaler.has_scaler_for_dim(dim=dim)
 
     def scale(
         self,
@@ -228,7 +245,8 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,
+        squash_mode: str = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -249,6 +267,8 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
+        squash_mode : str, optional
+            Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
 
@@ -257,6 +277,52 @@ class BaseLoss(nn.Module, ABC):
         torch.Tensor
             Weighted loss
         """
+
+
+class BaseLossWrapper(BaseLoss):
+    """Transparent wrapper around a single inner loss.
+
+    By default, all scaler and metadata methods are delegated to the
+    wrapped loss so that the wrapper behaves as if it *were* the inner
+    loss from the perspective of ``CombinedLoss`` and the scaler
+    machinery.  Subclasses only need to override ``forward``.
+    """
+
+    def __init__(self, loss: BaseLoss, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if not isinstance(loss, BaseLoss):
+            msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
+            raise TypeError(msg)
+        self.loss = loss
+        # Share the inner loss's scaler so that scaler additions/updates
+        # applied to this wrapper are visible to the actual loss computation.
+        self.scaler = self.loss.scaler
+        self.supports_sharding = getattr(self.loss, "supports_sharding", True)
+
+    # -- scaler delegation --------------------------------------------------
+
+    @functools.wraps(ScaleTensor.add_scaler)
+    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
+        self.loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
+
+    @functools.wraps(ScaleTensor.update_scaler)
+    def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
+        self.loss.update_scaler(name=name, scaler=scaler, override=override)
+
+    @functools.wraps(ScaleTensor.has_scaler_for_dim)
+    def has_scaler_for_dim(self, dim: TensorDim) -> bool:
+        return self.loss.has_scaler_for_dim(dim=dim)
+
+    # -- metadata delegation ------------------------------------------------
+
+    @property
+    def needs_shard_layout_info(self) -> bool:
+        """Delegate to the wrapped loss."""
+        return getattr(self.loss, "needs_shard_layout_info", False)
+
+    def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
+        """Yield leaf losses from the wrapped loss."""
+        yield from self.loss.iter_leaf_losses()
 
 
 class FunctionalLoss(BaseLoss):
@@ -288,7 +354,8 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,
+        squash_mode: str = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -309,6 +376,8 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
+        squash_mode : str, optional
+            Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
 
@@ -317,9 +386,7 @@ class FunctionalLoss(BaseLoss):
         torch.Tensor
             Weighted loss
         """
-        del kwargs  # not used in this base implementation, but may be used in child classes
         is_sharded = grid_shard_slice is not None
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        return self.reduce(out, squash, group=group if is_sharded else None)
+        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

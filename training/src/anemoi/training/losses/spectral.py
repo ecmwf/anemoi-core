@@ -35,7 +35,8 @@ from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
+from anemoi.training.losses.kcrps import CRPS
+from anemoi.training.losses.kcrps import CRPSBackend
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ class SpectralLoss(BaseLoss):
         kwargs
             Additional arguments for the spectral transform.
         """
-        super().__init__(ignore_nans=ignore_nans)
+        BaseLoss.__init__(self, ignore_nans=ignore_nans)
 
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
@@ -146,6 +147,7 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
@@ -163,7 +165,7 @@ class SpectralL2Loss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogSpectralDistance(SpectralLoss):
@@ -179,6 +181,7 @@ class LogSpectralDistance(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -198,7 +201,7 @@ class LogSpectralDistance(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
+        return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
 
 
 class FourierCorrelationLoss(SpectralLoss):
@@ -214,6 +217,7 @@ class FourierCorrelationLoss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -237,7 +241,7 @@ class FourierCorrelationLoss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogFFT2Distance(LogSpectralDistance):
@@ -261,7 +265,7 @@ class LogFFT2Distance(LogSpectralDistance):
         )
 
 
-class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
+class SpectralCRPSLoss(SpectralLoss, CRPS):
     """CRPS computed in spectral space using arbitrary spectral transforms.
 
     Works with:
@@ -283,6 +287,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         x_dim: int | None = None,
         y_dim: int | None = None,
         alpha: float = 1.0,
+        backend: CRPSBackend = "stable",
         no_autocast: bool = True,
         ignore_nans: bool = False,
         scalers: list | None = None,
@@ -296,7 +301,9 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             scalers=scalers,
             **kwargs,
         )
+        self._validate_arguments(alpha, backend)
         self.alpha = alpha
+        self.backend = backend
         self.no_autocast = no_autocast
 
     def forward(
@@ -309,7 +316,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,  # noqa: ARG002
+        squash_mode: str = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -322,9 +329,9 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
-                crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+                crps = self._kernel_crps(pred_spec, tgt_spec)
         else:
-            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+            crps = self._kernel_crps(pred_spec, tgt_spec)
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         scaled = self.scale(
@@ -333,7 +340,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(scaled, squash=squash, group=group)
+        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
 
     @property
     def name(self) -> str:

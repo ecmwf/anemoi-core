@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.3...graphs-0.9.4) (2026-05-14)
+
+
+### Features
+
+* Graph for skipped and multiscale suggestions ([#1052](https://github.com/ecmwf/anemoi-core/issues/1052)) ([a5eeaef](https://github.com/ecmwf/anemoi-core/commit/a5eeaef1615906974f684e39197f17be7fe9afb4))
+* **graphs:** Add option to disable node scaling by degree ([#1078](https://github.com/ecmwf/anemoi-core/issues/1078)) ([0e93646](https://github.com/ecmwf/anemoi-core/commit/0e9364615c2ef476c0b26dd2b8404c76933e63d4))
+
+
+### Bug Fixes
+
+* **graphs:** Fix node selection in interactive 3D graph viewer ([#1088](https://github.com/ecmwf/anemoi-core/issues/1088)) ([0acd429](https://github.com/ecmwf/anemoi-core/commit/0acd429d33bba64b8685d23c901995cdd2199542))
+
+## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.2...graphs-0.9.3) (2026-04-23)
+
+
+### Features
+
+* **graphs:** Option to exclude self edges in KNN graphs ([#1065](https://github.com/ecmwf/anemoi-core/issues/1065)) ([04c881d](https://github.com/ecmwf/anemoi-core/commit/04c881dd293a0d90d05079ea1ce13a7b4ce602f5))
+
+
+### Bug Fixes
+
+* **graphs,aicon:** Icon mesh vertex mask ([#975](https://github.com/ecmwf/anemoi-core/issues/975)) ([e19b259](https://github.com/ecmwf/anemoi-core/commit/e19b25995535e451df97439f8f349dafa8d9e9d4))
+
+
+### Documentation
+
+* **graphs:** Correct a diagram on how multiscale edges work ([#1051](https://github.com/ecmwf/anemoi-core/issues/1051)) ([48c180c](https://github.com/ecmwf/anemoi-core/commit/48c180ce455708941a86a4a4273754c3f6f93102))
+
+## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.1...graphs-0.9.2) (2026-04-21)
+
+
+### Bug Fixes
+
+* **graphs:** Support passing a graph object directly to GraphExporter ([#1032](https://github.com/ecmwf/anemoi-core/issues/1032)) ([d1f2d92](https://github.com/ecmwf/anemoi-core/commit/d1f2d92861ff049e601dcf25bfe977b1c4f4073c))
+
+
+### Documentation
+
+* **graphs:** Add refinement level 10 ([#1039](https://github.com/ecmwf/anemoi-core/issues/1039)) ([ee1d68b](https://github.com/ecmwf/anemoi-core/commit/ee1d68bec99a108cdea17b2669639ffe54d93a75))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.0...graphs-0.9.1) (2026-03-26)
 
 

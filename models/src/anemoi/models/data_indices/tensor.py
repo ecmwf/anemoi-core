@@ -52,12 +52,26 @@ class BaseTensorIndex:
         self.target = self._build_idx_from_list(target)
         self.full = self._build_idx_from_list(includes)
         self.excludes = sorted(list(set(self.name_to_index.keys()) - set(self.includes)))
+        self.full_index_to_name = {int(index): name for name, index in self.name_to_index.items()}
+        self.ordered_names = [self.full_index_to_name[int(index)] for index in self.full.tolist()]
+        self.name_to_position = {name: position for position, name in enumerate(self.ordered_names)}
 
     def _build_idx_from_list(self, var_list):
         sorted_variables = torch.Tensor(sorted(i for name, i in self.name_to_index.items() if name in var_list)).to(
             torch.int
         )
         return sorted_variables
+
+    def positions_for_names(self, names: list[str]) -> list[int]:
+        """Resolve variable names to positions in this index-space `.full` tensor."""
+        missing = [name for name in names if name not in self.name_to_position]
+        if missing:
+            msg = (
+                f"Variables {missing} are not available in this tensor index-space. "
+                f"Available variables: {self.ordered_names}"
+            )
+            raise ValueError(msg)
+        return [self.name_to_position[name] for name in names]
 
     def __len__(self) -> int:
         return len(self.full)
