@@ -159,7 +159,9 @@ async def test_s3_source_downloads_from_real_public_bucket(
     config_dir = tmp_path / ".config" / "anemoi"
     config_dir.mkdir(parents=True)
     (config_dir / "settings.toml").write_text(settings_body)
-    (config_dir / "settings.secrets.toml").write_text(secrets_body)
+    secrets_path = config_dir / "settings.secrets.toml"
+    secrets_path.write_text(secrets_body)
+    secrets_path.chmod(0o600)  # anemoi-utils refuses to read a world-readable secrets file
     monkeypatch.setenv("HOME", str(tmp_path))
 
     # The NOAA file is a CSV, not a torch checkpoint - only exercise the
