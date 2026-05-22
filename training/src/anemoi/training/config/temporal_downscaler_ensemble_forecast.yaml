@@ -12,6 +12,9 @@ defaults:
 
 config_validation: True
 
+data:
+  frequency: null
+
 diagnostics:
   plot:
     callbacks: []

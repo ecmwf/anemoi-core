@@ -47,7 +47,7 @@ limit_batches:
 
 # Pointers to datasets and model run info
 dataset: ${system.input.dataset}
-forecast_steps: 120
+forecast_steps: 18
 step_frequency: 1h
 
 training:
@@ -55,8 +55,6 @@ training:
     data:
       dataset_config:
         dataset: ${dataloader.dataset}
-        frequency: ${data.frequency}
-        drop: []
       start: null
       end: 2020
       forecast_steps: ${dataloader.forecast_steps}
@@ -67,8 +65,6 @@ validation:
     data:
       dataset_config:
         dataset: ${dataloader.dataset}
-        frequency: ${data.frequency}
-        drop: []
       start: 2021
       end: 2021
       forecast_steps: ${dataloader.forecast_steps}
@@ -79,8 +75,6 @@ test:
     data:
       dataset_config:
         dataset: ${dataloader.dataset}
-        frequency: ${data.frequency}
-        drop: []
       start: 2022
       forecast_steps: ${dataloader.forecast_steps}
       step_frequency: ${dataloader.step_frequency}

@@ -93,7 +93,7 @@ class NativeDatasetSchema(BaseModel):
 class TrajectorySchema(PydanticBaseModel):
     """Trajectory configuration schema."""
 
-    start: datetime.datetime = Field(example="2020-02-05T12:00:00")
+    start: str = Field(example="2020-02-05T12:00:00")
     "Starting datetime for the trajectory."
     length: PositiveInt = Field(example=12)
     "Length of the trajectory in number of time steps."

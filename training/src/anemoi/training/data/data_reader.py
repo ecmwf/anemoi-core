@@ -222,10 +222,85 @@ class NativeGridDataset(BaseAnemoiReader):
         return False
 
 
+class _ForecastZarrData:
+    """Wrapper around a 5D zarr that exposes the dataset-like interface expected by the pipeline."""
+
+    def __init__(self, zarr_group, init_dates, init_indices, variables, resolution, step_frequency, forecast_steps):
+        self._zarr = zarr_group
+        self._array = zarr_group["data"]
+        self._init_dates = init_dates
+        self._init_indices = init_indices
+        self._variables_list = variables
+        self._resolution = resolution
+        self._step_frequency = step_frequency
+        self._forecast_steps = forecast_steps
+
+    @property
+    def shape(self):
+        return self._array.shape
+
+    @property
+    def dates(self):
+        return self._init_dates
+
+    @property
+    def grids(self):
+        return [self._array.shape[4]]
+
+    @property
+    def variables(self):
+        return self._variables_list
+
+    @property
+    def frequency(self):
+        return self._step_frequency
+
+    @property
+    def resolution(self):
+        return self._resolution
+
+    @property
+    def name_to_index(self):
+        return {name: i for i, name in enumerate(self._variables_list)}
+
+    @property
+    def missing(self):
+        return set()
+
+    @property
+    def statistics(self):
+        stats = {}
+        for key in ("mean", "stdev", "minimum", "maximum"):
+            if key in self._zarr:
+                stats[key] = self._zarr[key][:]
+        return stats
+
+    def metadata(self):
+        return dict(self._zarr.attrs)
+
+    def supporting_arrays(self):
+        result = {}
+        if "latitudes" in self._zarr:
+            result["latitudes"] = self._zarr["latitudes"][:]
+        if "longitudes" in self._zarr:
+            result["longitudes"] = self._zarr["longitudes"][:]
+        return result
+
+    def __getitem__(self, item):
+        """Use zarr orthogonal indexing to support list/array indices."""
+        if isinstance(item, tuple) and any(isinstance(idx, (list, np.ndarray)) for idx in item):
+            return self._array.oindex[item]
+        return self._array[item]
+
+    def __repr__(self):
+        return f"ForecastZarrData(shape={self.shape}, inits={len(self._init_dates)})"
+
+
 class ForecastStepDataset(BaseAnemoiReader):
     """Dataset reader for 5D zarrs with an explicit forecast-step dimension.
 
     Expected zarr shape: ``(num_inits, variables, ensemble, forecast_steps, gridpoints)``.
+    Expected zarr arrays: ``data``, ``base_dates``, ``steps``.
 
     This reader virtualizes the dataset as a flat time series of length
     ``num_inits * forecast_steps`` so that the rest of the training pipeline
@@ -243,7 +318,26 @@ class ForecastStepDataset(BaseAnemoiReader):
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
     ):
-        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
+        # Bypass BaseAnemoiReader.__init__ — open_dataset doesn't support 5D zarrs.
+        import zarr
+
+        source = dataset_config if dataset_config is not None else dataset
+        if source is None:
+            msg = "Either dataset or dataset_config must be provided."
+            raise ValueError(msg)
+
+        # Extract the zarr path and drop list from the config
+        drop: list[str] = []
+        if isinstance(source, (dict, DictConfig)):
+            zarr_path = source.get("dataset") if isinstance(source, dict) else source.get("dataset")
+            if zarr_path is None:
+                msg = "dataset_config must contain a 'dataset' key with the zarr path."
+                raise ValueError(msg)
+            drop = list(source.get("drop", []) or [])
+        else:
+            zarr_path = source
+
+        self._zarr = zarr.open(zarr_path, mode="r")
         self._forecast_steps = forecast_steps
 
         if isinstance(step_frequency, str):
@@ -254,22 +348,80 @@ class ForecastStepDataset(BaseAnemoiReader):
             self._step_frequency = step_frequency
 
         # Validate shape: expect 5D (inits, vars, ensemble, steps, grid)
-        if len(self.data.shape) != 5:
+        data_array = self._zarr["data"]
+        if len(data_array.shape) != 5:
             msg = (
                 f"ForecastStepDataset expects a 5D zarr "
-                f"(inits, variables, ensemble, steps, gridpoints), got shape {self.data.shape}"
+                f"(inits, variables, ensemble, steps, gridpoints), got shape {data_array.shape}"
             )
             raise ValueError(msg)
 
-        actual_steps = self.data.shape[3]
+        actual_steps = data_array.shape[3]
         if actual_steps < forecast_steps:
             msg = f"Dataset has {actual_steps} forecast steps but config requests {forecast_steps}."
             raise ValueError(msg)
 
+        # Parse metadata from zarr attrs
+        self._attrs = dict(self._zarr.attrs)
+        all_variables = self._attrs.get("variables", [])
+        self._resolution = self._attrs.get("resolution", "unknown")
+
+        # Apply drop list
+        drop_set = set(drop)
+        self._var_indices = [i for i, v in enumerate(all_variables) if v not in drop_set]
+        self._variables = [all_variables[i] for i in self._var_indices]
+        self._name_to_index = {name: i for i, name in enumerate(self._variables)}
+
+        # Load and filter init dates by start/end
+        base_dates = self._zarr["base_dates"][:]
+        if base_dates.dtype.kind != "M":
+            base_dates = base_dates.astype("datetime64[us]")
+        self._init_dates, self._init_indices = self._filter_init_dates(base_dates, start, end)
+
+        # Create the data wrapper that exposes the expected interface
+        self.data = _ForecastZarrData(
+            zarr_group=self._zarr,
+            init_dates=self._init_dates,
+            init_indices=self._init_indices,
+            variables=self._variables,
+            resolution=self._resolution,
+            step_frequency=self._step_frequency,
+            forecast_steps=self._forecast_steps,
+        )
+
+    @staticmethod
+    def _filter_init_dates(
+        base_dates: np.ndarray,
+        start: datetime.datetime | int | None,
+        end: datetime.datetime | int | None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Filter initialization dates by start/end and return (dates, indices)."""
+        indices = np.arange(len(base_dates))
+
+        if start is not None:
+            if isinstance(start, int):
+                start = np.datetime64(f"{start}-01-01")
+            else:
+                start = np.datetime64(start)
+            mask = base_dates >= start
+            indices = indices[mask]
+            base_dates = base_dates[mask]
+
+        if end is not None:
+            if isinstance(end, int):
+                end = np.datetime64(f"{end}-12-31T23:59:59")
+            else:
+                end = np.datetime64(end)
+            mask = base_dates <= end
+            indices = indices[mask]
+            base_dates = base_dates[mask]
+
+        return base_dates, indices
+
     @property
     def num_initializations(self) -> int:
         """Number of forecast initializations in the dataset."""
-        return self.data.shape[0]
+        return len(self._init_dates)
 
     @property
     def frequency(self) -> datetime.timedelta:
@@ -279,19 +431,64 @@ class ForecastStepDataset(BaseAnemoiReader):
     @property
     def dates(self) -> np.ndarray:
         """Virtual flat dates array of length num_inits * forecast_steps."""
-        init_dates = super().dates  # shape (num_inits,)
-        # Expand each init date into forecast_steps consecutive dates
         step_offsets = np.array(
             [np.timedelta64(int(self._step_frequency.total_seconds() * i), "s") for i in range(self._forecast_steps)],
         )
-        # Outer addition: (num_inits, 1) + (1, forecast_steps) -> (num_inits, forecast_steps)
-        all_dates = init_dates[:, None] + step_offsets[None, :]
+        all_dates = self._init_dates[:, None] + step_offsets[None, :]
         return all_dates.ravel()
 
     @property
     def grid_size(self) -> int:
         """Return dataset grid size."""
         return self.data.shape[4]
+
+    @property
+    def statistics(self) -> dict:
+        """Return dataset statistics from zarr arrays."""
+        stats = {}
+        for key in ("mean", "stdev", "minimum", "maximum"):
+            if key in self._zarr:
+                stats[key] = self._zarr[key][:][self._var_indices]
+        return stats
+
+    def statistics_tendencies(self, timestep=None) -> dict | None:
+        """Tendency statistics not supported for forecast zarrs."""
+        return None
+
+    @property
+    def variables(self) -> list[str]:
+        """Return dataset variables."""
+        return self._variables
+
+    @property
+    def missing(self) -> set[int]:
+        """Return dataset missing values mask."""
+        return set()
+
+    @property
+    def metadata(self) -> dict:
+        """Return dataset metadata."""
+        return self._attrs
+
+    @property
+    def supporting_arrays(self) -> dict:
+        """Return dataset supporting_arrays."""
+        result = {}
+        if "latitudes" in self._zarr:
+            result["latitudes"] = self._zarr["latitudes"][:]
+        if "longitudes" in self._zarr:
+            result["longitudes"] = self._zarr["longitudes"][:]
+        return result
+
+    @property
+    def name_to_index(self) -> dict[str, int]:
+        """Return variable name to index mapping."""
+        return self._name_to_index
+
+    @property
+    def resolution(self) -> str:
+        """Return dataset resolution."""
+        return self._resolution
 
     @property
     def has_trajectories(self) -> bool:
@@ -322,23 +519,32 @@ class ForecastStepDataset(BaseAnemoiReader):
             indices = np.asarray(time_indices)
 
         # All indices must belong to the same initialization
-        init_idx = indices[0] // self._forecast_steps
-        step_indices = indices - init_idx * self._forecast_steps
+        virtual_init_idx = indices[0] // self._forecast_steps
+        step_indices = indices - virtual_init_idx * self._forecast_steps
 
-        # Load from 5D zarr: (1, variables, ensemble, steps, gridpoints)
+        # Map virtual init index to actual zarr init index
+        actual_init_idx = self._init_indices[virtual_init_idx]
+
+        # Load from 5D zarr: (variables, ensemble, steps, gridpoints)
         if isinstance(grid_shard_indices, slice):
-            x = self.data[init_idx, :, :, step_indices.tolist(), grid_shard_indices]
+            x = self.data[actual_init_idx, :, :, step_indices.tolist(), grid_shard_indices]
         else:
-            x = self.data[init_idx, :, :, step_indices.tolist(), :]
+            x = self.data[actual_init_idx, :, :, step_indices.tolist(), :]
             if grid_shard_indices is not None:
                 x = x[..., grid_shard_indices]
+
+        # Apply variable drop
+        x = x[self._var_indices]
 
         # x shape: (variables, ensemble, num_requested_steps, gridpoints)
         x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)
 
     def tree(self, prefix: str = "") -> Tree:
-        tree = super().tree(prefix)
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Zarr: {self._zarr.store.path if hasattr(self._zarr.store, 'path') else 'N/A'}")
+        tree.add(f"Resolution: {self._resolution}")
+        tree.add(f"Num variables: {len(self._variables)}")
         tree.add(f"Forecast steps: {self._forecast_steps}")
         tree.add(f"Step frequency: {self._step_frequency}")
         tree.add(f"Num initializations: {self.num_initializations}")
