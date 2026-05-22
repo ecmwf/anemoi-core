@@ -30,11 +30,25 @@ class _TorchClusterAreaMaskBackend:
     """Torch-cluster radius backend (CPU/GPU depending on distributed device)."""
 
     def __init__(self, device: torch.device | str):
+        LOGGER.debug(
+            'Initializing %s on device %s',
+            self.__class__.__name__,
+            device
+        )
         self.device = device
         self._ref_vectors: torch.Tensor | None = None
         self._kdtree: cKDTree | None = None
 
     def fit(self, coords_rad: torch.Tensor) -> None:
+
+        if coords_rad.device != self.device:
+            LOGGER.debug(
+                "%s: Moving reference vector coordinates from %s to %s",
+                self.__class__.__name__,
+                coords_rad.device,
+                self.device
+            )
+
         self._ref_vectors = latlon_rad_to_cartesian(coords_rad.to(self.device))
 
     def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
@@ -42,17 +56,26 @@ class _TorchClusterAreaMaskBackend:
 
         assert self._ref_vectors is not None, "The model must be fitted before calling get_mask."
 
+        LOGGER.debug(
+            "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
+            self.__class__.__name__,
+            chord_threshold
+        )
+
         if isinstance(coords_rad, np.ndarray):
             coords_rad = torch.from_numpy(coords_rad)
 
+    
+        LOGGER.debug(
+                "%s: Moving query vector coordinates from %s to %s",
+                self.__class__.__name__,
+                coords_rad.device,
+                self.device
+        )
         coords_rad = coords_rad.to(self.device)
 
         query_vectors = latlon_rad_to_cartesian(coords_rad)
-        LOGGER.debug(
-            "Reference vectors are on %s, query vectors are on %s",
-            self._ref_vectors.device,
-            query_vectors.device,
-        )
+
         edge_index = radius(
             x=self._ref_vectors,
             y=query_vectors,
@@ -69,21 +92,42 @@ class _KDTreeAreaMaskBackend:
     """Scipy cKDTree backend running on CPU."""
 
     def __init__(self):
+        LOGGER.debug(
+            "Initializing %s",
+            self.__class__.__name__
+        )
         self._ref_vectors: np.ndarray | None = None
         self._kdtree: cKDTree | None = None
 
     def fit(self, coords_rad: torch.Tensor) -> None:
+
+        if coords_rad.device == "cpu":
+            LOGGER.debug(
+                '%s: Moving reference coordinates from %s to cpu',
+                self.__class__.__name__,
+                coords_rad.device
+            )
         self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.cpu().numpy())
         self._kdtree = cKDTree(self._ref_vectors)
 
     def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
         assert self._kdtree is not None, "The model must be fitted before calling get_mask."
 
+        LOGGER.debug(
+            '%s: Getting the query coordinate mask with Eucl. chord threshold %.4f',
+            self.__class__.__name__,
+            chord_threshold
+        )
+
         if isinstance(coords_rad, torch.Tensor):
+            LOGGER.debug(
+                '%s: Moving query vector coordinates from %s to cpu',
+                self.__class__.__name__,
+                coords_rad.device
+            )
             coords_rad = coords_rad.cpu().numpy()
 
         query_vectors = latlon_rad_to_cartesian_np(coords_rad)
-        LOGGER.debug("Reference vectors are on cpu, query vectors are on cpu")
         counts = self._kdtree.query_ball_point(query_vectors, r=chord_threshold, workers=-1, return_length=True)
         return torch.from_numpy(counts > 0)
 
@@ -165,13 +209,6 @@ class AreaMaskBuilder:
         coords_rad : torch.Tensor of shape (N_ref, 2)
             Latitude and longitude of the reference nodes in radians.
         """
-        LOGGER.debug(
-            "%s: Using backend %s to fit coordinates with chord threshold %.4f",
-            self.__class__.__name__,
-            self._backend.__class__.__name__,
-            self._chord_threshold,
-        )
-
         self._backend.fit(coords_rad)
 
     def fit(self, graph: HeteroData) -> None:
@@ -184,17 +221,24 @@ class AreaMaskBuilder:
         """
         reference_mask_str = self.reference_node_name
         if self.mask_attr_name is not None:
-            reference_mask_str += f" ({self.mask_attr_name})"
+            reference_mask_str += f"[{self.mask_attr_name}]"
 
         coords_rad = self._get_reference_coords(graph)
-        self.fit_coords(coords_rad)
-
         LOGGER.info(
-            'Fitting %s with %d reference nodes from "%s".',
+            'Fitting %s (%s) with %d reference nodes from %s.',
             self.__class__.__name__,
+            self._backend.__class__.__name__,
             len(coords_rad),
             reference_mask_str,
         )
+        LOGGER.debug(
+            'Reference nodes live on %s',
+            coords_rad.device
+        )
+
+        self.fit_coords(coords_rad)
+
+
 
     def get_mask(self, coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor:
         """Compute a mask based on the distance to the reference nodes.
@@ -213,11 +257,18 @@ class AreaMaskBuilder:
             Boolean mask, True where the query node is within margin_radius_km
             of at least one reference node.
         """
-        LOGGER.debug(
-            "%s: Using backend %s to compute mask with chord threshold %.4f",
-            self.__class__.__name__,
+        LOGGER.info(
+            "Computing area-mask (%s) for %d query nodes with margin: %.1f km",
             self._backend.__class__.__name__,
-            self._chord_threshold,
+            len(coords_rad),
+            self.margin_radius_km
+        )
+        
+        _device = coords_rad.device if isinstance(coords_rad, torch.Tensor) else "cpu"
+    
+        LOGGER.debug(
+                "Query nodes live on %s",
+                _device
         )
 
         return self._backend.get_mask(coords_rad, chord_threshold=self._chord_threshold)
