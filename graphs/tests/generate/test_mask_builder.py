@@ -94,7 +94,7 @@ def test_get_mask(graph_with_nodes: HeteroData):
     mask = mask_builder.get_mask(query_coords_rad)
 
     assert isinstance(mask, torch.Tensor)
-    assert mask.dtype == np.bool_
+    assert mask.dtype == torch.bool
     assert mask.shape == (graph_with_nodes["test_nodes"].num_nodes,)
     assert mask.all()
 
