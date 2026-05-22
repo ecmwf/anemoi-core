@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.3...graphs-0.9.4) (2026-05-14)
+
+
+### Features
+
+* Graph for skipped and multiscale suggestions ([#1052](https://github.com/ecmwf/anemoi-core/issues/1052)) ([a5eeaef](https://github.com/ecmwf/anemoi-core/commit/a5eeaef1615906974f684e39197f17be7fe9afb4))
+* **graphs:** Add option to disable node scaling by degree ([#1078](https://github.com/ecmwf/anemoi-core/issues/1078)) ([0e93646](https://github.com/ecmwf/anemoi-core/commit/0e9364615c2ef476c0b26dd2b8404c76933e63d4))
+
+
+### Bug Fixes
+
+* **graphs:** Fix node selection in interactive 3D graph viewer ([#1088](https://github.com/ecmwf/anemoi-core/issues/1088)) ([0acd429](https://github.com/ecmwf/anemoi-core/commit/0acd429d33bba64b8685d23c901995cdd2199542))
+
 ## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.2...graphs-0.9.3) (2026-04-23)
 
 

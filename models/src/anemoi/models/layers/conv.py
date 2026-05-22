@@ -22,6 +22,7 @@ from torch_geometric.utils import scatter
 from torch_geometric.utils import softmax
 
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.utils.config import DotDict
 
 
@@ -34,6 +35,7 @@ class GraphConv(MessagePassing):
         out_channels: int,
         layer_kernels: DotDict,
         mlp_extra_layers: int = 0,
+        mlp_implementation: MLPImplementation = "mlp",
         **kwargs,
     ) -> None:
         """Initialize GraphConv node interactions.
@@ -57,7 +59,8 @@ class GraphConv(MessagePassing):
             out_channels,
             out_channels,
             layer_kernels=layer_kernels,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
     def forward(self, x: OptPairTensor, edge_attr: Tensor, edge_index: Adj, size: Optional[Size] = None):
