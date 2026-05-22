@@ -28,12 +28,15 @@ from anemoi.utils.schemas import BaseModel
 
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
+from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
 from .decoder import TransformerDecoderSchema  # noqa: TC001
 from .encoder import GNNEncoderSchema  # noqa: TC001
 from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
+from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
+from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
@@ -48,8 +51,6 @@ class DefinedModels(str, Enum):
     ANEMOI_ENS_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiEnsModelEncProcDec"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC = "anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical"
     ANEMOI_MODEL_HIER_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecHierarchical"
-    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC = "anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator"
-    ANEMOI_MODEL_INTERPMULTIENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiModelEncProcDecMultiOutInterpolator"
     ANEMOI_DIFFUSION_MODEL_ENC_PROC_DEC = (
         "anemoi.models.models.diffusion_encoder_processor_decoder.AnemoiDiffusionModelEncProcDec"
     )
@@ -67,8 +68,12 @@ class DefinedModels(str, Enum):
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
     "Model object defined in anemoi.models.model."
-    convert_: str = Field("all", alias="_convert_")
-    "The target's parameters to convert to primitive containers. Other parameters will use OmegaConf. Default to all."
+    hidden_nodes_name: str | list[str] = Field(examples=["hidden", ["hidden1", "hidden2"]])
+    "Name of the hidden nodes. If the model is hierarchical, it can be a list of names for each level."
+    latent_skip: bool = Field(default=True)
+    "Add skip connection in latent space before/after processor."
+    convert_: str = Field("none", alias="_convert_")
+    "Keep OmegaConf containers when instantiating — model code uses attribute-style access throughout."
 
 
 class DiffusionModel(Model):
@@ -173,7 +178,6 @@ class NoOutputMaskSchema(BaseModel):
 
 class Boolean1DSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.Boolean1DMask"] = Field(..., alias="_target_")
-    nodes_name: str = Field(examples="data")
     attribute_name: str = Field(example="cutout_mask")
 
 
@@ -213,20 +217,31 @@ class BaseModelSchema(PydanticBaseModel):
     output_mask: OutputMaskSchemas  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
-    "Add skip connection in latent space before/after processor. Currently only in interpolator."
+    "Add skip connection in latent space before/after processor."
     processor: Union[
-        GNNProcessorSchema, GraphTransformerProcessorSchema, TransformerProcessorSchema, PointWiseMLPProcessorSchema
+        NoOpProcessorSchema,
+        GNNProcessorSchema,
+        GraphTransformerProcessorSchema,
+        TransformerProcessorSchema,
+        PointWiseMLPProcessorSchema,
     ] = Field(
         ...,
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: Union[GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema] = Field(
+    encoder: Union[
+        GNNEncoderSchema, GraphTransformerEncoderSchema, TransformerEncoderSchema, PointWiseForwardMapperSchema
+    ] = Field(
         ...,
         discriminator="target_",
     )
     "GNN encoder schema."
-    decoder: Union[GNNDecoderSchema, GraphTransformerDecoderSchema, TransformerDecoderSchema] = Field(
+    decoder: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
         ...,
         discriminator="target_",
     )
@@ -262,6 +277,10 @@ class NoiseConditioningSchema(BaseModel):
     "Settings related to custom kernels for encoder processor and decoder blocks"
     noise_matrix: Optional[str] = Field(default=None)
     "Path to the noise projection matrix file (.npz). If None, no projection is applied."
+    noise_edges_name: Optional[tuple[str, str, str]] = Field(default=None)
+    "Edge type identifier (src, relation, dst) for graph-based noise projection."
+    edge_weight_attribute: Optional[str] = Field(default=None)
+    "Optional edge attribute name for graph-based noise projection weights."
     row_normalize_noise_matrix: bool = Field(default=False)
     "Whether to row-normalize the noise projection matrix weights."
     autocast: bool = Field(default=False)

@@ -14,17 +14,22 @@ from typing import Optional
 
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
+from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -36,16 +41,18 @@ class BaseGraphModel(nn.Module):
     def __init__(
         self,
         *,
-        model_config: DotDict,
+        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
 
         Parameters
         ----------
-        model_config : DotDict
+        model_config : DictConfig
             Model configuration
         data_indices : dict
             Data indices
@@ -58,27 +65,25 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
+        self.n_step_input = n_step_input
+        self.n_step_output = n_step_output
 
-        model_config = DotDict(model_config)
-        self._graph_name_data = (
-            model_config.graph.data
-        )  # assumed to be all the same because this is how we construct the graphs
-        self._graph_name_hidden = (
-            model_config.graph.hidden
-        )  # assumed to be all the same because this is how we construct the graphs
-        self.n_step_input = model_config.training.multistep_input
-        self.n_step_output = model_config.training.multistep_output
+        self.dataset_names = list(data_indices.keys())
+        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+
         self.num_channels = model_config.model.num_channels
+        self.latent_skip = model_config.model.model.latent_skip
 
-        self.node_attributes = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.node_attributes[dataset_name] = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
-            )
+        trainable_parameters = broadcast_config_keys(
+            model_config.model.trainable_parameters,
+            data=self.dataset_names,
+            hidden=self._graph_name_hidden,
+        )
+        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
-        self._assert_consistent_hidden_graphs()
+        self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
         self._build_networks(model_config)
@@ -96,33 +101,68 @@ class BaseGraphModel(nn.Module):
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
+        self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
+        self._decoding_forcing_input_idx = {}
         self.input_dim = {}
+        self.input_dim_latent = self._calculate_input_dim_latent()
+        self.target_dim = {}
         self.output_dim = {}
-        self.input_dim_latent = {}
 
         for dataset_name, dataset_indices in data_indices.items():
-            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
-            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self._decoding_forcing_input_idx[dataset_name] = [
+                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
+            ]
+
+            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
+            self.num_input_channels_decoding_forcings[dataset_name] = len(
+                self._decoding_forcing_input_idx[dataset_name]
+            )
+            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
+
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
+            self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
-            self.input_dim_latent[dataset_name] = self._calculate_input_dim_latent(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return (
-            self.n_step_input * self.num_input_channels[dataset_name]
-            + self.node_attributes[dataset_name].attr_ndims[self._graph_name_data]
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+
+    def _calculate_input_dim_latent(self) -> int:
+        """Calculate the latent input dimension."""
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        return self.node_attributes.attr_ndims[nodes_name]
+
+    @staticmethod
+    def _as_hidden_node_names(
+        hidden_nodes_name: str | list[str] | ListConfig,
+    ) -> list[str]:
+        if isinstance(hidden_nodes_name, str):
+            return [hidden_nodes_name]
+
+        if isinstance(hidden_nodes_name, (list, ListConfig)):
+            return list(hidden_nodes_name)
+
+        raise TypeError(
+            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
         )
+
+    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
+        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
+            assert (
+                hidden_name in self._graph_data.node_types
+            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+
+    def _calculate_target_dim(self, dataset_name: str) -> int:
+        # Default behaviour is to pass the same input as to the encoder.
+        # TODO: abstract different options into the base class
+        return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]
-
-    def _calculate_input_dim_latent(self, dataset_name: str) -> int:
-        return self.node_attributes[dataset_name].attr_ndims[self._graph_name_hidden]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -140,43 +180,6 @@ class BaseGraphModel(nn.Module):
             assert len(dataset_internal_input_idx) == len(
                 dataset_internal_output_idx,
             ), f"Dataset '{dataset_name}': Model indices must match {dataset_internal_input_idx} != {dataset_internal_output_idx}"
-
-    def _assert_consistent_hidden_graphs(self) -> None:
-        """Assert that all datasets have identical hidden-to-hidden graph structures.
-
-        This is required because the processor is shared between datasets and operates
-        on the hidden state, so all datasets must have the same hidden graph topology.
-        """
-        if isinstance(self._graph_data, dict) and len(self._graph_data) > 1:
-            dataset_names = list(self._graph_data.keys())
-            reference_dataset = dataset_names[0]
-            reference_graph = self._graph_data[reference_dataset]
-            reference_hidden_graph = reference_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-
-            # Check hidden graph structure consistency across all datasets
-            for dataset_name in dataset_names[1:]:
-                dataset_graph = self._graph_data[dataset_name]
-                dataset_hidden_graph = dataset_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)]
-
-                # Compare edge indices
-                assert torch.equal(reference_hidden_graph.edge_index, dataset_hidden_graph.edge_index), (
-                    f"Hidden-to-hidden graph edge structure mismatch between reference dataset '{reference_dataset}' "
-                    f"and dataset '{dataset_name}'. All datasets must have identical hidden graph topology "
-                    f"for the shared processor to work correctly."
-                )
-
-                # Compare number of nodes (should be same for hidden graphs)
-                ref_num_hidden_nodes = self.node_attributes[reference_dataset].num_nodes[self._graph_name_hidden]
-                dataset_num_hidden_nodes = self.node_attributes[dataset_name].num_nodes[self._graph_name_hidden]
-                assert ref_num_hidden_nodes == dataset_num_hidden_nodes, (
-                    f"Hidden node count mismatch between reference dataset '{reference_dataset}' ({ref_num_hidden_nodes} nodes) "
-                    f"and dataset '{dataset_name}' ({dataset_num_hidden_nodes} nodes). "
-                    f"All datasets must have the same number of hidden nodes for the shared processor."
-                )
-
-            LOGGER.info(
-                "All datasets have consistent hidden-to-hidden graph structures (required for shared processor)"
-            )
 
     def _assert_valid_sharding(
         self,
@@ -201,14 +204,14 @@ class BaseGraphModel(nn.Module):
     def _resolve_in_out_sharded(
         self,
         dataset_names: list[str],
-        grid_shard_shapes: dict[str, Optional[list]] | None,
+        grid_shard_sizes: DatasetShardSizes | None,
     ) -> dict[str, bool]:
         in_out_sharded: dict[str, bool] = {}
         for dataset_name in dataset_names:
-            if grid_shard_shapes is None:
+            if grid_shard_sizes is None:
                 in_out_sharded[dataset_name] = False
             else:
-                in_out_sharded[dataset_name] = grid_shard_shapes[dataset_name] is not None
+                in_out_sharded[dataset_name] = grid_shard_sizes[dataset_name] is not None
 
         return in_out_sharded
 
@@ -225,7 +228,13 @@ class BaseGraphModel(nn.Module):
         pass
 
     @abstractmethod
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+    def _assemble_input(
+        self,
+        x,
+        batch_size,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: ProcessGroup | None = None,
+    ):
         pass
 
     @abstractmethod
@@ -234,33 +243,56 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        for dataset_name in self._graph_data.keys():
-            self.residual[dataset_name] = instantiate(residual_config, graph=self._graph_data[dataset_name])
+        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
+        for dataset_name in self.dataset_names:
+            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+            self.residual[dataset_name] = instantiate(
+                residual_config,
+                graph=self._graph_data,
+                data_node_name=data_node_name,
+                statistics=self.statistics[dataset_name],
+                data_indices=self.data_indices[dataset_name],
+                dataset_name=dataset_name,
+            )
+
+    def _build_named_node_attributes_graph(self) -> HeteroData:
+        node_attributes_graph = HeteroData()
+        for dataset_name in self.dataset_names:
+            node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
+            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
+
+        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+            node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
+            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
+
+        return node_attributes_graph
 
     @abstractmethod
     def forward(
         self,
-        x: Tensor,
+        x: dict[str, Tensor],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_shapes: dict[str, list] | None = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, Tensor]:
         """Forward pass of the model.
 
         Parameters
         ----------
-        x : Tensor
+        x : dict[str, Tensor]
             Input data
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
-        grid_shard_shapes : list, optional
-            Shard shapes of the grid, by default None
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset shard sizes for the grid dimension. ``None`` means the
+            corresponding dataset is replicated, not sharded.
 
         Returns
         -------
-        Tensor
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+        dict[str, Tensor]
+            Output of the model, with the same shape as the input (sharded if
+            the corresponding input dataset is sharded)
         """
         pass
 
@@ -273,7 +305,7 @@ class BaseGraphModel(nn.Module):
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> Tensor:
+    ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
 
         Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
@@ -298,7 +330,7 @@ class BaseGraphModel(nn.Module):
 
         Returns
         -------
-        Tensor
+        dict[str, torch.Tensor]
             Model output (after post-processing)
         """
         with torch.no_grad():
@@ -317,19 +349,27 @@ class BaseGraphModel(nn.Module):
                 ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
-            grid_shard_shapes = None
+            grid_shard_sizes: DatasetShardSizes | None = None
             if model_comm_group is not None:
-                grid_shard_shapes = {}
+                grid_shard_sizes = {}
                 for dataset_name in dataset_names:
-                    shard_shapes = get_shard_shapes(x[dataset_name], -2, model_comm_group=model_comm_group)
-                    grid_shard_shapes[dataset_name] = [shape[-2] for shape in shard_shapes]
-                    x[dataset_name] = shard_tensor(x[dataset_name], -2, shard_shapes, model_comm_group)
+                    grid_shard_sizes[dataset_name] = get_shard_sizes(
+                        x[dataset_name], -2, model_comm_group=model_comm_group
+                    )
+                    x[dataset_name] = shard_tensor(
+                        x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                    )
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
 
             # Perform forward pass
-            y_hat = self.forward(x, model_comm_group=model_comm_group, grid_shard_shapes=grid_shard_shapes, **kwargs)
+            y_hat = self.forward(
+                x,
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=grid_shard_sizes,
+                **kwargs,
+            )
 
             # Apply post-processing
             for dataset_name in dataset_names:
@@ -337,9 +377,11 @@ class BaseGraphModel(nn.Module):
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
+                assert grid_shard_sizes is not None
                 for dataset_name in dataset_names:
-                    y_hat_shard_shapes = apply_shard_shapes(y_hat[dataset_name], -2, grid_shard_shapes[dataset_name])
-                    y_hat[dataset_name] = gather_tensor(y_hat[dataset_name], -2, y_hat_shard_shapes, model_comm_group)
+                    y_hat[dataset_name] = gather_tensor(
+                        y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                    )
 
         return y_hat
 

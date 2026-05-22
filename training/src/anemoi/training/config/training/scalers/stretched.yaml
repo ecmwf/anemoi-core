@@ -39,16 +39,13 @@ datasets:
     # if using this option 'variable_loss_scalings' should all be set close to 1.0 for prognostic variables
     stdev_tendency:
       _target_: anemoi.training.losses.scalers.StdevTendencyScaler
-      timestep: ${data.timestep}
 
     var_tendency:
       _target_: anemoi.training.losses.scalers.VarTendencyScaler
-      timestep: ${data.timestep}
 
     # Scalers from node attributes
     node_weights:
       _target_: anemoi.training.losses.scalers.ReweightedGraphNodeAttributeScaler
-      nodes_name: ${graph.data}
       nodes_attribute_name: area_weight
       scaling_mask_attribute_name: cutout_mask
       weight_frac_of_total: ???
@@ -56,23 +53,19 @@ datasets:
 
     lam_node_weights:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
       nodes_attribute_name: lam_area_weight
       norm: "unit-sum"
 
     limited_area_mask:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
       nodes_attribute_name: cutout_mask
       norm: null
 
     outside_lam_mask:
       _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
-      nodes_name: ${graph.data}
       nodes_attribute_name: boundary_mask
       norm: null
 
     # Scalers in the time dimension
     time_steps:
       _target_: anemoi.training.losses.scalers.UniformTimeStepScaler
-      multistep_output: ${training.multistep_output}

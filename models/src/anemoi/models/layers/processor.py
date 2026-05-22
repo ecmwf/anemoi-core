@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import ABC
 from typing import Optional
 
@@ -20,15 +21,33 @@ from torch_geometric.typing import Adj
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.shapes import change_channels_in_shape
-from anemoi.models.distributed.shapes import get_shard_shapes
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
+
+LOGGER = logging.getLogger(__name__)
+
+
+class NoOpProcessor(nn.Module):
+    """No-op processor, used for ablations."""
+
+    def __init__(self, **kwargs) -> None:
+        if len(kwargs) > 0:
+            LOGGER.warning(
+                f"{self.__class__.__name__} does not use any of the following provided kwargs: {list(kwargs.keys())}"
+            )
+        super().__init__()
+
+    def forward(self, x: Tensor, *args, **kwargs) -> Tensor:
+        return x
 
 
 class BaseProcessor(nn.Module, ABC):
@@ -138,7 +157,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         cpu_offload: bool = False,
         dropout_p: float = 0.0,
         layer_kernels: DotDict,
@@ -151,12 +170,13 @@ class PointWiseMLPProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
             PointWiseMLPProcessorBlock,
             num_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
         )
@@ -167,18 +187,17 @@ class PointWiseMLPProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: list[list[int]],
+        shard_info: GraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
     ) -> Tensor:
-        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
             ), f"Only batch size of 1 is supported when model is sharded accross {model_comm_group.size()} GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group, **kwargs)
 
         return x
 
@@ -193,10 +212,12 @@ class TransformerProcessor(BaseProcessor):
         num_channels: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
+        attn_channels: Optional[int] = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
@@ -216,8 +237,13 @@ class TransformerProcessor(BaseProcessor):
             Number of chunks in processor
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to num_channels. This allows reducing the number of
+            channels used for the attention computation without changing the
+            width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
         dropout_p: float, optional
@@ -225,6 +251,8 @@ class TransformerProcessor(BaseProcessor):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default None
         use_alibi_slopes : bool
@@ -247,18 +275,21 @@ class TransformerProcessor(BaseProcessor):
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
+            **kwargs,
         )
 
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
             window_size=window_size,
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
+            mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
         )
@@ -269,20 +300,19 @@ class TransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: list[list[int]],
+        shard_info: GraphShardInfo,
         edge_attr: Optional[Tensor] = None,
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         *args,
         **kwargs,
     ) -> Tensor:
-        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
         if model_comm_group:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        (x,) = self.run_layers((x,), shape_nodes, batch_size, model_comm_group=model_comm_group, **kwargs)
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x
 
@@ -298,6 +328,8 @@ class GNNProcessor(BaseProcessor):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_hidden_ratio: float = 1.0,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -316,6 +348,10 @@ class GNNProcessor(BaseProcessor):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to num_channels. Default 1.0 preserves existing behaviour.
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -330,10 +366,13 @@ class GNNProcessor(BaseProcessor):
             cpu_offload=cpu_offload,
             mlp_extra_layers=mlp_extra_layers,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         kwargs_build = {
             "mlp_extra_layers": mlp_extra_layers,
+            "mlp_hidden_ratio": mlp_hidden_ratio,
+            "mlp_implementation": mlp_implementation,
             "layer_kernels": self.layer_factory,
             "edge_dim": None,
         }
@@ -360,26 +399,22 @@ class GNNProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: list[list[int]],
+        shard_info: GraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
-        edge_shard_shapes: Optional[tuple] = None,
         *args,
         **kwargs,
     ) -> Tensor:
-        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-
-        if edge_shard_shapes is None:
+        if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
-            target_nodes = sum(x[0] for x in shape_nodes)
-            edge_attr, edge_index, _ = shard_edges_1hop(
+            target_nodes = sum(shard_info.nodes)
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
                 edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
             )
+            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
-        x, edge_attr = self.run_layers(
-            (x, edge_attr), edge_index, (shape_nodes, shape_nodes), model_comm_group, **kwargs
-        )
+        x, edge_attr = self.run_layers((x, edge_attr), edge_index, shard_info, model_comm_group, **kwargs)
 
         return x
 
@@ -394,9 +429,11 @@ class GraphTransformerProcessor(BaseProcessor):
         num_channels: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         edge_dim: int,
+        attn_channels: Optional[int] = None,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -415,12 +452,19 @@ class GraphTransformerProcessor(BaseProcessor):
             Number of chunks in processor
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to num_channels. This allows reducing the number
+            of channels used for the attention computation without changing
+            the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -439,16 +483,19 @@ class GraphTransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             mlp_hidden_ratio=mlp_hidden_ratio,
             layer_kernels=layer_kernels,
+            **kwargs,
         )
 
         self.build_layers(
             GraphTransformerProcessorBlock,
             in_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             out_channels=num_channels,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
             edge_pre_mlp=edge_pre_mlp,
@@ -460,32 +507,29 @@ class GraphTransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
-        shard_shapes: list[list[int]],
+        shard_info: GraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
-        edge_shard_shapes: Optional[tuple] = None,
         *args,
         **kwargs,
     ) -> Tensor:
-        size = sum(x[0] for x in shard_shapes)
+        size = sum(shard_info.nodes)
 
-        shape_nodes = change_channels_in_shape(shard_shapes, self.num_channels)
-
-        if edge_shard_shapes is not None:
+        if shard_info.edges_are_sharded():
             # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
             # but edge_attr can stay sharded
-            shapes_edge_attr = edge_shard_shapes[0]
-            edge_index = gather_tensor(edge_index, 1, edge_shard_shapes[1], model_comm_group)
+            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
         else:
             # Edges not pre-sharded, shard edge_attr here (edge_index stays full)
-            shapes_edge_attr = get_shard_shapes(edge_attr, 0, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, shapes_edge_attr, model_comm_group)
+            edge_shard_sizes = get_shard_sizes(edge_attr, 0, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
+            shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
             edge_index=edge_index,
-            shapes=(shape_nodes, shape_nodes, shapes_edge_attr),
+            shard_info=shard_info,
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,

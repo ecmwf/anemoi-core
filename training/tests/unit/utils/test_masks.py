@@ -21,7 +21,7 @@ def test_boolean1d_apply() -> None:
     mask = torch.arange(num_points) % 2 == 0
     graph = HeteroData()
     graph["nodes"]["attr"] = mask
-    bool_1d = Boolean1DMask(graph, "nodes", "attr")
+    bool_1d = Boolean1DMask(graph["nodes"], "attr")
 
     x_1 = bool_1d.apply(x, dim=2, fill_value=y)
 

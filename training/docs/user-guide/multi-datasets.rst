@@ -19,7 +19,7 @@ When multiple datasets are configured:
 #. A single shared processor operates on the combined latent representation.
 
 .. warning::
-    All datasets must share the same time resolution and forecast horizon or interpolation target times.
+    All datasets must share the same time resolution and forecast horizon or target times.
 
 
 Dataset-Specific Configuration
@@ -124,6 +124,15 @@ Previous format (no longer supported in validated configurations):
                     start: 1985
                     end: 2020
                     trajectory: null
+
+
+*****************
+ Graph Creation
+*****************
+
+The graph must define a set of nodes for each dataset. The dataset name has to be used as the nodes name in the graph
+recipe.
+
 
 ***************************************
  Dataset Name Conventions in Templates

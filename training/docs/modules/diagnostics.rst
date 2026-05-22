@@ -37,7 +37,8 @@ callback, any other kwarg is passed to the callback's constructor.
 
    callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-      rollout: ${dataloader.validation_rollout}
+      rollout:
+      - ${dataloader.validation_rollout}
       frequency: 20
 
 Plotting callbacks are configured in a similar way, but they are
@@ -65,10 +66,8 @@ Task-specific plot adapters normalize output handling so plotting
 callbacks can use the same interface across task types:
 
 - forecaster tasks use ``ForecasterPlotAdapter``;
-- diffusion tasks use ``DiffusionPlotAdapter``;
 - autoencoder tasks use ``AutoencoderPlotAdapter``;
-- multi-output interpolation uses
-  ``InterpolatorMultiOutPlotAdapter``.
+- temporal downscaler tasks use ``TemporalDownscalerPlotAdapter``.
 
 These adapters rely on the shared task ``_step`` return format
 ``(loss, metrics, predictions)`` where ``predictions`` is always a list
@@ -76,7 +75,7 @@ of dataset-keyed dictionaries.
 
 **Focus Area**
 
-Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
+Plotting callbacks (such as ``PlotSample`` and ``PlotLoss``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
 
 * **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
 * **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
@@ -190,7 +189,6 @@ which is recommended for interactive terminals and
             sample_idx: ${diagnostics.plot.sample_idx}
             per_sample : 6
             parameters: ${diagnostics.plot.parameters}
-            output_steps: ${training.multistep_output}
 
 Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:
@@ -211,6 +209,11 @@ also possible for users to add callbacks using the same structure:
    :show-inheritance:
 
 .. automodule:: anemoi.training.diagnostics.callbacks.plot
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.plot_adapter
    :members:
    :no-undoc-members:
    :show-inheritance:
