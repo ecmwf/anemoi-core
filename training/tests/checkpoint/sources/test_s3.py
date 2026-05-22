@@ -1,7 +1,16 @@
-"""Tests for S3Source."""
+"""Gate sources-g4: S3Source.
 
+CANONICAL GATE TEST — DO NOT MODIFY.
+
+S3Source downloads via ``anemoi.utils.remote.s3.download_file`` (obstore-backed).
+boto3 is not a dependency.
+"""
+
+from __future__ import annotations
+
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -10,61 +19,104 @@ import torch
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
+from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.s3 import S3Source
+
+
+def _fake_anemoi_utils_s3(download_impl: object) -> ModuleType:
+    """Stub ``anemoi.utils.remote.s3`` module exposing a custom ``download_file``."""
+    module = ModuleType("anemoi.utils.remote.s3")
+    module.download_file = download_impl  # type: ignore[attr-defined]
+    return module
 
 
 def test_s3_source_extends_checkpoint_source() -> None:
     assert issubclass(S3Source, CheckpointSource)
 
 
-def test_s3_source_lazy_imports_boto3() -> None:
-    """boto3 must NOT be imported at module level."""
+def test_s3_source_does_not_import_anemoi_utils_at_module_level() -> None:
+    """anemoi.utils.remote.s3 must be imported lazily inside the method."""
     import importlib
-    import sys
 
-    saved = sys.modules.pop("boto3", None)
+    saved = sys.modules.pop("anemoi.utils.remote.s3", None)
     try:
         importlib.reload(importlib.import_module("anemoi.training.checkpoint.sources.s3"))
     finally:
-        if saved:
-            sys.modules["boto3"] = saved
+        if saved is not None:
+            sys.modules["anemoi.utils.remote.s3"] = saved
 
 
 @pytest.mark.asyncio
-async def test_s3_source_parses_s3_url() -> None:
-    """s3://bucket/path/to/model.ckpt -> bucket='bucket', key='path/to/model.ckpt'."""
+async def test_s3_source_calls_anemoi_utils_download_file() -> None:
+    """S3Source forwards the URL to anemoi.utils.remote.s3.download_file."""
     source = S3Source(url="s3://my-bucket/checkpoints/model.ckpt")
     context = CheckpointContext()
 
-    mock_client = MagicMock()
+    captured: dict[str, object] = {}
 
-    def fake_download(_bucket: str, _key: str, dest: str) -> None:
-        torch.save({"state_dict": {}}, dest)
+    def fake_download(url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        captured["url"] = url
+        captured["target"] = target
+        torch.save({"state_dict": {}}, target)
 
-    mock_client.download_file.side_effect = fake_download
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}):
+        result = await source.process(context)
 
-    with patch("anemoi.utils.remote.s3.s3_client", return_value=mock_client):
-        await source.process(context)
-        mock_client.download_file.assert_called_once()
-        call_args = mock_client.download_file.call_args
-        assert call_args[0][0] == "my-bucket"
-        assert call_args[0][1] == "checkpoints/model.ckpt"
+    assert captured["url"] == "s3://my-bucket/checkpoints/model.ckpt"
+    assert result.checkpoint_data == {"state_dict": {}}
+    assert result.metadata["source_type"] == "s3"
+    assert result.metadata["s3_bucket"] == "my-bucket"
+    assert result.metadata["s3_key"] == "checkpoints/model.ckpt"
 
 
 @pytest.mark.asyncio
-async def test_s3_source_raises_not_found_for_missing_key() -> None:
-    """S3 NoSuchKey -> CheckpointNotFoundError."""
+async def test_s3_source_raises_not_found_for_missing_object() -> None:
+    """FileNotFoundError from anemoi-utils -> CheckpointNotFoundError."""
     source = S3Source(url="s3://bucket/missing.ckpt")
     context = CheckpointContext()
 
-    from botocore.exceptions import ClientError
+    def fake_download(*_args: object, **_kwargs: object) -> None:
+        msg = "object does not exist"
+        raise FileNotFoundError(msg)
 
-    mock_client = MagicMock()
-    mock_client.download_file.side_effect = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
-
-    with patch("anemoi.utils.remote.s3.s3_client", return_value=mock_client), pytest.raises(CheckpointNotFoundError):
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointNotFoundError):
         await source.process(context)
+
+
+@pytest.mark.asyncio
+async def test_s3_source_raises_source_error_for_transport_failure() -> None:
+    """OSError/RuntimeError from anemoi-utils -> CheckpointSourceError."""
+    source = S3Source(url="s3://bucket/key.ckpt")
+    context = CheckpointContext()
+
+    def fake_download(*_args: object, **_kwargs: object) -> None:
+        msg = "connection refused"
+        raise OSError(msg)
+
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointSourceError):
+        await source.process(context)
+
+
+@pytest.mark.asyncio
+async def test_s3_source_raises_when_obstore_missing() -> None:
+    """ImportError raised by anemoi-utils download_file (obstore missing) -> CheckpointSourceError."""
+    source = S3Source(url="s3://bucket/key.ckpt")
+    context = CheckpointContext()
+
+    def fake_download(*_args: object, **_kwargs: object) -> None:
+        msg = "No module named 'obstore'"
+        raise ImportError(msg)
+
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    patched = patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module})
+    with patched, pytest.raises(CheckpointSourceError) as excinfo:
+        await source.process(context)
+    assert "obstore" in str(excinfo.value)
+    assert "anemoi-utils[s3]" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -73,12 +125,9 @@ async def test_s3_source_cleans_up_temp_file_on_failure() -> None:
     source = S3Source(url="s3://bucket/corrupt.ckpt")
     context = CheckpointContext()
 
-    mock_client = MagicMock()
+    def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        Path(target).write_text("not a valid checkpoint")
 
-    def fake_download(_bucket: str, _key: str, dest: str) -> None:
-        Path(dest).write_text("not a valid checkpoint")
-
-    mock_client.download_file.side_effect = fake_download
-
-    with patch("anemoi.utils.remote.s3.s3_client", return_value=mock_client), pytest.raises(CheckpointLoadError):
+    fake_module = _fake_anemoi_utils_s3(fake_download)
+    with patch.dict(sys.modules, {"anemoi.utils.remote.s3": fake_module}), pytest.raises(CheckpointLoadError):
         await source.process(context)
