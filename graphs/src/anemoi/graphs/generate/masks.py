@@ -30,11 +30,7 @@ class _TorchClusterAreaMaskBackend:
     """Torch-cluster radius backend (CPU/GPU depending on distributed device)."""
 
     def __init__(self, device: torch.device | str):
-        LOGGER.debug(
-            'Initializing %s on device %s',
-            self.__class__.__name__,
-            device
-        )
+        LOGGER.debug("Initializing %s on device %s", self.__class__.__name__, device)
         self.device = device
         self._ref_vectors: torch.Tensor | None = None
         self._kdtree: cKDTree | None = None
@@ -46,7 +42,7 @@ class _TorchClusterAreaMaskBackend:
                 "%s: Moving reference vector coordinates from %s to %s",
                 self.__class__.__name__,
                 coords_rad.device,
-                self.device
+                self.device,
             )
 
         self._ref_vectors = latlon_rad_to_cartesian(coords_rad.to(self.device))
@@ -59,18 +55,14 @@ class _TorchClusterAreaMaskBackend:
         LOGGER.debug(
             "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
             self.__class__.__name__,
-            chord_threshold
+            chord_threshold,
         )
 
         if isinstance(coords_rad, np.ndarray):
             coords_rad = torch.from_numpy(coords_rad)
 
-    
         LOGGER.debug(
-                "%s: Moving query vector coordinates from %s to %s",
-                self.__class__.__name__,
-                coords_rad.device,
-                self.device
+            "%s: Moving query vector coordinates from %s to %s", self.__class__.__name__, coords_rad.device, self.device
         )
         coords_rad = coords_rad.to(self.device)
 
@@ -92,21 +84,14 @@ class _KDTreeAreaMaskBackend:
     """Scipy cKDTree backend running on CPU."""
 
     def __init__(self):
-        LOGGER.debug(
-            "Initializing %s",
-            self.__class__.__name__
-        )
+        LOGGER.debug("Initializing %s", self.__class__.__name__)
         self._ref_vectors: np.ndarray | None = None
         self._kdtree: cKDTree | None = None
 
     def fit(self, coords_rad: torch.Tensor) -> None:
 
         if coords_rad.device == "cpu":
-            LOGGER.debug(
-                '%s: Moving reference coordinates from %s to cpu',
-                self.__class__.__name__,
-                coords_rad.device
-            )
+            LOGGER.debug("%s: Moving reference coordinates from %s to cpu", self.__class__.__name__, coords_rad.device)
         self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.cpu().numpy())
         self._kdtree = cKDTree(self._ref_vectors)
 
@@ -114,16 +99,14 @@ class _KDTreeAreaMaskBackend:
         assert self._kdtree is not None, "The model must be fitted before calling get_mask."
 
         LOGGER.debug(
-            '%s: Getting the query coordinate mask with Eucl. chord threshold %.4f',
+            "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
             self.__class__.__name__,
-            chord_threshold
+            chord_threshold,
         )
 
         if isinstance(coords_rad, torch.Tensor):
             LOGGER.debug(
-                '%s: Moving query vector coordinates from %s to cpu',
-                self.__class__.__name__,
-                coords_rad.device
+                "%s: Moving query vector coordinates from %s to cpu", self.__class__.__name__, coords_rad.device
             )
             coords_rad = coords_rad.cpu().numpy()
 
@@ -225,20 +208,15 @@ class AreaMaskBuilder:
 
         coords_rad = self._get_reference_coords(graph)
         LOGGER.info(
-            'Fitting %s (%s) with %d reference nodes from %s.',
+            "Fitting %s (%s) with %d reference nodes from %s.",
             self.__class__.__name__,
             self._backend.__class__.__name__,
             len(coords_rad),
             reference_mask_str,
         )
-        LOGGER.debug(
-            'Reference nodes live on %s',
-            coords_rad.device
-        )
+        LOGGER.debug("Reference nodes live on %s", coords_rad.device)
 
         self.fit_coords(coords_rad)
-
-
 
     def get_mask(self, coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor:
         """Compute a mask based on the distance to the reference nodes.
@@ -261,14 +239,11 @@ class AreaMaskBuilder:
             "Computing area-mask (%s) for %d query nodes with margin: %.1f km",
             self._backend.__class__.__name__,
             len(coords_rad),
-            self.margin_radius_km
+            self.margin_radius_km,
         )
-        
+
         _device = coords_rad.device if isinstance(coords_rad, torch.Tensor) else "cpu"
-    
-        LOGGER.debug(
-                "Query nodes live on %s",
-                _device
-        )
+
+        LOGGER.debug("Query nodes live on %s", _device)
 
         return self._backend.get_mask(coords_rad, chord_threshold=self._chord_threshold)
