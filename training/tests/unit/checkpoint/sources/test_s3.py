@@ -149,16 +149,17 @@ async def test_s3_source_downloads_from_real_public_bucket(
     pytest.importorskip("anemoi.utils.remote.s3")
 
     # anemoi-utils needs explicit anonymous config for unsigned buckets.
+    # Non-secret options live in settings.toml; credential keys (even empty
+    # reset values) must live in settings.secrets.toml per anemoi-utils
+    # config policy.
+    bucket_section = '[object-storage."noaa-ghcn-pds"]'
+    settings_body = f'{bucket_section}\nendpoint_url = ""\nregion = "us-east-1"\nskip_signature = true\n'
+    secrets_body = f'{bucket_section}\naccess_key_id = ""\nsecret_access_key = ""\n'
+
     config_dir = tmp_path / ".config" / "anemoi"
     config_dir.mkdir(parents=True)
-    (config_dir / "settings.toml").write_text(
-        '[object-storage."noaa-ghcn-pds"]\n'
-        'endpoint_url = ""\n'
-        'access_key_id = ""\n'
-        'secret_access_key = ""\n'
-        'region = "us-east-1"\n'
-        "skip_signature = true\n",
-    )
+    (config_dir / "settings.toml").write_text(settings_body)
+    (config_dir / "settings.secrets.toml").write_text(secrets_body)
     monkeypatch.setenv("HOME", str(tmp_path))
 
     # The NOAA file is a CSV, not a torch checkpoint - only exercise the
