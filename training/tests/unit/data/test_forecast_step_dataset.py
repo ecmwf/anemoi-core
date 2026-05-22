@@ -96,7 +96,7 @@ class FakeZarr5D:
             if item == "data":
                 return self  # data array is self (has .shape and supports indexing)
             if item == "base_dates":
-                return type("Arr", (), {"__getitem__": lambda s, k: self._dates})()
+                return type("Arr", (), {"__getitem__": lambda _s, _k: self._dates})()
             return None
         if not isinstance(item, tuple):
             return self._data[item]

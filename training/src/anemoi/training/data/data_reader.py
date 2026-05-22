@@ -227,7 +227,7 @@ class _ForecastZarrData:
 
     def __init__(
         self,
-        zarr_group: "zarr.Group",
+        zarr_group: object,
         init_dates: np.ndarray,
         init_indices: np.ndarray,
         variables: list[str],
