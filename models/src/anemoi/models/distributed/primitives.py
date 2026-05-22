@@ -182,6 +182,51 @@ def _gather(
     return _gather_default(input_, dim_, sizes, group)
 
 
+def _expand_sharded_tensor(
+    input_: Tensor,
+    dim_: int,
+    sizes: ShardSizes,
+    group: Optional[ProcessGroup] = None,
+) -> Tensor:
+    """Expand a local shard to the gathered shape without communication.
+
+    Only the local rank slice is materialized from ``input_``. The remaining
+    slices are left uninitialized in the returned tensor.
+    """
+    if dist.get_world_size(group=group) == 1:
+        return input_
+
+    assert (
+        -input_.dim() <= dim_ < input_.dim()
+    ), f"Error, cannot expand along {dim_} for tensor with {input_.dim()} dimensions."
+
+    input_format = get_memory_format(input_)
+    input_ = input_.contiguous(memory_format=input_format)
+    dim = dim_ % input_.dim()
+    rank = dist.get_rank(group=group)
+
+    expected_local_size = sizes[rank]
+    assert input_.shape[dim] == expected_local_size, (
+        f"Error, expected local shard size {expected_local_size} along dimension {dim} "
+        f"for rank {rank}, but got {input_.shape[dim]}"
+    )
+
+    output_shape = list(input_.shape)
+    output_shape[dim] = sum(sizes)
+    output = torch.empty(
+        output_shape,
+        dtype=input_.dtype,
+        layout=input_.layout,
+        device=input_.device,
+        memory_format=input_format,
+    )
+
+    start = sum(sizes[:rank])
+    output.narrow(dim, start, expected_local_size).copy_(input_)
+
+    return output
+
+
 def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
