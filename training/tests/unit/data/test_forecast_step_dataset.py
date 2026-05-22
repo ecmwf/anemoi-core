@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+from typing import ClassVar
 from unittest.mock import patch
 
 import numpy as np
@@ -31,12 +32,20 @@ class FakeZarr5D:
         ensemble: int = 2,
         steps: int = 24,
         gridpoints: int = 10,
+        frequency: datetime.timedelta | None = None,
     ):
         self._shape = (num_inits, variables, ensemble, steps, gridpoints)
         self._data = np.random.default_rng(42).standard_normal(self._shape).astype(np.float32)
         self._dates = np.array(
             [np.datetime64("2020-01-01T00:00") + np.timedelta64(12 * i, "h") for i in range(num_inits)],
         )
+        self._frequency = frequency or datetime.timedelta(hours=12)
+
+        class _FakeStore:
+            path = "fake.zarr"
+
+        self.store = _FakeStore()
+        self.attrs = {"variables": [f"var_{i}" for i in range(variables)], "resolution": "o96"}
 
     @property
     def shape(self) -> tuple:
@@ -56,7 +65,7 @@ class FakeZarr5D:
 
     @property
     def frequency(self) -> datetime.timedelta:
-        return datetime.timedelta(hours=12)
+        return self._frequency
 
     @property
     def resolution(self) -> str:
@@ -80,8 +89,15 @@ class FakeZarr5D:
     def statistics(self) -> dict:
         return {"mean": np.zeros(self._shape[1]), "stdev": np.ones(self._shape[1])}
 
-    def __getitem__(self, item):
-        """Zarr-style orthogonal indexing: each index applies independently to its axis."""
+    def __getitem__(self, item: "tuple | int | slice | list | np.ndarray | str"):
+        """Zarr-style orthogonal indexing or string-key group access."""
+        # Support zarr group-like string key access
+        if isinstance(item, str):
+            if item == "data":
+                return self  # data array is self (has .shape and supports indexing)
+            if item == "base_dates":
+                return type("Arr", (), {"__getitem__": lambda s, k: self._dates})()
+            return None
         if not isinstance(item, tuple):
             return self._data[item]
 
@@ -100,6 +116,15 @@ class FakeZarr5D:
                 result = np.take(result, idx, axis=axis)
         return result
 
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' checks like a zarr group."""
+        return key in ("data", "base_dates")
+
+    @property
+    def oindex(self) -> "FakeZarr5D":
+        """Support .oindex[...] access (delegates to __getitem__)."""
+        return self
+
 
 def _make_forecast_step_dataset(
     num_inits: int = 4,
@@ -112,15 +137,6 @@ def _make_forecast_step_dataset(
 ) -> ForecastStepDataset:
     """Create a ForecastStepDataset with a fake 5D zarr backend."""
     dataset = ForecastStepDataset.__new__(ForecastStepDataset)
-    dataset.data = FakeZarr5D(
-        num_inits=num_inits,
-        variables=variables,
-        ensemble=ensemble,
-        steps=steps,
-        gridpoints=gridpoints,
-    )
-
-    dataset._forecast_steps = forecast_steps
 
     if isinstance(step_frequency, str):
         from anemoi.utils.dates import frequency_to_timedelta
@@ -128,6 +144,24 @@ def _make_forecast_step_dataset(
         dataset._step_frequency = frequency_to_timedelta(step_frequency)
     else:
         dataset._step_frequency = step_frequency
+
+    fake_zarr = FakeZarr5D(
+        num_inits=num_inits,
+        variables=variables,
+        ensemble=ensemble,
+        steps=steps,
+        gridpoints=gridpoints,
+        frequency=dataset._step_frequency,
+    )
+    dataset.data = fake_zarr
+
+    dataset._forecast_steps = forecast_steps
+
+    # Set attributes that ForecastStepDataset normally creates in __init__
+    dataset._init_dates = fake_zarr.dates
+    dataset._init_indices = np.arange(num_inits)
+    dataset._zarr = fake_zarr  # stand-in for the zarr group
+    dataset._var_indices = list(range(variables))
 
     return dataset
 
@@ -317,33 +351,40 @@ class TestForecastStepDatasetValidation:
         class Fake4D:
             shape = (10, 3, 2, 100)
             dates = np.array([np.datetime64("2020-01-01")])
-            grids = [100]
-            variables = ["a", "b", "c"]
+            grids: ClassVar[list[int]] = [100]
+            variables: ClassVar[list[str]] = ["a", "b", "c"]
             frequency = datetime.timedelta(hours=6)
             resolution = "o96"
-            name_to_index = {"a": 0, "b": 1, "c": 2}
-            missing = set()
+            name_to_index: ClassVar[dict[str, int]] = {"a": 0, "b": 1, "c": 2}
+            missing: ClassVar[set[int]] = set()
 
-            def metadata(self):
+            def metadata(self) -> dict:
                 return {}
 
-            def supporting_arrays(self):
+            def supporting_arrays(self) -> dict:
                 return {}
 
-            statistics = {}
+            statistics: ClassVar[dict] = {}
 
-        with pytest.raises(ValueError, match="expects a 5D zarr"):
+        def _raise_for_4d() -> None:
             ds = ForecastStepDataset.__new__(ForecastStepDataset)
             ds.data = Fake4D()
             ds._forecast_steps = 10
-            # Manually trigger the validation that __init__ does
             if len(ds.data.shape) != 5:
-                msg = f"ForecastStepDataset expects a 5D zarr (inits, variables, ensemble, steps, gridpoints), got shape {ds.data.shape}"
+                shape = ds.data.shape
+                msg = (
+                    "ForecastStepDataset expects a 5D zarr "
+                    f"(inits, variables, ensemble, steps, gridpoints), got shape {shape}"
+                )
                 raise ValueError(msg)
+
+        with pytest.raises(ValueError, match="expects a 5D zarr"):
+            _raise_for_4d()
 
     def test_rejects_insufficient_forecast_steps(self) -> None:
         """Should raise if dataset has fewer steps than requested."""
-        with pytest.raises(ValueError, match="forecast steps but config requests"):
+
+        def _raise_for_insufficient_steps() -> None:
             ds = ForecastStepDataset.__new__(ForecastStepDataset)
             ds.data = FakeZarr5D(steps=10)
             ds._forecast_steps = 20
@@ -351,6 +392,9 @@ class TestForecastStepDatasetValidation:
             if actual_steps < ds._forecast_steps:
                 msg = f"Dataset has {actual_steps} forecast steps but config requests {ds._forecast_steps}."
                 raise ValueError(msg)
+
+        with pytest.raises(ValueError, match="forecast steps but config requests"):
+            _raise_for_insufficient_steps()
 
 
 class TestForecastStepDatasetTree:
@@ -372,7 +416,7 @@ class TestCreateDatasetWithForecastSteps:
         """create_dataset should instantiate ForecastStepDataset when forecast_steps is set."""
         fake_zarr = FakeZarr5D(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
 
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake_zarr):
+        with patch("zarr.open", return_value=fake_zarr):
             from anemoi.training.data.data_reader import create_dataset
 
             config = {

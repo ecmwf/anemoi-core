@@ -225,60 +225,71 @@ class NativeGridDataset(BaseAnemoiReader):
 class _ForecastZarrData:
     """Wrapper around a 5D zarr that exposes the dataset-like interface expected by the pipeline."""
 
-    def __init__(self, zarr_group, init_dates, init_indices, variables, resolution, step_frequency, forecast_steps):
+    def __init__(
+        self,
+        zarr_group: "zarr.Group",
+        init_dates: np.ndarray,
+        init_indices: np.ndarray,
+        variables: list[str],
+        var_indices: list[int],
+        resolution: str,
+        step_frequency: datetime.timedelta,
+        forecast_steps: int,
+    ) -> None:
         self._zarr = zarr_group
         self._array = zarr_group["data"]
         self._init_dates = init_dates
         self._init_indices = init_indices
         self._variables_list = variables
+        self._var_indices = var_indices
         self._resolution = resolution
         self._step_frequency = step_frequency
         self._forecast_steps = forecast_steps
 
     @property
-    def shape(self):
+    def shape(self) -> tuple:
         return self._array.shape
 
     @property
-    def dates(self):
+    def dates(self) -> np.ndarray:
         return self._init_dates
 
     @property
-    def grids(self):
+    def grids(self) -> list[int]:
         return [self._array.shape[4]]
 
     @property
-    def variables(self):
+    def variables(self) -> list[str]:
         return self._variables_list
 
     @property
-    def frequency(self):
+    def frequency(self) -> datetime.timedelta:
         return self._step_frequency
 
     @property
-    def resolution(self):
+    def resolution(self) -> str:
         return self._resolution
 
     @property
-    def name_to_index(self):
+    def name_to_index(self) -> dict[str, int]:
         return {name: i for i, name in enumerate(self._variables_list)}
 
     @property
-    def missing(self):
+    def missing(self) -> set[int]:
         return set()
 
     @property
-    def statistics(self):
+    def statistics(self) -> dict:
         stats = {}
         for key in ("mean", "stdev", "minimum", "maximum"):
             if key in self._zarr:
-                stats[key] = self._zarr[key][:]
+                stats[key] = self._zarr[key][:][self._var_indices]
         return stats
 
-    def metadata(self):
+    def metadata(self) -> dict:
         return dict(self._zarr.attrs)
 
-    def supporting_arrays(self):
+    def supporting_arrays(self) -> dict:
         result = {}
         if "latitudes" in self._zarr:
             result["latitudes"] = self._zarr["latitudes"][:]
@@ -286,13 +297,13 @@ class _ForecastZarrData:
             result["longitudes"] = self._zarr["longitudes"][:]
         return result
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: "tuple | int | slice | list | np.ndarray") -> np.ndarray:
         """Use zarr orthogonal indexing to support list/array indices."""
         if isinstance(item, tuple) and any(isinstance(idx, (list, np.ndarray)) for idx in item):
             return self._array.oindex[item]
         return self._array[item]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ForecastZarrData(shape={self.shape}, inits={len(self._init_dates)})"
 
 
@@ -329,7 +340,7 @@ class ForecastStepDataset(BaseAnemoiReader):
         # Extract the zarr path and drop list from the config
         drop: list[str] = []
         if isinstance(source, (dict, DictConfig)):
-            zarr_path = source.get("dataset") if isinstance(source, dict) else source.get("dataset")
+            zarr_path = source.get("dataset")
             if zarr_path is None:
                 msg = "dataset_config must contain a 'dataset' key with the zarr path."
                 raise ValueError(msg)
@@ -364,13 +375,11 @@ class ForecastStepDataset(BaseAnemoiReader):
         # Parse metadata from zarr attrs
         self._attrs = dict(self._zarr.attrs)
         all_variables = self._attrs.get("variables", [])
-        self._resolution = self._attrs.get("resolution", "unknown")
 
         # Apply drop list
         drop_set = set(drop)
         self._var_indices = [i for i, v in enumerate(all_variables) if v not in drop_set]
-        self._variables = [all_variables[i] for i in self._var_indices]
-        self._name_to_index = {name: i for i, name in enumerate(self._variables)}
+        variables = [all_variables[i] for i in self._var_indices]
 
         # Load and filter init dates by start/end
         base_dates = self._zarr["base_dates"][:]
@@ -383,8 +392,9 @@ class ForecastStepDataset(BaseAnemoiReader):
             zarr_group=self._zarr,
             init_dates=self._init_dates,
             init_indices=self._init_indices,
-            variables=self._variables,
-            resolution=self._resolution,
+            variables=variables,
+            var_indices=self._var_indices,
+            resolution=self._attrs.get("resolution", "unknown"),
             step_frequency=self._step_frequency,
             forecast_steps=self._forecast_steps,
         )
@@ -399,19 +409,13 @@ class ForecastStepDataset(BaseAnemoiReader):
         indices = np.arange(len(base_dates))
 
         if start is not None:
-            if isinstance(start, int):
-                start = np.datetime64(f"{start}-01-01")
-            else:
-                start = np.datetime64(start)
+            start = np.datetime64(f"{start}-01-01") if isinstance(start, int) else np.datetime64(start)
             mask = base_dates >= start
             indices = indices[mask]
             base_dates = base_dates[mask]
 
         if end is not None:
-            if isinstance(end, int):
-                end = np.datetime64(f"{end}-12-31T23:59:59")
-            else:
-                end = np.datetime64(end)
+            end = np.datetime64(f"{end}-12-31T23:59:59") if isinstance(end, int) else np.datetime64(end)
             mask = base_dates <= end
             indices = indices[mask]
             base_dates = base_dates[mask]
@@ -424,11 +428,6 @@ class ForecastStepDataset(BaseAnemoiReader):
         return len(self._init_dates)
 
     @property
-    def frequency(self) -> datetime.timedelta:
-        """Virtual frequency = step frequency (e.g. 1h)."""
-        return self._step_frequency
-
-    @property
     def dates(self) -> np.ndarray:
         """Virtual flat dates array of length num_inits * forecast_steps."""
         step_offsets = np.array(
@@ -436,59 +435,6 @@ class ForecastStepDataset(BaseAnemoiReader):
         )
         all_dates = self._init_dates[:, None] + step_offsets[None, :]
         return all_dates.ravel()
-
-    @property
-    def grid_size(self) -> int:
-        """Return dataset grid size."""
-        return self.data.shape[4]
-
-    @property
-    def statistics(self) -> dict:
-        """Return dataset statistics from zarr arrays."""
-        stats = {}
-        for key in ("mean", "stdev", "minimum", "maximum"):
-            if key in self._zarr:
-                stats[key] = self._zarr[key][:][self._var_indices]
-        return stats
-
-    def statistics_tendencies(self, timestep=None) -> dict | None:
-        """Tendency statistics not supported for forecast zarrs."""
-        return None
-
-    @property
-    def variables(self) -> list[str]:
-        """Return dataset variables."""
-        return self._variables
-
-    @property
-    def missing(self) -> set[int]:
-        """Return dataset missing values mask."""
-        return set()
-
-    @property
-    def metadata(self) -> dict:
-        """Return dataset metadata."""
-        return self._attrs
-
-    @property
-    def supporting_arrays(self) -> dict:
-        """Return dataset supporting_arrays."""
-        result = {}
-        if "latitudes" in self._zarr:
-            result["latitudes"] = self._zarr["latitudes"][:]
-        if "longitudes" in self._zarr:
-            result["longitudes"] = self._zarr["longitudes"][:]
-        return result
-
-    @property
-    def name_to_index(self) -> dict[str, int]:
-        """Return variable name to index mapping."""
-        return self._name_to_index
-
-    @property
-    def resolution(self) -> str:
-        """Return dataset resolution."""
-        return self._resolution
 
     @property
     def has_trajectories(self) -> bool:
@@ -543,10 +489,10 @@ class ForecastStepDataset(BaseAnemoiReader):
     def tree(self, prefix: str = "") -> Tree:
         tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
         tree.add(f"Zarr: {self._zarr.store.path if hasattr(self._zarr.store, 'path') else 'N/A'}")
-        tree.add(f"Resolution: {self._resolution}")
-        tree.add(f"Num variables: {len(self._variables)}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Num variables: {len(self.variables)}")
         tree.add(f"Forecast steps: {self._forecast_steps}")
-        tree.add(f"Step frequency: {self._step_frequency}")
+        tree.add(f"Step frequency: {self.frequency}")
         tree.add(f"Num initializations: {self.num_initializations}")
         tree.add(f"Virtual length: {self.num_initializations * self._forecast_steps}")
         return tree
