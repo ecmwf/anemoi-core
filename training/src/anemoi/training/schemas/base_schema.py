@@ -170,6 +170,27 @@ class SchemaCommonMixin:
             raise ValueError(msg)
         return values
 
+    @model_validator(mode="before")
+    @classmethod
+    def _check_datashader_projection_compat(cls, values: Any) -> Any:
+        """Raise if a non-equirectangular projection is combined with datashader."""
+        try:
+            plot = values.get("diagnostics", {}).get("plot", {}) or {}
+            if OmegaConf.is_config(plot):
+                plot = OmegaConf.to_container(plot, resolve=False)
+            datashader = plot.get("datashader", True)
+            projection_kind = plot.get("projection_kind", "equirectangular")
+        except Exception:  # noqa: BLE001
+            return values
+        if datashader and projection_kind != "equirectangular":
+            msg = (
+                f"projection_kind='{projection_kind}' is incompatible with datashader=True. "
+                "Datashader only supports equirectangular axes. "
+                "Set datashader=False or projection_kind='equirectangular'."
+            )
+            raise ValueError(msg)
+        return values
+
     def model_post_init(self, _: Any) -> None:
         expand_paths(self.system)
         if self.diagnostics.log.mlflow.enabled and (

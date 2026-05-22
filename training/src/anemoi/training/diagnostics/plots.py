@@ -508,8 +508,7 @@ def _setup_figure_and_colormaps(
     tuple
         (fig, axs, pc_lon, pc_lat, transform, colormaps)
     """
-    plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
+    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, projection_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     subplot_kw = {"projection": proj} if proj is not None else {}

@@ -108,7 +108,13 @@ class Projection(BaseProjection):
 
     @classmethod
     def from_kind(cls, latlons: np.ndarray, kind: str = "equirectangular") -> "Projection":
-        """Build a Projection from a kind string (equirectangular or lambert_conformal)."""
+        """Build a Projection from a kind string.
+
+        Built-in kinds: ``'equirectangular'`` (no cartopy) and ``'lambert_conformal'``
+        (auto-fitted to the data domain).  Any other string is resolved as a
+        ``cartopy.crs`` class name in snake_case, e.g. ``'robinson'`` →
+        ``cartopy.crs.Robinson()``.  Requires cartopy for all non-equirectangular kinds.
+        """
         if kind == "equirectangular":
             return cls.equirectangular()
         if kind == "lambert_conformal":
@@ -125,7 +131,22 @@ class Projection(BaseProjection):
                 )
                 return cls.equirectangular()
             return cls.lambert_conformal(latlons)
-        raise ValueError(kind)
+        # Fall back to dynamic cartopy CRS lookup: snake_case → CamelCase class name
+        try:
+            import cartopy.crs as ccrs
+        except ModuleNotFoundError as e:
+            msg = f"projection_kind='{kind}' requires cartopy. Install with: pip install anemoi-training[plotting]"
+            raise ModuleNotFoundError(msg) from e
+        crs_name = "".join(part.capitalize() for part in kind.split("_"))
+        crs_cls = getattr(ccrs, crs_name, None)
+        if crs_cls is None:
+            msg = (
+                f"Unknown projection_kind='{kind}'. "
+                f"Use 'equirectangular', 'lambert_conformal', or any cartopy.crs class name in snake_case "
+                f"(e.g. 'robinson', 'mollweide', 'orthographic')."
+            )
+            raise ValueError(msg)
+        return cls(crs_cls())
 
     def crs_for_axes(self) -> object | None:
         """CRS for plt.subplots(subplot_kw={"projection": ...}). None for equirectangular."""
