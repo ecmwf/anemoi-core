@@ -493,3 +493,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             }
         )
         """
+
+    def on_train_epoch_end(self) -> None:
+        super().on_train_epoch_end()
+        gate = getattr(getattr(self.model, "model", None), "ar_gate", None)
+        if isinstance(gate, torch.nn.Parameter) and gate.requires_grad:
+            self.log("ar_gate", gate.float().abs().item(), rank_zero_only=True, logger=self.logger_enabled)
