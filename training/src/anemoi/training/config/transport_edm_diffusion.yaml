@@ -4,7 +4,7 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
-- model: graphtransformer_transport
+- model: graphtransformer_transport_edm
 - task: forecaster
 - training: edm_diffusion
 - _self_

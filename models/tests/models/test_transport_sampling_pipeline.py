@@ -21,6 +21,7 @@ from anemoi.models.transport import StochasticInterpolantModelObjective
 from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
+from anemoi.models.transport import schedules
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -132,13 +133,11 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
 def test_sample_passes_zero_terminated_schedule_to_sampler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class DummyScheduler(transport_samplers.NoiseScheduler):
-        def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
+    class DummySchedule(schedules.SigmaSchedule):
+        def __init__(self, sigma_max: float, sigma_min: float, num_steps: int):
             super().__init__(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
-            del kwargs
 
-        def _build_schedule(self, device=None, dtype_compute: torch.dtype = torch.float64, **kwargs):
-            del kwargs
+        def _build_schedule(self, device=None, dtype_compute: torch.dtype = torch.float64):
             return torch.linspace(1.0, 0.1, self.num_steps, device=device, dtype=dtype_compute)
 
     class DummySampler:
@@ -171,22 +170,22 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
             return y
 
     model = _transport_model_stub()
-    model.inference_defaults = SimpleNamespace(
-        noise_scheduler={
+    model.inference_defaults = {
+        "sampling_schedule": {
             "schedule_type": "dummy",
             "sigma_max": 1.0,
             "sigma_min": 0.1,
             "num_steps": 4,
         },
-        edm_diffusion_sampler={"sampler": "dummy"},
-    )
+        "sampler": {"sampler": "dummy"},
+    }
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3, "ds_b": 4}
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
     model._forward_transport_network = lambda *_args, **_kwargs: None
 
-    monkeypatch.setitem(transport_samplers.NOISE_SCHEDULERS, "dummy", DummyScheduler)
+    monkeypatch.setitem(schedules.SIGMA_SCHEDULES, "dummy", DummySchedule)
     monkeypatch.setitem(transport_samplers.DIFFUSION_SAMPLERS, "dummy", DummySampler)
 
     x = {
@@ -231,7 +230,10 @@ def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
 
     model = _transport_model_stub()
     model.transport_model_objective = StochasticInterpolantModelObjective()
-    model.inference_defaults = SimpleNamespace(noise_scheduler={"num_steps": 3})
+    model.inference_defaults = {
+        "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
+        "sampler": {"sampler": "heun"},
+    }
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
@@ -290,7 +292,10 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
 
     model = _transport_model_stub()
     model.transport_model_objective = StochasticInterpolantModelObjective()
-    model.inference_defaults = SimpleNamespace()
+    model.inference_defaults = {
+        "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
+        "sampler": {"sampler": "heun"},
+    }
     model.n_step_output = 2
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
@@ -310,7 +315,7 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
 
     x = {"ds_a": torch.randn(1, 3, 1, 5, 6, dtype=torch.float32)}
 
-    out = model.sample(x, sampler_params={"sampler": "dummy_vector", "num_steps": 3})
+    out = model.sample(x, sampler_params={"sampler": "dummy_vector"})
 
     assert set(out.keys()) == {"ds_a"}
     assert out["ds_a"].shape == (1, 2, 1, 5, 3)
@@ -428,15 +433,15 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
     sampler_config: dict[str, float],
 ) -> None:
     model = _transport_model_stub()
-    model.inference_defaults = SimpleNamespace(
-        noise_scheduler={
+    model.inference_defaults = {
+        "sampling_schedule": {
             "schedule_type": "linear",
             "sigma_max": 1.0,
             "sigma_min": 0.02,
             "num_steps": 6,
         },
-        edm_diffusion_sampler={"sampler": sampler_name, **sampler_config},
-    )
+        "sampler": {"sampler": sampler_name, **sampler_config},
+    }
     model.n_step_output = 2
     model.num_output_channels = {"dataset_a": 3, "dataset_b": 2}
     model.transport_model_objective = EDMDiffusionModelObjective()

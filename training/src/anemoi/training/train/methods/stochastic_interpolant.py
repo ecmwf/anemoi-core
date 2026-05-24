@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-import torch
+from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import stochastic_interpolant_alpha
 from anemoi.models.transport.paths import stochastic_interpolant_alpha_dot
@@ -19,10 +19,14 @@ from anemoi.models.transport.paths import stochastic_interpolant_bridge_noise_ve
 from anemoi.models.transport.paths import stochastic_interpolant_clean_mean
 from anemoi.models.transport.paths import stochastic_interpolant_sigma
 from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
+from anemoi.models.transport.schedules import TIME_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    import torch
 
 
 class StochasticInterpolantTransportObjective(TransportObjective):
@@ -85,7 +89,10 @@ class StochasticInterpolantTransportObjective(TransportObjective):
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         """Create the interpolated training input and the change the model should predict."""
         shape = {dataset_name: target.shape for dataset_name, target in clean_target.items()}
-        time_level = self._sample_time_level(shape, next(iter(clean_target.values())).device)
+        time_level = self._sample_training_time(
+            shape,
+            device=next(iter(clean_target.values())).device,
+        )
 
         interpolant_state: dict[str, torch.Tensor] = {}
         drift_target: dict[str, torch.Tensor] = {}
@@ -144,31 +151,24 @@ class StochasticInterpolantTransportObjective(TransportObjective):
             for dataset_name in interpolant_state
         }
 
-    def _sample_time_level(
+    def _sample_training_time(
         self,
         shape: dict[str, tuple[int, ...]],
         device: torch.device,
     ) -> dict[str, torch.Tensor]:
         """Draw one interpolation time per sample and ensemble member."""
-        dataset_names = list(shape.keys())
-        ref_shape = shape[dataset_names[0]]
-        assert (
-            len(ref_shape) == 5
-        ), "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for stochastic interpolants."
-        batch_size = ref_shape[0]
-        ensemble_size = ref_shape[2]
-        for dataset_name, shape_x in shape.items():
-            assert len(shape_x) == 5, f"Expected 5D tensor shape for dataset '{dataset_name}'."
-            assert (
-                shape_x[0] == batch_size and shape_x[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets when sampling stochastic-interpolant times."
-
-        time_base = torch.rand((batch_size, ensemble_size), device=device)
-        time_base = time_base[:, None, :, None, None]
-        # Important: the model later reads the condition from one dataset and
-        # assumes every dataset carries the same bridge time. Keep this shared
-        # across datasets unless the model conditioning path is changed too.
-        return dict.fromkeys(shape, time_base)
+        training_condition_config = dict(self.module.model.model.training_condition)
+        try:
+            distribution_name = training_condition_config.pop("distribution")
+        except KeyError as exc:
+            msg = "Stochastic-interpolant training_condition must define 'distribution'."
+            raise ValueError(msg) from exc
+        if distribution_name not in TIME_TRAINING_DISTRIBUTIONS:
+            msg = f"Unknown stochastic-interpolant training condition distribution: {distribution_name}"
+            raise ValueError(msg)
+        distribution_cls = TIME_TRAINING_DISTRIBUTIONS[distribution_name]
+        distribution = distribution_cls(**training_condition_config)
+        return distribution.sample(shape, device=device)
 
     @property
     def _alpha_schedule(self) -> str:

@@ -144,6 +144,12 @@ class DummyTransportModel(DummyModel):
     def __init__(self, num_output_variables: int | None = None) -> None:
         super().__init__(num_output_variables=num_output_variables, output_times=1)
         self.edm = EdmSettings(sigma_max=4.0, sigma_min=1.0, sigma_data=0.5)
+        self.training_condition = {
+            "distribution": "karras",
+            "sigma_max": self.edm.sigma_max,
+            "sigma_min": self.edm.sigma_min,
+            "rho": self.edm.rho,
+        }
         self.stochastic_interpolant = StochasticInterpolantSettings(noise_scale=0.0)
 
     def __call__(
@@ -517,6 +523,7 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
                     sigma_schedule="quadratic_bridge",
                     noise_scale=1.0,
                 ),
+                training_condition={"distribution": "uniform_time"},
                 transport_source=TransportSourceBuilder(
                     TransportSourceSettings(kind="reference_state", noise_scale=0.25),
                 ),
@@ -536,7 +543,11 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
         },
     )
 
-    monkeypatch.setattr(torch, "rand", lambda shape, device=None: torch.full(shape, 0.25, device=device))
+    monkeypatch.setattr(
+        torch,
+        "rand",
+        lambda shape, device=None, dtype=None: torch.full(shape, 0.25, device=device, dtype=dtype),
+    )
     monkeypatch.setattr(
         torch,
         "randn",
@@ -1445,9 +1456,9 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.model = _DummyTransportWrapper(
-        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
-    )
+    transport_model = DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+    transport_model.training_condition = {"distribution": "uniform_time"}
+    forecaster.model = _DummyTransportWrapper(transport_model)
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
     forecaster.is_first_step = False
@@ -1586,9 +1597,9 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.model = _DummyTransportWrapper(
-        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
-    )
+    transport_model = DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output))
+    transport_model.training_condition = {"distribution": "uniform_time"}
+    forecaster.model = _DummyTransportWrapper(transport_model)
     forecaster._transport_objective = StochasticInterpolantTransportObjective(forecaster)
     forecaster.is_first_step = False
     forecaster.updating_scalars = {}
@@ -2019,7 +2030,7 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     captured: dict[str, Any] = {}
 
     def _prepare_tensors_stub(
-        self: DiffusionTendencyTraining,
+        self: EnsembleTraining,
         y_pred: torch.Tensor,
         y: torch.Tensor,
         validation_mode: bool = False,

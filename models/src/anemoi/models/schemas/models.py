@@ -124,6 +124,8 @@ class TransportConfig(BaseModel):
         examples=[StochasticInterpolantSettings.noise_scale],
     )
     "Overall scale of the stochastic-interpolant bridge noise."
+    training_condition: dict = Field(default_factory=dict)
+    "Distribution used to sample one training noise level or bridge time per sample."
     noise_embedder: dict = Field(default_factory=dict)
     "Hydra configuration for embedding the current noise level or bridge time."
     inference_defaults: dict = Field(default_factory=dict)

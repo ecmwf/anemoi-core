@@ -9,14 +9,17 @@
 
 from __future__ import annotations
 
-import torch
+from typing import TYPE_CHECKING
 
 from anemoi.models.transport.paths import edm_loss_weight
-from anemoi.models.transport.paths import karras_sigma_from_unit_time
+from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    import torch
 
 
 class EDMDiffusionTransportObjective(TransportObjective):
@@ -27,14 +30,11 @@ class EDMDiffusionTransportObjective(TransportObjective):
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
         shapes = {dataset_name: target.shape for dataset_name, target in prepared.model_target.items()}
-        sigma, noise_weights = self._get_noise_level(
+        sigma = self._sample_training_sigma(
             shape=shapes,
-            sigma_max=self.module.model.model.edm.sigma_max,
-            sigma_min=self.module.model.model.edm.sigma_min,
-            sigma_data=self.module.model.model.edm.sigma_data,
-            rho=self._rho,
             device=next(iter(prepared.model_target.values())).device,
         )
+        noise_weights = self._loss_weights(sigma)
         source = self.build_transport_source(prepared)
         target_noised = self._noise_target(prepared.model_target, sigma, source)
         # EDM diffusion predicts the clean target. The prediction mode decides
@@ -49,10 +49,6 @@ class EDMDiffusionTransportObjective(TransportObjective):
             weights=noise_weights,
             aux={},
         )
-
-    @property
-    def _rho(self) -> float:
-        return self.module.model.model.edm.rho
 
     def forward(
         self,
@@ -109,48 +105,28 @@ class EDMDiffusionTransportObjective(TransportObjective):
         """Create the corrupted target by adding scaled source noise to the clean target."""
         return {name: x[name] + source[name] * sigma[name] for name in x}
 
-    def _get_noise_level(
+    def _sample_training_sigma(
         self,
         shape: dict[str, tuple[int, ...]],
-        sigma_max: float,
-        sigma_min: float,
-        sigma_data: float,
-        rho: float,
         device: torch.device,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """Sample one noise level per sample and return the matching EDM loss weight."""
-        sigma, weight = {}, {}
-        dataset_names = list(shape.keys())
-        ref_shape = shape[dataset_names[0]]
-        assert (
-            len(ref_shape) == 5
-        ), "Expected 5D tensor shape (batch, time, ensemble, grid, vars) for EDM diffusion noise."
-        batch_size = ref_shape[0]
-        ensemble_size = ref_shape[2]
-        for dataset_name, shape_x in shape.items():
-            assert (
-                len(shape_x) == 5
-            ), f"Expected 5D tensor shape (batch, time, ensemble, grid, vars) for dataset '{dataset_name}'."
-            assert (
-                shape_x[0] == batch_size and shape_x[2] == ensemble_size
-            ), "Batch or ensemble dimension mismatch across datasets when sampling EDM diffusion noise."
+    ) -> dict[str, torch.Tensor]:
+        """Sample one EDM noise level per sample and ensemble member."""
+        training_condition_config = dict(self.module.model.model.training_condition)
+        try:
+            distribution_name = training_condition_config.pop("distribution")
+        except KeyError as exc:
+            msg = "EDM training_condition must define 'distribution'."
+            raise ValueError(msg) from exc
+        if distribution_name not in SIGMA_TRAINING_DISTRIBUTIONS:
+            msg = f"Unknown EDM training condition distribution: {distribution_name}"
+            raise ValueError(msg)
+        distribution_cls = SIGMA_TRAINING_DISTRIBUTIONS[distribution_name]
+        distribution = distribution_cls(**training_condition_config)
+        return distribution.sample(shape, device=device)
 
-        base_shape = (batch_size, ensemble_size)
-        rnd_uniform = torch.rand(base_shape, device=device)
-        sigma_base = karras_sigma_from_unit_time(
-            rnd_uniform,
-            sigma_max=sigma_max,
-            sigma_min=sigma_min,
-            rho=rho,
-        )
-        weight_base = edm_loss_weight(sigma_base, sigma_data)
-        sigma_base = sigma_base[:, None, :, None, None]
-        weight_base = weight_base[:, None, :, None, None]
-
-        # Important: the model later reads the condition from one dataset and
-        # assumes every dataset carries the same noise level. Keep this shared
-        # across datasets unless the model conditioning path is changed too.
-        for dataset_name in shape:
-            sigma[dataset_name] = sigma_base
-            weight[dataset_name] = weight_base
-        return sigma, weight
+    def _loss_weights(self, sigma: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Return EDM loss weights for sampled sigma values."""
+        sigma_data = self.module.model.model.edm.sigma_data
+        return {
+            dataset_name: edm_loss_weight(sigma_dataset, sigma_data) for dataset_name, sigma_dataset in sigma.items()
+        }

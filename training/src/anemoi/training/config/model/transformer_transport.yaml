@@ -19,22 +19,6 @@ model:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.transport.noise_channels}
       max_period: 1000
-    inference_defaults:
-      noise_scheduler:
-        schedule_type: "karras"
-        sigma_max: 100.0
-        sigma_min: 0.02
-        rho: 7.0
-        num_steps: 50
-      edm_diffusion_sampler:
-        sampler: "heun"
-        S_churn: 0.0
-        S_min: 0.0
-        S_max: .inf
-        S_noise: 1.0
-      stochastic_interpolant_sampler:
-        sampler: "heun"
-        num_steps: 50
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.

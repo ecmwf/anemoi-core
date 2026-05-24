@@ -261,10 +261,16 @@ These configs select ``training: edm_diffusion`` or
 ``training.transport_objective``. Tendency variants additionally select
 ``prediction_mode: tendency`` and a tendency model config.
 
+The entry points select objective-specific model configs such as
+``graphtransformer_transport_edm``, ``graphtransformer_transport_si``,
+``graphtransformer_transport_tendency_edm``, and
+``graphtransformer_transport_tendency_si``. Transformer variants use the
+same ``_edm`` and ``_si`` suffixes.
+
 Model configuration
 ===================
 
-Transport model configs put all objective-specific settings under
+Objective-specific model configs put transport settings under
 ``model.model.transport``:
 
 .. code:: yaml
@@ -277,6 +283,11 @@ Transport model configs put all objective-specific settings under
        sigma_max: 100.0
        sigma_min: 0.02
        rho: 7.0
+       training_condition:
+         distribution: karras
+         sigma_max: ${model.model.transport.sigma_max}
+         sigma_min: ${model.model.transport.sigma_min}
+         rho: ${model.model.transport.rho}
        noise_embedder:
          _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
          num_channels: ${model.model.transport.noise_channels}
@@ -303,6 +314,8 @@ and configure the interpolant schedules:
          si_beta_schedule: linear
          si_sigma_schedule: brownian_bridge
          si_noise_scale: 1.0
+         training_condition:
+           distribution: uniform_time
          source:
            kind: gaussian
 
@@ -361,6 +374,8 @@ and no bridge noise:
          si_beta_schedule: linear
          si_sigma_schedule: brownian_bridge
          si_noise_scale: 0.0
+         training_condition:
+           distribution: uniform_time
          source:
            kind: gaussian
            scale: 1.0
@@ -419,18 +434,17 @@ Default sampler settings live under
 .. code:: yaml
 
    inference_defaults:
-     noise_scheduler:
+     sampling_schedule:
        schedule_type: karras
        sigma_max: 100.0
        sigma_min: 0.02
        rho: 7.0
        num_steps: 50
-     edm_diffusion_sampler:
+     sampler:
        sampler: heun
-     stochastic_interpolant_sampler:
-       sampler: heun
-       num_steps: 50
 
 These defaults can be overridden at inference time with
-``noise_scheduler_params`` and ``sampler_params`` passed to
-``predict_step``.
+``schedule_params`` and ``sampler_params`` passed to ``predict_step``.
+For stochastic interpolants, use the same structure with
+``sampling_schedule.schedule_type: unit_time`` and a vector-field sampler
+such as ``heun`` or ``euler``.

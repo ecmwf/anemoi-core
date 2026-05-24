@@ -18,23 +18,57 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport.paths import unit_time_grid
+from anemoi.models.transport.schedules import SIGMA_SCHEDULES
+from anemoi.models.transport.schedules import TIME_SCHEDULES
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _get_inference_defaults_section(model: Any, *names: str) -> dict:
-    defaults = getattr(model, "inference_defaults", {})
-    for name in names:
-        section = defaults.get(name) if isinstance(defaults, dict) else getattr(defaults, name, None)
-        if section is not None:
-            return dict(section)
-    return {}
+def _get_inference_defaults_section(model: Any, name: str) -> dict:
+    section = model.inference_defaults.get(name)
+    return dict(section) if section is not None else {}
 
 
-def _get_default_num_steps(model: Any, fallback: int = 50) -> int:
-    noise_scheduler_config = _get_inference_defaults_section(model, "noise_scheduler")
-    return int(noise_scheduler_config.get("num_steps", fallback))
+def _get_inference_config(model: Any, section: str, overrides: Optional[dict]) -> dict:
+    config = _get_inference_defaults_section(model, section)
+    if overrides is not None:
+        config.update(overrides)
+    LOGGER.debug("%s_config: %s", section, config)
+    return config
+
+
+def _resolve_registry_entry(config: dict, selector: str, registry: dict, context: str) -> type:
+    if selector not in config:
+        raise ValueError(f"{context} must define '{selector}'.")
+    entry_name = config.pop(selector)
+    if entry_name not in registry:
+        raise ValueError(f"Unknown {context}: {entry_name}")
+    return registry[entry_name]
+
+
+def _build_inference_schedule(
+    model: Any,
+    registry: dict,
+    context: str,
+    schedule_params: Optional[dict],
+    device: torch.device,
+) -> torch.Tensor:
+    schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
+    scheduler_cls = _resolve_registry_entry(schedule_config, "schedule_type", registry, context)
+    scheduler = scheduler_cls(**schedule_config)
+    return scheduler.get_schedule(device, torch.float64)
+
+
+def _build_inference_sampler(
+    model: Any,
+    registry: dict,
+    context: str,
+    sampler_params: Optional[dict],
+    dtype: torch.dtype,
+) -> Any:
+    sampler_config = _get_inference_config(model, "sampler", sampler_params)
+    sampler_cls = _resolve_registry_entry(sampler_config, "sampler", registry, context)
+    return sampler_cls(dtype=dtype, **sampler_config)
 
 
 class TransportModelObjective:
@@ -58,7 +92,7 @@ class TransportModelObjective:
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        noise_scheduler_params: Optional[dict] = None,
+        schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -95,57 +129,36 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        noise_scheduler_params: Optional[dict] = None,
+        schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Sample from an EDM diffusion model."""
         x_device = next(iter(x.values())).device
 
-        noise_scheduler_config = dict(model.inference_defaults.noise_scheduler)
-        if noise_scheduler_params is not None:
-            noise_scheduler_config.update(noise_scheduler_params)
-
-        LOGGER.debug("noise_scheduler_config: %s", noise_scheduler_config)
-
-        actual_schedule_type = noise_scheduler_config.pop("schedule_type")
-        if actual_schedule_type not in transport_samplers.NOISE_SCHEDULERS:
-            raise ValueError(f"Unknown schedule type: {actual_schedule_type}")
-
-        scheduler_cls = transport_samplers.NOISE_SCHEDULERS[actual_schedule_type]
-        scheduler = scheduler_cls(**noise_scheduler_config)
-
         source = model.build_sampling_source(
             x,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
         )
-        sigmas, y_init = {}, {}
-        for dataset_name in x:
-            sigma_i = scheduler.get_schedule(x_device, torch.float64)
-            sigmas[dataset_name] = sigma_i
-            y_init[dataset_name] = source[dataset_name].to(dtype=sigma_i.dtype) * sigma_i[0]
+        sigma_schedule = _build_inference_schedule(
+            model,
+            SIGMA_SCHEDULES,
+            "EDM sampling schedule",
+            schedule_params,
+            x_device,
+        )
+        y_init = {
+            dataset_name: source[dataset_name].to(dtype=sigma_schedule.dtype) * sigma_schedule[0] for dataset_name in x
+        }
 
-        edm_diffusion_sampler_config = _get_inference_defaults_section(model, "edm_diffusion_sampler")
-        if sampler_params is not None:
-            edm_diffusion_sampler_config.update(sampler_params)
-
-        LOGGER.debug("edm_diffusion_sampler_config: %s", edm_diffusion_sampler_config)
-
-        actual_sampler = edm_diffusion_sampler_config.pop("sampler")
-        if actual_sampler not in transport_samplers.DIFFUSION_SAMPLERS:
-            raise ValueError(f"Unknown sampler: {actual_sampler}")
-
-        sampler_cls = transport_samplers.DIFFUSION_SAMPLERS[actual_sampler]
-        sampler_instance = sampler_cls(dtype=next(iter(sigmas.values())).dtype, **edm_diffusion_sampler_config)
-
-        sigmas_ref = next(iter(sigmas.values()))
-        for dataset_name, sigmas_i in sigmas.items():
-            if not torch.allclose(sigmas_i, sigmas_ref):
-                LOGGER.warning(
-                    "Sigma schedules differ between datasets. Dataset '%s' has a different schedule.",
-                    dataset_name,
-                )
+        sampler_instance = _build_inference_sampler(
+            model,
+            transport_samplers.DIFFUSION_SAMPLERS,
+            "EDM sampler",
+            sampler_params,
+            sigma_schedule.dtype,
+        )
 
         def denoising_fn(
             x_arg: dict[str, torch.Tensor],
@@ -166,7 +179,7 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         return sampler_instance.sample(
             x,
             y_init,
-            sigmas_ref,
+            sigma_schedule,
             denoising_fn,
             model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
@@ -234,20 +247,11 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        noise_scheduler_params: Optional[dict] = None,
+        schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         x_device = next(iter(x.values())).device
-
-        si_sampler_config = _get_inference_defaults_section(model, "stochastic_interpolant_sampler")
-        if noise_scheduler_params is not None:
-            si_sampler_config.update(noise_scheduler_params)
-        if sampler_params is not None:
-            si_sampler_config.update(sampler_params)
-
-        actual_sampler = si_sampler_config.pop("sampler", "heun")
-        num_steps = si_sampler_config.pop("num_steps", _get_default_num_steps(model))
 
         source = model.build_sampling_source(
             x,
@@ -256,7 +260,13 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         )
         y_init = source
 
-        times = unit_time_grid(int(num_steps), device=x_device, dtype=torch.float64)
+        time_schedule = _build_inference_schedule(
+            model,
+            TIME_SCHEDULES,
+            "stochastic-interpolant schedule",
+            schedule_params,
+            x_device,
+        )
 
         def transport_fn(
             x_arg: dict[str, torch.Tensor],
@@ -274,15 +284,17 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
                 grid_shard_sizes=shard_sizes_arg,
             )
 
-        if actual_sampler not in transport_samplers.VECTOR_FIELD_SAMPLERS:
-            raise ValueError(f"Unknown stochastic-interpolant sampler: {actual_sampler}")
-
-        sampler_cls = transport_samplers.VECTOR_FIELD_SAMPLERS[actual_sampler]
-        sampler_instance = sampler_cls(dtype=times.dtype, **si_sampler_config)
+        sampler_instance = _build_inference_sampler(
+            model,
+            transport_samplers.VECTOR_FIELD_SAMPLERS,
+            "stochastic-interpolant sampler",
+            sampler_params,
+            time_schedule.dtype,
+        )
         return sampler_instance.sample(
             x,
             y_init,
-            times,
+            time_schedule,
             transport_fn,
             model_comm_group,
             grid_shard_sizes=grid_shard_sizes,

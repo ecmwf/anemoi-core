@@ -12,21 +12,21 @@ from collections.abc import Callable
 import pytest
 import torch
 
-from anemoi.models.samplers.transport_samplers import DEFAULT_FINAL_SIGMA_EPS
-from anemoi.models.samplers.transport_samplers import CosineScheduler
 from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
 from anemoi.models.samplers.transport_samplers import EDMHeunSampler
-from anemoi.models.samplers.transport_samplers import ExponentialScheduler
-from anemoi.models.samplers.transport_samplers import KarrasScheduler
-from anemoi.models.samplers.transport_samplers import LinearScheduler
-from anemoi.models.samplers.transport_samplers import NoiseScheduler
 from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
+from anemoi.models.transport.schedules import DEFAULT_FINAL_SIGMA_EPS
+from anemoi.models.transport.schedules import CosineSigmaSchedule
+from anemoi.models.transport.schedules import ExponentialSigmaSchedule
+from anemoi.models.transport.schedules import KarrasSigmaSchedule
+from anemoi.models.transport.schedules import LinearSigmaSchedule
+from anemoi.models.transport.schedules import SigmaSchedule
 
 DATASET_NAME = "test_dataset"
 
 
-class DummyScheduler(NoiseScheduler):
+class DummySigmaSchedule(SigmaSchedule):
     def __init__(
         self,
         schedule: torch.Tensor,
@@ -46,9 +46,7 @@ class DummyScheduler(NoiseScheduler):
         self,
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
     ) -> torch.Tensor:
-        del kwargs
         return self.schedule.to(device=device, dtype=dtype_compute)
 
 
@@ -81,14 +79,14 @@ def make_inputs(dtype: torch.dtype = torch.float32) -> tuple[dict[str, torch.Ten
 @pytest.mark.parametrize(
     ("scheduler_cls", "scheduler_kwargs"),
     [
-        (KarrasScheduler, {"rho": 7.0}),
-        (LinearScheduler, {}),
-        (CosineScheduler, {"s": 0.008}),
-        (ExponentialScheduler, {}),
+        (KarrasSigmaSchedule, {"rho": 7.0}),
+        (LinearSigmaSchedule, {}),
+        (CosineSigmaSchedule, {"s": 0.008}),
+        (ExponentialSigmaSchedule, {}),
     ],
 )
-def test_builtin_noise_schedulers_return_descending_schedule_with_final_zero(
-    scheduler_cls: type[NoiseScheduler],
+def test_builtin_sigma_schedules_return_descending_schedule_with_final_zero(
+    scheduler_cls: type[SigmaSchedule],
     scheduler_kwargs: dict[str, float],
 ) -> None:
     scheduler = scheduler_cls(
@@ -111,8 +109,8 @@ def test_builtin_noise_schedulers_return_descending_schedule_with_final_zero(
     assert prefinal[-1].item() == pytest.approx(0.02)
 
 
-def test_karras_scheduler_single_step_returns_sigma_max_and_final_zero() -> None:
-    sigmas = KarrasScheduler(
+def test_karras_sigma_schedule_single_step_returns_sigma_max_and_final_zero() -> None:
+    sigmas = KarrasSigmaSchedule(
         sigma_max=1.0,
         sigma_min=0.02,
         num_steps=1,
@@ -125,15 +123,15 @@ def test_karras_scheduler_single_step_returns_sigma_max_and_final_zero() -> None
 @pytest.mark.parametrize(
     ("scheduler_cls", "scheduler_kwargs"),
     [
-        (KarrasScheduler, {"rho": 7.0}),
-        (LinearScheduler, {}),
-        (CosineScheduler, {"s": 0.008}),
-        (ExponentialScheduler, {}),
+        (KarrasSigmaSchedule, {"rho": 7.0}),
+        (LinearSigmaSchedule, {}),
+        (CosineSigmaSchedule, {"s": 0.008}),
+        (ExponentialSigmaSchedule, {}),
     ],
 )
 @pytest.mark.parametrize("sigma_min", [0.0, -0.1])
-def test_builtin_noise_schedulers_require_strictly_positive_sigma_min(
-    scheduler_cls: type[NoiseScheduler],
+def test_builtin_sigma_schedules_require_strictly_positive_sigma_min(
+    scheduler_cls: type[SigmaSchedule],
     scheduler_kwargs: dict[str, float],
     sigma_min: float,
 ) -> None:
@@ -146,20 +144,20 @@ def test_builtin_noise_schedulers_require_strictly_positive_sigma_min(
         )
 
 
-def test_noise_scheduler_validates_common_constructor_contract() -> None:
+def test_sigma_schedule_validates_common_constructor_contract() -> None:
     with pytest.raises(ValueError, match="sigma_max must be strictly positive"):
-        DummyScheduler(torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.0)
+        DummySigmaSchedule(torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.0)
 
     with pytest.raises(ValueError, match="sigma_max must be greater than or equal to sigma_min"):
-        DummyScheduler(torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.05, sigma_min=0.1)
+        DummySigmaSchedule(torch.linspace(1.0, 0.1, 4), num_steps=4, sigma_max=0.05, sigma_min=0.1)
 
     with pytest.raises(ValueError, match="num_steps must be at least 1"):
-        DummyScheduler(torch.empty(0), num_steps=0)
+        DummySigmaSchedule(torch.empty(0), num_steps=0)
 
 
-def test_noise_scheduler_appends_exact_final_zero_when_missing() -> None:
+def test_sigma_schedule_appends_exact_final_zero_when_missing() -> None:
     base_schedule = torch.linspace(1.0, 0.1, 4, dtype=torch.float64)
-    scheduler = DummyScheduler(base_schedule, num_steps=4)
+    scheduler = DummySigmaSchedule(base_schedule, num_steps=4)
 
     sigmas = scheduler.get_schedule(dtype_compute=torch.float64)
 
@@ -167,9 +165,9 @@ def test_noise_scheduler_appends_exact_final_zero_when_missing() -> None:
     assert sigmas[-1].item() == 0.0
 
 
-def test_noise_scheduler_canonicalizes_explicit_near_zero_final_value_to_zero() -> None:
+def test_sigma_schedule_canonicalizes_explicit_near_zero_final_value_to_zero() -> None:
     final_sigma = DEFAULT_FINAL_SIGMA_EPS / 10
-    scheduler = DummyScheduler(
+    scheduler = DummySigmaSchedule(
         torch.tensor([1.0, 0.7, 0.4, 0.1, final_sigma], dtype=torch.float64),
         num_steps=4,
     )
@@ -180,8 +178,8 @@ def test_noise_scheduler_canonicalizes_explicit_near_zero_final_value_to_zero() 
     assert sigmas[-1].item() == 0.0
 
 
-def test_noise_scheduler_rejects_explicit_final_value_outside_tolerance() -> None:
-    scheduler = DummyScheduler(
+def test_sigma_schedule_rejects_explicit_final_value_outside_tolerance() -> None:
+    scheduler = DummySigmaSchedule(
         torch.tensor([1.0, 0.7, 0.4, 0.1, DEFAULT_FINAL_SIGMA_EPS * 10], dtype=torch.float64),
         num_steps=4,
     )

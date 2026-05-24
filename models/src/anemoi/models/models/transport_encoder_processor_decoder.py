@@ -65,9 +65,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
         self.transport_source = TransportSourceBuilder.from_config(transport_params)
+        self.training_condition = dict(transport_params.get("training_condition", {}))
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
-        self.inference_defaults = transport_params.inference_defaults
+        self.inference_defaults = transport_params.get("inference_defaults", {})
         self.transport_model_objective = get_transport_model_objective(transport_params.objective)
 
         super().__init__(
@@ -517,7 +518,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
-        noise_scheduler_params: Optional[dict] = None,
+        schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         pre_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
@@ -539,8 +540,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
-        noise_scheduler_params : Optional[dict]
-            Dictionary of noise scheduler parameters (schedule_type, sigma_max, sigma_min, rho, num_steps, etc.)
+        schedule_params : Optional[dict]
+            Dictionary of sampling schedule parameters (schedule_type, num_steps, etc.)
             These will override the default values from inference_defaults.
         sampler_params : Optional[dict]
             Dictionary of sampler parameters (sampler, S_churn, S_min, S_max, S_noise, etc.)
@@ -582,7 +583,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 x,
                 model_comm_group,
                 grid_shard_sizes=grid_shard_sizes,
-                noise_scheduler_params=noise_scheduler_params,
+                schedule_params=schedule_params,
                 sampler_params=sampler_params,
                 **kwargs,
             )
@@ -609,7 +610,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        noise_scheduler_params: Optional[dict] = None,
+        schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -619,7 +620,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             x,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
-            noise_scheduler_params=noise_scheduler_params,
+            schedule_params=schedule_params,
             sampler_params=sampler_params,
             **kwargs,
         )

@@ -678,7 +678,7 @@ def stochastic_interpolant_config(
     params=[
         pytest.param(
             [
-                "model=graphtransformer_transport",
+                "model=graphtransformer_transport_edm",
                 "training=multi_transport",
                 "training.prediction_mode=state",
                 "training.transport_objective=edm_diffusion",
@@ -687,7 +687,7 @@ def stochastic_interpolant_config(
         ),
         pytest.param(
             [
-                "model=graphtransformer_transport_tendency",
+                "model=graphtransformer_transport_tendency_edm",
                 "training=multi_transport",
                 "training.prediction_mode=tendency",
                 "training.transport_objective=edm_diffusion",
