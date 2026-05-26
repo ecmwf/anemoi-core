@@ -253,7 +253,9 @@ class AnemoiTrainer:
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(self.last_checkpoint, **kwargs, strict=False)
+                model = model_task.load_from_checkpoint(
+                    self.last_checkpoint, **kwargs, strict=False, map_location="cpu"
+                )
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
