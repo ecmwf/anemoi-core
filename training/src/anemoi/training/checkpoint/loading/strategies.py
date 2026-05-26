@@ -66,6 +66,8 @@ class WeightsOnlyLoader(LoadingStrategy):
         CheckpointContext
             Context with weights loaded and optimizer/scheduler cleared.
         """
+        self._refresh_checkpoint_processors(context)
+
         state_dict = self._extract_state_dict(context)
 
         try:
@@ -123,6 +125,8 @@ class TransferLearningLoader(LoadingStrategy):
             Context with compatible weights loaded and metadata updated.
         """
         from anemoi.training.checkpoint.loading.utils import filter_state_dict
+
+        self._refresh_checkpoint_processors(context)
 
         source_state = self._extract_state_dict(context)
         target_state = context.model.state_dict()
@@ -191,6 +195,8 @@ class WarmStartLoader(LoadingStrategy):
             Context with all training state restored.
         """
         from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
+
+        self._refresh_checkpoint_processors(context)
 
         # 1. Model weights (strict — exact match expected for resume)
         state_dict = self._extract_state_dict(context)
