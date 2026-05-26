@@ -28,8 +28,20 @@ class WeightsOnlyLoader(LoadingStrategy):
 
     This is the simplest loading strategy: extract the state dict from
     checkpoint data, load it into the model, and explicitly discard any
-    optimizer/scheduler state. Useful for cold-start scenarios where you
-    want pretrained weights but a fresh optimizer.
+    optimizer/scheduler state.
+
+    Behavior
+    --------
+    - Loads weights with ``strict=self.strict`` (default ``False``)
+    - Clears ``context.optimizer`` and ``context.scheduler`` to ``None``
+    - **Leaves training-progress metadata untouched** (``epoch``,
+      ``global_step``, ``best_metric``). A prior pipeline stage that set
+      these values keeps them. If you want explicit zero-reset semantics,
+      use :class:`ColdStartLoader`.
+
+    Composes naturally inside larger pipelines where another stage owns
+    training-progress state. For top-level "fresh training from pretrained
+    weights" use :class:`ColdStartLoader` instead.
 
     Parameters
     ----------
@@ -238,9 +250,20 @@ class WarmStartLoader(LoadingStrategy):
 class ColdStartLoader(WeightsOnlyLoader):
     """Start fresh training from pretrained weights.
 
-    Loads model weights (via WeightsOnlyLoader), then explicitly resets
-    training state (epoch, global_step) to zero and records the
-    pretrained checkpoint source. Optimizer and scheduler are discarded.
+    Extends :class:`WeightsOnlyLoader` with the explicit "fresh training"
+    contract that top-level callers usually want.
+
+    When to use
+    -----------
+    Use this when you want pretrained weights but a clean training run:
+    ``epoch`` and ``global_step`` are reset to zero regardless of what
+    was in the checkpoint, and ``pretrained_from`` is recorded in metadata
+    so downstream tooling (loggers, checkpoint naming) can trace the
+    provenance.
+
+    Use :class:`WeightsOnlyLoader` directly when composing pipelines where
+    another stage owns training-progress metadata and you do not want to
+    overwrite it.
     """
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
