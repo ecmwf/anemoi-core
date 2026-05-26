@@ -55,7 +55,7 @@ class SpectralDimensionScaler(BaseScaler):
         n_spectral_modes : int
             Number of total wavenumbers (L dimension).
         n_spectral : int, optional
-            Total number of spectral modes (length of the flattened spectral dimension). Default to n_spectral_modes
+            Total number of spectral modes (length of the spectral dimension). Default to n_spectral_modes
         norm : str, optional
             Type of normalization to apply.
             Options are None, unit-sum, unit-mean and l1.

@@ -564,27 +564,6 @@ def test_lead_time_decay_loss_scaling(
 # ---------------------------------------------------------------------------
 # Spectral dimension scaler tests
 # ---------------------------------------------------------------------------
-"""Test that spectral scalers can be reshaped into a (L, M) matrix.
-
-The flat scaler of length ``n_spectral_modes ** 2`` should unflatten to
-``(n_spectral_modes, n_spectral_modes)`` where each *row* corresponds to a
-single total wavenumber and columns correspond to different orders.
-
-The spectral transform output (x_spec) has shape ``[..., L, M, variables]``
-with entries in dimensions ``(-3, -2)`` above the diagonal zeroed out::
-
-    [ X, 0, 0, 0]
-    [ X, X, 0, 0]
-    [ X, X, X, 0]
-    [ X, X, X, X]
-
-These spatial/spectral dims are then flattened into one "mode" axis::
-
-    [ X, 0, 0, 0, X, X, 0, 0, X, X, X, 0, X, X, X, X]
-
-The scaler operates on this flattened representation and can be unflattened
-back to ``(L, M)`` for inspection.
-"""
 
 
 @pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
