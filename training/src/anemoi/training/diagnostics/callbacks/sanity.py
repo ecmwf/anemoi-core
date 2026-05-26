@@ -11,6 +11,8 @@ import logging
 
 import pytorch_lightning as pl
 
+from anemoi.transform.variables import Variable
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -53,6 +55,41 @@ class CheckVariableOrder(pl.callbacks.Callback):
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
         self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._check_variable_units(trainer, pl_module)
+
+    @staticmethod
+    def _check_variable_units(trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Check unit compatibility between checkpoint and current dataset.
+
+        Raises
+        ------
+        ValueError
+            If variables have incompatible units between checkpoint and dataset.
+        """
+        ckpt_variables_metadata = getattr(pl_module, "_ckpt_variables_metadata", None)
+
+        if ckpt_variables_metadata is None:
+            LOGGER.warning(
+                "Checkpoint does not contain variables_metadata. Skipping unit compatibility check.",
+            )
+            return
+
+        for dataset_name, ckpt_var_meta in ckpt_variables_metadata.items():
+            dataset_metadata = trainer.datamodule.metadata.get(dataset_name, {})
+            ds_var_meta = dataset_metadata.get("variables_metadata")
+
+            if ds_var_meta is None:
+                LOGGER.warning(
+                    "Dataset '%s' does not contain variables_metadata. "
+                    "Skipping unit compatibility check for this dataset.",
+                    dataset_name,
+                )
+                continue
+
+            ckpt_vars = {name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items()}
+            ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
+
+            Variable.check_compatibility(ckpt_vars, ds_vars)
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.

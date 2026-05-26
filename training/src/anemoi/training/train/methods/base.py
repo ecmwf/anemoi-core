@@ -460,6 +460,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
 
+        # Extract variables_metadata for unit compatibility check
+        metadata_inference = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
+        ckpt_variables_metadata = {}
+        for dataset_name in self._ckpt_model_name_to_index:
+            ds_inference = metadata_inference.get(dataset_name, {})
+            vm = ds_inference.get("variables_metadata")
+            if vm is not None:
+                ckpt_variables_metadata[dataset_name] = vm
+        self._ckpt_variables_metadata = ckpt_variables_metadata or None
+
     def _update_scaler_for_dataset(
         self,
         name: str,

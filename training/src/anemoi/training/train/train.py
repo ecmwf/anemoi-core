@@ -45,7 +45,6 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
-from anemoi.training.utils.checkpoint import _extract_variables_metadata_from_checkpoint
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -309,17 +308,18 @@ class AnemoiTrainer(ABC):
 
     def _validate_transfer_learning_units(
         self,
+        model: pl.LightningModule,
     ) -> None:
         """Validate variable unit compatibility between checkpoint and current dataset.
 
-        Loads the variables_metadata from the checkpoint's metadata_inference and compares
-        units with the current dataset's variables_metadata. Only variables present in both
-        are checked.
+        Compares the variables_metadata stored on the model (extracted from the checkpoint
+        during loading) with the current dataset's variables_metadata. For shared datasets,
+        the variables are assumed to match exactly.
 
         Raises
         ------
         ValueError
-            If any common variable has incompatible units between checkpoint and dataset.
+            If variables have incompatible units between checkpoint and dataset.
 
         Warns
         -----
@@ -328,10 +328,7 @@ class AnemoiTrainer(ABC):
         """
         from anemoi.transform.variables import Variable
 
-        if self.last_checkpoint is None:
-            return
-
-        ckpt_variables_metadata = _extract_variables_metadata_from_checkpoint(self.last_checkpoint)
+        ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
 
         if ckpt_variables_metadata is None:
             LOGGER.warning(
@@ -351,13 +348,8 @@ class AnemoiTrainer(ABC):
                 )
                 continue
 
-            # Only check variables present in both
-            common_variables = set(ckpt_var_meta.keys()) & set(ds_var_meta.keys())
-            if not common_variables:
-                continue
-
-            ckpt_vars = {name: Variable.from_dict(name, ckpt_var_meta[name]) for name in common_variables}
-            ds_vars = {name: Variable.from_dict(name, ds_var_meta[name]) for name in common_variables}
+            ckpt_vars = {name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items()}
+            ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
 
             try:
                 Variable.check_compatibility(ckpt_vars, ds_vars)
@@ -382,9 +374,6 @@ class AnemoiTrainer(ABC):
         training_method = get_class(self.config.training.training_method)
         model = training_method(**kwargs)  # Task -> pl.LightningModule
 
-        # Validate variable units between checkpoint and current dataset (before loading weights)
-        self._validate_transfer_learning_units()
-
         # Load the model weights
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
@@ -406,6 +395,8 @@ class AnemoiTrainer(ABC):
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
             self._validate_transfer_learning_datasets(model)
+            # Validate variable units between checkpoint and current dataset
+            self._validate_transfer_learning_units(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
