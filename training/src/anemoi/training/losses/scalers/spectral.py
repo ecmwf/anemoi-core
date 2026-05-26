@@ -87,14 +87,12 @@ class SpectralDimensionScaler(BaseScaler):
 class LinearSpectralDimensionScaler(SpectralDimensionScaler):
     """Linearly increasing weights with total wavenumber.
 
-    For SHT output of shape ``(L, M)`` flattened to ``L * M``, with
-    ``L == M == n_spectral_modes``, the weight at flat index *i* is based on
-    the total wavenumber ``L = i // n_spectral_modes``:
+    For spectral transform output of shape ``(L, M)`` reduced to to ``L``, with
+    ``L = n_spectral_modes``, the weight at for total wavenumber *i* is:
 
-        weight[i] = slope * (i // n_spectral_modes) + y_intercept
+        weight[i] = slope * i + y_intercept
 
-    This means all orders within the same total wavenumber receive the same
-    weight.  With the default parameters (``slope=1/n_spectral_modes``,
+    With the default parameters (``slope=1/n_spectral_modes``,
     ``y_intercept=1/n_spectral_modes``), higher wavenumbers receive higher
     weights.
     """

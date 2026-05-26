@@ -168,14 +168,13 @@ class SpectralLoss(BaseLoss):
 
 class PowerSpectrumLoss(SpectralLoss):
     r"""L2 loss on power-per-wavenumber in spectral domain.
-    TODO(@Sara): find a better name. possibly configurable power spectrum/PSD loss?
 
-    This loss compares the *power spectrum*
+    This loss compares the power spectrum
     (energy per total wavenumber) of prediction and target.
 
     **Steps:**
 
-    1. Apply the spectral transform (e.g. SHT) to both ``pred`` and ``target``.
+    1. Apply the spectral transform to ``pred`` and ``target``.
        The result has shape ``(..., L, M, variables)`` where ``L`` is the total
        wavenumber and ``M`` is the zonal wavenumber.
     2. Compute the power per total wavenumber by summing ``|coeff|²`` over the
@@ -191,7 +190,7 @@ class PowerSpectrumLoss(SpectralLoss):
 
     .. math::
         \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
-                                   - \sum_m |F_{lm}|^2 \bigr)^2
+                                   - \sum_m |F_{lm}|^2 \bigr)^2 .
     """
 
     def forward(
@@ -390,10 +389,11 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
+        _assert_spectral_scalers_compatible(self.scaler, crps.size(TensorDim.GRID))
         scaled = self.scale(
             crps,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(scaled, squash=squash, group=group)
