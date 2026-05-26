@@ -88,10 +88,11 @@ class _KDTreeAreaMaskBackend:
         self._kdtree: cKDTree | None = None
 
     def fit(self, coords_rad: torch.Tensor) -> None:
-
-        if coords_rad.device == "cpu":
+        if coords_rad.device != "cpu":
             LOGGER.debug("%s: Moving reference coordinates from %s to cpu", self.__class__.__name__, coords_rad.device)
-        self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.cpu().numpy())
+            coords_rad = coords_rad.cpu()
+
+        self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.numpy())
         self._kdtree = cKDTree(self._ref_vectors)
 
     def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
