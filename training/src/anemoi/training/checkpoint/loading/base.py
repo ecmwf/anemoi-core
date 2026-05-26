@@ -14,6 +14,28 @@ model. Different strategies handle different use cases: warm start
 (resume training), cold start (fresh optimiser), transfer learning
 (partial weight loading), and weights-only loading.
 
+Wiring to the Lightning trainer
+-------------------------------
+This module defines the strategy contract; the actual
+trainer-to-pipeline wiring (replacing the legacy
+``model.load_from_checkpoint(...)`` call site and the
+``AnemoiLightningModule.on_load_checkpoint`` hook) lands in Phase 3 of
+the checkpoint refactor (Issue #495 / CheckpointManager). Until that
+ships, strategies still need to perform every step that
+``on_load_checkpoint`` did, so that an integration that simply forwards
+the loaded model into Lightning does not silently regress. Two helper
+methods bridge that gap:
+
+- ``_apply_format_migrations`` mirrors the
+  ``chunking_fix_migration(checkpoint)`` call in
+  ``anemoi.training.utils.checkpoint.transfer_learning_loading``.
+- ``_refresh_checkpoint_processors`` mirrors
+  ``AnemoiLightningModule._update_checkpoint_state_dict_for_load`` and
+  honours ``config.training.update_ds_stats_on_ckpt_load``.
+
+Both run at the top of every strategy's ``process()`` so the loaded
+state dict matches what the legacy path would have produced.
+
 Example
 -------
 >>> class WeightsOnlyLoader(LoadingStrategy):
@@ -298,9 +320,19 @@ class LoadingStrategy(PipelineStage):
     def _mark_weights_loaded(self, model: nn.Module) -> None:
         """Mark the model as having successfully loaded weights.
 
-        Sets ``model.weights_initialized = True`` which downstream
-        components can check to determine whether checkpoint weights
-        have been applied.
+        Sets ``model.weights_initialized = True``. Downstream checks
+        (``anemoi.training.checkpoint.pipeline.CheckpointPipeline`` at
+        line 501 and ``anemoi.training.checkpoint.validation`` at
+        line 297) read this attribute to decide whether to warn that
+        a source stage ran without a loading strategy ever applying
+        weights.
+
+        The flag is a **hint, not a gate**: ``getattr(model,
+        "weights_initialized", False)`` is treated as "no loading
+        strategy executed" and only triggers a warning log. Code that
+        forgets to call ``_mark_weights_loaded`` still runs, it just
+        produces noisier output. Tests that bypass strategies entirely
+        therefore do not need to set the attribute.
 
         Parameters
         ----------
