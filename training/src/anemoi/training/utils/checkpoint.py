@@ -22,7 +22,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
@@ -44,7 +44,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
-    module = BaseGraphModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
+    module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 
     metadata = dict(**model.metadata)
@@ -106,8 +106,25 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Load the filtered st-ate_dict into the model
     model.load_state_dict(state_dict, strict=False)
-    # Needed for data indices check
-    model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+
+    ## Needed for data indices check
+    data_indices = checkpoint["hyper_parameters"]["data_indices"]
+
+    if isinstance(data_indices, dict):
+        # New format: data_indices is always a dict in new code (even for single-dataset)
+        LOGGER.info("Loading checkpoint with datasets: %s", list(data_indices.keys()))
+        model._ckpt_model_name_to_index = {
+            dataset_name: indices.name_to_index for dataset_name, indices in data_indices.items()
+        }
+    else:
+        # Old format: data_indices is a single IndexCollection object (not dict)
+        msg = (
+            f"Checkpoint at '{ckpt_path}' was created with an older version of anemoi-core "
+            "that does not support multi-dataset training. This checkpoint is incompatible "
+            "with transfer learning in the current version."
+        )
+        raise TypeError(msg)
+
     return model
 
 

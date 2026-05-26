@@ -29,15 +29,22 @@ from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import load_graph_from_file
+from anemoi.graphs.create import validate_loaded_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -79,6 +86,18 @@ class AnemoiTrainer(ABC):
 
         self.config = convert_to_omegaconf(self.config)
 
+        # Optionally override the torch default BLAS backend.
+        _blas_backend = self.config.training.get("preferred_blas_backend", None)
+        if _blas_backend:
+            if hasattr(torch.backends.cuda, "preferred_blas_library"):
+                torch.backends.cuda.preferred_blas_library(_blas_backend)
+                LOGGER.info("BLAS backend forced to %r (config.training.preferred_blas_backend)", _blas_backend)
+            else:
+                LOGGER.warning(
+                    "config.training.preferred_blas_backend=%r ignored: API unavailable in this PyTorch version",
+                    _blas_backend,
+                )
+
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
@@ -105,9 +124,14 @@ class AnemoiTrainer(ABC):
         self._log_information()
 
     @cached_property
+    def task(self) -> BaseTask:
+        """Task instance."""
+        return instantiate(self.config.task)
+
+    @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(self.config)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.task)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -143,38 +167,6 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = self.config.graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
     @cached_property
     @abstractmethod
     def profiler(self) -> None:
@@ -182,36 +174,144 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
+    def _dataset_names(self) -> list[str]:
+        """Dataset names derived from the dataloader training config."""
+        return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
+
+    @cached_property
+    def graph_data(self) -> HeteroData:
+        """Graph data built or loaded for the current trainer config."""
+        dataset_names = self._dataset_names
+        graph_cfg = self.config.graph
+        graph_path = self.config.system.input.graph
+        save_path = Path(graph_path) if graph_path else None
+
+        # Existing-graph mode: path given but no nodes/edges defined — load as-is.
+        is_existing = (
+            graph_path is not None
+            and not graph_cfg.overwrite
+            and not getattr(graph_cfg, "nodes", None)
+            and not getattr(graph_cfg, "edges", None)
+        )
+        if is_existing:
+            if not save_path.exists():
+                msg = f"Existing graph file not found: {save_path}"
+                raise FileNotFoundError(msg)
+            graph = load_graph_from_file(save_path)
+            fused = uses_fused_dataset_graph(graph, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            validate_loaded_graph(graph, required)
+            return graph
+
+        # Build mode: expand config and create graph via GraphCreator.
+        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
+
+        if not uses_fused_dataset_graph(graph_cfg, dataset_names):
+            if len(dataset_names) == 1:
+                dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+                dataset_name = dataset_names[0]
+                reader_cfg = dataset_configs[dataset_name].dataset_config
+                dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
+                if dataset_path is None:
+                    msg = f"Dataset source is None for dataset '{dataset_name}'."
+                    raise ValueError(msg)
+                data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
+                if (
+                    data_node_cfg is not None
+                    and hasattr(data_node_cfg, "node_builder")
+                    and hasattr(data_node_cfg.node_builder, "dataset")
+                ):
+                    data_node_cfg.node_builder.dataset = dataset_path
+            else:
+                msg = (
+                    "Multiple datasets require a fused graph config with one node group per dataset. "
+                    f"Received datasets {dataset_names} but graph nodes "
+                    f"{list(graph_cfg.nodes.keys())}."
+                )
+                raise ValueError(msg)
+
+        # Try loading existing saved graph before rebuilding.
+        overwrite = graph_cfg.get("overwrite", False)
+        if save_path and save_path.exists() and not overwrite:
+            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            graph = load_graph_from_file(save_path)
+            validate_loaded_graph(graph, required)
+            return graph
+
+        return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
+
+    def _validate_transfer_learning_datasets(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate dataset compatibility between checkpoint and config for transfer learning.
+
+        This method handles multiple transfer learning scenarios when loading a checkpoint:
+
+        - **Scenario 1**: Exact match (checkpoint datasets == config datasets)
+          All weights are loaded normally.
+
+        - **Scenario 2**: Adding datasets (config has datasets not in checkpoint)
+          Missing datasets will have their encoder & decoder weights randomly initialized.
+          The shared processor weights are still transferred.
+
+        - **Scenario 3**: Removing datasets (checkpoint has datasets not in config)
+          Extra datasets in checkpoint are ignored (their weights are not loaded).
+
+        - **Scenario 4**: Swapping datasets (combination of scenarios 2 and 3)
+          Some datasets are added (randomly initialized), others are removed (ignored).
+
+        -----
+        - Logs warnings for datasets that are missing or ignored
+        - Logs info summary of loaded and initialized datasets
+        - The shared processor weights are always transferred
+        """
+        loaded_datasets = []
+        initialized_datasets = []
+
+        # Check if checkpoint has multi-dataset format
+        if not isinstance(model._ckpt_model_name_to_index, dict):
+            return
+
+        # Validate each dataset in current config against checkpoint
+        for dataset_name, data_indices in self.data_indices.items():
+            if dataset_name in model._ckpt_model_name_to_index:
+                # Dataset found in checkpoint - validate variables match
+                ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                loaded_datasets.append(dataset_name)
+            else:
+                # Dataset not found in checkpoint - will be randomly initialized
+                LOGGER.warning(
+                    "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
+                    dataset_name,
+                )
+                initialized_datasets.append(dataset_name)
+
+        # Check for datasets in checkpoint but not in config
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        if ignored_datasets:
+            for ignored_dataset in ignored_datasets:
+                LOGGER.warning(
+                    "Dataset '%s' found in checkpoint but NOT in config. "
+                    "Encoder & decoder weights for '%s' will be ignored.",
+                    ignored_dataset,
+                    ignored_dataset,
+                )
+
+        # Log summary of what was loaded
+        if loaded_datasets:
+            LOGGER.info("Successfully loaded weights for datasets: %s", loaded_datasets)
+        if initialized_datasets:
+            LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
-
         kwargs = {
             "config": self.config,
+            "task": self.task,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -220,8 +320,8 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model_task = get_class(self.config.training.model_task)
-        model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
+        training_method = get_class(self.config.training.training_method)
+        model = training_method(**kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -234,7 +334,7 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(
+                model = training_method.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
@@ -242,9 +342,8 @@ class AnemoiTrainer(ABC):
                 )
 
             model.data_indices = self.data_indices
-            # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            # Validate data indices between checkpoint and current config
+            self._validate_transfer_learning_datasets(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
@@ -315,7 +414,15 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config)
+        callbacks_context = CallbacksContext(
+            diagnostics=self.config.diagnostics,
+            checkpoints_output=self.config.system.output.checkpoints,
+            plots_output=self.config.system.output.plots,
+            wandb_enabled=getattr(getattr(self.config.diagnostics.log, "wandb", None), "enabled", False),
+            mlflow_enabled=getattr(getattr(self.config.diagnostics.log, "mlflow", None), "enabled", False),
+            weight_averaging_config=getattr(self.config.training, "weight_averaging", None),
+        )
+        return get_callbacks(callbacks_context)
 
     @cached_property
     def metadata(self) -> dict:
@@ -324,7 +431,7 @@ class AnemoiTrainer(ABC):
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
-            "task": None,  # will be populated in BaseGraphModule
+            "task": None,  # will be populated in BaseTrainingModule
         }
         # Store metadata needed in inference in a separate dict "metadata_inference"
         # For each group, we add a dictionary with:
@@ -338,6 +445,7 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
+            "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
@@ -346,6 +454,7 @@ class AnemoiTrainer(ABC):
             "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
+        self.task.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
     @cached_property
@@ -429,17 +538,18 @@ class AnemoiTrainer(ABC):
         )
         LOGGER.info(
             "Effective learning rate: %.3e",
-            int(total_number_of_model_instances) * self.config.training.lr.rate,
+            int(total_number_of_model_instances) * self.config.training.optimization.lr,
         )
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
+            lr_scheduler_cfg = getattr(self.config.training.optimization, "lr_scheduler", None)
             LOGGER.info(
                 "Training limits: max_epochs=%d, max_steps=%d. "
                 "Training will stop when either limit is reached first. "
-                "Learning rate scheduler will run for %d steps.",
+                "Learning rate scheduler: %s.",
                 self.config.training.max_epochs,
                 self.config.training.max_steps,
-                self.config.training.lr.iterations,
+                lr_scheduler_cfg or "none",
             )
 
     def _get_server2server_lineage(self) -> None:

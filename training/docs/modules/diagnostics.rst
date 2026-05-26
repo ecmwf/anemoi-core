@@ -37,7 +37,8 @@ callback, any other kwarg is passed to the callback's constructor.
 
    callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-      rollout: ${dataloader.validation_rollout}
+      rollout:
+      - ${dataloader.validation_rollout}
       frequency: 20
 
 Plotting callbacks are configured in a similar way, but they are
@@ -58,9 +59,23 @@ background thread, allowing plotting tasks to be offloaded to worker
 threads. This setup keeps the main thread responsive, handling
 plot-related tasks asynchronously and efficiently in the background.
 
+Plot adapter compatibility
+==========================
+
+Task-specific plot adapters normalize output handling so plotting
+callbacks can use the same interface across task types:
+
+- forecaster tasks use ``ForecasterPlotAdapter``;
+- autoencoder tasks use ``AutoencoderPlotAdapter``;
+- temporal downscaler tasks use ``TemporalDownscalerPlotAdapter``.
+
+These adapters rely on the shared task ``_step`` return format
+``(loss, metrics, predictions)`` where ``predictions`` is always a list
+of dataset-keyed dictionaries.
+
 **Focus Area**
 
-Plotting callbacks (such as ``PlotSample``, ``PlotLoss``, and ``LongRolloutPlots``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
+Plotting callbacks (such as ``PlotSample`` and ``PlotLoss``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
 
 * **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
 * **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
@@ -88,6 +103,19 @@ performance and detail.
    produce smoother-looking plots due to the aggregation of data points.
 * If `datashader` is set to False, matplotlib.scatter is used, which provides
    sharper and more detailed visuals but may be slower for large datasets.
+
+**Projection**
+
+Plotting callbacks also support ``config.diagnostics.plot.projection_kind``
+to control the map projection used for geospatial figures.
+
+- ``equirectangular`` (default): regular axes, no Cartopy dependency.
+- ``lambert_conformal``: regional Lambert Conformal projection fitted to
+  the plotted latitude/longitude domain (requires Cartopy).
+
+When ``datashader: True`` is enabled, plotting is forced to
+``equirectangular`` because Datashader rendering does not support
+Cartopy transforms.
 
 **Note** - this asynchronous behaviour is only available for the
 plotting callbacks.
@@ -122,6 +150,7 @@ which is recommended for interactive terminals and
    plot:
       asynchronous: True # Whether to plot asynchronously
       datashader: True # Whether to use datashader for plotting (faster)
+      projection_kind: equirectangular # or lambert_conformal (requires Cartopy)
       frequency: # Frequency of the plotting
       batch: 750
       epoch: 5
@@ -160,7 +189,6 @@ which is recommended for interactive terminals and
             sample_idx: ${diagnostics.plot.sample_idx}
             per_sample : 6
             parameters: ${diagnostics.plot.parameters}
-            output_steps: ${training.multistep_output}
 
 Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:
@@ -181,6 +209,11 @@ also possible for users to add callbacks using the same structure:
    :show-inheritance:
 
 .. automodule:: anemoi.training.diagnostics.callbacks.plot
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.plot_adapter
    :members:
    :no-undoc-members:
    :show-inheritance:

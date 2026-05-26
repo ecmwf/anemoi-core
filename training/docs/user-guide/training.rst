@@ -41,7 +41,8 @@ To configure the training:
    the command line interface.
 -  Replace all "missing" values in config `???` with the appropriate
    values for your training setup.
--  Choose the model task and model type from :ref:`Models <Models>`.
+-  Choose the task (see :doc:`tasks`), training method
+   (see :doc:`training-methods`), and model type from :ref:`Models <Models>`.
 -  Optionally, customize additional components like the normaliser or
    optimization strategies to enhance model performance.
 
@@ -80,6 +81,34 @@ To set up experiment tracking:
    command line interface.
 #. Start the experiment tracking server and monitor your training runs
    in real-time.
+
+****************************
+ Reproducibility and Seeding
+****************************
+
+Anemoi Training seeds the random number generators used during training
+to control stochastic parts of a run. This helps repeat experiments, but
+it does not guarantee exact reproducibility across hardware, software
+versions, or distributed executions because floating-point numerics and
+parallel reductions can still differ slightly.
+
+-  Set ``ANEMOI_BASE_SEED`` explicitly if you want a fixed base seed for
+   a run.
+-  If ``ANEMOI_BASE_SEED`` is not set, Anemoi Training uses
+   ``SLURM_JOB_ID`` when running inside a SLURM job.
+-  If neither value is available, Anemoi Training falls back to ``42``.
+
+When restarting from a checkpoint, avoid reusing the same manual base
+seed. Checkpoints restore model and optimizer state, but not the
+random-number streams used during training and data loading, so the same
+seed can replay the same sequence of random choices after restart. This
+is usually not a concern when the seed comes from ``SLURM_JOB_ID``,
+because a new SLURM job normally gets a new job ID.
+
+Seeds below ``1000`` are multiplied by ``1000`` before use, so a
+fallback seed of ``42`` appears in logs as an effective seed of
+``42000``. This normalized base seed is logged during training and
+stored in checkpoint metadata.
 
 Step 5: Execute Training
 ========================
@@ -175,8 +204,12 @@ requirements.
  Dataloader
 ************
 
-The dataloader file contains information on how many workers are used,
-and the batch size. ``num_workers`` relates to model parallelisation.
+Anemoi uses the Dataloader class from `PyTorch`_ to load the input batches for the upcoming training steps. The data is asynchronously prefetched from a filesystem and stored in CPU memory until a batch is required by the GPU.
+
+.. _PyTorch: https://docs.pytorch.org/docs/stable/data.html#single-and-multi-process-data-loading
+
+The dataloader config exposes configuration options of the underlying pytorch dataloaders. By default, ``num_workers`` dataloading processes are created for every GPU. Each worker will prefetch a maximum of ``prefetch_factor`` batches.
+
 
 .. code:: yaml
 
@@ -194,6 +227,28 @@ and the batch size. ``num_workers`` relates to model parallelisation.
       validation: null
       test: 20
 
+   prefetch_factor:
+      training: 2
+      validation: 2
+      test: 2
+
+   multiprocessing_context: None
+
+
+Determining the optimal number of workers depends on your system and training setup. More dataloader processes can increase your filesystem bandwidth, at the cost of higher CPU memory usage. Higher source resolutions and larger batch sizes increase the memory required per worker. When the available CPU memory is not sufficient for the requested number of workers, your training run will crash. One can use the `anemoi dataloader benchmark`_ to quickly test different setups and determine the optimal configuration for your training setup.
+
+.. _anemoi dataloader benchmark: https://github.com/ecmwf/anemoi-core/pull/818
+
+The config entry ``limit_batches`` is an option to limit the number of batches loaded by the dataloader. This can be useful for testing and debugging purposes, allowing you to run a shorter training loop without processing the entire dataset.
+
+The config entry ``multiprocessing_context`` allows you to specify the multiprocessing context for the dataloader workers.
+The default is ``None``, which uses the default context for your system. Typically, there is no need to change this, but in some cases, such as when using certain libraries or running on specific platforms, you may need to set it to ``fork`` or ``spawn`` to avoid issues with multiprocessing.
+
+.. note::
+
+   When training directly from S3, it is required to use the ``spawn`` multiprocessing context to avoid issues with the underlying library used to access S3.
+
+
 The dataloader file also describes the files used for training,
 validation and testing, and the datasplit For machine learning, we
 separate our data into: training data, used to train the model;
@@ -208,7 +263,9 @@ time of each section of the data.
 This can be given as a full date, or just the year, or year and month,
 in these cases the first of the month/first of the year is used.
 
-We also define the dataset used and the frequency. These can be set
+We also define the dataset reader options under ``dataset_config``.
+This includes the dataset source (``dataset``) and optional keys such as
+``frequency``, ``drop``, ``select`` and ``statistics``. These can be set
 separately for the different training/validation/test parts of the
 dataset `your_dataset_name`, for example, if test data is stored in a
 different file.
@@ -223,6 +280,10 @@ variables, the items listed in drop/select may vary.
 
 .. literalinclude:: yaml/dataloader.yaml
    :language: yaml
+
+
+
+
 
 ***************
  Normalisation
@@ -294,8 +355,6 @@ performed. The user can specify the imputer for each dataset by setting
 ensuring that the variable value over NaNs becomes zero after mean-std
 normalisation. Another option is to impute with a given constant.
 
-The ``DynamicInputImputer`` can be used for fields where the NaN
-locations change in time.
 
 .. code:: yaml
 
@@ -331,10 +390,14 @@ properties of the forecast and is configured for each dataset separately.
 
 For ensemble training, the following loss functions are available:
 
--  **Kernel CRPS**: Continuous Ranked Probability Score using kernel
-   density estimation
--  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
-   the number of ensemble members used.
+-  **CRPS**: Kernel Continuous Ranked Probability Score for ensemble
+   predictions. ``alpha=0`` gives standard CRPS, ``alpha=1`` gives fair
+   CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
+   The default ``alpha: 0.95`` combines 5% standard CRPS with 95% fair
+   CRPS. The ``naive`` backend uses a simple loop over unordered
+   ensemble-member pairs and avoids materializing the full pairwise tensor.
+   The ``stable`` backend materializes pairwise tensors and uses the
+   numerically stable all-pairs formulation.
 
 .. _loss-function-scaling:
 
@@ -560,3 +623,66 @@ frozen and only the encoder and decoder will be trained:
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
 adapt to a new task while keeping others (e.g., the processor) fixed.
+
+****************************
+ Precision and BLAS Backend
+****************************
+
+Anemoi supports Lightning's native mixed precision training as well as the option to select a preferred BLAS backend
+to be used by PyTorch. For example:
+
+.. code:: yaml
+
+   training:
+      precision: bf16-mixed
+      preferred_blas_backend: "cublas"
+
+Note that both entries are optional and can be left unspecified. The default precision is ``f16-mixed`` while the BLAS backend will fall back to the
+default selection of PyTorch.
+
+******************
+ Weight Averaging
+******************
+
+Weight averaging is a technique to improve model generalization by
+averaging model weights during training. Anemoi Training supports weight
+averaging methods through PyTorch Lightning callbacks:
+
+-  **Exponential Moving Average (EMA)**: Maintains an exponential moving
+      average of model weights, which can lead to smoother convergence
+      and better generalization.
+
+      .. code:: yaml
+
+         weight_averaging:
+            _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+            decay: 0.999
+
+      The ``decay`` parameter (typically between 0.99 and 0.9999)
+      controls the smoothing factor. Higher values give more weight to
+      historical weights, resulting in a more stable average. By
+      default, the decay is set to 0.999.
+
+-  **Stochastic Weight Averaging (SWA)**: Averages weights from multiple
+      points along the training trajectory, typically resulting in wider
+      optima and improved generalization.
+
+      .. code:: yaml
+
+         weight_averaging:
+            _target_: pytorch_lightning.callbacks.StochasticWeightAveraging
+            swa_lrs: 1.e-4
+
+      The ``swa_lrs`` parameter specifies the learning rate to use
+      during the SWA phase. By default, the learning rate is set to
+      1e-4. Additional parameters can be configured as described in the
+      [PyTorch Lightning
+      documentation](https://lightning.ai/docs/pytorch/latest/api/lightning.pytorch.callbacks.StochasticWeightAveraging.html#lightning.pytorch.callbacks.StochasticWeightAveraging)
+
+By default, weight averaging is disabled. To explicitly disable it or to
+override a parent configuration, set ``weight_averaging`` to null.
+
+.. note::
+
+   Weight averaging is only supported in PyTorch Lightning 2.6 and later
+   versions.

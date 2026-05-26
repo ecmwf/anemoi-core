@@ -1,4 +1,5 @@
 asynchronous: True # Whether to plot asynchronously
+projection_kind: equirectangular  # or lambert_conformal (requires cartopy)
 datashader: True # Choose which technique to use for plotting
 frequency: # Frequency of the plotting
   batch: 750
@@ -66,7 +67,6 @@ callbacks:
     sample_idx: ${diagnostics.plot.sample_idx}
     per_sample : 6
     parameters: ${diagnostics.plot.parameters}
-    output_steps: ${training.multistep_output}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     #Defining the accumulation levels for precipitation related fields and the colormap
     accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
@@ -87,7 +87,6 @@ callbacks:
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
     dataset_names: ["era5"]
     sample_idx: ${diagnostics.plot.sample_idx}
-    output_steps: ${training.multistep_output}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
     parameters:
@@ -99,7 +98,6 @@ callbacks:
   - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
     dataset_names: ["cerra"]
     sample_idx: ${diagnostics.plot.sample_idx}
-    output_steps: ${training.multistep_output}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
     parameters:
@@ -119,7 +117,6 @@ callbacks:
     - v_850
     - 2t
     - tp
-    output_steps: ${training.multistep_output}
     every_n_batches: ${diagnostics.plot.frequency.batch}
     #Defining the accumulation levels for precipitation related fields and the colormap
     accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm

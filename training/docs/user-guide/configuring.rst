@@ -25,7 +25,8 @@ settings at the top as follows:
    - system: example
    - graph: multi_scale
    - model: gnn
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 These are group configs for each section. The options after the defaults
@@ -78,41 +79,31 @@ You can also change the GPU count to whatever you have available:
 This matches the interface of the underlying defaults in Anemoi
 training.
 
-*********************************
- Multistep Input and Output
-*********************************
+***********************************
+ Dataloader Breaking Change
+***********************************
 
-Anemoi uses ``multistep_input`` and ``multistep_output`` to control how many time
-steps the model injests as input and predicts in a single forward pass.
+Starting from the current configuration schema, dataloader dataset reader
+settings must be provided under ``dataset_config``.
 
--  ``multistep_input``: number of past timesteps provided as model input. When set to 1, only `t_{0}` is used.
--  ``multistep_output``: number of future timesteps predicted per forward pass.
-
-Set ``multistep_output`` greater than 1 to enable multi-output prediction. This
-reduces the number of forward passes needed to cover a rollout horizon.
-
-Example:
+Use:
 
 .. code:: yaml
 
-   training:
-      multistep_input: 3
-      multistep_output: 2
-      rollout:
-         start: 1
-         max: 4
+   dataloader:
+      training:
+         datasets:
+            your_dataset_name:
+               dataset_config:
+                  dataset: ${system.input.dataset}
+                  frequency: ${data.frequency}
+                  drop: []
+               start: 1985
+               end: 2020
 
-Rollout behavior:
+Do not use the previous ``dataset``/``name`` nesting. Configuration
+validation now enforces the new layout.
 
--  When time indices are inferred, the dataloader uses
-   ``multistep_input + rollout * multistep_output`` to determine how many timesteps
-   to load.
--  If ``multistep_output`` is greater than ``multistep_input``, only the most recent
-   ``multistep_input`` outputs are fed into the next rollout step.
-
-Notes:
-
--  Autoencoders require ``multistep_input == multistep_output``.
 
 Example Config File
 ===================
@@ -142,7 +133,8 @@ match the dataset you provide.
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
    config_validation: True
@@ -157,10 +149,6 @@ match the dataset you provide.
       input:
          dataset: datset-n320-2019-2021-6h.zarr
          graph: first_graph_n320.pt
-
-   training:
-      lr:
-         rate: 1e-3
 
 When we save this `example.yaml` file, we can run the training with this
 config using:
@@ -184,13 +172,13 @@ or override individual config entries such as
 
 .. code:: bash
 
-   anemoi-training train diagnostics.plot.enabled=False
+   anemoi-training train system.hardware.num_gpus_per_node=1
 
 or combine everything together
 
 .. code:: bash
 
-   anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
+   anemoi-training train --config-name=debug.yaml model=transformer system.hardware.num_gpus_per_node=1
 
 .. _config-validation:
 
@@ -261,7 +249,8 @@ correctly indented (in this case the `diagnostics.log` field):
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -313,7 +302,8 @@ typos that might still need to be fixed manually:
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -374,7 +364,8 @@ let's say we have a config with a union of schemas like the following:
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 

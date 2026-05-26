@@ -5,6 +5,7 @@ defaults:
 - system: example
 - graph: limited_area
 - model: graphtransformer
+- task: forecaster
 - training: lam
 - _self_
 
@@ -30,7 +31,6 @@ dataloader:
 model:
   output_mask:
     _target_: anemoi.training.utils.masks.Boolean1DMask
-    nodes_name: ${graph.data}
     attribute_name: cutout_mask
 system:
   input:

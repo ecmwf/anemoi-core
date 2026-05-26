@@ -15,6 +15,7 @@ def get_base_seed(base_seed_env: str | None = None) -> int:
     """Gets the base seed from the environment variables.
 
     Option to manually set a seed via export ANEMOI_BASE_SEED=xxx in job script
+    If no supported environment variable is set, falls back to 42.
 
     Parameters
     ----------
@@ -37,7 +38,8 @@ def get_base_seed(base_seed_env: str | None = None) -> int:
             base_seed = int(os.environ.get(env_var))
             break
 
-    assert base_seed is not None, f"Base seed not found in environment variables {env_var_list}"
+    if base_seed is None:
+        base_seed = 42
 
     base_seed_threshold = 1000
     if base_seed < base_seed_threshold:

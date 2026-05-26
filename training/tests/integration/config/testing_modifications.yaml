@@ -4,11 +4,11 @@ dataloader:
     training: 2
     validation: 2
   batch_size:
-    training: 2
-    validation: 2
+    training: 3
+    validation: 3
   limit_batches:
-    training: 2
-    validation: 2
+    training: 3
+    validation: 3
 
 diagnostics:
   log:
@@ -38,6 +38,13 @@ graph:
 
 model:
   num_channels: 16
+  processor:
+    num_layers: 2
+    num_chunks: 2
 
 training:
   max_epochs: 2
+  optimization:
+    lr: 10e-5
+    lr_scheduler:
+      warmup_t: 1
