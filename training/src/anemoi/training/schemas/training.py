@@ -252,7 +252,6 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
-    combined = "anemoi.training.losses.combined.CombinedLoss"
     fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
     lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
@@ -297,6 +296,8 @@ class MultiscaleConfigDiskSchema(BaseModel):
 
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None]
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner per_scale_loss)."
 
 
 class MultiscaleConfigOnTheFlySchema(BaseModel):
@@ -338,6 +339,24 @@ class MultiScaleLossSchema(BaseModel):
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
 
+    @field_validator("per_scale_loss", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
+
+        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
+        """
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
+
     @model_validator(mode="after")
     def check_no_deprecated_mixed_with_on_the_fly(self) -> Self:
         if isinstance(self.multiscale_config, MultiscaleConfigOnTheFlySchema) and (
@@ -350,6 +369,36 @@ class MultiScaleLossSchema(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+
+class TimeAggregateLossWrapperSchema(BaseModel):
+    """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
+
+    target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
+    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
+    "Time aggregation operations to apply over the time dimension before computing the loss."
+    loss_fn: BaseLossSchema | CRPSSchema
+    "Inner loss function applied to each time-aggregated output."
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+
+    @field_validator("loss_fn", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
+
+        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
+        """
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -387,18 +436,32 @@ def _loss_discriminator(v: Any) -> str:
         return "spectral"
     if target == "anemoi.training.losses.HuberLoss":
         return "huber"
+    if target == "anemoi.training.losses.aggregate.TimeAggregateLossWrapper":
+        return "time_aggregate"
     return "base"
 
 
 class CombinedLossSchema(BaseLossSchema):
+    """Schema for CombinedLoss.
+
+    Top-level ``scalers`` act as defaults for sub-losses that don't specify their own.
+    Sub-losses that explicitly set ``scalers`` override the parent value.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
+    "CombinedLoss target."
+    scalers: list[str] = Field(default_factory=list, example=["variable"])
+    "Optional top-level scalers propagated to sub-losses that don't define their own."
     losses: list[
         Annotated[
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
-            | Annotated[MultiScaleLossSchema, Tag("multiscale")],
+            | Annotated[MultiScaleLossSchema, Tag("multiscale")]
+            | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
         ]
     ] = Field(min_length=1)
@@ -406,24 +469,35 @@ class CombinedLossSchema(BaseLossSchema):
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
 
-    @field_validator("losses", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def add_empty_scalers(cls, losses: Any) -> Any:
-        """Add empty scalers to loss functions that use them (not MultiscaleLossWrapper)."""
-        from omegaconf import OmegaConf
+    def propagate_scalers_to_children(cls, data: Any) -> Any:
+        """Propagate parent scalers to sub-losses that don't specify their own.
+
+        MultiscaleLossWrapper is skipped because it manages scalers via per_scale_loss.
+        """
+        from omegaconf import DictConfig
         from omegaconf.omegaconf import open_dict
 
+        parent_scalers = data.get("scalers", []) if hasattr(data, "get") else []
+        if not parent_scalers:
+            return data
+
+        losses = data.get("losses", []) if hasattr(data, "get") else []
         for loss in losses:
-            target = loss.get("_target_", "") if hasattr(loss, "get") else ""
+            if not hasattr(loss, "get"):
+                continue
+            target = loss.get("_target_", "")
+            # MultiscaleLossWrapper manages scalers on per_scale_loss, not at top level
             if "MultiscaleLossWrapper" in str(target):
                 continue
             if "scalers" not in loss:
-                if OmegaConf.is_config(loss):
+                if isinstance(loss, DictConfig):
                     with open_dict(loss):
-                        loss["scalers"] = []
-                else:
-                    loss["scalers"] = []
-        return losses
+                        loss["scalers"] = list(parent_scalers)
+                elif isinstance(loss, dict):
+                    loss["scalers"] = list(parent_scalers)
+        return data
 
     @model_validator(mode="after")
     def check_length_of_weights_and_losses(self) -> Self:
@@ -441,6 +515,7 @@ LossSchemas = Annotated[
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
+    | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),
 ]
@@ -514,10 +589,10 @@ class BaseTrainingSchema(BaseModel):
     "Config for gradient clipping."
     strategy: StrategySchemas
     "Strategy to use."
-    weight_averaging: WeightAveragingSchema | None = Field(default=None)
-    "Config for weight averaging (SWA or EMA). Set to null to disable."
     training_loss: DatasetDict[LossSchemas]
     "Training loss configuration."
+    weight_averaging: WeightAveragingSchema | None = Field(default=None)
+    "Config for weight averaging (SWA or EMA). Set to null to disable."
     loss_gradient_scaling: bool = False
     "Dynamic rescaling of the loss gradient. Not yet tested."
     scalers: DatasetDict[dict[str, ScalerSchema]]
