@@ -20,7 +20,7 @@ from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import PowerSpectrumLoss  # SpectralL2Loss
+from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import WeightedMSELoss
@@ -465,7 +465,7 @@ def test_octahedral_sht_loss() -> None:
     loss = get_loss_function(
         DictConfig(
             {
-                "_target_": "anemoi.training.losses.spectral.SpectralL2Loss",
+                "_target_": "anemoi.training.losses.spectral.PowerSpectrumLoss",
                 "transform": "octahedral_sht",
                 "nlat": nlat,
                 "scalers": [],
