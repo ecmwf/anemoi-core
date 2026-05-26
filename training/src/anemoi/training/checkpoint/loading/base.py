@@ -132,16 +132,24 @@ class LoadingStrategy(PipelineStage):
     ) -> None:
         """Restore Anemoi-specific metadata from checkpoint onto model.
 
-        Sets ``model._ckpt_model_name_to_index`` from the checkpoint's
-        ``hyper_parameters.data_indices.name_to_index``, which maps
-        variable names to their tensor indices. This mapping is required
-        by diagnostics callbacks (e.g. sanity checks) and downstream
-        inference.
+        Sets ``model._ckpt_model_name_to_index``, which maps variable names
+        to their tensor indices and is consumed by diagnostics callbacks
+        (sanity checks) and downstream inference.
 
-        The attribute is set unconditionally when available in the
-        checkpoint data — fresh models do **not** have it by default
-        (it is only set during checkpoint loading in the existing
-        codebase via ``on_load_checkpoint``).
+        Two checkpoint shapes are supported, matching the production hook
+        in ``anemoi.training.train.tasks.base.AnemoiLightningModule.on_load_checkpoint``:
+
+        - **Multi-dataset** (current): ``hyper_parameters["data_indices"]``
+          is a ``dict[str, IndexCollection]`` keyed by dataset name. The
+          attribute becomes ``{dataset_name: ic.name_to_index for ...}``,
+          which matches what ``DiagnosticsSanityCallback`` indexes by
+          dataset name.
+        - **Single-dataset** (legacy): ``hyper_parameters["data_indices"]``
+          is a single ``IndexCollection`` with a ``.name_to_index``
+          attribute. The flat mapping is assigned unchanged.
+
+        If neither shape is recognised, the attribute is left alone and
+        a debug message is logged.
 
         Parameters
         ----------
@@ -152,14 +160,30 @@ class LoadingStrategy(PipelineStage):
         """
         hyper_params = checkpoint_data.get("hyper_parameters", {})
         data_indices = hyper_params.get("data_indices")
+
+        if isinstance(data_indices, dict) and data_indices:
+            try:
+                model._ckpt_model_name_to_index = {name: ic.name_to_index for name, ic in data_indices.items()}
+            except AttributeError:
+                LOGGER.debug(
+                    "Multi-dataset data_indices entries lack .name_to_index; skipping restoration",
+                )
+                return
+            LOGGER.debug(
+                "Restored multi-dataset _ckpt_model_name_to_index for %d datasets",
+                len(data_indices),
+            )
+            return
+
         if data_indices is not None and hasattr(data_indices, "name_to_index"):
             model._ckpt_model_name_to_index = data_indices.name_to_index
-            LOGGER.debug("Restored _ckpt_model_name_to_index from checkpoint hyper_parameters")
-        else:
-            LOGGER.debug(
-                "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
-                "skipping _ckpt_model_name_to_index restoration",
-            )
+            LOGGER.debug("Restored single-dataset _ckpt_model_name_to_index from checkpoint hyper_parameters")
+            return
+
+        LOGGER.debug(
+            "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
+            "skipping _ckpt_model_name_to_index restoration",
+        )
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
         """Mark the model as having successfully loaded weights.
