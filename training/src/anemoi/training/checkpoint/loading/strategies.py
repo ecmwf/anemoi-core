@@ -200,20 +200,37 @@ class WarmStartLoader(LoadingStrategy):
         elif context.scheduler is not None:
             LOGGER.warning("Checkpoint has no 'lr_schedulers'; scheduler state not restored")
 
-        # 4. Training progress
-        context.metadata["epoch"] = context.checkpoint_data.get("epoch", 0)
-        context.metadata["global_step"] = context.checkpoint_data.get("global_step", 0)
+        # 4. Training progress (via TrainingState for type-safe extraction)
+        from anemoi.training.checkpoint.loading.state import TrainingState
+
+        state = TrainingState.from_checkpoint(context.checkpoint_data)
+        state.apply_to(context)
+
+        LOGGER.debug("Restored epoch=%d", state.epoch)
+        LOGGER.debug("Restored global_step=%d", state.global_step)
+        if state.best_metric is not None:
+            LOGGER.debug("Restored best_metric=%s", state.best_metric)
+        if state.metrics_history:
+            LOGGER.debug("Restored metrics_history with %d entries", len(state.metrics_history))
 
         # 5. Anemoi metadata
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
         context.metadata["loading_strategy"] = "warm_start"
 
-        LOGGER.info(
-            "Warm start: restored full state (epoch=%d, global_step=%d)",
-            context.metadata["epoch"],
-            context.metadata["global_step"],
-        )
+        if state.best_metric is not None:
+            LOGGER.info(
+                "Warm start: restored full state (epoch=%d, global_step=%d, best_metric=%s)",
+                state.epoch,
+                state.global_step,
+                state.best_metric,
+            )
+        else:
+            LOGGER.info(
+                "Warm start: restored full state (epoch=%d, global_step=%d)",
+                state.epoch,
+                state.global_step,
+            )
 
         return context
 

@@ -14,7 +14,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
+from typing import TYPE_CHECKING
 from typing import Any
+
+if TYPE_CHECKING:
+    from anemoi.training.checkpoint.base import CheckpointContext
 
 
 @dataclass
@@ -70,3 +74,22 @@ class TrainingState:
             Dictionary representation of the training state
         """
         return asdict(self)
+
+    def apply_to(self, context: CheckpointContext) -> None:
+        """Copy state fields into ``context.metadata`` for downstream consumers.
+
+        Always writes ``epoch`` and ``global_step``. ``best_metric`` and
+        ``metrics_history`` are written only when populated, so empty
+        defaults do not overwrite anything a prior stage may have set.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context whose ``metadata`` dict will be updated in place
+        """
+        context.metadata["epoch"] = self.epoch
+        context.metadata["global_step"] = self.global_step
+        if self.best_metric is not None:
+            context.metadata["best_metric"] = self.best_metric
+        if self.metrics_history:
+            context.metadata["metrics_history"] = self.metrics_history
