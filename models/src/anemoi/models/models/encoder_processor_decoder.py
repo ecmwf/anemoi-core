@@ -9,12 +9,14 @@
 
 
 import logging
+import random
 from typing import Optional
 
 import einops
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
+from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
@@ -28,6 +30,64 @@ from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+
+class GatedLatentFusion(nn.Module):
+    """Gated fusion block to incorporate an encoder latent into the running latent.
+
+    NOT attention — there is no Q/K/V or softmax over positions. Both tensors
+    are already node-aligned (same N nodes, same D dims), so we use concatenation
+    + MLP instead. This is simpler, cheaper, and sufficient for pointwise fusion.
+
+    Uses a learned sigmoid gate (Flamingo-style) so the block can learn to be a
+    no-op — critical for optional encoders that may be absent at inference time.
+
+    Applied independently per node with full weight sharing across all nodes.
+    Parameter count depends only on hidden_dim (D), not on number of nodes (N).
+
+    Both inputs and output have shape [N, D].
+    """
+
+    def __init__(self, hidden_dim: int) -> None:
+        super().__init__()
+        # Separate norms because latent (running accumulation) and encoder output
+        # (fresh from encoder) have different scale/distribution.
+        self.norm_latent = nn.LayerNorm(hidden_dim)
+        self.norm_input = nn.LayerNorm(hidden_dim)
+        # Gate: single linear → sigmoid. Only needs to learn "how much" to incorporate.
+        self.to_gate = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Sigmoid(),
+        )
+        # Value: 2-layer MLP with SiLU. Needs more capacity to learn "what" to add.
+        self.to_value = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+    def forward(self, latent: Tensor, encoder_output: Tensor) -> Tensor:
+        """Fold encoder_output into the running latent.
+
+        Parameters
+        ----------
+        latent : Tensor
+            Running latent of shape [N, D].
+        encoder_output : Tensor
+            Encoder output to incorporate, shape [N, D].
+
+        Returns
+        -------
+        Tensor
+            Updated latent of shape [N, D].
+        """
+        ln = self.norm_latent(latent)
+        en = self.norm_input(encoder_output)
+        combined = torch.cat([ln, en], dim=-1)  # [N, 2D]
+        gate = self.to_gate(combined)  # [N, D] in (0, 1)
+        value = self.to_value(combined)  # [N, D]
+        # Gated residual: if gate → 0, block is a no-op (safe for missing encoders)
+        return latent + gate * value
 
 
 class AnemoiModelEncProcDec(BaseGraphModel):
@@ -72,6 +132,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
+
+        # Gated fusion blocks to combine encoder latents sequentially (Perceiver-style flow).
+        # The first dataset's latent is the initial latent; each subsequent encoder
+        # has its own fusion block. Optional encoders can be skipped — gate learns no-op.
+        # One block per encoder (~1.3M params each for D=512).
+        self.latent_fusion = torch.nn.ModuleDict()
+        for dataset_name in self.dataset_names[1:]:
+            self.latent_fusion[dataset_name] = GatedLatentFusion(
+                hidden_dim=self.num_channels,
+            )
+
+        # Encoder/decoder dropout: during training, randomly drop non-primary encoders
+        # (and their corresponding decoders) so the model learns to function without them.
+        # This forces the primary encoder to carry sufficient information on its own.
+        self.encoder_dropout_p = model_config.model.get("encoder_dropout", 0.5)
 
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
@@ -209,6 +284,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         dataset_names = list(x.keys())
 
+        # During training, randomly mark non-primary encoders as dropped.
+        # Dropped encoders still run (to keep static_graph=True for DDP) but
+        # their contribution is multiplied by 0 → zero gradients, zero loss.
+        if self.training and self.encoder_dropout_p > 0:
+            dropped_names = {
+                name for name in dataset_names
+                if name != self.dataset_names[0] and random.random() < self.encoder_dropout_p
+            }
+        else:
+            dropped_names = set()
+
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
@@ -220,7 +306,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
-        # Process each dataset through its corresponding encoder
+        # Process each active dataset through its corresponding encoder
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
@@ -254,7 +340,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edges=enc_edge_shard_sizes,
             )
 
-            # Encoder for this dataset
+            # Encoder for this dataset — always run to keep graph static for DDP.
+            # If dropped, multiply latent by 0 so it contributes nothing.
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_size,
@@ -264,11 +351,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
+            if dataset_name in dropped_names:
+                x_latent = x_latent * 0  # zero out but keep in graph
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
-        # Combine all dataset latents
-        x_latent = sum(dataset_latents.values())
+        # Fuse encoder latents sequentially: first encoder is the base latent,
+        # subsequent encoders are folded in via gated fusion blocks (no attention).
+        # Dropped encoders contribute zero latent — fusion block still runs (static graph)
+        # but learns no-op. Order randomized during training to prevent order dependence.
+        x_latent = dataset_latents[self.dataset_names[0]]
+        remaining = [name for name in self.dataset_names[1:] if name in dataset_latents]
+        if self.training:
+            random.shuffle(remaining)
+        for dataset_name in remaining:
+            x_latent = self.latent_fusion[dataset_name](x_latent, dataset_latents[dataset_name])
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
@@ -289,7 +386,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if self.latent_skip:
             x_latent = x_latent_proc + x_latent
 
-        # Decoder
+        # Decoder — always run all decoders (static graph for DDP).
+        # For dropped datasets, decoder still runs but output is replaced with input
+        # so the loss sees zero tendency → no gradient signal for that dataset.
         x_out_dict = {}
         for dataset_name in dataset_names:
             # Compute decoder edges using updated latent representation
@@ -313,9 +412,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
 
-            x_out_dict[dataset_name] = self._assemble_output(
+            x_out = self._assemble_output(
                 x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
             )
+
+            if dataset_name in dropped_names:
+                # Replace output with NaN — NaN-aware loss will ignore this dataset.
+                # Multiply by 0 and add NaN to keep decoder params in the graph.
+                x_out = x_out * 0 + float("nan")
+                # TODO: use the loss that can handle NaNs
+
+            x_out_dict[dataset_name] = x_out
 
         return x_out_dict
 
