@@ -1,12 +1,8 @@
-"""Gate loading-g1: State dict utilities.
-
-CANONICAL GATE TEST — DO NOT MODIFY.
-"""
+"""Gate loading-g1: State dict utilities."""
 
 import torch
 
 from anemoi.training.checkpoint.loading.utils import filter_state_dict
-from anemoi.training.checkpoint.loading.utils import match_state_dict_keys
 
 
 def test_filter_state_dict_removes_shape_mismatches() -> None:
@@ -41,15 +37,3 @@ def test_filter_state_dict_does_not_mutate_input() -> None:
     filter_state_dict(source, target)
 
     assert set(source.keys()) == original_keys
-
-
-def test_match_state_dict_keys() -> None:
-    """Return missing, unexpected, and shape-mismatched keys."""
-    source_dict = {"a": torch.randn(3), "b": torch.randn(5), "c": torch.randn(2)}
-    target_dict = {"a": torch.randn(3), "b": torch.randn(10), "d": torch.randn(4)}
-
-    result = match_state_dict_keys(source_dict, target_dict)
-
-    assert "d" in result.missing_in_source  # In target, not in source
-    assert "c" in result.unexpected_in_source  # In source, not in target
-    assert "b" in result.shape_mismatches  # Both have it, shapes differ

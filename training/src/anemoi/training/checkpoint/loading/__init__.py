@@ -14,7 +14,6 @@ from .state import TrainingState
 from .strategies import ColdStartLoader
 from .strategies import WeightsOnlyLoader
 from .utils import filter_state_dict
-from .utils import match_state_dict_keys
 
 __all__ = [
     "ColdStartLoader",
@@ -22,5 +21,4 @@ __all__ = [
     "TrainingState",
     "WeightsOnlyLoader",
     "filter_state_dict",
-    "match_state_dict_keys",
 ]
