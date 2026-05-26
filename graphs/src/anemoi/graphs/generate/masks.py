@@ -33,7 +33,6 @@ class _TorchClusterAreaMaskBackend:
         LOGGER.debug("Initializing %s on device %s", self.__class__.__name__, device)
         self.device = device
         self._ref_vectors: torch.Tensor | None = None
-        self._kdtree: cKDTree | None = None
 
     def fit(self, coords_rad: torch.Tensor) -> None:
 
