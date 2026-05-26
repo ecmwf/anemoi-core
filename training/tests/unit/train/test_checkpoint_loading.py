@@ -400,7 +400,7 @@ def test_validate_transfer_learning_units_incompatible() -> None:
     )
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
 
-    with pytest.raises(ValueError, match="Units are not compatible"):
+    with pytest.raises(ValueError, match="dataset 'era5'"):
         AnemoiTrainer._validate_transfer_learning_units(trainer, model)
 
 
@@ -463,7 +463,7 @@ def test_validate_transfer_learning_units_mismatched_variables_raises() -> None:
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
 
     # Should raise: variable sets differ (u10 missing, v10 added)
-    with pytest.raises(ValueError, match="Variable compatibility"):
+    with pytest.raises(ValueError, match="dataset 'era5'"):
         AnemoiTrainer._validate_transfer_learning_units(trainer, model)
 
 

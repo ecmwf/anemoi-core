@@ -326,36 +326,10 @@ class AnemoiTrainer(ABC):
         If variables_metadata is missing from either the checkpoint or the current dataset,
         a warning is logged and the check is skipped.
         """
-        from anemoi.transform.variables import Variable
+        from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
         ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
-
-        if ckpt_variables_metadata is None:
-            LOGGER.warning(
-                "Checkpoint does not contain variables_metadata. Skipping unit compatibility check.",
-            )
-            return
-
-        for dataset_name, ckpt_var_meta in ckpt_variables_metadata.items():
-            dataset_metadata = self.datamodule.metadata.get(dataset_name, {})
-            ds_var_meta = dataset_metadata.get("variables_metadata")
-
-            if ds_var_meta is None:
-                LOGGER.warning(
-                    "Dataset '%s' does not contain variables_metadata. "
-                    "Skipping unit compatibility check for this dataset.",
-                    dataset_name,
-                )
-                continue
-
-            ckpt_vars = {name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items()}
-            ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
-
-            try:
-                Variable.check_compatibility(ckpt_vars, ds_vars)
-            except ValueError:
-                LOGGER.exception("Incompatible units found between checkpoint and dataset '%s'", dataset_name)
-                raise
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
 
     @cached_property
     def model(self) -> pl.LightningModule:
