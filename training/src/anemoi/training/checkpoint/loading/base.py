@@ -233,24 +233,18 @@ class LoadingStrategy(PipelineStage):
         if context.checkpoint_data is None:
             return
 
-        try:
-            from anemoi.models.migrations.scripts.chunking_fix import migrate as chunking_fix_migration
-        except ImportError:
-            try:
-                import importlib
-
-                module = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix")
-                chunking_fix_migration = module.migrate
-            except (ImportError, AttributeError):
-                LOGGER.debug("chunking_fix migration not available in anemoi-models; skipping")
-                return
+        migrate = _load_chunking_fix_migration()
+        if migrate is None:
+            return
 
         try:
-            context.checkpoint_data = chunking_fix_migration(context.checkpoint_data)
-        except (KeyError, AttributeError, TypeError) as exc:
-            # Migration only applies to checkpoints with the full anemoi training
-            # hyper_parameters.config tree. Test fixtures and minimally-built
-            # checkpoints (e.g. raw state_dict saves) lack it — treat as no-op.
+            context.checkpoint_data = migrate(context.checkpoint_data)
+        except (KeyError, AttributeError) as exc:
+            # The migration reads ``ckpt["hyper_parameters"]["config"].model.processor``
+            # unconditionally. Test fixtures and minimally-built checkpoints (raw
+            # state_dict saves) lack that tree, so the access raises KeyError or
+            # AttributeError. Treat that as "nothing to migrate" rather than
+            # propagating — real anemoi checkpoints always have the structure.
             LOGGER.debug("chunking_fix migration skipped: checkpoint shape incomplete (%s)", exc)
             return
         LOGGER.debug("Applied chunking_fix migration to checkpoint data")
@@ -341,6 +335,35 @@ class LoadingStrategy(PipelineStage):
         """
         model.weights_initialized = True
         LOGGER.debug("Marked model weights as initialized")
+
+
+# Candidate import paths for the chunking_fix migration. Try the friendly
+# dotted name first; fall back to the timestamp-prefixed module that
+# anemoi-models currently ships
+# (``1762857428_chunking_fix``, also used by the legacy import in
+# ``anemoi.training.utils.checkpoint``). Both resolve to a ``migrate(ckpt)``
+# function. Returns ``None`` if neither path is importable, which we treat
+# as "no chunking migration needed in this anemoi-models version".
+_CHUNKING_FIX_PATHS = (
+    "anemoi.models.migrations.scripts.chunking_fix",
+    "anemoi.models.migrations.scripts.1762857428_chunking_fix",
+)
+
+
+def _load_chunking_fix_migration() -> Any | None:
+    """Resolve the ``chunking_fix.migrate`` callable from anemoi-models, or ``None``."""
+    import importlib
+
+    for path in _CHUNKING_FIX_PATHS:
+        try:
+            module = importlib.import_module(path)
+        except ImportError:
+            continue
+        migrate = getattr(module, "migrate", None)
+        if migrate is not None:
+            return migrate
+    LOGGER.debug("chunking_fix migration not available in anemoi-models; skipping")
+    return None
 
 
 def _drop_keys_with_prefix(state_dict: dict[str, Any], prefixes: tuple[str, ...]) -> int:

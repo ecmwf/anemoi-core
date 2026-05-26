@@ -102,3 +102,46 @@ def test_missing_migration_module_is_noop(monkeypatch: pytest.MonkeyPatch) -> No
     WeightsOnlyLoader()._apply_format_migrations(context)
 
     assert context.checkpoint_data is ckpt
+
+
+def test_incomplete_checkpoint_shape_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A migration that raises KeyError on minimal test checkpoints → no-op."""
+
+    def raising_migrate(_ckpt: dict) -> dict:
+        msg = "hyper_parameters"
+        raise KeyError(msg)
+
+    module = types.ModuleType("anemoi.models.migrations.scripts.chunking_fix")
+    module.migrate = raising_migrate
+    monkeypatch.setitem(sys.modules, "anemoi.models.migrations.scripts.chunking_fix", module)
+
+    ckpt = _ckpt()
+    context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
+
+    # Should not propagate the KeyError
+    WeightsOnlyLoader()._apply_format_migrations(context)
+
+    # And should leave the checkpoint untouched
+    assert context.checkpoint_data is ckpt
+
+
+def test_unexpected_migration_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the migration raises something other than KeyError/AttributeError, surface it.
+
+    We deliberately narrowed the except clause: TypeError (signature mismatch in
+    the migration itself, for instance) should not be silently swallowed.
+    """
+
+    def buggy_migrate(_ckpt: dict, _extra: int) -> dict:  # wrong signature
+        msg = "called with extra positional arg"
+        raise RuntimeError(msg)
+
+    module = types.ModuleType("anemoi.models.migrations.scripts.chunking_fix")
+    module.migrate = buggy_migrate
+    monkeypatch.setitem(sys.modules, "anemoi.models.migrations.scripts.chunking_fix", module)
+
+    context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt())
+
+    with pytest.raises(TypeError):
+        # buggy_migrate(_ckpt) is missing _extra → TypeError from the call itself
+        WeightsOnlyLoader()._apply_format_migrations(context)
