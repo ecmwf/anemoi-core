@@ -185,6 +185,54 @@ class LoadingStrategy(PipelineStage):
             "skipping _ckpt_model_name_to_index restoration",
         )
 
+    def _apply_format_migrations(self, context: CheckpointContext) -> None:
+        """Run anemoi-models checkpoint-format migrations against ``context.checkpoint_data``.
+
+        Mirrors the legacy ``chunking_fix_migration(checkpoint)`` call in
+        ``anemoi.training.utils.checkpoint.transfer_learning_loading`` so
+        old checkpoints with the pre-chunking attention head layout get
+        rewritten before any ``load_state_dict`` attempt. Without this,
+        :func:`~anemoi.training.checkpoint.loading.utils.filter_state_dict`
+        silently drops the affected weights as shape mismatches.
+
+        Importing the migration is best-effort: anemoi-models versions
+        that predate the migration module are tolerated as a no-op, so
+        the pipeline does not hard-require a specific anemoi-models
+        version.
+
+        Mutates ``context.checkpoint_data`` in place (the migration
+        returns the rewritten dict; we reassign it onto the context).
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context with ``checkpoint_data`` set
+        """
+        if context.checkpoint_data is None:
+            return
+
+        try:
+            from anemoi.models.migrations.scripts.chunking_fix import migrate as chunking_fix_migration
+        except ImportError:
+            try:
+                import importlib
+
+                module = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix")
+                chunking_fix_migration = module.migrate
+            except (ImportError, AttributeError):
+                LOGGER.debug("chunking_fix migration not available in anemoi-models; skipping")
+                return
+
+        try:
+            context.checkpoint_data = chunking_fix_migration(context.checkpoint_data)
+        except (KeyError, AttributeError, TypeError) as exc:
+            # Migration only applies to checkpoints with the full anemoi training
+            # hyper_parameters.config tree. Test fixtures and minimally-built
+            # checkpoints (e.g. raw state_dict saves) lack it — treat as no-op.
+            LOGGER.debug("chunking_fix migration skipped: checkpoint shape incomplete (%s)", exc)
+            return
+        LOGGER.debug("Applied chunking_fix migration to checkpoint data")
+
     @staticmethod
     def _processor_prefixes_from_config(context: CheckpointContext) -> tuple[str, ...]:
         """Return the processor key prefixes to refresh, based on context.config.

@@ -66,6 +66,7 @@ class WeightsOnlyLoader(LoadingStrategy):
         CheckpointContext
             Context with weights loaded and optimizer/scheduler cleared.
         """
+        self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
 
         state_dict = self._extract_state_dict(context)
@@ -126,6 +127,7 @@ class TransferLearningLoader(LoadingStrategy):
         """
         from anemoi.training.checkpoint.loading.utils import filter_state_dict
 
+        self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
 
         source_state = self._extract_state_dict(context)
@@ -196,6 +198,7 @@ class WarmStartLoader(LoadingStrategy):
         """
         from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 
+        self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
 
         # 1. Model weights (strict — exact match expected for resume)
