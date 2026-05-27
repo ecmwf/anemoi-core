@@ -78,7 +78,7 @@ def create_stretched_tri_nodes(
     lam_resolution : int
         Local resolution level.
     area_mask_builder : AreaMaskBuilder
-        NearestNeighbors with the cloud of points to limit the mesh area.
+        Builder used to generate the Area Of Interest (AOI) mask that limits the mesh area.
 
     Returns
     -------
