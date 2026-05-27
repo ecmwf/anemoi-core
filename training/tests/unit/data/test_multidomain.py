@@ -23,16 +23,16 @@ class TestMultiDomain:
         """Fixture to provide a MultiDomainDataset instance with mocked datasets."""
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
-        mock_dataset_a.missing = {7,8,9,10}
-        mock_dataset_a.dates = list(range(30))  
+        mock_dataset_a.missing = {7, 8, 9, 10}
+        mock_dataset_a.dates = list(range(30))
         mock_dataset_a.has_trajectories = False
         mock_dataset_a.frequency = "3h"
 
         mock_dataset_b = mocker.MagicMock()
         mock_dataset_b.missing = set()
-        mock_dataset_b.dates = list(range(20, 60))  
+        mock_dataset_b.dates = list(range(20, 60))
         mock_dataset_b.has_trajectories = True
-        mock_dataset_b.trajectory_ids = np.array([0]*20 + [1]*20) #split at 40
+        mock_dataset_b.trajectory_ids = np.array([0] * 20 + [1] * 20)  # split at 40
         mock_dataset_b.frequency = "1h"
 
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
@@ -66,7 +66,7 @@ class TestMultiDomain:
             "dataset_a": np.array(
                 [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
             ),
-            "dataset_b": np.array([0,1,20,21]),
+            "dataset_b": np.array([0, 1, 20, 21]),
         }
         for key in expected_indices:
             assert np.array_equal(valid_indices[key], expected_indices[key])
