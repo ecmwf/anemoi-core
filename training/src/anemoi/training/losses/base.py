@@ -47,6 +47,7 @@ class BaseLoss(nn.Module, ABC):
     def __init__(
         self,
         ignore_nans: bool = False,
+        **kwargs,
     ) -> None:
         """Node- and feature_weighted Loss.
 
@@ -70,6 +71,7 @@ class BaseLoss(nn.Module, ABC):
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
 
         """
+        del kwargs
         super().__init__()
 
         self.add_module("scaler", ScaleTensor())

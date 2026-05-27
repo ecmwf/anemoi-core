@@ -49,6 +49,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
         loss_matrices_path: Path | str | None = None,
         loss_matrices: list[Path | str] | None = None,
+        **kwargs,
     ) -> None:
         """Wrapper for multi-scale loss computation.
 
@@ -94,6 +95,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         loss_matrices : list[Path | str] | None
             Deprecated.  Pass inside *multiscale_config* instead.
         """
+        del kwargs
         super().__init__(loss=per_scale_loss, ignore_nans=ignore_nans)
 
         _has_matrices = bool(loss_matrices)  # [None] still signals file mode (identity scale)
