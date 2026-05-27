@@ -204,6 +204,7 @@ def test_forecaster_mixed_frequency_inputs_use_dataset_specific_requested_times(
         },
     }
     task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
 
     batch = {
         "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
@@ -316,6 +317,8 @@ def test_forecaster_preserves_datamodule_mixed_frequency_timing_metadata() -> No
     }
 
     task.fill_metadata(metadata)
+    assert task.dataset_time_maps == {}
+    task.configure_from_metadata(metadata)
 
     timesteps = metadata["metadata_inference"]["data"]["timesteps"]
     assert timesteps["relative_date_indices_training_by_dataset"]["data"] == [0, 2]
@@ -341,6 +344,7 @@ def test_forecaster_advance_input_reuses_latest_available_mixed_frequency_timest
         },
     }
     task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
     data_indices = {
         "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
     }
@@ -394,6 +398,7 @@ def test_forecaster_mixed_frequency_advance_input_preserves_ensemble_dimension()
         },
     }
     task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
     data_indices = {
         "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
     }
@@ -446,6 +451,7 @@ def test_forecaster_mixed_frequency_advance_input_checks_batch_bounds() -> None:
         },
     }
     task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
     data_indices = {
         "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
     }

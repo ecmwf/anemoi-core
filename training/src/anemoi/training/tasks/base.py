@@ -366,6 +366,15 @@ class BaseTask(ABC):
             existing_timesteps = metadata_inference[dataset_name].get("timesteps", {})
             metadata_inference[dataset_name]["timesteps"] = timesteps | existing_timesteps
 
+    def configure_from_metadata(self, md_dict: dict) -> None:
+        """Initialize task runtime state from metadata."""
+        metadata_inference = md_dict.get("metadata_inference", {})
+        dataset_names = metadata_inference.get("dataset_names", []) if isinstance(metadata_inference, Mapping) else []
+
+        self.dataset_input_relative_times_by_dataset = {}
+        self.dataset_target_relative_times_by_dataset = {}
+        self.dataset_time_maps = {}
+
         if len(dataset_names) == 0:
             return
 

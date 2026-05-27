@@ -342,3 +342,42 @@ def test_datamodule_fill_metadata_derives_mixed_frequency_windows_from_task(
         "meps": [],
         "nordic_radar": [1, 2, 3],
     }
+
+
+def test_datamodule_and_task_metadata_configure_mixed_frequency_timing(
+    mocker: MockFixture,
+) -> None:
+    cfg = make_multidataset_cfg(meps_frequency="1h", radar_frequency="5m")
+
+    mocker.patch(
+        "anemoi.training.data.datamodule.create_dataset",
+        side_effect=lambda dataset_cfg, **_kwargs: FakeDatasetReader(
+            dataset_name=dataset_cfg.dataset_config.dataset,
+            frequency=dataset_cfg.dataset_config.frequency,
+            start="2020-01-01T00:00",
+            stop="2020-01-03T00:00",
+        ),
+    )
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 3, "epoch_increment": 0, "maximum": 3},
+    )
+    datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
+    metadata = {"metadata_inference": {}}
+
+    datamodule.fill_metadata(metadata)
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+
+    timesteps = metadata["metadata_inference"]["nordic_radar"]["timesteps"]
+    assert timesteps["relative_date_indices_training"] == [0, 1, 2, 3]
+    assert timesteps["relative_date_input_indices_training_by_dataset"]["meps"] == [0]
+    assert timesteps["relative_date_input_indices_training_by_dataset"]["nordic_radar"] == [0]
+    assert timesteps["relative_date_indices_training_by_dataset"]["meps"] == [0]
+    assert timesteps["relative_date_indices_training_by_dataset"]["nordic_radar"] == [0, 1, 2, 3]
+    assert timesteps["relative_date_target_indices_training_by_dataset"]["meps"] == []
+    assert timesteps["relative_date_target_indices_training_by_dataset"]["nordic_radar"] == [1, 2, 3]
+    assert task.dataset_time_maps["meps"] == {0: 0}
+    assert task.dataset_time_maps["nordic_radar"] == {0: 0, 1: 1, 2: 2, 3: 3}
