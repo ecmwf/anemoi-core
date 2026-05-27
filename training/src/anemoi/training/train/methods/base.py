@@ -267,6 +267,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+                output_mask=self.output_mask[dataset_name],
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
@@ -275,6 +276,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+                output_mask=self.output_mask[dataset_name],
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -395,6 +397,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         data_indices: IndexCollection,
         graph_data: object | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
+        output_mask: object | None = None,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
@@ -404,6 +407,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     data_indices=data_indices,
                     graph_data=graph_data,
                     data_node_name=data_node_name,
+                    output_mask=output_mask,
                 )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
