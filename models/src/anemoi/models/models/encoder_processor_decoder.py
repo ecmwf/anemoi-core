@@ -241,32 +241,30 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
-            if dataset_name in self.encoded_dataset_names:
-                encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                    dataset_name
-                ].get_edges(
-                    batch_size=batch_size,
-                    model_comm_group=model_comm_group,
-                )
+            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
+                dataset_name
+            ].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
 
-                enc_shard_info = BipartiteGraphShardInfo(
-                    src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
-                    dst_nodes=shard_sizes_hidden,
-                    edges=enc_edge_shard_sizes,
-                )
+            enc_shard_info = BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
+                dst_nodes=shard_sizes_hidden,
+                edges=enc_edge_shard_sizes,
+            )
 
-                # Encoder for this dataset
-                x_data_latent, x_latent = self.encoder[dataset_name](
-                    (x_data_latent, x_hidden_latent),
-                    batch_size=batch_size,
-                    shard_info=enc_shard_info,
-                    edge_attr=encoder_edge_attr,
-                    edge_index=encoder_edge_index,
-                    model_comm_group=model_comm_group,
-                    keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                )
-                dataset_latents[dataset_name] = x_latent
-
+            # Encoder for this dataset
+            x_data_latent, x_latent = self.encoder[dataset_name](
+                (x_data_latent, x_hidden_latent),
+                batch_size=batch_size,
+                shard_info=enc_shard_info,
+                edge_attr=encoder_edge_attr,
+                edge_index=encoder_edge_index,
+                model_comm_group=model_comm_group,
+                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            )
+            dataset_latents[dataset_name] = x_latent
             x_data_latent_dict[dataset_name] = x_data_latent
 
         # Combine all dataset latents
