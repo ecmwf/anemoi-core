@@ -339,6 +339,7 @@ class AnemoiTrainer(ABC):
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",
                 )
 
             model.data_indices = self.data_indices
