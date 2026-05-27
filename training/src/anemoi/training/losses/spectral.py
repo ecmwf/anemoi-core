@@ -38,6 +38,8 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.kcrps import CRPS
 from anemoi.training.losses.kcrps import CRPSBackend
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.masks import BaseMask
+from anemoi.training.utils.masks import NoOutputMask
 
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -76,6 +78,7 @@ class SpectralLoss(BaseLoss):
         *,
         ignore_nans: bool = False,
         scalers: list | None = None,
+        output_mask: BaseMask | None = None,
         **kwargs,
     ) -> None:
         """Create a spectral loss.
@@ -97,6 +100,8 @@ class SpectralLoss(BaseLoss):
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
         kwargs.pop("scalers", None)
+
+        self.output_mask = output_mask if output_mask is not None else NoOutputMask()
 
         # Sharding over grid dimension is not supported for spectral transforms.
         # Enforce loss to be calculated on full grids.
@@ -124,6 +129,7 @@ class SpectralLoss(BaseLoss):
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten spectral dimensions."""
+        x = self.output_mask.crop(x, dim=-2)
         x_spec = self.transform.forward(x)
         # flatten only transformed spatial/spectral dims into one "mode" axis
         spatial_start_dim = x.ndim - 2
