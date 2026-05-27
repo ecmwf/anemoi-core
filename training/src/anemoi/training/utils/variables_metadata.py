@@ -33,7 +33,7 @@ def check_variables_metadata_compatibility(
     Parameters
     ----------
     ckpt_variables_metadata : dict[str, dict] | None
-        Per-dataset variables_metadata from the checkpoint (extracted from metadata_inference).
+        Per-dataset variables_metadata from the checkpoint.
         Maps dataset names to dicts of {variable_name: {metadata...}}.
     dataset_metadata : dict[str, dict]
         Per-dataset metadata from the current datamodule. Each entry is expected to have

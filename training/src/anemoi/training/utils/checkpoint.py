@@ -126,10 +126,10 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
         raise TypeError(msg)
 
     # Extract variables_metadata for unit compatibility check
-    metadata_inference = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
+    metadata = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
     ckpt_variables_metadata = {}
     for dataset_name in model._ckpt_model_name_to_index:
-        ds_inference = metadata_inference.get(dataset_name, {})
+        ds_inference = metadata.get(dataset_name, {})
         vm = ds_inference.get("variables_metadata")
         if vm is not None:
             ckpt_variables_metadata[dataset_name] = vm
