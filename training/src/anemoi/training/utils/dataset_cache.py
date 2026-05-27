@@ -21,6 +21,8 @@ import socket
 import struct
 import io
 
+from abc import ABC, abstractmethod
+
 
 import pytorch_lightning as pl
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -28,6 +30,8 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 import logging
 LOGGER = logging.getLogger(__name__)
 
+
+USE_LOCKING = False  # Set to False to disable file locking (not recommended)
 
 class CachedDataWrapper:
     """Wrapper that intercepts data access and routes through cache."""
@@ -383,12 +387,11 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         self.cache = zarr.open(self.cache_path, mode="a")  # append mode so all ranks can read+write
         self.cache_full=False # prevents subsequent writing when cache is full
-        # File-based lock so multiple local ranks don't write the same zarr chunk concurrently
-        self._write_lock_path = self.cache_path / ".write_lock"
+        if USE_LOCKING:
+            # File-based lock so multiple local ranks don't write the same zarr chunk concurrently
+            self._write_lock_path = self.cache_path / ".write_lock"
        
         dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
-        #dates = self.ds.size
-        #dates = self.ds.ds_train.data.shape[0]
         
         if self.cache_registry is None:
             # Keep cache_registry on CPU with shared memory for DataLoader worker access
@@ -398,15 +401,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
             LOGGER.info(f"Rank {self.rank}: Created cache registry on CPU with shared memory for {dates} dates")
             
         self.remote_cache_roots=self._get_all_cache_roots()
-        
-    
-
-
-    def _start_tcp_server(self, port):
-        """Start a TCP cache server on this node leader."""
-        self.tcp_server = TCPCacheServer(self.cache, port)
-        self.tcp_server.start()
-        LOGGER.info(f"Serving cache via TCP on {self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
         
     def _get_hostname(self, rank):
         return self.hostnames[rank]
@@ -438,24 +432,15 @@ class DatasetCache(AnemoiDatasetsDataModule):
         dist.all_gather_object(roots, root, self.proc_group)
         return roots
     
+    @abstractmethod
     def _shutdown_server(self):
         """Shutdown the HTTP server and close the socket."""
-        try:
-            if hasattr(self, 'httpd') and self.httpd is not None:
-                LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
-                #self.httpd.shutdown()
-                #TODO doesnt kill server, use pkill instead
-                #if hasattr(self, 'server_thread') and self.server_thread is not None:
-                #    self.server_thread.join(timeout=5)
-                # Close the socket to free the port
-                #self.httpd.server_close()
-                LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
-        except Exception as e:
-            LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
+        pass
 
     def __del__(self):
-       if getattr(self, 'is_node_leader', False):
-           self._shutdown_server()
+        #loops here and gets stuck
+        #if getattr(self, 'is_node_leader', False):
+        self._shutdown_server()
 
     def priority_reduce(self, stacked, cache_registry, node_id):
         """ reduces global cache registries by taking local node first then any other node"""
@@ -493,21 +478,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         num_cached = (self.cache_registry != -1).sum().item()
         LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {num_cached} cached items across all nodes")
 
-
-    def _get_remote_cache_url(self, remote_node_id):
-        remote_global_rank = self._node_leader_rank[remote_node_id]
-        remote_host = self._get_hostname(remote_global_rank)
-        port = self.root_port + remote_node_id
-        remote_cache_path = "cache" #just need relative path here, will be added to the root dir of our http server (e.g. $TMPDIR)
-        return f"http://{remote_host}:{port}/{remote_cache_path}"
-
-    def _get_remote_tcp_address(self, remote_node_id):
-        """Return (hostname, port) for the TCP cache server on *remote_node_id*."""
-        remote_global_rank = self._node_leader_rank[remote_node_id]
-        remote_host = self._get_hostname(remote_global_rank)
-        port = self.root_port + remote_node_id
-        return remote_host, port
-        
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of node_ids containing file in their SSD"""
         # cache_registry stores node_ids, not ranks
@@ -545,8 +515,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 # use a file lock so multiple local ranks don't write the same chunk concurrently
                 if self.cache_registry[date].item() == -1:  # quick non-locked check
                     try:
-                        lock_fd = open(self._write_lock_path, 'w')
-                        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                        if USE_LOCKING:
+                            lock_fd = open(self._write_lock_path, 'w')
+                            fcntl.flock(lock_fd, fcntl.LOCK_EX)
                         try:
                             if self.cache_registry[date].item() == -1:  # double-check under lock
                                 self.cache[date] = data
@@ -554,8 +525,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
                         except Exception as e:
                             LOGGER.error(f"Rank {self.rank}: Error writing date {date} to cache: {e}")
                         finally:
-                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                            lock_fd.close()
+                            if USE_LOCKING:
+                                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                                lock_fd.close()
 
                     #TODO calculate and manage space rather then relying on catching an error
                     except OSError as e:
@@ -615,18 +587,8 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Use self.ds_train to access our cached property
         return len(self.ds_train.valid_date_indices)
     
-    #TODO currently does not get called
-    def on_validation_epoch_end(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        **kwargs,
-    ) -> None:
-        if trainer.current_epoch == 0:
-            self.update_global_view()
-        
-
 class ZarrDatasetCache(DatasetCache):
+    """ Should implement _start_server, _fetch_remote and optionally _shutdown_server"""
     def _start_server(self, directory, port):
         #directory = Path("/").resolve()
         directory = Path(self.cache_root).resolve()
@@ -650,6 +612,14 @@ class ZarrDatasetCache(DatasetCache):
         
         LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
 
+    def _get_remote_cache_url(self, remote_node_id):
+        remote_global_rank = self._node_leader_rank[remote_node_id]
+        remote_host = self._get_hostname(remote_global_rank)
+        port = self.root_port + remote_node_id
+        remote_cache_path = "cache" #just need relative path here, will be added to the root dir of our http server (e.g. $TMPDIR)
+        return f"http://{remote_host}:{port}/{remote_cache_path}"
+
+
     def _fetch_remote(self, date, verbose=False):
         if self.remote_zarrs[remote_node_id] is None:
             remote_cache_url=self._get_remote_cache_url(remote_node_id)
@@ -663,16 +633,39 @@ class ZarrDatasetCache(DatasetCache):
 
 
 class TCPDatasetCache(DatasetCache):
+    """ Should implement _start_server, _fetch_remote and optionally _shutdown_server"""
     def _start_server(self, directory, port):
         """Start a TCP cache server on this node leader."""
         self.tcp_server = TCPCacheServer(self.cache, port)
         self.tcp_server.start()
         LOGGER.info(f"Serving cache via TCP on {self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
 
-    
+    def _shutdown_server(self):
+        try:
+            if hasattr(self, 'httpd') and self.httpd is not None:
+                LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
+                #self.httpd.shutdown()
+                #TODO doesnt kill server, use pkill instead
+                #if hasattr(self, 'server_thread') and self.server_thread is not None:
+                #    self.server_thread.join(timeout=5)
+                # Close the socket to free the port
+                #self.httpd.server_close()
+                LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
+        except Exception as e:
+            LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
+
+    def _get_remote_tcp_address(self, remote_node_id):
+        """Return (hostname, port) for the TCP cache server on *remote_node_id*."""
+        remote_global_rank = self._node_leader_rank[remote_node_id]
+        remote_host = self._get_hostname(remote_global_rank)
+        port = self.root_port + remote_node_id
+        return remote_host, port
+        
+
     def _fetch_remote(self, date, verbose=False):
         if self.remote_tcp_clients[remote_node_id] is None:
             host, port = self._get_remote_tcp_address(remote_node_id)
             self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
             LOGGER.info(f"Rank {self.rank}: Opened TCP connection to remote cache of node {remote_node_id} ({host}:{port}).")
         data = self.remote_tcp_clients[remote_node_id].fetch(date)
+    
