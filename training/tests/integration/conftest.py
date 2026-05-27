@@ -680,8 +680,8 @@ def stochastic_interpolant_config(
             [
                 "model=graphtransformer_transport_edm",
                 "training=multi_transport",
-                "training.prediction_mode=state",
-                "training.transport_objective=edm_diffusion",
+                "training.transport.prediction_mode=state",
+                "training.transport.objective=edm_diffusion",
             ],
             id="edm_diffusion",
         ),
@@ -689,8 +689,8 @@ def stochastic_interpolant_config(
             [
                 "model=graphtransformer_transport_tendency_edm",
                 "training=multi_transport",
-                "training.prediction_mode=tendency",
-                "training.transport_objective=edm_diffusion",
+                "training.transport.prediction_mode=tendency",
+                "training.transport.objective=edm_diffusion",
             ],
             id="edm_diffusion_tendency",
         ),

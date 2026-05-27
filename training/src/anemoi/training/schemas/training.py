@@ -625,13 +625,18 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
     "Training objective."
 
 
+class TransportTrainingConfigSchema(BaseModel):
+    prediction_mode: Literal["state", "tendency"] = "state"
+    "Endpoint semantics for the transport objective."
+    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
+    "Transport objective used to perturb targets and train the model."
+
+
 class TransportTrainingSchema(BaseTrainingSchema):
     training_method: Literal["anemoi.training.train.methods.TransportTraining"] = Field(..., alias="training_method")
     "Training objective."
-    prediction_mode: Literal["state", "tendency"] = "state"
-    "Endpoint semantics for the transport objective."
-    transport_objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
-    "Transport objective used to perturb targets and train the model."
+    transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
+    "Transport training configuration."
 
 
 TrainingSchema = Annotated[

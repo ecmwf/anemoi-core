@@ -30,7 +30,9 @@ optimization:
     eps: 1e-7
 
 training_method: anemoi.training.train.methods.TransportTraining
-prediction_mode: state
+transport:
+  prediction_mode: state
+  objective: edm_diffusion
 
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy

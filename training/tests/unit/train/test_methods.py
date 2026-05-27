@@ -253,10 +253,12 @@ def _wire_training_module(
 
 
 # Shared minimal configs
-_CFG_EMPTY = DictConfig({"training": {"prediction_mode": "state", "transport_objective": "stochastic_interpolant"}})
+_CFG_EMPTY = DictConfig(
+    {"training": {"transport": {"prediction_mode": "state", "objective": "stochastic_interpolant"}}},
+)
 _CFG_DIFFUSION = DictConfig(
     {
-        "training": {"prediction_mode": "state", "transport_objective": "edm_diffusion"},
+        "training": {"transport": {"prediction_mode": "state", "objective": "edm_diffusion"}},
         "model": {"model": {"transport": {"rho": 7.0}}},
     },
 )

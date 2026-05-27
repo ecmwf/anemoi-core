@@ -14,4 +14,5 @@ defaults:
 config_validation: True
 
 training:
-  prediction_mode: tendency
+  transport:
+    prediction_mode: tendency

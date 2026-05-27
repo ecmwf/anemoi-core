@@ -3,4 +3,5 @@ defaults:
   - transport
   - _self_
 
-transport_objective: stochastic_interpolant
+transport:
+  objective: stochastic_interpolant

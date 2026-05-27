@@ -3,7 +3,8 @@ defaults:
   - transport
   - _self_
 
-transport_objective: edm_diffusion
+transport:
+  objective: edm_diffusion
 
 training_loss:
   datasets:

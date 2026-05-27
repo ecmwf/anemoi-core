@@ -308,18 +308,16 @@ TRANSPORT_OBJECTIVE_CLASSES = {
 class BaseTransportTraining(BaseTrainingModule):
     """Shared training code for transport methods that corrupt targets before prediction."""
 
-    prediction_mode_name = "state"
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._prediction_mode = self._get_prediction_mode_cls()(self)
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:
-        prediction_mode = getattr(self.config.training, "prediction_mode", self.prediction_mode_name)
+        prediction_mode = self.config.training.transport.prediction_mode
         try:
             return PREDICTION_MODE_CLASSES[prediction_mode]
         except KeyError as exc:
-            msg = f"Unknown transport prediction_mode '{prediction_mode}'."
+            msg = f"Unknown training.transport.prediction_mode '{prediction_mode}'."
             raise ValueError(msg) from exc
 
     @property
@@ -437,8 +435,6 @@ class BaseTransportTraining(BaseTrainingModule):
 class TransportTraining(BaseTransportTraining):
     """Training module for EDM diffusion and stochastic-interpolant transport models."""
 
-    transport_objective_name = "edm_diffusion"
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._validate_model_transport_objective()
@@ -446,23 +442,23 @@ class TransportTraining(BaseTransportTraining):
 
     def _validate_model_transport_objective(self) -> None:
         """Check that training and inference use the same transport objective."""
-        training_objective = getattr(self.config.training, "transport_objective", self.transport_objective_name)
+        training_objective = self.config.training.transport.objective
         model_config = getattr(getattr(self.config, "model", None), "model", None)
         model_transport_config = getattr(model_config, "transport", None)
         model_objective = getattr(model_transport_config, "objective", None)
         if model_objective is not None and model_objective != training_objective:
             msg = (
-                "training.transport_objective must match model.model.transport.objective "
+                "training.transport.objective must match model.model.transport.objective "
                 f"({training_objective!r} != {model_objective!r})."
             )
             raise ValueError(msg)
 
     def _get_transport_objective_cls(self) -> type[TransportObjective]:
-        transport_objective = getattr(self.config.training, "transport_objective", self.transport_objective_name)
+        transport_objective = self.config.training.transport.objective
         try:
             return TRANSPORT_OBJECTIVE_CLASSES[transport_objective]
         except KeyError as exc:
-            msg = f"Unknown transport_objective '{transport_objective}'."
+            msg = f"Unknown training.transport.objective '{transport_objective}'."
             raise ValueError(msg) from exc
 
     @property
