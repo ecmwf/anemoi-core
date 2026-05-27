@@ -1,0 +1,7 @@
+# Modifier stage — freezes specified submodules by name (dot-notation supported,
+# e.g. "processor.0"). Changes which parameters have requires_grad; chain after a
+# loading strategy.
+_target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+submodules_to_freeze: []   # e.g. [encoder, "processor.0"]
+strict: false              # raise if a named submodule is not found
+validate_gradients: true   # assert frozen params accumulate no gradient
