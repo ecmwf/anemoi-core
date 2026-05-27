@@ -1,0 +1,3 @@
+# Loading strategy — fills the model's existing parameter slots from a source checkpoint.
+# Discards optimizer and scheduler state. Does NOT change model architecture.
+_target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader

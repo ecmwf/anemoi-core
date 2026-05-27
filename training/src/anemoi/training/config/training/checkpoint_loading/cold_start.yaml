@@ -1,0 +1,3 @@
+# Loading strategy — loads pretrained weights, then explicitly resets training state
+# (epoch=0, global_step=0, no optimizer, no scheduler). Architecture unchanged.
+_target_: anemoi.training.checkpoint.loading.strategies.ColdStartLoader
