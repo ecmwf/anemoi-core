@@ -128,6 +128,37 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         return x_data_latent, x_skip, grid_shard_sizes
 
+    def _assemble_target(
+        self,
+        x_input_data: torch.Tensor,
+        x_encoded_data: Optional[torch.Tensor],
+        batch_size: int,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: ProcessGroup | None = None,
+        dataset_name: str | None = None,
+    ) -> torch.Tensor:
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+
+        if dataset_name in self.encoded_dataset_names:
+            return x_data_latent_dict[dataset_name]
+        
+        # For datasets not encoded, we can still provide the data as input to the decoder if configured to do so
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        if self.decoding_target_forcing == "prognostic+forcing":
+            target_features = x_input_data
+        elif self.decoding_target_forcing == "forcings":
+            target_features = x_input_data[..., self._decoding_forcing_input_idx[dataset_name]]
+        else:
+            return node_attributes_data
+        
+        return torch.cat(
+            (
+                einops.rearrange(target_features, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                node_attributes_data,
+            ),
+            dim=-1,  # feature dimension
+        )
+
     def _assemble_output(
         self,
         x_out: torch.Tensor,
@@ -230,7 +261,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
-        for dataset_name in dataset_names:
+        for dataset_name in self.encoded_dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
@@ -292,6 +323,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
+            x_data_target, shard_sizes_data = self._assemble_target(
+                x[dataset_name],
+                x_data_latent_dict.get(dataset_name, None),
+                dataset_name=dataset_name,
+            )
+
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
                 dataset_name
@@ -304,7 +341,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent, x_data_latent_dict[dataset_name]),
+                (x_latent, x_data_target),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,

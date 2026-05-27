@@ -75,6 +75,8 @@ class BaseGraphModel(nn.Module):
         LOGGER.info(f"Encoded dataset names: {self.encoded_dataset_names}")
         if self.encoded_dataset_names is None:
             self.encoded_dataset_names = self.dataset_names
+        self.decoding_target_forcing = model_config.model.get("decoding_target_forcing", "prognostic+forcing")
+        assert self.decoding_target_forcing in ["prognostic+forcing", "forcings", "none"], f"Invalid value for decoding_target_forcing: {self.decoding_target_forcing}"
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.num_channels = model_config.model.num_channels
@@ -165,7 +167,17 @@ class BaseGraphModel(nn.Module):
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.
         # TODO: abstract different options into the base class
-        return self._calculate_input_dim(dataset_name)
+        if dataset_name in self.encoded_dataset_names:
+            return self._calculate_input_dim(dataset_name)
+        else:
+            if self.decoding_target_forcing == "prognostic+forcing":
+                return self._calculate_input_dim(dataset_name)
+            elif self.decoding_target_forcing == "forcings":
+                return self.node_attributes.attr_ndims[dataset_name] + self.num_input_channels_decoding_forcings[dataset_name]
+            elif self.decoding_target_forcing == "none":
+                return self.node_attributes.attr_ndims[dataset_name]
+            else:
+                raise ValueError(f"Invalid value for decoding_target_forcing: {self.decoding_target_forcing}")
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]
