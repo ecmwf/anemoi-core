@@ -32,6 +32,7 @@ class BaseMask:
         error_message = "Method `apply` must be implemented in subclass."
         raise NotImplementedError(error_message)
 
+    @abstractmethod
     def rollout_boundary(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         error_message = "Method `rollout_boundary` must be implemented in subclass."
         raise NotImplementedError(error_message)
