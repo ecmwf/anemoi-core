@@ -51,6 +51,7 @@ docs/_api/
 .env
 .envrc
 .venv
+uv.lock
 env/
 venv/
 ENV/
@@ -99,6 +100,7 @@ dmypy.json
 *.zip
 *.db
 *.tgz
+*.odb
 
 # ML artifacts
 wandb/

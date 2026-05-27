@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import Optional
+from typing import Union
 
 import einops
 import torch
@@ -23,11 +25,17 @@ from torch import where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
-from anemoi.models.distributed.transformer import shard_heads
-from anemoi.models.distributed.transformer import shard_sequence
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+# Change attention implementation during inference runtime
+ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
 class MultiHeadSelfAttention(nn.Module):
@@ -57,6 +65,7 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,
         is_causal: bool = False,
@@ -81,7 +90,10 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads : int
             number of heads
         embed_dim : int
-            embedding dimension
+            Input and output embedding dimension
+        attn_channels : int, optional
+            Internal attention width used for q/k/v projections. If None,
+            defaults to embed_dim.
         qkv_bias : bool, optional
             bias for querys, keys and values, by default False
         qk_norm : bool, optional
@@ -102,16 +114,18 @@ class MultiHeadSelfAttention(nn.Module):
         """
         super().__init__()
 
-        assert (
-            embed_dim % num_heads == 0
-        ), f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
+        self.attn_channels = embed_dim if attn_channels is None else attn_channels
+        if self.attn_channels <= 0:
+            raise ValueError(f"attn_channels must be > 0, got {self.attn_channels}")
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})")
 
         self.attention_implementation = attention_implementation
+        self._attention_backend_applied = False
         self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
-        self.embed_dim = embed_dim
-        self.head_dim = embed_dim // num_heads  # q k v
+        self.head_dim = self.attn_channels // num_heads  # q k v
         self.window_size = window_size
         self.dropout_p = dropout_p
         self.is_causal = is_causal
@@ -128,11 +142,11 @@ class MultiHeadSelfAttention(nn.Module):
             self.alibi_slopes = None
 
         linear = layer_kernels.Linear
-        self.lin_q = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.lin_k = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
-        self.lin_v = nn.Linear(embed_dim, embed_dim, bias=qkv_bias)
+        self.lin_q = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_k = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_v = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
 
-        self.projection = linear(embed_dim, embed_dim, bias=True)
+        self.projection = linear(self.attn_channels, embed_dim, bias=True)
 
         if self.qk_norm:
             self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
@@ -143,7 +157,20 @@ class MultiHeadSelfAttention(nn.Module):
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
-        assert self.attention_implementation in attn_funcs, f"{self.attention_implementation} not supported. \
+
+        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND:
+            if ATTENTION_BACKEND == self.attention_implementation:
+                # Attention backend has already been updated, return early
+                return
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                self.attention_implementation,
+                ATTENTION_BACKEND,
+            )
+            self.attention_implementation = ATTENTION_BACKEND
+
+        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here
@@ -159,7 +186,7 @@ class MultiHeadSelfAttention(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        shapes: list,
+        grid_shard_sizes: Union[ShardSizes, tuple[ShardSizes, ShardSizes]],
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
@@ -178,9 +205,16 @@ class MultiHeadSelfAttention(nn.Module):
             for t in (query, key, value)
         )
 
-        query = shard_heads(query, shapes=shapes, mgroup=model_comm_group)
-        key = shard_heads(key, shapes=shapes, mgroup=model_comm_group)
-        value = shard_heads(value, shapes=shapes, mgroup=model_comm_group)
+        # Shard heads: split along heads (dim -3), gather along sequence/grid (dim -2)
+        q_shard_sizes = grid_shard_sizes[1] if isinstance(grid_shard_sizes, tuple) else grid_shard_sizes
+        kv_shard_sizes = grid_shard_sizes[0] if isinstance(grid_shard_sizes, tuple) else grid_shard_sizes
+        head_shard_sizes = get_shard_sizes(query, -3, model_comm_group)
+
+        query = all_to_all_transpose(query, -3, head_shard_sizes, -2, q_shard_sizes, model_comm_group)
+        key, value = (
+            all_to_all_transpose(t, -3, head_shard_sizes, -2, kv_shard_sizes, model_comm_group) for t in (key, value)
+        )
+
         dropout_p = self.dropout_p if self.training else 0.0
 
         if self.qk_norm:
@@ -199,7 +233,9 @@ class MultiHeadSelfAttention(nn.Module):
             alibi_slopes=self.alibi_slopes,
         )
 
-        out = shard_sequence(out, shapes=shapes, num_heads=self.num_heads, mgroup=model_comm_group)
+        # Shard sequence: split along sequence/grid (dim -2), gather along heads (dim -3)
+        out = all_to_all_transpose(out, -2, q_shard_sizes, -3, head_shard_sizes, model_comm_group)
+
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         out = self.projection(out)
@@ -207,14 +243,23 @@ class MultiHeadSelfAttention(nn.Module):
         return out
 
     def forward(
-        self, x: Tensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: Tensor,
+        grid_shard_sizes: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
 
         query = self.lin_q(x)
         key = self.lin_k(x)
         value = self.lin_v(x)
 
-        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
+        # Check once at runtime if the Attention backend env var has been set, and update attention backend accordingly
+        if ATTENTION_BACKEND and not self._attention_backend_applied:
+            self.set_attention_function()
+            self._attention_backend_applied = True
+
+        return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
 
 
 class SDPAAttentionWrapper(nn.Module):
@@ -482,13 +527,19 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         super().__init__(*args, **kwargs)
 
     def forward(
-        self, x: PairTensor, shapes: list, batch_size: int, model_comm_group: Optional[ProcessGroup] = None
+        self,
+        x: PairTensor,
+        shard_info: BipartiteGraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
         query = self.lin_q(x[1])
         key = self.lin_k(x[0])
         value = self.lin_v(x[0])
 
-        return self.attention_computation(query, key, value, shapes, batch_size, model_comm_group)
+        shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
+
+        return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
 
 
 def get_alibi_slopes(num_heads: int) -> Tensor:
