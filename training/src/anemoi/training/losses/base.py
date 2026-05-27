@@ -167,7 +167,7 @@ class BaseLoss(nn.Module, ABC):
             * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
         """
         if self.ignore_nans:
-            nan_mask = torch.isnan(target+pred)
+            nan_mask = torch.isnan(target + pred)
             target = target.masked_fill(nan_mask, 0.0)
             pred = pred.masked_fill(nan_mask, 0.0)
 
