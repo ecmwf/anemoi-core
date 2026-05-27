@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - training_loss: ensemble
   - optimization: default
   - weight_averaging: null
 
@@ -51,33 +52,6 @@ strategy:
 loss_gradient_scaling: False
 
 
-# loss function for the model
-# To train without multiscale loss, set it to the desired loss directly
-training_loss:
-  datasets:
-    data: # user-defined key in data
-      # loss class to initialise, can be anything subclassing torch.nn.Module
-      _target_: anemoi.training.losses.MultiscaleLossWrapper
-      # Disk mode:   multiscale_config: {loss_matrices_path: /path, loss_matrices: ["file.npz", null]}
-      # On-the-fly:  multiscale_config: {num_scales: 4, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
-      multiscale_config: null  # null = single scale, no smoothing
-      weights: [1.0]
-
-      per_scale_loss:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-
-        # Scalers to include in loss calculation
-        # A selection of available scalers are listed in training/scalers.
-        # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-        # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-        # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: False
-        no_autocast: True
-        alpha: 0.95
-
-
-
 # Validation metrics calculation,
 # This may be a list, in which case all metrics will be calculated
 # and logged according to their name.
@@ -88,7 +62,7 @@ validation_metrics:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       fkcrps:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+        _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
         ignore_nans: False
         alpha: 1.0
@@ -100,7 +74,7 @@ validation_metrics:
         weights: [1.0]
 
         per_scale_loss:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+          _target_: anemoi.training.losses.CRPS
           scalers: ['node_weights', 'time_steps']
 
           # Scalers to include in loss calculation
