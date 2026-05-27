@@ -20,7 +20,6 @@ import pytest
 import torch
 
 from anemoi.training.utils.dataset_cache import (
-    CachedDataWrapper,
     DatasetCache,
     TCPCacheClient,
     TCPCacheServer,
@@ -49,28 +48,11 @@ class FakeOriginalData:
     def shape(self):
         return self._data.shape
 
-
-class FakeCacheInstance:
-    """Minimal stand-in for a DatasetCache to be used by CachedDataWrapper."""
-
-    def __init__(self, data: np.ndarray):
-        self._data = data
-
-    def fetch(self, date, verbose=False):
-        return self._data[date]
-
-
 @pytest.fixture
 def sample_data():
     """4D sample data: (time=10, channels=3, levels=2, grid=5)."""
     rng = np.random.default_rng(42)
     return rng.standard_normal((10, 3, 2, 5)).astype(np.float32)
-
-
-@pytest.fixture
-def fake_cache(sample_data):
-    return FakeCacheInstance(sample_data)
-
 
 @pytest.fixture
 def fake_original(sample_data):
@@ -132,70 +114,6 @@ class TestRecvExact:
         sock = FakeSocket()
         result = _recv_exact(sock, 10)
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Tests for CachedDataWrapper
-# ---------------------------------------------------------------------------
-
-
-class TestCachedDataWrapper:
-    """Tests for the CachedDataWrapper class."""
-
-    def test_integer_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[3]
-        np.testing.assert_array_equal(result, sample_data[3])
-
-    def test_numpy_integer_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[np.int64(7)]
-        np.testing.assert_array_equal(result, sample_data[7])
-
-    def test_simple_slice(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[2:5]
-        expected = sample_data[2:5]
-        np.testing.assert_array_equal(result, expected)
-
-    def test_slice_with_step(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[0:8:2]
-        expected = sample_data[0:8:2]
-        np.testing.assert_array_equal(result, expected)
-
-    def test_tuple_single_time_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        # Access like data[3, :, 1, :]
-        result = wrapper[3, :, 1, :]
-        expected = sample_data[3][:, 1, :]
-        np.testing.assert_array_equal(result, expected)
-
-    def test_tuple_slice_time_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        # Access like data[1:4, :, 0, :]
-        result = wrapper[1:4, :, 0, :]
-        # Each time step is fetched individually and then sub-indexed
-        expected = np.stack([sample_data[i][:, 0, :] for i in range(1, 4)], axis=0)
-        np.testing.assert_array_equal(result, expected)
-
-    def test_len(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        assert len(wrapper) == 10
-
-    def test_attribute_delegation(self, sample_data, fake_cache, fake_original):
-        """Attributes not on wrapper should delegate to original data."""
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        assert wrapper.shape == sample_data.shape
-
-    def test_access_count_increments(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        assert wrapper._access_count == 0
-        _ = wrapper[0]
-        _ = wrapper[1]
-        _ = wrapper[2]
-        assert wrapper._access_count == 3
-
 
 # ---------------------------------------------------------------------------
 # Tests for TCPCacheServer + TCPCacheClient

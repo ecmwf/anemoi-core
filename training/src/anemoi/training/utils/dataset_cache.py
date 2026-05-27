@@ -31,76 +31,6 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
-USE_LOCKING = False  # Set to False to disable file locking (not recommended)
-
-class CachedDataWrapper:
-    """Wrapper that intercepts data access and routes through cache."""
-    
-    def __init__(self, original_data, cache_instance):
-        self.original_data = original_data
-        self.cache = cache_instance
-        self._access_count = 0
-        LOGGER.info(f"CachedDataWrapper created for {type(original_data).__name__}")
-        
-    def __getitem__(self, index):
-        """Intercept array access and route through cache."""
-        self._access_count += 1
-        if self._access_count <= 5:
-            LOGGER.debug(f"CachedDataWrapper.__getitem__ called (access #{self._access_count}) with index type: {type(index).__name__}, value: {index if not isinstance(index, (tuple, slice)) or len(str(index)) < 50 else '...'}")
-        
-        # Handle different index types
-        if isinstance(index, tuple):
-            # Multi-dimensional indexing like data[time, :, :, grid]
-            time_idx = index[0]
-            rest_idx = index[1:] if len(index) > 1 else ()
-            
-            if isinstance(time_idx, slice):
-                # Slice access - fetch multiple time steps
-                start, stop, step = time_idx.indices(len(self.original_data))
-                LOGGER.debug(f"CachedDataWrapper: Fetching slice [{start}:{stop}:{step}] (total {(stop-start)//max(1,step or 1)} samples)")
-                results = []
-                for i in range(start, stop, step or 1):
-                    single_result = self.cache.fetch(i, verbose=False)
-                    if rest_idx:
-                        single_result = single_result[rest_idx]
-                    results.append(single_result)
-                return np.stack(results, axis=0)
-            elif isinstance(time_idx, int):
-                # Single time index
-                LOGGER.debug(f"CachedDataWrapper: Fetching single time index {time_idx}")
-                result = self.cache.fetch(time_idx, verbose=False)
-                if rest_idx:
-                    result = result[rest_idx]
-                return result
-            else:
-                # Fallback to original data access
-                LOGGER.warning(f"CachedDataWrapper: Unhandled tuple index type: {type(time_idx).__name__}, falling back to original data")
-                return self.original_data[index]
-        elif isinstance(index, (int, np.integer)):
-            # Single integer index
-            LOGGER.debug(f"CachedDataWrapper: Fetching single integer index {index}")
-            return self.cache.fetch(int(index), verbose=False)
-        elif isinstance(index, slice):
-            # Simple slice
-            start, stop, step = index.indices(len(self.original_data))
-            LOGGER.debug(f"CachedDataWrapper: Fetching simple slice [{start}:{stop}:{step}]")
-            results = []
-            for i in range(start, stop, step or 1):
-                results.append(self.cache.fetch(i, verbose=False))
-            return np.stack(results, axis=0)
-        else:
-            # Fallback for other index types
-            LOGGER.warning(f"CachedDataWrapper: Unhandled index type: {type(index).__name__}, falling back to original data")
-            return self.original_data[index]
-
-    def __len__(self):
-        return len(self.original_data)
-    
-    def __getattr__(self, name):
-        """Delegate attribute access to original data."""
-        return getattr(self.original_data, name)
-
-
 def _recv_exact(sock, nbytes):
     """Receive exactly *nbytes* from *sock*, or return None on clean EOF."""
     parts = []
@@ -325,9 +255,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Barrier so all local ranks wait for the server to be up
         dist.barrier(self.proc_group)
         
-        # Inject cache wrapper into the underlying datasets
-        self._inject_cache_wrapper()
-        
         LOGGER.info(f"{self.rank=}: Initalised a shared cache under {self.cache_path}")
         self.is_initalised=True
 
@@ -335,29 +262,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.remote_zarrs = [None] * self.num_nodes
         self.remote_tcp_clients = [None] * self.num_nodes
     
-    def _inject_cache_wrapper(self):
-        """Replace the underlying dataset's data accessor with cached version."""
-        # Use self.ds_train which accesses our cached property that stores the wrapped instance
-        train_dataset = self.ds_train
-        
-        for dataset_name, dataset in train_dataset.datasets.items():
-            if dataset_name == self.primary_dataset_name:
-                original_data = dataset.data
-                LOGGER.info(f"Rank {self.rank}: Injecting cache wrapper for dataset '{dataset_name}' (type: {type(original_data).__name__})")
-                dataset.data = CachedDataWrapper(original_data, self)
-                # Verify injection
-                if isinstance(dataset.data, CachedDataWrapper):
-                    LOGGER.info(f"Rank {self.rank}: Cache wrapper injected successfully for '{dataset_name}' - data is now {type(dataset.data).__name__}")
-                else:
-                    LOGGER.error(f"Rank {self.rank}: Cache wrapper injection FAILED for '{dataset_name}' - data is still {type(dataset.data).__name__}")
-            else:
-                LOGGER.info(f"Rank {self.rank}: Skipping cache injection for dataset '{dataset_name}' (only caching primary dataset)")
-        
-        # Double-check after injection
-        LOGGER.info(f"Rank {self.rank}: Verifying injection after completion:")
-        for dataset_name, dataset in train_dataset.datasets.items():
-            LOGGER.info(f"Rank {self.rank}:   Dataset '{dataset_name}' data type: {type(dataset.data).__name__}")
-       
     def _init_cache(self, delete_existing_cache=True):
         
         if self.cache_root is None:
@@ -387,9 +291,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         self.cache = zarr.open(self.cache_path, mode="a")  # append mode so all ranks can read+write
         self.cache_full=False # prevents subsequent writing when cache is full
-        if USE_LOCKING:
-            # File-based lock so multiple local ranks don't write the same zarr chunk concurrently
-            self._write_lock_path = self.cache_path / ".write_lock"
        
         dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
         
@@ -486,79 +387,54 @@ class DatasetCache(AnemoiDatasetsDataModule):
             return []
         return [cached_node]
 
+    def _add_to_cache(self, date, data):
+        if not self.cache_full:
+            # add data to the shared node cache
+            try:
+                self.cache[date] = data
+                self.cache_registry[date] = self.node_id
+
+            #TODO calculate and manage space rather then relying on catching an error
+            except OSError as e:
+                if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
+                    self.cache_full=True
+                    LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
+                else:
+                    raise e
+
     def fetch(self, date, verbose=False) -> np.ndarray:
         """ Reads cache regsitry, based on result fetches file from local SSD, remote SSD or filesytem"""
 
-        #LOGGER.info(f"Rank {self.rank}: Fetching date {date} (verbose={verbose})")
-        
         self.total_fetches.value += 1
 
         cache_hits = self.check_cache(date)
         
-        # Get the primary dataset's raw data for caching
-        # Use self.ds_train to access our cached property
-        primary_dataset = self.ds_train.datasets[self.primary_dataset_name]
-        primary_data = primary_dataset.data  # Underlying dataset (e.g., Zarr)
-        
-        # Check if we're accessing the wrapper itself (avoid infinite recursion)
-        if isinstance(primary_data, CachedDataWrapper):
-            primary_data = primary_data.original_data
-
         if len(cache_hits) == 0:
-            #Cache miss, go to filesystem
+            #Cache miss, go to filesystem and add to cache
+            data = self.ds_train.datasets[self.primary_dataset_name][date]
+            self._add_to_cache(date, data)
             
+            # Logging and stats update
             self.cache_misses.value += 1
-            data = primary_data[date]
-            
-            if not self.cache_full:
-                # add data to the shared node cache
-                # use a file lock so multiple local ranks don't write the same chunk concurrently
-                if self.cache_registry[date].item() == -1:  # quick non-locked check
-                    try:
-                        if USE_LOCKING:
-                            lock_fd = open(self._write_lock_path, 'w')
-                            fcntl.flock(lock_fd, fcntl.LOCK_EX)
-                        try:
-                            if self.cache_registry[date].item() == -1:  # double-check under lock
-                                self.cache[date] = data
-                                self.cache_registry[date] = self.node_id
-                        except Exception as e:
-                            LOGGER.error(f"Rank {self.rank}: Error writing date {date} to cache: {e}")
-                        finally:
-                            if USE_LOCKING:
-                                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                                lock_fd.close()
-
-                    #TODO calculate and manage space rather then relying on catching an error
-                    except OSError as e:
-                        if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
-                            self.cache_full=True
-                            LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
-                        else:
-                            raise e
-                else:
-                    # Another local rank already wrote this date
-                    self.cache_registry[date] = self.node_id
-            
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         elif self.node_id in cache_hits:
             #Cache hit on local node SSD – read from shared zarr cache
-            
-            self.cache_hits_local.value += 1
             data = self.cache[date]            
-            
+
+            # Logging and stats update
+            self.cache_hits_local.value += 1
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
             #cache hit on remote node SSD
-            
-            self.cache_hits_remote.value += 1
             remote_node_id = cache_hits[0]
-            
-            data = self._fetch_remote(date, verbose=verbose)
+            data = self._fetch_remote(date, remote_node_id, verbose=verbose)
+
+            # Logging and stats update
+            self.cache_hits_remote.value += 1
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
@@ -575,11 +451,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
             yield self.fetch(date)
         
     def __getitem__(self, index):
-        # allow integer or slice access
-        if isinstance(index, slice):
-            return [self.fetch(i) for i in range(*index.indices(len(self)))]
-        else:
-            return self.fetch(index)
+        return self.fetch(index)
 
     def __len__(self):
         # MultiDataset.valid_date_indices contains all valid time indices
@@ -619,7 +491,7 @@ class ZarrDatasetCache(DatasetCache):
         return f"http://{remote_host}:{port}/{remote_cache_path}"
 
 
-    def _fetch_remote(self, date, verbose=False):
+    def _fetch_remote(self, date, remote_node_id, verbose=False):
         if self.remote_zarrs[remote_node_id] is None:
             remote_cache_url=self._get_remote_cache_url(remote_node_id)
             try:
@@ -661,7 +533,7 @@ class TCPDatasetCache(DatasetCache):
         return remote_host, port
         
 
-    def _fetch_remote(self, date, verbose=False):
+    def _fetch_remote(self, date, remote_node_id, verbose=False):
         if self.remote_tcp_clients[remote_node_id] is None:
             host, port = self._get_remote_tcp_address(remote_node_id)
             self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
