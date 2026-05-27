@@ -245,7 +245,16 @@ class DatasetCache(AnemoiDatasetsDataModule):
         Delegate to the underlying dataset (self.ds).
         """
         return getattr(self.ds, name)
-    
+
+    @abstractmethod
+    def _start_server(self, directory, port):
+        """Start the server that will serve cached files to other nodes. Only called on node leaders."""
+        pass
+
+    @abstractmethod
+    def _fetch_remote(self, date, verbose=False):
+        """Fetch a single date from a remote nodes cache."""
+        pass
 
     #split between init and setup to match distirbuted strategy from PL structure (we need the proccess group to be initalised)
     def setup(self, **kwargs):
@@ -308,10 +317,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.root_port = 8000
         self.port = self.root_port + self.node_id
         if self.is_node_leader:
-            if self.remote_backend == "zarr":
-                self._start_server(self.cache_root, self.port)
-            elif self.remote_backend == "tcp":
-                self._start_tcp_server(self.port)
+            self._start_server(self.cache_root, self.port)
         # Barrier so all local ranks wait for the server to be up
         dist.barrier(self.proc_group)
         
@@ -394,28 +400,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.remote_cache_roots=self._get_all_cache_roots()
         
     
-    def _start_server(self, directory, port):
-        #directory = Path("/").resolve()
-        directory = Path(self.cache_root).resolve()
-        handler=http.server.SimpleHTTPRequestHandler
-        
-        def no_logging(*args):
-            return
-        handler.log_message=no_logging #by default the http server logs a lot to stdout, this silences it
-        
-        handler = partial(handler, directory=str(directory))
-        
-        # Allow socket reuse to avoid "Address already in use" errors
-        socketserver.TCPServer.allow_reuse_address = True
-        httpd = socketserver.TCPServer(("", port), handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        
-        # Store server metadata for proper shutdown
-        self.httpd = httpd
-        self.server_thread = thread
-        
-        LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
+
 
     def _start_tcp_server(self, port):
         """Start a TCP cache server on this node leader."""
@@ -601,24 +586,8 @@ class DatasetCache(AnemoiDatasetsDataModule):
             self.cache_hits_remote.value += 1
             remote_node_id = cache_hits[0]
             
-            if self.remote_backend == "zarr":
-                if self.remote_zarrs[remote_node_id] is None:
-                    remote_cache_url=self._get_remote_cache_url(remote_node_id)
-                    try:
-                        self.remote_zarrs[remote_node_id] = zarr.open(remote_cache_url, mode='r')
-                        LOGGER.info(f"Rank {self.rank}: Opened zarr interface to remote cache of node {remote_node_id}.")
-                    except (PathNotFoundError, KeyError) as e:
-                        LOGGER.info(f"Error opening remote date {date} from node {remote_node_id} to {self.rank}. full error: {e}. falling back to filesystem.")
-                        data = primary_data[date]
-                data = self.remote_zarrs[remote_node_id][date]
+            data = self._fetch_remote(date, verbose=verbose)
 
-            elif self.remote_backend == "tcp":
-                if self.remote_tcp_clients[remote_node_id] is None:
-                    host, port = self._get_remote_tcp_address(remote_node_id)
-                    self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
-                    LOGGER.info(f"Rank {self.rank}: Opened TCP connection to remote cache of node {remote_node_id} ({host}:{port}).")
-                data = self.remote_tcp_clients[remote_node_id].fetch(date)
-            
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
@@ -656,3 +625,54 @@ class DatasetCache(AnemoiDatasetsDataModule):
         if trainer.current_epoch == 0:
             self.update_global_view()
         
+
+class ZarrDatasetCache(DatasetCache):
+    def _start_server(self, directory, port):
+        #directory = Path("/").resolve()
+        directory = Path(self.cache_root).resolve()
+        handler=http.server.SimpleHTTPRequestHandler
+        
+        def no_logging(*args):
+            return
+        handler.log_message=no_logging #by default the http server logs a lot to stdout, this silences it
+        
+        handler = partial(handler, directory=str(directory))
+        
+        # Allow socket reuse to avoid "Address already in use" errors
+        socketserver.TCPServer.allow_reuse_address = True
+        httpd = socketserver.TCPServer(("", port), handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        
+        # Store server metadata for proper shutdown
+        self.httpd = httpd
+        self.server_thread = thread
+        
+        LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
+
+    def _fetch_remote(self, date, verbose=False):
+        if self.remote_zarrs[remote_node_id] is None:
+            remote_cache_url=self._get_remote_cache_url(remote_node_id)
+            try:
+                self.remote_zarrs[remote_node_id] = zarr.open(remote_cache_url, mode='r')
+                LOGGER.info(f"Rank {self.rank}: Opened zarr interface to remote cache of node {remote_node_id}.")
+            except (PathNotFoundError, KeyError) as e:
+                LOGGER.info(f"Error opening remote date {date} from node {remote_node_id} to {self.rank}. full error: {e}. falling back to filesystem.")
+                data = primary_data[date]
+        data = self.remote_zarrs[remote_node_id][date]
+
+
+class TCPDatasetCache(DatasetCache):
+    def _start_server(self, directory, port):
+        """Start a TCP cache server on this node leader."""
+        self.tcp_server = TCPCacheServer(self.cache, port)
+        self.tcp_server.start()
+        LOGGER.info(f"Serving cache via TCP on {self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
+
+    
+    def _fetch_remote(self, date, verbose=False):
+        if self.remote_tcp_clients[remote_node_id] is None:
+            host, port = self._get_remote_tcp_address(remote_node_id)
+            self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
+            LOGGER.info(f"Rank {self.rank}: Opened TCP connection to remote cache of node {remote_node_id} ({host}:{port}).")
+        data = self.remote_tcp_clients[remote_node_id].fetch(date)
