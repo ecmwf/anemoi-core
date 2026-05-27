@@ -80,7 +80,7 @@ class SpectralDimensionScaler(BaseScaler):
 class LinearSpectralDimensionScaler(SpectralDimensionScaler):
     """Linearly increasing weights with total wavenumber.
 
-    For spectral transform output of shape ``(L, M)`` reduced to to ``L``, with
+    For spectral transform output of shape ``(L, M)`` reduced to ``L``, with
     ``L = n_spectral_modes``, the weight at for total wavenumber *i* is:
 
         weight[i] = slope * i + y_intercept
