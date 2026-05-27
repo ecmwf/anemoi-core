@@ -22,20 +22,13 @@ class SpectralDimensionScaler(BaseScaler):
     """Base class for scaling over the spectral dimension.
 
     When spectral losses are used the grid dimension is mapped to a spectral
-    dimension via a spectral transform.  For SHT-based transforms the output
-    has shape ``(L, M)`` (total wavenumber, order) which is then flattened to a
-    single mode axis of length ``L * M``.  Since ``L == M == n_spectral_modes``
-    for SHTs, the total flat size is ``n_spectral_modes ** 2``.
+    representation via a spectral transform.  The output of the transforms
+    has shape ``(L, M)`` (total wavenumber, zonal wavenumber).
+    Different losses have different output shape: some losses use the flattened
+    output (L*M) and others collapse over zonal wavenumbers.
 
-    Subclasses define how the weight varies as a function of total wavenumber.
-    The total wavenumber for flat index *i* is ``i // n_spectral_modes``.
-
-    The scaler produces a 1-D tensor of length ``n_spectral_modes ** 2``
-    and registers it on ``TensorDim.GRID`` so that the standard scaler pipeline
-    applies it along the correct axis (position 3 in the loss tensor, which
-    holds spectral modes instead of grid points when a spectral transform has
-    been applied).
-
+    n_spectral refers to the length of the spectral dimension, and n_
+    spectral_modes the number of total wavenumbers.
     The default implementation scales uniformly by ``1 / n_spectral_modes``.
     """
 
