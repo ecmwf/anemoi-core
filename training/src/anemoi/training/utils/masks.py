@@ -32,7 +32,6 @@ class BaseMask:
         error_message = "Method `apply` must be implemented in subclass."
         raise NotImplementedError(error_message)
 
-    @abstractmethod
     def rollout_boundary(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         error_message = "Method `rollout_boundary` must be implemented in subclass."
         raise NotImplementedError(error_message)
@@ -107,6 +106,12 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
         mask = self.broadcast_like(x, dim, grid_shard_slice).cpu()
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
+    def crop(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
+        """Return x with only the True positions of the mask along dim."""
+        mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
+        indices = mask.nonzero(as_tuple=True)[0]
+        return torch.index_select(x, dim, indices.to(x.device))
+
     def rollout_boundary(
         self,
         pred_state: torch.Tensor,
@@ -144,6 +149,9 @@ class NoOutputMask(BaseMask):
     """No output mask."""
 
     def apply(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
+        return x
+
+    def crop(self, x: torch.Tensor, dim: int, **kwargs) -> torch.Tensor:  # noqa: ARG002
         return x
 
     def rollout_boundary(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
