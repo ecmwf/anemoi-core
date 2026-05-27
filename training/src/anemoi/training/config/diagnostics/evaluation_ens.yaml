@@ -8,7 +8,8 @@ defaults:
 # defaults list and just use
 callbacks:
   - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEvalEns
-    rollout: ${dataloader.validation_rollout}
+    rollout:
+    - ${dataloader.validation_rollout}
     every_n_batches: 4
 
 plot:

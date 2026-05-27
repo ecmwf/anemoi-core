@@ -98,33 +98,6 @@ ColormapSchema = Annotated[
 ]
 
 
-class LongRolloutPlotsSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots"] = Field(alias="_target_")
-    "LongRolloutPlots object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    rollout: list[int]
-    "Rollout steps to plot at."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    video_rollout: int = Field(example=0)
-    "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: list[float] | None = Field(default=None)
-    "Accumulation levels to plot, by default None."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    per_sample: int | None = Field(default=None)
-    "Number of plots per sample, by default 6."
-    every_n_epochs: int = Field(example=1)
-    "Epoch frequency to plot at, by default 1."
-    animation_interval: int | None = Field(default=None)
-    "Delay between frames in the animation in milliseconds, by default 400."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
-
-
 class PlotSampleSchema(BaseModel):
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
     "PlotSample object from anemoi training diagnostics callbacks."
@@ -276,8 +249,7 @@ class GraphTrainableFeaturesPlotEnsSchema(BaseModel):
 
 
 PlotCallbacks = Annotated[
-    LongRolloutPlotsSchema
-    | GraphTrainableFeaturesPlotSchema
+    GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
     | PlotSampleSchema
     | PlotSpectrumSchema

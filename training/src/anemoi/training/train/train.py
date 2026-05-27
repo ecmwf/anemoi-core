@@ -619,7 +619,8 @@ class AnemoiTrainer(ABC):
             #import pdb
             #breakpoint()
             dataset_path=f"{self.config.system.input.dataset}"
-            self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.system.hardware.cache_dir, dataset_path=dataset_path)
+            suffix=getattr(self.config.system.hardware, "hostname_suffix", None)
+            self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.system.hardware.cache_dir, dataset_path=dataset_path, hostname_suffix=suffix)
 
         self.prepare_compilation()
 

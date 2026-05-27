@@ -1,20 +1,27 @@
 import os
-import io
 import errno
 import fcntl
 import shutil
-import struct
 import torch
 import torch.distributed as dist
 from pathlib import Path
+import http.server
+import socketserver
+from functools import partial
 from multiprocessing import Value
 
 from anemoi.datasets import open_dataset
 
+import zarr
+from zarr.convenience import PathNotFoundError
+import threading
+
 import numpy as np
 import socket
-import socketserver
-import threading
+import struct
+import io
+
+from abc import ABC, abstractmethod
 
 
 import pytorch_lightning as pl
@@ -23,6 +30,8 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 import logging
 LOGGER = logging.getLogger(__name__)
 
+
+USE_LOCKING = False  # Set to False to disable file locking (not recommended)
 
 class CachedDataWrapper:
     """Wrapper that intercepts data access and routes through cache."""
@@ -92,13 +101,120 @@ class CachedDataWrapper:
         return getattr(self.original_data, name)
 
 
+def _recv_exact(sock, nbytes):
+    """Receive exactly *nbytes* from *sock*, or return None on clean EOF."""
+    parts = []
+    remaining = nbytes
+    while remaining > 0:
+        chunk = sock.recv(min(remaining, 1 << 20))  # up to 1 MB per recv
+        if not chunk:
+            return None
+        parts.append(chunk)
+        remaining -= len(chunk)
+    return b''.join(parts)
+
+
+class TCPCacheServer:
+    """TCP server that serves numpy arrays from the local zarr cache.
+
+    Protocol (persistent connection, many requests per connection):
+      Request:  4 bytes  – date index (uint32, big-endian)
+      Response: 8 bytes  – payload length (uint64, big-endian)
+                N bytes  – uncompressed .npy data (``np.save`` format)
+    """
+
+    def __init__(self, cache, port, host=""):
+        self.cache = cache
+        self.port = port
+        self.host = host
+
+    def start(self):
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind((self.host, self.port))
+        srv.listen(64)
+        self._server_socket = srv
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _ = self._server_socket.accept()
+                threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+            except OSError:
+                break
+
+    def _handle(self, conn):
+        try:
+            while True:
+                hdr = _recv_exact(conn, 4)
+                if hdr is None:
+                    break
+                date = struct.unpack("!I", hdr)[0]
+                arr = np.asarray(self.cache[date])
+                buf = io.BytesIO()
+                np.save(buf, arr)
+                payload = buf.getvalue()
+                conn.sendall(struct.pack("!Q", len(payload)) + payload)
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            pass
+        finally:
+            conn.close()
+
+
+class TCPCacheClient:
+    """Persistent-connection client for :class:`TCPCacheServer`.
+
+    Lazily connects on first ``fetch`` and reconnects automatically on failure.
+    Supports ``client[date]`` indexing for drop-in compatibility with zarr arrays.
+    """
+
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self._sock = None
+
+    def _connect(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((self.host, self.port))
+        self._sock = s
+
+    def fetch(self, date):
+        if self._sock is None:
+            self._connect()
+        try:
+            self._sock.sendall(struct.pack("!I", date))
+            hdr = _recv_exact(self._sock, 8)
+            if hdr is None:
+                raise ConnectionError("server closed connection")
+            length = struct.unpack("!Q", hdr)[0]
+            payload = _recv_exact(self._sock, length)
+            if payload is None:
+                raise ConnectionError("server closed connection")
+            return np.load(io.BytesIO(payload))
+        except (ConnectionResetError, BrokenPipeError, ConnectionError):
+            self._sock = None
+            self._connect()
+            return self.fetch(date)
+
+    def __getitem__(self, date):
+        return self.fetch(date)
+
+    def close(self):
+        if self._sock is not None:
+            self._sock.close()
+            self._sock = None
+
+
 #TODO change to overwriting the dataset insetad of data module?
 class DatasetCache(AnemoiDatasetsDataModule):
-    def __init__(self, ds, cache_root, dataset_path, proc_group=None):
+    def __init__(self, ds, cache_root, dataset_path, proc_group=None, hostname_suffix=None, remote_backend="zarr"):
         self.ds=ds
         self.cache_root = Path(cache_root)
         self.dataset_path=dataset_path
         self.proc_group = proc_group
+        self.remote_backend = remote_backend  # "zarr" (HTTP zarr) or "tcp" (raw socket + uncompressed npy)
         
         # For multi-dataset scenarios, we cache the first dataset by default
         # In the future, this could be made configurable
@@ -106,6 +222,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.primary_dataset_name = None
         
         self.is_initalised = False
+
+        # optional suffix which will be appended to hostnames
+        self.hostname_suffix=hostname_suffix
         
         # Cache statistics - use shared memory for cross-process visibility
         self.cache_hits_local = Value('i', 0)  # 'i' = signed int
@@ -130,7 +249,16 @@ class DatasetCache(AnemoiDatasetsDataModule):
         Delegate to the underlying dataset (self.ds).
         """
         return getattr(self.ds, name)
-    
+
+    @abstractmethod
+    def _start_server(self, directory, port):
+        """Start the server that will serve cached files to other nodes. Only called on node leaders."""
+        pass
+
+    @abstractmethod
+    def _fetch_remote(self, date, verbose=False):
+        """Fetch a single date from a remote nodes cache."""
+        pass
 
     #split between init and setup to match distirbuted strategy from PL structure (we need the proccess group to be initalised)
     def setup(self, **kwargs):
@@ -153,7 +281,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
             LOGGER.info(f"Rank {self.rank}: Set CUDA device to {self.rank}")
         
         self.world_size = dist.get_world_size(self.proc_group)
-        self.hostnames = self._get_all_hostnames()
+        self.hostnames = self._get_all_hostnames(suffix=self.hostname_suffix)
         self.proc_group = dist.new_group(ranks=None, backend="gloo")
 
         # Build a mapping from hostname -> node_id (integer) and figure out
@@ -178,7 +306,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Use self.ds_train which uses our cached property
         self.dataset_names = list(self.ds_train.datasets.keys())
         self.primary_dataset_name = self.dataset_names[0]
-        LOGGER.info(f"DatasetCache: Found datasets {self.dataset_names}, using '{self.primary_dataset_name}' for caching")
+        LOGGER.info(f"DatasetCache: Found datasets {self.dataset_names}, using '{self.primary_dataset_name}' for zarr metadata")
         
         #creates space under self.cache_dir
         self.filesystem= f"{self.dataset_path}" #TODO read from zarr metadata
@@ -188,11 +316,12 @@ class DatasetCache(AnemoiDatasetsDataModule):
         self.cache_registry=None
         self._init_cache()
        
-        # One HTTP server per node, run by the node leader only
+        # One server per node (HTTP for zarr backend, TCP for tcp backend),
+        # run by the node leader only.
         self.root_port = 8000
         self.port = self.root_port + self.node_id
         if self.is_node_leader:
-            self._start_server()
+            self._start_server(self.cache_root, self.port)
         # Barrier so all local ranks wait for the server to be up
         dist.barrier(self.proc_group)
         
@@ -202,9 +331,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         LOGGER.info(f"{self.rank=}: Initalised a shared cache under {self.cache_path}")
         self.is_initalised=True
 
-        # Persistent TCP connections to remote nodes, keyed by node_id.
-        # Created lazily on first remote hit.
-        self._tcp_conns: dict[int, socket.socket] = {}
+        # Remote connection handles – opened lazily in fetch()
+        self.remote_zarrs = [None] * self.num_nodes
+        self.remote_tcp_clients = [None] * self.num_nodes
     
     def _inject_cache_wrapper(self):
         """Replace the underlying dataset's data accessor with cached version."""
@@ -245,16 +374,24 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 LOGGER.info(f"Existing cache found under {self.cache_path}. Deleting because {delete_existing_cache=}")
                 shutil.rmtree(self.cache_path)
             self.cache_path.mkdir(exist_ok=True)
+            
+            #copy zarr metadata from filesystem
+            # This is needed so we can load chunks from the cache like we would from the remote zarr
+            # BUT we will have a lot of gaps in the local copy, so we will have a seperate list self.cache_registry of which elements are present or not
+            #TODO replace with zarr.empty_like()
+            shutil.copy2(f"{self.filesystem}/data/.zarray", self.cache_path)
+            #shutil.copy2(f"{self.filesystem}/data/.zattrs", self.cache_path) #some datasets dont have, not sure if its needed tbh
+            shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
         # Barrier so non-leaders don't use the dir before it exists
         dist.barrier(self.proc_group)
         
+        self.cache = zarr.open(self.cache_path, mode="a")  # append mode so all ranks can read+write
         self.cache_full=False # prevents subsequent writing when cache is full
-        # File-based lock so multiple local ranks don't write the same .npy concurrently
-        self._write_lock_path = self.cache_path / ".write_lock"
+        if USE_LOCKING:
+            # File-based lock so multiple local ranks don't write the same zarr chunk concurrently
+            self._write_lock_path = self.cache_path / ".write_lock"
        
         dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
-        #dates = self.ds.size
-        #dates = self.ds.ds_train.data.shape[0]
         
         if self.cache_registry is None:
             # Keep cache_registry on CPU with shared memory for DataLoader worker access
@@ -265,62 +402,21 @@ class DatasetCache(AnemoiDatasetsDataModule):
             
         self.remote_cache_roots=self._get_all_cache_roots()
         
-    
-    def _start_server(self):
-        """Start a threaded raw TCP server that serves .npy files from the cache.
-
-        Protocol (per request on a persistent connection):
-          Client sends:  4 bytes  – date index as uint32 big-endian
-          Server replies: 4 bytes  – payload length N as uint32 big-endian
-                          N bytes  – raw .npy file contents
-          If the file doesn't exist the server replies with length 0.
-        """
-        cache_path = self.cache_path  # capture for the handler closure
-
-        class _CacheRequestHandler(socketserver.StreamRequestHandler):
-            """Handle one persistent connection: loop reading 4-byte date requests."""
-
-            def handle(self):
-                while True:
-                    # Read 4-byte date request
-                    header = self.rfile.read(4)
-                    if not header or len(header) < 4:
-                        break  # client closed connection
-                    date = struct.unpack('!I', header)[0]
-                    npy_path = cache_path / f"{date}.npy"
-                    if npy_path.exists():
-                        payload = npy_path.read_bytes()
-                        self.wfile.write(struct.pack('!I', len(payload)))
-                        self.wfile.write(payload)
-                    else:
-                        self.wfile.write(struct.pack('!I', 0))
-                    self.wfile.flush()
-
-        class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-            allow_reuse_address = True
-            daemon_threads = True
-
-        self._tcp_server = _ThreadedTCPServer(("", self.port), _CacheRequestHandler)
-        # TCP_NODELAY on the listening socket
-        self._tcp_server.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-        self.server_thread = threading.Thread(target=self._tcp_server.serve_forever, daemon=True)
-        self.server_thread.start()
-        LOGGER.info(
-            f"Rank {self.rank}: TCP cache server listening on "
-            f"{self._get_hostname(self.global_rank)}:{self.port}"
-        )
-        
     def _get_hostname(self, rank):
         return self.hostnames[rank]
     
-    def _get_all_hostnames(self):
-        """Gather the hostname of every rank into a list (length = world_size)."""
+    def _get_all_hostnames(self, suffix:str=None):
+        """Gather the hostname of every rank into a list (length = world_size).
+
+        Appends optional suffix to hostnames if given."""
         my_host = socket.gethostname()
 
         # Gather all hostnames as Python objects
         hostnames = [None for _ in range(self.world_size)]
         dist.all_gather_object(hostnames, my_host, self.proc_group)
+        if suffix is not None:
+            #append the ib interface to the end of the hostnames
+            hostnames = [hostname + suffix for hostname in hostnames]
         LOGGER.info(f"{self.rank=} {hostnames=}")
         return hostnames
     
@@ -336,27 +432,15 @@ class DatasetCache(AnemoiDatasetsDataModule):
         dist.all_gather_object(roots, root, self.proc_group)
         return roots
     
+    @abstractmethod
     def _shutdown_server(self):
-        """Stop the TCP server and close all client connections."""
-        try:
-            if hasattr(self, '_tcp_server') and self._tcp_server is not None:
-                LOGGER.info(f"Rank {self.rank}: Shutting down TCP server on port {self.port}")
-                # commenting these out because otherwise the process just hangs
-                #self._tcp_server.shutdown()
-                #self._tcp_server.server_close()
-                LOGGER.info(f"Rank {self.rank}: TCP server shut down successfully")
-        except Exception as e:
-            LOGGER.warning(f"Rank {self.rank}: Error shutting down TCP server: {e}")
-        # Close outgoing persistent connections
-        for nid, sock in getattr(self, '_tcp_conns', {}).items():
-            try:
-                sock.close()
-            except Exception:
-                pass
+        """Shutdown the HTTP server and close the socket."""
+        pass
 
     def __del__(self):
-       if getattr(self, 'is_node_leader', False):
-           self._shutdown_server()
+        #loops here and gets stuck
+        #if getattr(self, 'is_node_leader', False):
+        self._shutdown_server()
 
     def priority_reduce(self, stacked, cache_registry, node_id):
         """ reduces global cache registries by taking local node first then any other node"""
@@ -394,55 +478,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
         num_cached = (self.cache_registry != -1).sum().item()
         LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {num_cached} cached items across all nodes")
 
-
-    def _get_tcp_conn(self, remote_node_id) -> socket.socket:
-        """Return (or lazily create) a persistent TCP connection to a remote node."""
-        sock = self._tcp_conns.get(remote_node_id)
-        if sock is None:
-            remote_global_rank = self._node_leader_rank[remote_node_id]
-            remote_host = self._get_hostname(remote_global_rank)
-            port = self.root_port + remote_node_id
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.connect((remote_host, port))
-            self._tcp_conns[remote_node_id] = sock
-            LOGGER.info(f"Rank {self.rank}: Opened persistent TCP connection to node {remote_node_id} ({remote_host}:{port})")
-        return sock
-
-    @staticmethod
-    def _recvall(sock: socket.socket, n: int) -> bytes:
-        """Receive exactly n bytes from a socket."""
-        buf = bytearray()
-        while len(buf) < n:
-            chunk = sock.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError("Connection closed while receiving data")
-            buf.extend(chunk)
-        return bytes(buf)
-
-    def _fetch_remote_tcp(self, remote_node_id: int, date: int) -> np.ndarray | None:
-        """Fetch a cached .npy from a remote node over the persistent TCP connection.
-
-        Returns the numpy array, or None if the remote doesn't have it.
-        """
-        try:
-            sock = self._get_tcp_conn(remote_node_id)
-            # Send 4-byte date request
-            sock.sendall(struct.pack('!I', date))
-            # Read 4-byte length
-            length_bytes = self._recvall(sock, 4)
-            length = struct.unpack('!I', length_bytes)[0]
-            if length == 0:
-                return None
-            # Read payload
-            payload = self._recvall(sock, length)
-            return np.load(io.BytesIO(payload))
-        except Exception as e:
-            LOGGER.warning(f"Rank {self.rank}: TCP fetch failed for date {date} from node {remote_node_id}: {e}")
-            # Drop the broken connection so it gets recreated next time
-            self._tcp_conns.pop(remote_node_id, None)
-            return None
-        
     def check_cache(self, date) -> list[int]:
         """ checks either local or global registry. returns list of node_ids containing file in their SSD"""
         # cache_registry stores node_ids, not ranks
@@ -476,27 +511,28 @@ class DatasetCache(AnemoiDatasetsDataModule):
             data = primary_data[date]
             
             if not self.cache_full:
-                # add data to the shared node cache as .npy file
-                # use a file lock so multiple local ranks don't write the same date concurrently
-                npy_path = self.cache_path / f"{date}.npy"
-                if not npy_path.exists():  # quick non-locked check to skip if already written by peer
+                # add data to the shared node cache
+                # use a file lock so multiple local ranks don't write the same chunk concurrently
+                if self.cache_registry[date].item() == -1:  # quick non-locked check
                     try:
-                        lock_fd = open(self._write_lock_path, 'w')
-                        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                        if USE_LOCKING:
+                            lock_fd = open(self._write_lock_path, 'w')
+                            fcntl.flock(lock_fd, fcntl.LOCK_EX)
                         try:
-                            if not npy_path.exists():  # double-check under lock
-                                np.save(npy_path, data)
+                            if self.cache_registry[date].item() == -1:  # double-check under lock
+                                self.cache[date] = data
                                 self.cache_registry[date] = self.node_id
+                        except Exception as e:
+                            LOGGER.error(f"Rank {self.rank}: Error writing date {date} to cache: {e}")
                         finally:
-                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                            lock_fd.close()
+                            if USE_LOCKING:
+                                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                                lock_fd.close()
 
                     #TODO calculate and manage space rather then relying on catching an error
                     except OSError as e:
                         if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
                             self.cache_full=True
-                            # Clean up the partial .npy file so it doesn't get served
-                            npy_path.unlink(missing_ok=True)
                             LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
                         else:
                             raise e
@@ -508,25 +544,21 @@ class DatasetCache(AnemoiDatasetsDataModule):
                 LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         elif self.node_id in cache_hits:
-            #Cache hit on local node SSD – read .npy straight from disk
+            #Cache hit on local node SSD – read from shared zarr cache
             
             self.cache_hits_local.value += 1
-            data = np.load(self.cache_path / f"{date}.npy")
+            data = self.cache[date]            
             
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
-            #cache hit on remote node SSD – raw TCP fetch
+            #cache hit on remote node SSD
             
             self.cache_hits_remote.value += 1
             remote_node_id = cache_hits[0]
             
-            data = self._fetch_remote_tcp(remote_node_id, date)
-            if data is None: 
-                LOGGER.warning(f"Rank {self.rank}: Remote TCP fetch returned None for date {date} from node {remote_node_id}. Falling back to filesystem.")
-                data = primary_data[date]
-            
+            data = self._fetch_remote(date, verbose=verbose)
             if verbose or (self.total_fetches.value % 10 == 0):
                 LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
@@ -553,3 +585,86 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # MultiDataset.valid_date_indices contains all valid time indices
         # Use self.ds_train to access our cached property
         return len(self.ds_train.valid_date_indices)
+    
+class ZarrDatasetCache(DatasetCache):
+    """ Should implement _start_server, _fetch_remote and optionally _shutdown_server"""
+    def _start_server(self, directory, port):
+        #directory = Path("/").resolve()
+        directory = Path(self.cache_root).resolve()
+        handler=http.server.SimpleHTTPRequestHandler
+        
+        def no_logging(*args):
+            return
+        handler.log_message=no_logging #by default the http server logs a lot to stdout, this silences it
+        
+        handler = partial(handler, directory=str(directory))
+        
+        # Allow socket reuse to avoid "Address already in use" errors
+        socketserver.TCPServer.allow_reuse_address = True
+        httpd = socketserver.TCPServer(("", port), handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        
+        # Store server metadata for proper shutdown
+        self.httpd = httpd
+        self.server_thread = thread
+        
+        LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
+
+    def _get_remote_cache_url(self, remote_node_id):
+        remote_global_rank = self._node_leader_rank[remote_node_id]
+        remote_host = self._get_hostname(remote_global_rank)
+        port = self.root_port + remote_node_id
+        remote_cache_path = "cache" #just need relative path here, will be added to the root dir of our http server (e.g. $TMPDIR)
+        return f"http://{remote_host}:{port}/{remote_cache_path}"
+
+
+    def _fetch_remote(self, date, verbose=False):
+        if self.remote_zarrs[remote_node_id] is None:
+            remote_cache_url=self._get_remote_cache_url(remote_node_id)
+            try:
+                self.remote_zarrs[remote_node_id] = zarr.open(remote_cache_url, mode='r')
+                LOGGER.info(f"Rank {self.rank}: Opened zarr interface to remote cache of node {remote_node_id}.")
+            except (PathNotFoundError, KeyError) as e:
+                LOGGER.info(f"Error opening remote date {date} from node {remote_node_id} to {self.rank}. full error: {e}. falling back to filesystem.")
+                data = primary_data[date]
+        data = self.remote_zarrs[remote_node_id][date]
+
+
+class TCPDatasetCache(DatasetCache):
+    """ Should implement _start_server, _fetch_remote and optionally _shutdown_server"""
+    def _start_server(self, directory, port):
+        """Start a TCP cache server on this node leader."""
+        self.tcp_server = TCPCacheServer(self.cache, port)
+        self.tcp_server.start()
+        LOGGER.info(f"Serving cache via TCP on {self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
+
+    def _shutdown_server(self):
+        try:
+            if hasattr(self, 'httpd') and self.httpd is not None:
+                LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
+                #self.httpd.shutdown()
+                #TODO doesnt kill server, use pkill instead
+                #if hasattr(self, 'server_thread') and self.server_thread is not None:
+                #    self.server_thread.join(timeout=5)
+                # Close the socket to free the port
+                #self.httpd.server_close()
+                LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
+        except Exception as e:
+            LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
+
+    def _get_remote_tcp_address(self, remote_node_id):
+        """Return (hostname, port) for the TCP cache server on *remote_node_id*."""
+        remote_global_rank = self._node_leader_rank[remote_node_id]
+        remote_host = self._get_hostname(remote_global_rank)
+        port = self.root_port + remote_node_id
+        return remote_host, port
+        
+
+    def _fetch_remote(self, date, verbose=False):
+        if self.remote_tcp_clients[remote_node_id] is None:
+            host, port = self._get_remote_tcp_address(remote_node_id)
+            self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
+            LOGGER.info(f"Rank {self.rank}: Opened TCP connection to remote cache of node {remote_node_id} ({host}:{port}).")
+        data = self.remote_tcp_clients[remote_node_id].fetch(date)
+    
