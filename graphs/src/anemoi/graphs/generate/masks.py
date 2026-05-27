@@ -125,10 +125,10 @@ class AreaMaskBuilder:
     Methods
     -------
     fit_coords(coords_rad: torch.Tensor)
-        Fit the KNN model to the coordinates in radians.
+        Fit the backend to the coordinates in radians.
     fit(graph: HeteroData)
-        Fit the KNN model to the reference nodes.
-    get_mask(coords_rad: np.ndarray) -> np.ndarray
+        Fit the backend to the reference nodes.
+    get_mask(coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor
         Get the mask for the nodes based on the distance to the reference nodes.
     """
 
