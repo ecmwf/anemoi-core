@@ -92,6 +92,20 @@ def test_crps_with_singleton_target_ensemble_dim() -> None:
     torch.testing.assert_close(out, torch.zeros(2))
 
 
+def test_crps_mask_nans_preserves_ensemble_sizes() -> None:
+    pred = torch.ones(1, 1, 3, 2, 1)
+    target = torch.ones(1, 1, 2, 2, 1)
+    pred[:, :, 1, 0, 0] = torch.nan
+    target[:, :, 0, 1, 0] = torch.nan
+
+    masked_pred, masked_target = CRPS(ignore_nans=True).mask_nans(pred, target)
+
+    assert masked_pred.shape == pred.shape
+    assert masked_target.shape == target.shape
+    assert torch.isfinite(masked_pred).all()
+    assert torch.isfinite(masked_target).all()
+
+
 @pytest.fixture
 def functionalloss() -> type[FunctionalLoss]:
     class ReturnDifference(FunctionalLoss):

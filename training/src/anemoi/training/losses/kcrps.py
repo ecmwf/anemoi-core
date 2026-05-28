@@ -72,6 +72,17 @@ class CRPS(BaseLoss):
             msg = f"Unknown CRPS backend {backend!r}. Expected one of: 'naive', 'stable'."
             raise ValueError(msg)
 
+    def mask_nans(self, pred: torch.Tensor, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Mask CRPS inputs while preserving each tensor's ensemble size."""
+        if self.ignore_nans:
+            target_nan_mask = torch.isnan(target).any(dim=2, keepdim=True)
+            pred_nan_mask = torch.isnan(pred).any(dim=2, keepdim=True)
+            nan_mask = target_nan_mask | pred_nan_mask
+            target = target.masked_fill(nan_mask, 0.0)
+            pred = pred.masked_fill(nan_mask, 0.0)
+
+        return pred, target
+
     def _kernel_crps(
         self,
         preds: torch.Tensor,
@@ -162,15 +173,10 @@ class CRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
+        y_pred, y_target = self.mask_nans(y_pred, y_target)
+
         y_target = einops.rearrange(y_target, "bs t 1 latlon v -> bs t v latlon 1")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
-
-        if self.ignore_nans:
-            target_nan_mask = torch.isnan(y_target)
-            pred_nan_mask = torch.isnan(y_pred).any(dim=-1, keepdim=True)
-            nan_mask = target_nan_mask | pred_nan_mask
-            y_target = y_target.masked_fill(nan_mask, 0.0)
-            y_pred = y_pred.masked_fill(nan_mask, 0.0)
 
         if self.no_autocast:
             with torch.amp.autocast(device_type=y_pred.device.type, enabled=False):
