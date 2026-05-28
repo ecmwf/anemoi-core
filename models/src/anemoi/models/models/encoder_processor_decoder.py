@@ -140,7 +140,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         if dataset_name in self.encoded_dataset_names:
-            return x_data_latent_dict[dataset_name]
+            return x_encoded_data
         
         # For datasets not encoded, we can still provide the data as input to the decoder if configured to do so
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
@@ -323,9 +323,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
-            x_data_target, shard_sizes_data = self._assemble_target(
+            x_data_target = self._assemble_target(
                 x[dataset_name],
                 x_data_latent_dict.get(dataset_name, None),
+                batch_size=batch_size,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )
 
