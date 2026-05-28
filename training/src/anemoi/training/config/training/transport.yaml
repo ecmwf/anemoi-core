@@ -29,7 +29,8 @@ optimization:
     betas: [0.9, 0.95]
     eps: 1e-7
 
-training_method: anemoi.training.train.methods.TransportTraining
+method:
+  _target_: anemoi.training.train.methods.TransportTraining
 transport:
   prediction_mode: state
   objective: edm_diffusion

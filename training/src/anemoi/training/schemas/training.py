@@ -615,14 +615,34 @@ class BaseTrainingSchema(BaseModel):
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
+class SingleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.SingleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the single training method."
+
+
+class EnsembleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.EnsembleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the ensemble training method."
+
+
+class TransportTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.TransportTraining"] = Field(..., alias="_target_")
+    "Hydra target for the transport training method."
+
+
+def _training_method_discriminator(v: Any) -> str:
+    method = v.get("method", {}) if hasattr(v, "get") else getattr(v, "method", None)
+    return method.get("_target_", "") if hasattr(method, "get") else getattr(method, "target_", "")
+
+
 class SingleTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
-    "Training objective."
+    method: SingleTrainingMethodSchema
+    "Training method."
 
 
 class EnsembleTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
-    "Training objective."
+    method: EnsembleTrainingMethodSchema
+    "Training method."
 
 
 class TransportTrainingConfigSchema(BaseModel):
@@ -633,13 +653,15 @@ class TransportTrainingConfigSchema(BaseModel):
 
 
 class TransportTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.TransportTraining"] = Field(..., alias="training_method")
-    "Training objective."
+    method: TransportTrainingMethodSchema
+    "Training method."
     transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
     "Transport training configuration."
 
 
 TrainingSchema = Annotated[
-    SingleTrainingSchema | EnsembleTrainingSchema | TransportTrainingSchema,
-    Discriminator("training_method"),
+    Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
+    | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
+    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
+    Discriminator(_training_method_discriminator),
 ]

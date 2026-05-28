@@ -26,7 +26,8 @@ NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigra
 
 default_config = """
 training:
-  training_method: anemoi.training.train.tasks.GraphEnsForecaster
+  method:
+    _target_: anemoi.training.train.methods.EnsembleTraining
   multistep_input : 1
 
 diagnostics:
@@ -250,7 +251,8 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
 # Progress bar callback tests
 progress_bar_config = """
 training:
-  training_method: anemoi.training.train.tasks.GraphEnsForecaster
+  method:
+    _target_: anemoi.training.train.methods.EnsembleTraining
 
 diagnostics:
   callbacks: []
