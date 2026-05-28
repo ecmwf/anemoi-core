@@ -189,14 +189,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.n_step_input = self.task.num_input_timesteps
         self.n_step_output = self.task.num_output_timesteps
-        task_input_steps_by_dataset = getattr(self.task, "num_input_timesteps_by_dataset", {})
-        task_output_steps_by_dataset = getattr(self.task, "num_output_timesteps_by_dataset", {})
         self.n_step_input_by_dataset = {
-            dataset_name: int(task_input_steps_by_dataset.get(dataset_name, self.n_step_input))
+            dataset_name: len(self.task._requested_input_relative_times(dataset_name))
             for dataset_name in self.dataset_names
         }
         self.n_step_output_by_dataset = {
-            dataset_name: int(task_output_steps_by_dataset.get(dataset_name, self.n_step_output))
+            dataset_name: len(self.task._requested_output_relative_times(dataset_name))
             for dataset_name in self.dataset_names
         }
         model_n_step_input: int | dict[str, int] = self.n_step_input

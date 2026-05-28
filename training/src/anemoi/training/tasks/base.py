@@ -59,8 +59,6 @@ class BaseTask(ABC):
         input_offsets: list[datetime.timedelta] | dict[str, list[datetime.timedelta]],
         output_offsets: list[datetime.timedelta] | dict[str, list[datetime.timedelta]],
     ) -> None:
-        self.num_input_timesteps_by_dataset: dict[str, int] = {}
-        self.num_output_timesteps_by_dataset: dict[str, int] = {}
         self.dataset_input_relative_times_by_dataset: dict[str, list[int]] = {}
         self.dataset_target_relative_times_by_dataset: dict[str, list[int]] = {}
         self.dataset_time_maps: dict[str, dict[int, int]] = {}
@@ -89,12 +87,6 @@ class BaseTask(ABC):
                     *[offset for offsets in self._output_offsets.values() for offset in offsets],
                 },
             )
-            self.num_input_timesteps_by_dataset = {
-                dataset_name: len(self._input_offsets[dataset_name]) for dataset_name in dataset_names
-            }
-            self.num_output_timesteps_by_dataset = {
-                dataset_name: len(self._output_offsets[dataset_name]) for dataset_name in dataset_names
-            }
             if len(self._input_offsets) > 0:
                 self._reference_input_dataset_name = max(
                     self._input_offsets,

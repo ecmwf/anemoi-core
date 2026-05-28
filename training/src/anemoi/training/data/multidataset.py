@@ -214,7 +214,9 @@ class MultiDataset(IterableDataset):
         A date t is valid if we can sample the elements t + i
         for every relative_date_index i across all data readers.
 
-        Returns the intersection of valid indices from all data readers.
+        With dataset-native relative indices this returns the intersection of
+        valid indices across data readers. In the shared-grid path it returns
+        the valid indices of the anchor dataset used to align the sample.
         """
         if self.relative_date_indices_are_native:
             return compute_valid_data_indices(self.data_readers, self.raw_relative_date_indices)

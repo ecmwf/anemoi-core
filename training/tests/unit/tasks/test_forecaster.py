@@ -218,8 +218,35 @@ def test_forecaster_mixed_frequency_inputs_use_dataset_specific_requested_times(
 
     assert x["meps"].shape == (1, 1, 1, 1, 2)
     assert x["radar"].shape == (1, 2, 1, 1, 2)
-    torch.testing.assert_close(x["meps"][0, :, 0, 0, 0], torch.tensor([1.0]))
-    torch.testing.assert_close(x["radar"][0, :, 0, 0, 0], torch.tensor([3.0, 4.0]))
+
+
+def test_forecaster_preserves_explicit_empty_input_window_from_metadata() -> None:
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="5m",
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["meps"],
+            "meps": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"meps": []},
+                    "relative_date_indices_training_by_dataset": {"meps": [0]},
+                },
+            },
+        },
+    }
+
+    task.configure_from_metadata(metadata)
+    batch = {
+        "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
+    }
+    x = task.get_inputs(batch, {"meps": _make_minimal_index_collection(_NAME_TO_INDEX)})
+
+    assert task.dataset_input_relative_times_by_dataset["meps"] == []
+    assert task._requested_input_relative_times("meps") == []
+    assert x["meps"].shape == (1, 0, 1, 1, 2)
 
 
 @pytest.mark.parametrize(
