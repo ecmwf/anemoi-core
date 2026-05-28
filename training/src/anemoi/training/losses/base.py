@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from enum import StrEnum
 from typing import Any
 from typing import ClassVar
+from typing import Literal
 
 import torch
 from torch import nn
@@ -26,6 +27,9 @@ from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
+
+
+Squash_mode = Literal["avg", "sum"]
 
 
 class LossFactoryContextKey(StrEnum):
@@ -50,11 +54,6 @@ class BaseLoss(nn.Module, ABC):
     ) -> None:
         """Node- and feature_weighted Loss.
 
-        Exposes:
-        - self.avg_function: torch.nanmean or torch.mean
-        - self.sum_function: torch.nansum or torch.sum
-        depending on the value of `ignore_nans`
-
         Registers:
         - self.scaler: ScaleTensor modified with `add_scaler` and `update_scaler`
 
@@ -74,8 +73,7 @@ class BaseLoss(nn.Module, ABC):
 
         self.add_module("scaler", ScaleTensor())
 
-        self.avg_function = torch.nanmean if ignore_nans else torch.mean
-        self.sum_function = torch.nansum if ignore_nans else torch.sum
+        self.ignore_nans = ignore_nans
 
         self.supports_sharding = True
         self.num_scales = 1
@@ -148,12 +146,41 @@ class BaseLoss(nn.Module, ABC):
             grid_shard_slice=grid_shard_slice,
         )
 
+    def mask_nans(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the fraction of ignored nan-values in the target and masked  prediction and target tensors.
+
+        Parameters
+        ----------
+        pred : torch.Tensor,
+            Prediction tensor
+        target : torch.Tensor,
+            Target tensor
+
+        Returns
+        -------
+        torch.Tensor, torch.Tensor]
+            * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``
+            * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
+        """
+        if self.ignore_nans:
+            nan_mask = torch.isnan(target + pred)
+            target = target.masked_fill(nan_mask, 0.0)
+            pred = pred.masked_fill(nan_mask, 0.0)
+
+            return pred, target
+
+        return pred, target
+
     def reduce(
         self,
         out: torch.Tensor,
         squash: bool = True,
         tensor_layout: "TensorLayout" = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
         """Reduce the out of the loss.
@@ -169,7 +196,7 @@ class BaseLoss(nn.Module, ABC):
             Difference tensor, of shape TensorDim
         squash : bool, optional
             Whether to squash the variable dimension, by default True
-        squash_mode : str, optional
+        squash_mode : {"avg", "sum"} , optional
             Mode to use for squashing the variable dimension, by default "avg"
             If "avg", the last dimension is averaged.
             If "sum", the last dimension is summed.
@@ -205,9 +232,9 @@ class BaseLoss(nn.Module, ABC):
             return reduced if group is None else reduce_tensor(reduced, group)
         if squash:
             if squash_mode == "avg":
-                out = self.avg_function(out, dim=tensor_layout.grid, keepdim=True)
+                out = torch.mean(out, dim=tensor_layout.grid, keepdim=True)
             elif squash_mode == "sum":
-                out = self.sum_function(out, dim=tensor_layout.variable, keepdim=True)
+                out = torch.sum(out, dim=tensor_layout.variable, keepdim=True)
             else:
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
@@ -216,14 +243,14 @@ class BaseLoss(nn.Module, ABC):
         # 1. the normalisation over grid points is handled in the node weighting
         # 2. the normalization over output steps is handled by the time_step scaler
         dims = [tensor_layout.time, tensor_layout.grid]
-        space_time_summed = self.sum_function(
+        space_time_summed = torch.sum(
             out,
             dim=tuple([f for f in dims if f is not None]),
             keepdim=True,
         )
 
         dims = [tensor_layout.batch, tensor_layout.time, tensor_layout.ensemble]
-        out = self.avg_function(
+        out = torch.mean(
             space_time_summed,
             dim=tuple([f for f in dims if f is not None]),
         ).squeeze()
@@ -259,7 +286,7 @@ class BaseLoss(nn.Module, ABC):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
         **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
@@ -281,7 +308,7 @@ class BaseLoss(nn.Module, ABC):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group to reduce over, by default None
-        squash_mode : str, optional
+        squash_mode : {"avg", "sum"}, optional
             Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
@@ -307,6 +334,11 @@ class BaseLossWrapper(BaseLoss):
         if not isinstance(loss, BaseLoss):
             msg = f"Invalid loss type provided: {type(loss)}. Expected BaseLoss."
             raise TypeError(msg)
+        self.ignore_nans = loss.ignore_nans or self.ignore_nans
+        if self.ignore_nans and not loss.ignore_nans:
+            msg = "BaseLossWrapper.ignore_nans and BaseLoss.ignore_nans missmatch."
+            msg += f" {self.ignore_nans} != {loss.ignore_nans}"
+            raise ValueError(msg)
         self.loss = loss
         # Share the inner loss's scaler so that scaler additions/updates
         # applied to this wrapper are visible to the actual loss computation.
@@ -368,7 +400,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
         **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
@@ -390,7 +422,7 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
-        squash_mode : str, optional
+        squash_mode : {"avg", "sum"}, optional
             Reduction mode for the variable dimension, by default ``"avg"``
         **kwargs
             Additional keyword arguments
@@ -402,10 +434,17 @@ class FunctionalLoss(BaseLoss):
         """
         is_sharded = grid_shard_slice is not None
         if isinstance(pred.data, list):
-            out = [self.calculate_difference(p, t) for p, t in zip(pred.data, target.data)]
+            out = []
+            for p, t in zip(pred.data, target.data):
+                pdata, tdata = self.mask_nans(p, t)
+                out.append(self.calculate_difference(pdata, tdata))
+            # out = [self.calculate_difference(p, t) for p, t in zip(pred.data, target.data)]
         else:
-            out = self.calculate_difference(pred.data, target.data)
+            pdata, tdata = self.mask_nans(pred.data, target.data)
+            out = self.calculate_difference(pdata, tdata)
+
         # out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+
         return self.reduce(
             out, squash, tensor_layout=pred.layout, group=group if is_sharded else None, squash_mode=squash_mode
         )

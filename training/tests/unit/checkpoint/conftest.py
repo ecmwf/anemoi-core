@@ -190,6 +190,15 @@ def temp_checkpoint_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def sample_checkpoint(tmp_path: Path) -> Path:
+    """Write a minimal on-disk checkpoint for source/loading round-trip tests."""
+    ckpt_path = tmp_path / "test.ckpt"
+    state = {"state_dict": {"layer.weight": torch.randn(10, 5)}, "epoch": 3}
+    torch.save(state, ckpt_path)
+    return ckpt_path
+
+
+@pytest.fixture
 def checkpoint_files(
     temp_checkpoint_dir: Path,
     lightning_checkpoint: dict,

@@ -177,8 +177,8 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
     def compute_edge_index_from_coords(
         self, source_coords: torch.Tensor, target_coords: torch.Tensor,
     ) -> torch.Tensor:
-        if self.radius is None:
-            self.radius = self.get_cutoff_radius(target_coords)
+        # recompute the radius from the current per-batch coords
+        self.radius = self.get_cutoff_radius(target_coords)
 
         return super().compute_edge_index_from_coords(source_coords, target_coords)
 
@@ -313,7 +313,7 @@ class ReversedCutOffEdges(CutOffEdges):
         source_coords, target_coords = super().get_cartesian_node_coordinates(source_nodes, target_nodes)
         return target_coords, source_coords
 
-    def get_cutoff_radius(self, graph: HeteroData):
+    def get_cutoff_radius(self, reference: HeteroData | torch.Tensor) -> float:
         """Compute the cut-off radius.
 
         The cut-off radius is computed either as:
@@ -322,8 +322,12 @@ class ReversedCutOffEdges(CutOffEdges):
 
         Parameters
         ----------
-        graph : HeteroData
-            The graph.
+        reference : HeteroData | torch.Tensor
+            The reference nodes or coordinates. ``HeteroData`` is used at static
+            graph-build time (nodes stored as lat/lon in radians);
+            ``torch.Tensor`` is used at runtime by
+            :class:`anemoi.models.layers.graph_provider.DynamicGraphProvider`
+            and is assumed to contain cartesian coordinates on the unit sphere.
 
         Returns
         -------
@@ -334,14 +338,23 @@ class ReversedCutOffEdges(CutOffEdges):
             # Convert km to Cartesian distance on unit sphere
             # For small distances: Cartesian distance ≈ great circle distance (radians)
             # radians = km / EARTH_RADIUS
-            radius = self.cutoff_distance_km / EARTH_RADIUS
+            return self.cutoff_distance_km / EARTH_RADIUS
+
+        # Factor-based approach — reference is the *source* nodes for ReversedCutOffEdges.
+        if isinstance(reference, HeteroData):
+            # Coordinates are stored as 2d lat/lon in radians in the graph.
+            source_nodes, use_cartesian = reference[self.source_name], True
+        elif isinstance(reference, torch.Tensor):
+            source_nodes, use_cartesian = reference, False
         else:
-            # Use factor-based approach
-            reference_dist = CutOffEdges.get_reference_distance(
-                graph[self.source_name], mask_attr_name=self.source_mask_attr_name
-            )
-            radius = reference_dist * self.cutoff_factor
-        return radius
+            raise ValueError("Unsupported type for reference. Expected HeteroData or torch.Tensor.")
+
+        reference_dist = CutOffEdges.get_reference_distance(
+            source_nodes,
+            mask_attr_name=self.source_mask_attr_name,
+            use_cartesian=use_cartesian,
+        )
+        return reference_dist * self.cutoff_factor
 
     def undo_masking_adj_matrix(self, adj_matrix, source_nodes: NodeStorage, target_nodes: NodeStorage):
         adj_matrix = adj_matrix.T
@@ -350,9 +363,9 @@ class ReversedCutOffEdges(CutOffEdges):
     def compute_edge_index_from_coords(
         self, source_coords: torch.Tensor, target_coords: torch.Tensor,
     ) -> torch.Tensor:
-        # Reference for radius is the *source* nodes (matches ``get_cutoff_radius``).
-        # Recompute every call (factor-mode value depends on per-batch coords).
-        self.radius = self._radius_from_coords(source_coords)
+        # Reference for the radius is the *source* nodes (matches ``get_cutoff_radius``).
+        # Recompute every call — see ``CutOffEdges.compute_edge_index_from_coords``.
+        self.radius = self.get_cutoff_radius(source_coords)
         # Skip ``CutOffEdges.compute_edge_index_from_coords`` (which would
         # re-derive the radius from target_coords) and go straight to the base.
         return BaseDistanceEdgeBuilders.compute_edge_index_from_coords(self, source_coords, target_coords)
