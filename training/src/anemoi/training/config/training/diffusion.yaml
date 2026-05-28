@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - training_loss: single
   - optimization: default
   - weight_averaging: null
 
@@ -81,7 +82,6 @@ validation_metrics:
         # Cannot scale over the variable dimension due to possible remappings.
         # Available scalers include:
         # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
-        # Use the `scale_validation_metrics` section to variable scale.
         scalers: ["node_weights", "time_steps"]
         # other kwargs
         ignore_nans: True

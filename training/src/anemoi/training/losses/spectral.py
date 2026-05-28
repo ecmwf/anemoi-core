@@ -35,7 +35,8 @@ from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
+from anemoi.training.losses.kcrps import CRPS
+from anemoi.training.losses.kcrps import CRPSBackend
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ class SpectralLoss(BaseLoss):
         kwargs
             Additional arguments for the spectral transform.
         """
-        super().__init__(ignore_nans=ignore_nans)
+        BaseLoss.__init__(self, ignore_nans=ignore_nans)
 
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
@@ -264,7 +265,7 @@ class LogFFT2Distance(LogSpectralDistance):
         )
 
 
-class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
+class SpectralCRPSLoss(SpectralLoss, CRPS):
     """CRPS computed in spectral space using arbitrary spectral transforms.
 
     Works with:
@@ -286,6 +287,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         x_dim: int | None = None,
         y_dim: int | None = None,
         alpha: float = 1.0,
+        backend: CRPSBackend = "stable",
         no_autocast: bool = True,
         ignore_nans: bool = False,
         scalers: list | None = None,
@@ -299,7 +301,9 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             scalers=scalers,
             **kwargs,
         )
+        self._validate_arguments(alpha, backend)
         self.alpha = alpha
+        self.backend = backend
         self.no_autocast = no_autocast
 
     def forward(
@@ -325,9 +329,9 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
-                crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+                crps = self._kernel_crps(pred_spec, tgt_spec)
         else:
-            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+            crps = self._kernel_crps(pred_spec, tgt_spec)
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         scaled = self.scale(

@@ -24,11 +24,12 @@ from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -173,7 +174,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
-        # Handle dictionary of graph_data
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
@@ -230,6 +230,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
+            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
+            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
@@ -262,12 +265,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
+                graph_data=graph_data,
+                data_node_name=data_node_name,
             )
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
+                graph_data=graph_data,
+                data_node_name=data_node_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -293,12 +300,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_shapes, self.grid_sizes = {}, {}
+        self.shard_sizes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
             self.grid_sizes[dataset_name] = graph_data[
                 dataset_name
             ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
+            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,
             )
@@ -330,7 +337,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
-        self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
+        self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
     @property
@@ -386,10 +393,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         validation_metrics_configs: dict,
         scalers: dict,
         data_indices: IndexCollection,
+        graph_data: object | None = None,
+        data_node_name: str = DEFAULT_DATASET_NAME,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
-                metric_name: get_loss_function(val_metric_config, scalers=scalers, data_indices=data_indices)
+                metric_name: get_loss_function(
+                    val_metric_config,
+                    scalers=scalers,
+                    data_indices=data_indices,
+                    graph_data=graph_data,
+                    data_node_name=data_node_name,
+                )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
@@ -403,7 +418,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 
@@ -419,7 +434,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if update_states:
             processor_prefixes += ("model.pre_processors.", "model.post_processors.")
         if update_tendencies:
-            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+            processor_prefixes += (
+                "model.pre_processors_tendencies.",
+                "model.post_processors_tendencies.",
+            )
 
         if not processor_prefixes:
             return
@@ -545,9 +563,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         tuple[torch.Tensor, torch.Tensor, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
-        # Handle multi-dataset case for grid shard slice and shapes
+        # Handle multi-dataset case for grid shard slice and sizes
         grid_shard_slice = self.grid_shard_slice[dataset_name]
-        grid_shard_shapes = self.grid_shard_shapes[dataset_name]
+        grid_shard_sizes = self.grid_shard_sizes[dataset_name]
 
         is_sharded = grid_shard_slice is not None
 
@@ -556,9 +574,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, shard_shapes, self.model_comm_group)
+            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_sizes, self.model_comm_group)
+            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_sizes, self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
@@ -608,7 +625,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -794,7 +811,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Setup batch sharding before every step.
 
-        If the batch is sharded, it will be setup with the grid shard shapes and slice.
+        If the batch is sharded, it will be setup with the grid shard sizes and slice.
         Otherwise, the batch will be allgathered.
 
         Parameters
@@ -808,19 +825,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Batch after setup
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        self.grid_shard_shapes = {}
+        self.grid_shard_sizes = {}
         self.grid_shard_slice = {}
 
         for dataset_name in self.dataset_names:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_shapes[dataset_name] = self.shard_shapes[dataset_name]
+                self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
                 start, end = get_partition_range(
-                    partition_sizes=self.grid_shard_shapes[dataset_name],
+                    partition_sizes=self.grid_shard_sizes[dataset_name],
                     partition_id=self.reader_group_rank,
                 )
                 self.grid_shard_slice[dataset_name] = slice(start, end)
             else:
-                self.grid_shard_shapes[dataset_name] = None
+                self.grid_shard_sizes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
                 batch[dataset_name] = self.allgather_batch(batch[dataset_name], dataset_name)
         return batch
@@ -892,21 +909,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Allgathered (full) batch
         """
         grid_size = self.grid_sizes[dataset_name]
-        grid_shard_shapes = self.shard_shapes[dataset_name]
+        grid_shard_sizes = self.shard_sizes[dataset_name]
 
         if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
-        tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
-
-        torch.distributed.all_gather(
-            tensor_list,
-            batch.contiguous(),
-            group=self.reader_groups[self.reader_group_id],
+        return gather_tensor(
+            batch,
+            self.grid_dim,
+            grid_shard_sizes,
+            self.reader_groups[self.reader_group_id],
         )
-
-        return torch.cat(tensor_list, dim=self.grid_dim)
 
     def calculate_val_metrics(
         self,
@@ -976,7 +989,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
-                        grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                        grid_shard_sizes=self.grid_shard_sizes[dataset_name],
                     )
 
                 metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)

@@ -221,6 +221,18 @@ def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> 
     BaseSchema(**cfg)
 
 
+def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = ensemble_graph_multiscale_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_ensemble_truncated_connection(
+    ensemble_truncated_connection_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_truncated_connection_config
+    BaseSchema(**cfg)
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_hierarchical(
@@ -406,3 +418,10 @@ def test_training_cycle_temporal_downscaler_ensemble(
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = temporal_downscaler_ensemble_config
+    BaseSchema(**cfg)
