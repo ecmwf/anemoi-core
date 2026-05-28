@@ -126,6 +126,7 @@ class CombinedLoss(BaseLoss):
                         data_indices=data_indices,
                         graph_data=kwargs.get("graph_data"),
                         data_node_name=kwargs.get("data_node_name"),
+                        output_mask=kwargs.get("output_mask"),
                     ),
                 )
             elif isinstance(loss, type):
