@@ -42,6 +42,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import check_loss_tree_variable_units
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
 if TYPE_CHECKING:
@@ -269,6 +270,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 graph_data=graph_data,
                 data_node_name=data_node_name,
             )
+
+            # Check unit compatibility between predicted and target variables
+            ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
+            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],

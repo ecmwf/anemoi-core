@@ -493,3 +493,100 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
 
     # Should not raise: cerra is not in checkpoint
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+# --- Tests for check_loss_variable_units_compatibility ---
+
+
+def test_check_loss_variable_units_compatible_different_variables() -> None:
+    """Test compatible units between different predicted and target variables."""
+    from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
+
+    variables_metadata = {
+        "tp": {"units": "kg m**-2"},
+        "imerg": {"units": "kg m**-2"},
+    }
+    predicted_variables = ["tp"]
+    target_variables = ["imerg"]
+
+    # Should not raise
+    check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata)
+
+
+def test_check_loss_variable_units_incompatible_units_raises() -> None:
+    """Test that incompatible units between predicted and target raise ValueError."""
+    from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
+
+    variables_metadata = {
+        "tp": {"units": "kg m**-2"},
+        "imerg": {"units": "mm"},
+    }
+    predicted_variables = ["tp"]
+    target_variables = ["imerg"]
+
+    with pytest.raises(ValueError, match="Units are not compatible"):
+        check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata)
+
+
+def test_check_loss_variable_units_missing_metadata_warns() -> None:
+    """Test that missing variable metadata warns but doesn't error."""
+    from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
+
+    variables_metadata = {
+        "tp": {"units": "kg m**-2"},
+        # "imerg" not in metadata
+    }
+    predicted_variables = ["tp"]
+    target_variables = ["imerg"]
+
+    # Should not raise - missing metadata means we can't check
+    check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata)
+
+
+def test_check_loss_variable_units_none_metadata_returns() -> None:
+    """Test that None metadata returns without error."""
+    from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
+
+    # Should not raise
+    check_loss_variable_units_compatibility(["tp"], ["imerg"], None)
+
+
+# --- Tests for check_loss_tree_variable_units ---
+
+
+def test_check_loss_tree_recurses_into_combined_loss() -> None:
+    """Test that the tree walker finds variable mappers inside CombinedLoss."""
+    from omegaconf import DictConfig
+
+    from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses import get_loss_function
+    from anemoi.training.utils.variables_metadata import check_loss_tree_variable_units
+
+    data_indices = IndexCollection(
+        DictConfig({"forcing": ["forcing"], "diagnostic": [], "target": ["imerg"]}),
+        {"tp": 0, "forcing": 1, "imerg": 2},
+    )
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.MAELoss",
+                        "predicted_variables": ["tp"],
+                        "target_variables": ["imerg"],
+                    },
+                ],
+            },
+        ),
+        data_indices=data_indices,
+    )
+
+    # Compatible units - should not raise
+    variables_metadata = {"tp": {"units": "kg m**-2"}, "imerg": {"units": "kg m**-2"}}
+    check_loss_tree_variable_units(loss, variables_metadata)
+
+    # Incompatible units - should raise
+    variables_metadata_bad = {"tp": {"units": "kg m**-2"}, "imerg": {"units": "mm"}}
+    with pytest.raises(ValueError, match="Units are not compatible"):
+        check_loss_tree_variable_units(loss, variables_metadata_bad)

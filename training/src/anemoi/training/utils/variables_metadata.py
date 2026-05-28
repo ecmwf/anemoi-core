@@ -92,6 +92,76 @@ def check_variables_metadata_compatibility(
             raise ValueError(msg) from e
 
 
+def check_loss_variable_units_compatibility(
+    predicted_variables: list[str],
+    target_variables: list[str],
+    variables_metadata: dict[str, dict] | None,
+) -> None:
+    """Check unit compatibility between paired predicted and target variables.
+
+    When a loss function maps predicted variables to different target variables
+    (e.g. model output ``tp`` compared against observation ``imerg``), this function
+    verifies that the units of each predicted/target pair are compatible.
+    """
+    if variables_metadata is None:
+        LOG.warning(
+            "No variables_metadata available. Skipping loss variable unit compatibility check.",
+        )
+        return
+
+    for pred_var, target_var in zip(predicted_variables, target_variables, strict=False):
+
+        if pred_var not in variables_metadata:
+            LOG.warning(
+                "Predicted variable '%s' not found in variables_metadata. "
+                "Skipping unit check for pair ('%s', '%s').",
+                pred_var,
+                pred_var,
+                target_var,
+            )
+            continue
+
+        if target_var not in variables_metadata:
+            LOG.warning(
+                "Target variable '%s' not found in variables_metadata. Skipping unit check for pair ('%s', '%s').",
+                target_var,
+                pred_var,
+                target_var,
+            )
+            continue
+
+        pred_variable = Variable.from_dict(pred_var, variables_metadata[pred_var])
+        target_variable = Variable.from_dict(target_var, variables_metadata[target_var])
+
+        compatible, reason = pred_variable.compatible(target_variable, return_reason=True)
+        if not compatible:
+            msg = (
+                f"Loss variable unit mismatch: predicted variable '{pred_var}' and "
+                f"target variable '{target_var}' are not compatible: {reason}"
+            )
+            raise ValueError(msg)
+
+
+def check_loss_tree_variable_units(
+    loss: object,
+    variables_metadata: dict[str, dict] | None,
+) -> None:
+    """Walk a loss tree and check unit compatibility for any variable-mapped losses.
+
+    Recurses into composite losses (e.g. ``CombinedLoss``) to find all
+    ``LossVariableMapper`` instances and validate their predicted/target pairs.
+    """
+    predicted_variables = getattr(loss, "predicted_variables", None)
+    target_variables = getattr(loss, "target_variables", None)
+
+    if predicted_variables is not None and target_variables is not None:
+        check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata)
+
+    # Recurse into composite losses (e.g. CombinedLoss.losses)
+    for sub_loss in getattr(loss, "losses", []):
+        check_loss_tree_variable_units(sub_loss, variables_metadata)
+
+
 @lru_cache
 def _crack_variable_name(variable_name: str) -> tuple[str, str | None]:
     """Attempt to crack the variable name into parameter name and level.
