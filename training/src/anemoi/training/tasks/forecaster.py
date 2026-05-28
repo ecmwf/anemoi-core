@@ -31,16 +31,31 @@ class RolloutConfig:
         self.epoch_increment = epoch_increment
         self.maximum = maximum
         self.step = self.start
+        self._last_increased_epoch: int = -1
 
     def should_increase(self, current_epoch: int) -> bool:
         """Check if rollout should be increased at the end of the current epoch."""
-        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0
+        return (
+            self.epoch_increment > 0
+            and current_epoch % self.epoch_increment == 0
+            and current_epoch != self._last_increased_epoch
+        )
 
-    def increase(self) -> None:
+    def increase(self, current_epoch: int) -> None:
         """Increase the rollout window by one step."""
         if self.step < self.maximum:
             self.step += 1
+            self._last_increased_epoch = current_epoch
             LOGGER.info("Rollout window length has been increased to %d.", self.step)
+
+    def state_dict(self) -> dict:
+        """Return serialisable state."""
+        return {"step": self.step, "last_increased_epoch": self._last_increased_epoch}
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore state from a dict produced by :meth:`state_dict`."""
+        self.step = state["step"]
+        self._last_increased_epoch = state["last_increased_epoch"]
 
 
 class Forecaster(BaseTask):
@@ -211,15 +226,30 @@ class Forecaster(BaseTask):
         logger(
             "rollout",
             float(self.rollout.step),
-            on_step=True,
+            on_step=False,
+            on_epoch=True,
             logger=logger_enabled,
             rank_zero_only=True,
             sync_dist=False,
         )
 
+    def training_runtime_state_dict(self) -> dict:
+        """Return training runtime state to be persisted in the training checkpoint.
+
+        Captures the current rollout curriculum step so that job resume
+        continues the schedule from where it left off rather than restarting
+        from ``rollout.start``.
+        """
+        return {"rollout": self.rollout.state_dict()}
+
+    def load_training_runtime_state_dict(self, state: dict) -> None:
+        """Restore training runtime state from a training checkpoint."""
+        if "rollout" in state:
+            self.rollout.load_state_dict(state["rollout"])
+
     def on_train_epoch_end(self, current_epoch: int) -> None:
         if self.rollout.should_increase(current_epoch):
-            self.rollout.increase()
+            self.rollout.increase(current_epoch)
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
