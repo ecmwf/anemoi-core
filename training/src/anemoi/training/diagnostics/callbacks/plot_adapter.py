@@ -158,9 +158,14 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         Parameters
         ----------
         tensor : Any
-            Tensor with shape (..., members, grid, vars)
+            Tensor with shape (..., members, grid, vars).
         members : int | list[int] | None
             Members to select. None returns all members, int/list selects specific members.
+
+        Returns
+        -------
+        Any
+            Tensor with selected ensemble members.
         """
         if members is None:
             return tensor
@@ -169,8 +174,8 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         return tensor[:, :, members, ...]
 
     def prepare_loss_batch(self, batch: dict) -> dict:
-        """Squeeze ensemble dim to member 0 for loss plotting."""
-        return {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
+        """Return the batch for loss plotting."""
+        return batch
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         yield from self._inner.iter_plot_samples(data, output_tensor)

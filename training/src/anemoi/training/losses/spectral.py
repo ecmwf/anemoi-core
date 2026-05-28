@@ -324,17 +324,20 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        # → [..., modes, vars]
-        pred_spec = self._to_spectral_flat(pred)
-        tgt_spec = self._to_spectral_flat(target)
+        def compute_spectral_crps() -> torch.Tensor:
+            # -> [..., modes, vars]
+            pred_spec = self._to_spectral_flat(pred)
+            tgt_spec = self._to_spectral_flat(target)
 
-        pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
-        tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
+            pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
+            tgt_spec = einops.rearrange(tgt_spec, "b t 1 m v -> b t v m 1")
+            return self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+
         if self.no_autocast:
-            with torch.amp.autocast(device_type="cuda", enabled=False):
-                crps = self._kernel_crps(pred_spec, tgt_spec)
+            with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+                crps = compute_spectral_crps()
         else:
-            crps = self._kernel_crps(pred_spec, tgt_spec)
+            crps = compute_spectral_crps()
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         scaled = self.scale(

@@ -84,12 +84,12 @@ class CRPS(BaseLoss):
         Parameters
         ----------
         preds : torch.Tensor
-            Predicted ensemble, shape (batch_size, n_out_steps, n_vars, latlon, ens_size)
+            Predicted ensemble, shape (batch_size, n_out_steps, n_vars, latlon, ens_size).
         targets : torch.Tensor
-            Ground truth, shape (batch_size, n_out_steps, n_vars, latlon)
+            Ground truth, shape (batch_size, n_out_steps, n_vars, latlon, 1).
         alpha : float
             Factor for linear combination of fair (unbiased, ensemble variance component weighted by (ens-size-1)^-1)
-            and standard CRPS (1.0 = fully fair, 0.0 = fully unfair)
+            and standard CRPS (1.0 = fully fair, 0.0 = fully unfair).
         backend : {"naive", "stable"}
             Backend used for the point-wise CRPS calculation.
 
@@ -98,6 +98,8 @@ class CRPS(BaseLoss):
         CRPS : torch.Tensor
             The point-wise kernel CRPS, shape (batch_size, n_out_steps, n_vars, latlon).
         """
+        # Remove ensemble dim for ground truth.
+        targets = targets.squeeze(-1)
         alpha = self.alpha if alpha is None else alpha
         backend = self.backend if backend is None else backend
         ens_size = preds.shape[-1]
@@ -160,13 +162,18 @@ class CRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
-        y_pred, y_target = self.mask_nans(y_pred, y_target)
-
-        y_target = einops.rearrange(y_target, "bs t latlon v -> bs t v latlon")
+        y_target = einops.rearrange(y_target, "bs t 1 latlon v -> bs t v latlon 1")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
 
+        if self.ignore_nans:
+            target_nan_mask = torch.isnan(y_target)
+            pred_nan_mask = torch.isnan(y_pred).any(dim=-1, keepdim=True)
+            nan_mask = target_nan_mask | pred_nan_mask
+            y_target = y_target.masked_fill(nan_mask, 0.0)
+            y_pred = y_pred.masked_fill(nan_mask, 0.0)
+
         if self.no_autocast:
-            with torch.amp.autocast(device_type="cuda", enabled=False):
+            with torch.amp.autocast(device_type=y_pred.device.type, enabled=False):
                 crps = self._kernel_crps(y_pred, y_target)
         else:
             crps = self._kernel_crps(y_pred, y_target)
