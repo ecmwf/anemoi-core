@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import abstractmethod
 
 import numpy as np
@@ -15,6 +16,8 @@ import torch
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseMask:
@@ -33,6 +36,11 @@ class BaseMask:
         raise NotImplementedError(error_message)
 
     @abstractmethod
+    def crop(self, x: torch.Tensor, dim: int, **kwargs) -> torch.Tensor:
+        error_message = "Method `crop` must be implemented in subclass."
+        raise NotImplementedError(error_message)
+
+    @abstractmethod
     def rollout_boundary(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         error_message = "Method `rollout_boundary` must be implemented in subclass."
         raise NotImplementedError(error_message)
@@ -46,6 +54,28 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
         mask = nodes[attribute_name].bool().squeeze()
         self.register_buffer("mask", mask)
+
+        self._crop_start, self._crop_n = Boolean1DMask._find_contiguous_block(mask, attribute_name)
+
+    @staticmethod
+    def _find_contiguous_block(mask: torch.Tensor, attribute_name: str) -> tuple[int | None, int]:
+        """Return (start, n) for the contiguous True block in mask, or (None, n) if non-contiguous.
+
+        start is None when the True positions are non-contiguous,
+        in which case a warning is logged.
+        """
+        n = int(mask.sum())
+        if n > 0:
+            first = int(mask.int().argmax())
+            if bool(mask[first : first + n].all()):
+                return first, n
+            if n < len(mask):
+                LOGGER.warning(
+                    "Boolean1DMask %r: non-contiguous masked indices; "
+                    "reordering to a contiguous block would allow zero-copy operations.",
+                    attribute_name,
+                )
+        return None, n
 
     @property
     def supporting_arrays(self) -> dict:
@@ -109,6 +139,10 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
     def crop(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         """Return x with only the True positions of the mask along dim."""
+        if grid_shard_slice is None and self._crop_start is not None:
+            return x.narrow(dim, self._crop_start, self._crop_n)
+        # TODO(dieter): optimize for sharding.
+        # Currently crop is only called in SpectralLoss, which operates on unsharded states.
         mask = self.mask[grid_shard_slice] if grid_shard_slice is not None else self.mask
         indices = mask.nonzero(as_tuple=True)[0]
         return torch.index_select(x, dim, indices.to(x.device))
