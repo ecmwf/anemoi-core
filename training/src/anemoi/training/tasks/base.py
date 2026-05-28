@@ -186,7 +186,7 @@ class BaseTask(ABC):
 
     def _requested_input_relative_times(self, dataset_name: str) -> list[int]:
         requested = self.dataset_input_relative_times_by_dataset.get(dataset_name)
-        if requested is not None and len(requested) > 0:
+        if requested is not None:
             return requested
         return self.get_batch_input_indices(dataset_name=dataset_name)
 
