@@ -674,9 +674,10 @@ class FileGraphProvider(BaseGraphProvider):
     carry:
 
     * ``edge_index`` – [2, num_edges] tensor
-    * One or more edge attribute tensors (names listed in ``edge_attributes``)
+    * One or more edge attribute tensors (names listed in ``edge_attribute_names``)
     * ``src_size`` (int attribute) – number of source nodes
     * ``dst_size`` (int attribute) – number of destination nodes
+    * ``edge_attribute_names`` (list[str]) – names of edge attribute tensors to concatenate
     * ``trainable_size`` (int attribute, optional) – learnable edge param width (default 0)
 
     If ``src_size`` / ``dst_size`` are not stored on the graph they are inferred
@@ -738,16 +739,16 @@ class FileGraphProvider(BaseGraphProvider):
     def _init_from_graph(self, graph: HeteroData) -> None:
         """Derive src_size, dst_size, edge_attributes, trainable_size from a graph."""
         # --- src_size / dst_size ---
-        self.src_size = int(getattr(graph, "src_size", None))
-        self.dst_size = int(getattr(graph, "dst_size", None))
+        self.src_size = getattr(graph, "src_size", None)
+        self.dst_size = getattr(graph, "dst_size", None)
         assert (
             self.src_size is not None or self.dst_size is not None
         ), "Graph must have at least one of src_size or dst_size attributes"
 
-        self.edge_attributes: list[str] = list(getattr(graph, "edge_attributes", None))
+        self.edge_attributes: list[str] = getattr(graph, "edge_attribute_names", None)
         assert (
             self.edge_attributes is not None
-        ), "Graph must have 'edge_attributes' attribute listing edge attribute tensor names"
+        ), "Graph must have 'edge_attribute_names' attribute listing edge attribute tensor names"
 
         edge_attr_tensor = torch.cat([graph[attr] for attr in self.edge_attributes], axis=1)
 
@@ -792,8 +793,8 @@ class FileGraphProvider(BaseGraphProvider):
             graph.dst_size == self.dst_size
         ), f"Graph dst_size {graph.dst_size} does not match expected {self.dst_size}"
         assert (
-            list(getattr(graph, "edge_attributes", [])) == self.edge_attributes
-        ), f"Graph edge_attributes {getattr(graph, 'edge_attributes', None)} do not match expected {self.edge_attributes}"
+            list(getattr(graph, "edge_attribute_names", [])) == self.edge_attributes
+        ), f"Graph edge_attribute_names {getattr(graph, 'edge_attribute_names', None)} do not match expected {self.edge_attributes}"
         assert (
             int(getattr(graph, "trainable_size", 0)) == self.trainable_size
         ), f"Graph trainable_size {getattr(graph, 'trainable_size', 0)} does not match expected {self.trainable_size}"

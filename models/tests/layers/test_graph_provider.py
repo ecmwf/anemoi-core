@@ -37,7 +37,10 @@ def _make_fake_graph(seed: int = 0) -> HeteroData:
             torch.randint(0, NUM_DST_NODES, (NUM_EDGES,), generator=rng),
         ]
     )
-    graph["edge_attr"] = torch.randn(NUM_EDGES, EDGE_ATTR_DIM, generator=rng)
+    graph["edge_length"] = torch.randn(NUM_EDGES, EDGE_ATTR_DIM, generator=rng)
+    graph.edge_attribute_names = ["edge_length"]
+    graph.src_size = NUM_SRC_NODES
+    graph.dst_size = NUM_DST_NODES
     return graph
 
 
@@ -63,9 +66,6 @@ def test_file_graph_provider_len(graph_dir: Path) -> None:
     """Provider reports correct number of graph files."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
         num_workers=1,
         pin_memory=False,
     )
@@ -73,26 +73,19 @@ def test_file_graph_provider_len(graph_dir: Path) -> None:
 
 
 def test_file_graph_provider_edge_dim(graph_dir: Path) -> None:
-    """edge_dim matches the attribute width (+ trainable_size when set)."""
+    """edge_dim matches the attribute width."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
-        trainable_size=2,
         num_workers=1,
         pin_memory=False,
     )
-    assert provider.edge_dim == EDGE_ATTR_DIM + 2
+    assert provider.edge_dim == EDGE_ATTR_DIM
 
 
 def test_file_graph_provider_iteration(graph_dir: Path) -> None:
     """Iterating over the provider yields all graphs."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
         num_workers=1,
         pin_memory=False,
     )
@@ -109,9 +102,6 @@ def test_file_graph_provider_get_edges_no_shard(graph_dir: Path) -> None:
     """get_edges returns correct shapes without sharding."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
         num_workers=1,
         pin_memory=False,
     )
@@ -129,9 +119,6 @@ def test_file_graph_provider_get_edges_batch_expansion(graph_dir: Path) -> None:
     """get_edges expands edges correctly for batch_size > 1."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
         num_workers=1,
         pin_memory=False,
     )
@@ -148,9 +135,6 @@ def test_file_graph_provider_get_edges_default_graph(graph_dir: Path) -> None:
     """get_edges falls back to first graph when graph=None."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
         num_workers=1,
         pin_memory=False,
     )
@@ -159,32 +143,11 @@ def test_file_graph_provider_get_edges_default_graph(graph_dir: Path) -> None:
     assert edge_attr.shape[0] == NUM_EDGES
 
 
-def test_file_graph_provider_trainable(graph_dir: Path) -> None:
-    """Trainable parameters increase edge_attr width."""
-    trainable_size = 4
-    provider = FileGraphProvider(
-        graph_dir=graph_dir,
-        edge_attributes=["edge_attr"],
-        src_size=NUM_SRC_NODES,
-        dst_size=NUM_DST_NODES,
-        trainable_size=trainable_size,
-        num_workers=1,
-        pin_memory=False,
-    )
-
-    graph = provider._dataset[0]
-    edge_attr, _, _ = provider.get_edges(batch_size=1, graph=graph, shard_edges=False)
-    assert edge_attr.shape == (NUM_EDGES, EDGE_ATTR_DIM + trainable_size)
-
-
 def test_file_graph_provider_missing_dir(tmp_path: Path) -> None:
     """Raises FileNotFoundError for a nonexistent directory."""
     with pytest.raises(FileNotFoundError):
         FileGraphProvider(
             graph_dir=tmp_path / "nonexistent",
-            edge_attributes=["edge_attr"],
-            src_size=5,
-            dst_size=4,
             num_workers=1,
             pin_memory=False,
         )
@@ -197,9 +160,6 @@ def test_file_graph_provider_empty_dir(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         FileGraphProvider(
             graph_dir=empty,
-            edge_attributes=["edge_attr"],
-            src_size=5,
-            dst_size=4,
             num_workers=1,
             pin_memory=False,
         )
