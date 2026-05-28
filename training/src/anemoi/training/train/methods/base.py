@@ -42,6 +42,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -461,14 +462,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         }
 
         # Extract variables_metadata for unit compatibility check
-        metadata = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
-        ckpt_variables_metadata = {}
-        for dataset_name in self._ckpt_model_name_to_index:
-            ds_inference = metadata.get(dataset_name, {})
-            vm = ds_inference.get("variables_metadata")
-            if vm is not None:
-                ckpt_variables_metadata[dataset_name] = vm
-        self._ckpt_variables_metadata = ckpt_variables_metadata or None
+        self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+            checkpoint,
+            self._ckpt_model_name_to_index,
+        )
 
     def _update_scaler_for_dataset(
         self,

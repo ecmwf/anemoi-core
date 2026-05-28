@@ -23,6 +23,7 @@ from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
@@ -126,14 +127,10 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
         raise TypeError(msg)
 
     # Extract variables_metadata for unit compatibility check
-    metadata = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
-    ckpt_variables_metadata = {}
-    for dataset_name in model._ckpt_model_name_to_index:
-        ds_inference = metadata.get(dataset_name, {})
-        vm = ds_inference.get("variables_metadata")
-        if vm is not None:
-            ckpt_variables_metadata[dataset_name] = vm
-    model._ckpt_variables_metadata = ckpt_variables_metadata or None
+    model._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+        checkpoint,
+        model._ckpt_model_name_to_index,
+    )
 
     return model
 

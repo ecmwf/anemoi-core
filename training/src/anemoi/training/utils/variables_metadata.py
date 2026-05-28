@@ -20,6 +20,21 @@ LOG = logging.getLogger(__name__)
 GROUP_SPEC = str | list[str] | bool
 
 
+def extract_variables_metadata_from_checkpoint(
+    checkpoint: dict,
+    dataset_names: dict[str, object],
+) -> dict[str, dict] | None:
+    """Extract per-dataset variables_metadata from a loaded checkpoint."""
+    metadata = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("metadata_inference", {})
+    ckpt_variables_metadata = {}
+    for dataset_name in dataset_names:
+        ds_inference = metadata.get(dataset_name, {})
+        vm = ds_inference.get("variables_metadata")
+        if vm is not None:
+            ckpt_variables_metadata[dataset_name] = vm
+    return ckpt_variables_metadata or None
+
+
 def check_variables_metadata_compatibility(
     ckpt_variables_metadata: dict[str, dict] | None,
     dataset_metadata: dict[str, dict],
