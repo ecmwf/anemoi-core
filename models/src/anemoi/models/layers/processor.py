@@ -494,7 +494,7 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:

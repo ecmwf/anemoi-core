@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import os
 from typing import Optional
 from typing import Tuple
 
@@ -15,6 +16,8 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
+
+ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
 def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj, Tensor]:
@@ -54,6 +57,11 @@ def edge_index_to_csc(
     perm = None
     if not assume_sorted:
         edge_index, perm = sort_edge_index_by_dst(edge_index)
+    elif ANEMOI_DEBUG_SHARDING:
+        assert is_edge_index_dst_sorted(edge_index), (
+            "edge_index_to_csc called with assume_sorted=True but edge_index is not sorted by destination node. "
+            "This indicates a bug in edge sorting/sharding."
+        )
 
     row, col = edge_index
     if num_nodes is None:

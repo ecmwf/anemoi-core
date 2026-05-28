@@ -236,7 +236,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
     ):
         x_dst = x[1]
         num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
@@ -324,7 +324,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
@@ -431,7 +431,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
 
@@ -804,7 +804,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1003,7 +1003,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> Tensor:
 
@@ -1073,7 +1073,7 @@ class PointWiseMapper(BaseMapper, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1127,7 +1127,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
@@ -1331,7 +1331,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
-        edges_are_dst_sorted: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(

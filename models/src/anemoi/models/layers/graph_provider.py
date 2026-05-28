@@ -225,7 +225,11 @@ class StaticGraphProvider(BaseGraphProvider):
         if shard_edges:
             src_size, dst_size = self.edge_inc[:, 0].tolist()
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, src_size * batch_size, dst_size * batch_size, model_comm_group
+                edge_attr,
+                edge_index,
+                src_size * batch_size,
+                dst_size * batch_size,
+                model_comm_group,
             )
             return edge_attr, edge_index, edge_shard_sizes, True
 
