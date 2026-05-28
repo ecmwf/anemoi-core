@@ -20,6 +20,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GraphTransformerProcessor
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -182,3 +183,14 @@ class TestGraphTransformerProcessor:
             )
 
         assert torch.allclose(output_sorted, output_unsorted, atol=1e-4)
+
+    def test_graphtransformer_processor_accepts_fractional_mlp_hidden_ratio(
+        self, graphtransformer_init, graph_provider, device
+    ):
+        config = asdict(graphtransformer_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        config["mlp_hidden_ratio"] = 2.67
+        processor = GraphTransformerProcessor(**config).to(device)
+
+        expected_hidden_dim = compute_mlp_hidden_dim(graphtransformer_init.num_channels, 2.67)
+        assert processor.proc[0].node_dst_mlp.mlp[0].out_features == expected_hidden_dim

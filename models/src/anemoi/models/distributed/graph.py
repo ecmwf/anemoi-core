@@ -13,6 +13,7 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.primitives import _alltoall_transpose
+from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
@@ -326,14 +327,23 @@ class _ShardParallelSection(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.comm_group and ctx.gather_in_backward is True:
-            return (
-                _gather(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
-                None,
-                None,
-                None,
-                None,
-            )
+        if ctx.comm_group is not None:
+            if ctx.gather_in_backward:
+                return (
+                    _gather(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            else:
+                return (
+                    _expand_sharded_tensor(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
         return grad_output, None, None, None, None
 
 

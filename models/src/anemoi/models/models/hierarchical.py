@@ -240,12 +240,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_hidden_latents[hidden] = shard_tensor(x_latent, 0, shard_sizes_hidden_dict[hidden], model_comm_group)
 
         # Process each dataset through its corresponding encoder
-        dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
+        dataset_latents = {}
         shard_sizes_data_dict = {}
-        x_encoded_latents_dict: dict[str, dict[str, torch.Tensor]] = {}
-
+        x_encoded_latents_dict = {}
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
@@ -254,7 +253,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )
-            x_skip_dict[dataset_name] = {"data": x_skip}
+            x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
             # Compute encoder edges at model level
@@ -286,76 +285,74 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edges_are_dst_sorted=enc_edges_dst_sorted,
             )
             x_data_latent_dict[dataset_name] = x_data_latent
-
-            x_encoded_latents_dict[dataset_name] = {}
-
-            ## Downscale
-            for i in range(0, self.num_hidden - 1):
-                src_hidden_name = self._graph_name_hidden[i]
-                dst_hidden_name = self._graph_name_hidden[i + 1]
-
-                ## Processing at same level
-                if self.level_process:
-                    # Compute edges for down level processor
-                    (
-                        down_level_edge_attr,
-                        down_level_edge_index,
-                        down_edge_shard_sizes,
-                        down_edges_dst_sorted,
-                    ) = self.down_level_processor_graph_providers[src_hidden_name].get_edges(
-                        batch_size=batch_size,
-                        model_comm_group=model_comm_group,
-                    )
-
-                    x_latent = self.down_level_processor[src_hidden_name](
-                        x_latent,
-                        batch_size=batch_size,
-                        shard_info=GraphShardInfo(
-                            nodes=shard_sizes_hidden_dict[src_hidden_name],
-                            edges=down_edge_shard_sizes,
-                        ),
-                        edge_attr=down_level_edge_attr,
-                        edge_index=down_level_edge_index,
-                        model_comm_group=model_comm_group,
-                        edges_are_dst_sorted=down_edges_dst_sorted,
-                    )
-
-                # store latents for skip connections
-                x_skip_dict[dataset_name][src_hidden_name] = x_latent
-
-                # Compute edges for downscale mapper
-                (
-                    downscale_edge_attr,
-                    downscale_edge_index,
-                    ds_edge_shard_sizes,
-                    ds_edges_dst_sorted,
-                ) = self.downscale_graph_providers[src_hidden_name].get_edges(
-                    batch_size=batch_size,
-                    model_comm_group=model_comm_group,
-                )
-
-                ds_shard_info = BipartiteGraphShardInfo(
-                    src_nodes=shard_sizes_hidden_dict[src_hidden_name],
-                    dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
-                    edges=ds_edge_shard_sizes,
-                )
-
-                # Encode to next hidden level
-                x_encoded_latents_dict[dataset_name][src_hidden_name], x_latent = self.downscale[src_hidden_name](
-                    (x_latent, x_hidden_latents[dst_hidden_name]),
-                    batch_size=batch_size,
-                    shard_info=ds_shard_info,
-                    edge_attr=downscale_edge_attr,
-                    edge_index=downscale_edge_index,
-                    model_comm_group=model_comm_group,
-                    keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                    edges_are_dst_sorted=ds_edges_dst_sorted,
-                )
-
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents in the innermost layer
         x_latent = sum(dataset_latents.values())
+
+        ## Downscale
+        x_encoded_latents_dict = {}
+        for i in range(0, self.num_hidden - 1):
+            src_hidden_name = self._graph_name_hidden[i]
+            dst_hidden_name = self._graph_name_hidden[i + 1]
+
+            ## Processing at same level
+            if self.level_process:
+                # Compute edges for down level processor
+                (
+                    down_level_edge_attr,
+                    down_level_edge_index,
+                    down_edge_shard_sizes,
+                    down_edges_dst_sorted,
+                ) = self.down_level_processor_graph_providers[src_hidden_name].get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+
+                x_latent = self.down_level_processor[src_hidden_name](
+                    x_latent,
+                    batch_size=batch_size,
+                    shard_info=GraphShardInfo(
+                        nodes=shard_sizes_hidden_dict[src_hidden_name],
+                        edges=down_edge_shard_sizes,
+                    ),
+                    edge_attr=down_level_edge_attr,
+                    edge_index=down_level_edge_index,
+                    model_comm_group=model_comm_group,
+                    edges_are_dst_sorted=down_edges_dst_sorted,
+                )
+
+            # store latents for skip connections
+            x_skip_dict[src_hidden_name] = x_latent
+
+            # Compute edges for downscale mapper
+            (
+                downscale_edge_attr,
+                downscale_edge_index,
+                ds_edge_shard_sizes,
+                ds_edges_dst_sorted,
+            ) = self.downscale_graph_providers[src_hidden_name].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
+
+            ds_shard_info = BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_hidden_dict[src_hidden_name],
+                dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
+                edges=ds_edge_shard_sizes,
+            )
+
+            # Encode to next hidden level
+            x_encoded_latents_dict[src_hidden_name], x_latent = self.downscale[src_hidden_name](
+                (x_latent, x_hidden_latents[dst_hidden_name]),
+                batch_size=batch_size,
+                shard_info=ds_shard_info,
+                edge_attr=downscale_edge_attr,
+                edge_index=downscale_edge_index,
+                model_comm_group=model_comm_group,
+                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+                edges_are_dst_sorted=ds_edges_dst_sorted,
+            )
 
         # Processing hidden-most level
         # Compute edges for main processor
@@ -385,71 +382,71 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         if self.latent_skip:
             x_latent = x_latent_proc + x_latent
 
-        # Decoder
+        ## Upscale
+        for i in range(self.num_hidden - 1, 0, -1):
+            src_hidden_name = self._graph_name_hidden[i]
+            dst_hidden_name = self._graph_name_hidden[i - 1]
+
+            # Compute edges for upscale mapper
+            (
+                upscale_edge_attr,
+                upscale_edge_index,
+                us_edge_shard_sizes,
+                us_edges_dst_sorted,
+            ) = self.upscale_graph_providers[src_hidden_name].get_edges(
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+            )
+
+            us_shard_info = BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_hidden_dict[src_hidden_name],
+                dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
+                edges=us_edge_shard_sizes,
+            )
+
+            # Decode to next level
+            x_latent = self.upscale[src_hidden_name](
+                (x_latent, x_encoded_latents_dict[dst_hidden_name]),
+                batch_size=batch_size,
+                shard_info=us_shard_info,
+                edge_attr=upscale_edge_attr,
+                edge_index=upscale_edge_index,
+                model_comm_group=model_comm_group,
+                keep_x_dst_sharded=True,
+                edges_are_dst_sorted=us_edges_dst_sorted,
+            )
+
+            # Add skip connections
+            x_latent = x_latent + x_skip_dict[dst_hidden_name]
+
+            # Processing at same level
+            if self.level_process:
+                # Compute edges for up level processor
+                (
+                    up_level_edge_attr,
+                    up_level_edge_index,
+                    up_edge_shard_sizes,
+                    up_edges_dst_sorted,
+                ) = self.up_level_processor_graph_providers[dst_hidden_name].get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+
+                x_latent = self.up_level_processor[dst_hidden_name](
+                    x_latent,
+                    edge_attr=up_level_edge_attr,
+                    edge_index=up_level_edge_index,
+                    batch_size=batch_size,
+                    shard_info=GraphShardInfo(
+                        nodes=shard_sizes_hidden_dict[dst_hidden_name],
+                        edges=up_edge_shard_sizes,
+                    ),
+                    model_comm_group=model_comm_group,
+                    edges_are_dst_sorted=up_edges_dst_sorted,
+                )
+
         x_out_dict = {}
         for dataset_name in dataset_names:
-            ## Upscale
-            for i in range(self.num_hidden - 1, 0, -1):
-                src_hidden_name = self._graph_name_hidden[i]
-                dst_hidden_name = self._graph_name_hidden[i - 1]
-
-                # Compute edges for upscale mapper
-                (
-                    upscale_edge_attr,
-                    upscale_edge_index,
-                    us_edge_shard_sizes,
-                    us_edges_dst_sorted,
-                ) = self.upscale_graph_providers[src_hidden_name].get_edges(
-                    batch_size=batch_size,
-                    model_comm_group=model_comm_group,
-                )
-
-                us_shard_info = BipartiteGraphShardInfo(
-                    src_nodes=shard_sizes_hidden_dict[src_hidden_name],
-                    dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
-                    edges=us_edge_shard_sizes,
-                )
-
-                # Decode to next level
-                x_latent = self.upscale[src_hidden_name](
-                    (x_latent, x_encoded_latents_dict[dataset_name][dst_hidden_name]),
-                    batch_size=batch_size,
-                    shard_info=us_shard_info,
-                    edge_attr=upscale_edge_attr,
-                    edge_index=upscale_edge_index,
-                    model_comm_group=model_comm_group,
-                    keep_x_dst_sharded=True,
-                    edges_are_dst_sorted=us_edges_dst_sorted,
-                )
-
-                # Add skip connections
-                x_latent = x_latent + x_skip_dict[dataset_name][dst_hidden_name]
-
-                # Processing at same level
-                if self.level_process:
-                    # Compute edges for up level processor
-                    (
-                        up_level_edge_attr,
-                        up_level_edge_index,
-                        up_edge_shard_sizes,
-                        up_edges_dst_sorted,
-                    ) = self.up_level_processor_graph_providers[dst_hidden_name].get_edges(
-                        batch_size=batch_size,
-                        model_comm_group=model_comm_group,
-                    )
-
-                    x_latent = self.up_level_processor[dst_hidden_name](
-                        x_latent,
-                        edge_attr=up_level_edge_attr,
-                        edge_index=up_level_edge_index,
-                        batch_size=batch_size,
-                        shard_info=GraphShardInfo(
-                            nodes=shard_sizes_hidden_dict[dst_hidden_name],
-                            edges=up_edge_shard_sizes,
-                        ),
-                        model_comm_group=model_comm_group,
-                        edges_are_dst_sorted=up_edges_dst_sorted,
-                    )
             # Compute decoder edges
             (
                 decoder_edge_attr,
@@ -457,8 +454,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 dec_edge_shard_sizes,
                 dec_edges_dst_sorted,
             ) = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
+                batch_size=batch_size, model_comm_group=model_comm_group
             )
 
             dec_shard_info = BipartiteGraphShardInfo(
@@ -480,7 +476,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
-                x_skip_dict[dataset_name]["data"],
+                x_skip_dict[dataset_name],
                 batch_size,
                 ensemble_size,
                 x[dataset_name].dtype,
