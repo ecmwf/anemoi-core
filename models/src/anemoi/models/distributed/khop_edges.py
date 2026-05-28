@@ -11,6 +11,7 @@
 import os
 from dataclasses import dataclass
 from typing import Optional
+from typing import Tuple
 from typing import Union
 
 import torch
@@ -20,18 +21,31 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
 from torch_geometric.utils import degree
+from torch_geometric.utils import index_sort
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.graph import model_is_distributed
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.triton.utils import is_edge_index_dst_sorted
-from anemoi.models.triton.utils import sort_edge_index_by_dst
+from anemoi.models.distributed.utils import model_is_distributed
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
+
+
+def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj, Tensor]:
+    """Sort edge indices by destination node."""
+    _, perm = index_sort(edge_index[1], max_value=max_value, stable=True)
+    return edge_index[:, perm], perm
+
+
+def is_edge_index_dst_sorted(edge_index: Adj) -> bool:
+    """Check whether edge_index is sorted by destination node (edge_index[1])."""
+    dst = edge_index[1]
+    if dst.numel() <= 1:
+        return True
+    return bool(torch.all(dst[1:] >= dst[:-1]).item())
 
 
 @dataclass(frozen=True)
@@ -125,13 +139,16 @@ class GraphPartition:
         start, end = get_partition_range(self.dst_splits, partition_id)
         return slice(start, end)
 
-    def _relabel_dst_nodes(self, edge_index: Adj, partition_id: int) -> None:
-        """Relabel dst indices from global to partition-local (in-place).
+    def _relabel_dst_nodes(self, edge_index: Adj, partition_id: int, in_place: bool = True) -> Adj:
+        """Relabel dst indices from global to partition-local.
 
-        Caller must ensure edge_index is a clone if the original must be preserved.
+        Modifies edge_index in-place by default, but can return a relabeled copy if in_place=False.
         """
+        edge_index_ = edge_index if in_place else edge_index.clone()
         dst_offset = get_partition_range(self.dst_splits, partition_id)[0]
-        edge_index[1] -= dst_offset
+        edge_index_[1] -= dst_offset
+
+        return edge_index_
 
 
 def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int, int]) -> GraphPartition:
@@ -450,24 +467,25 @@ def _sort_edges_1hop_chunks_fast(
     return edge_attr_list, edge_index_list
 
 
-def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj) -> tuple[Tensor, Adj, Tensor]:
+def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, in_place: bool = True) -> tuple[Tensor, Adj, Tensor]:
     """Drop src nodes with no edges and relabel src indices to be contiguous.
-
-    Modifies edge_index[0] in-place. Caller must clone edge_index beforehand
-    if the original must be preserved.
 
     Parameters
     ----------
     x_src : Tensor
         Source node features.
     edge_index : Adj
-        Edge index (will be modified in-place on row 0).
+        Edge index (row 0 will be modified in-place if in_place=True).
+    in_place : bool, optional
+        Whether to modify edge_index in-place (default: True).
+        If False, a clone is made before relabeling.
 
     Returns
     -------
     tuple[Tensor, Adj, Tensor]
         Subset of x_src, relabeled edge_index, indices of connected source nodes.
     """
+    edge_index = edge_index if in_place else edge_index.clone()
     connected_src_nodes = torch.unique(edge_index[0])
     x_src_subset = x_src[connected_src_nodes]
 

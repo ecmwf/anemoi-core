@@ -25,9 +25,9 @@ from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
-from anemoi.models.triton.utils import sort_edge_index_by_dst
 
 LOGGER = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class BaseGraphProvider(nn.Module, ABC):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-    ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes], bool], Tensor]:
+    ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
         """Get edge information.
 
         Parameters
@@ -107,8 +107,8 @@ class BaseGraphProvider(nn.Module, ABC):
 
         Returns
         -------
-        Union[tuple[Tensor, Adj, Optional[ShardSizes], bool], Tensor]
-            For standard providers: (edge_attr, edge_index, edge_shard_sizes, dst_sorted) tuple
+        Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]
+            For standard providers: (edge_attr, edge_index, edge_shard_sizes) tuple
             For sparse providers: sparse projection matrix
         """
         pass
@@ -217,7 +217,7 @@ class StaticGraphProvider(BaseGraphProvider):
         batch_size: int,
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes], bool]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges."""
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
@@ -231,9 +231,9 @@ class StaticGraphProvider(BaseGraphProvider):
                 dst_size * batch_size,
                 model_comm_group,
             )
-            return edge_attr, edge_index, edge_shard_sizes, True
+            return edge_attr, edge_index, edge_shard_sizes
 
-        return edge_attr, edge_index, None, True
+        return edge_attr, edge_index, None
 
     def get_edges(
         self,
@@ -243,7 +243,7 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes], bool]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edge attributes and expanded edge index for static graph.
 
         Parameters
@@ -263,8 +263,8 @@ class StaticGraphProvider(BaseGraphProvider):
 
         Returns
         -------
-        tuple[Tensor, Adj, Optional[ShardSizes], bool]
-            Edge attributes, expanded edge index, optional edge_shard_sizes, and whether edge_index is dst-sorted.
+        tuple[Tensor, Adj, Optional[ShardSizes]]
+            Edge attributes, expanded edge index, and optional edge_shard_sizes.
             edge_shard_sizes is a list of per-rank partition sizes when shard_edges=True,
             otherwise None.
         """
@@ -296,7 +296,7 @@ class NoOpGraphProvider(BaseGraphProvider):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-    ) -> tuple[None, None, None, bool]:
+    ) -> tuple[None, None, None]:
         """Return None for edge attributes, edge index, and edge_shard_sizes.
 
         Parameters
@@ -314,10 +314,10 @@ class NoOpGraphProvider(BaseGraphProvider):
 
         Returns
         -------
-        tuple[None, None, None, bool]
+        tuple[None, None, None]
             No edges
         """
-        return None, None, None, False
+        return None, None, None
 
 
 class DynamicGraphProvider(BaseGraphProvider):
@@ -378,7 +378,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_coords: Tensor,
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes], bool]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges, separated for checkpointing."""
         # Build graph from coordinates
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
@@ -389,9 +389,9 @@ class DynamicGraphProvider(BaseGraphProvider):
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
                 edge_attr, edge_index, src_coords.shape[0], dst_coords.shape[0], model_comm_group
             )
-            return edge_attr, edge_index, edge_shard_sizes, True
+            return edge_attr, edge_index, edge_shard_sizes
 
-        return edge_attr, edge_index, None, True
+        return edge_attr, edge_index, None
 
     def get_edges(
         self,
@@ -401,7 +401,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes], bool]:
+    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get dynamic edges constructed from node coordinates.
 
         Calls build_graph() to construct edges on-the-fly using k-NN, radius graphs, etc.
@@ -423,8 +423,8 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         Returns
         -------
-        tuple[Tensor, Adj, Optional[ShardSizes], bool]
-            Edge attributes, edge index, optional edge_shard_sizes, and whether edge_index is dst-sorted.
+        tuple[Tensor, Adj, Optional[ShardSizes]]
+            Edge attributes, edge index, and optional edge_shard_sizes.
 
         Raises
         ------

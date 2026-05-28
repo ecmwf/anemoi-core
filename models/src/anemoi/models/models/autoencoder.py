@@ -172,7 +172,6 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 encoder_edge_attr,
                 encoder_edge_index,
                 enc_edge_shard_sizes,
-                enc_edges_dst_sorted,
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -192,7 +191,6 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edges_are_dst_sorted=enc_edges_dst_sorted,
             )
 
             dataset_latents[dataset_name] = x_latent
@@ -216,10 +214,9 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-                dec_edges_dst_sorted,
-            ) = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size, model_comm_group=model_comm_group
-            )
+            ) = self.decoder_graph_provider[
+                dataset_name
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
@@ -235,7 +232,6 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-                edges_are_dst_sorted=dec_edges_dst_sorted,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

@@ -116,14 +116,13 @@ class TestGraphTransformerProcessor:
         shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
 
         # Run forward pass of processor
-        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
         output = graphtransformer_processor.forward(
             x,
             batch_size,
             shard_info,
             edge_attr,
             edge_index,
-            edges_are_dst_sorted=edges_are_dst_sorted,
         )
         assert output.shape == (self.NUM_NODES, graphtransformer_init.num_channels)
 
@@ -160,7 +159,7 @@ class TestGraphTransformerProcessor:
             device=next(graphtransformer_processor.parameters()).device,
         )
         shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
-        edge_attr, edge_index, _, edges_are_dst_sorted = graph_provider.get_edges(batch_size=batch_size)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
 
         with torch.no_grad():
             output_sorted = graphtransformer_processor.forward(
@@ -169,7 +168,6 @@ class TestGraphTransformerProcessor:
                 shard_info,
                 edge_attr,
                 edge_index,
-                edges_are_dst_sorted=edges_are_dst_sorted,
             )
 
             perm = torch.randperm(edge_index.shape[1], device=edge_index.device)

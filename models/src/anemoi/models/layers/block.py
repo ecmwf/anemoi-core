@@ -929,7 +929,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             edge_index,
             size,
             num_chunks=1,
-            edges_are_dst_sorted=layer_kwargs.get("edges_are_dst_sorted", False),
+            edges_are_dst_sorted=layer_kwargs.get("edges_are_dst_sorted", True),
         )
 
         if self.shard_strategy == "heads":
@@ -1063,7 +1063,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             edge_index,
             size,
             num_chunks,
-            edges_are_dst_sorted=kwargs.get("edges_are_dst_sorted", False),
+            edges_are_dst_sorted=kwargs.get("edges_are_dst_sorted", True),
         )
 
         out = self.shard_output_seq(out, bipartite_shard_info, head_shard_sizes, batch_size, model_comm_group)

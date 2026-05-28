@@ -261,7 +261,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 encoder_edge_attr,
                 encoder_edge_index,
                 enc_edge_shard_sizes,
-                enc_edges_dst_sorted,
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -282,7 +281,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edges_are_dst_sorted=enc_edges_dst_sorted,
             )
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
@@ -303,7 +301,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     down_level_edge_attr,
                     down_level_edge_index,
                     down_edge_shard_sizes,
-                    down_edges_dst_sorted,
                 ) = self.down_level_processor_graph_providers[src_hidden_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
@@ -319,7 +316,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     edge_attr=down_level_edge_attr,
                     edge_index=down_level_edge_index,
                     model_comm_group=model_comm_group,
-                    edges_are_dst_sorted=down_edges_dst_sorted,
                 )
 
             # store latents for skip connections
@@ -330,7 +326,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 downscale_edge_attr,
                 downscale_edge_index,
                 ds_edge_shard_sizes,
-                ds_edges_dst_sorted,
             ) = self.downscale_graph_providers[src_hidden_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -351,7 +346,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_index=downscale_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edges_are_dst_sorted=ds_edges_dst_sorted,
             )
 
         # Processing hidden-most level
@@ -360,7 +354,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-            proc_edges_dst_sorted,
         ) = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
@@ -376,7 +369,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
-            edges_are_dst_sorted=proc_edges_dst_sorted,
         )
 
         if self.latent_skip:
@@ -392,7 +384,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 upscale_edge_attr,
                 upscale_edge_index,
                 us_edge_shard_sizes,
-                us_edges_dst_sorted,
             ) = self.upscale_graph_providers[src_hidden_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -413,7 +404,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_index=upscale_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,
-                edges_are_dst_sorted=us_edges_dst_sorted,
             )
 
             # Add skip connections
@@ -426,7 +416,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     up_level_edge_attr,
                     up_level_edge_index,
                     up_edge_shard_sizes,
-                    up_edges_dst_sorted,
                 ) = self.up_level_processor_graph_providers[dst_hidden_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
@@ -442,7 +431,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                         edges=up_edge_shard_sizes,
                     ),
                     model_comm_group=model_comm_group,
-                    edges_are_dst_sorted=up_edges_dst_sorted,
                 )
 
         x_out_dict = {}
@@ -452,10 +440,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-                dec_edges_dst_sorted,
-            ) = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size, model_comm_group=model_comm_group
-            )
+            ) = self.decoder_graph_provider[
+                dataset_name
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden_dict[self._graph_name_hidden[0]],
@@ -471,7 +458,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-                edges_are_dst_sorted=dec_edges_dst_sorted,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

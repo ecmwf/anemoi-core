@@ -12,30 +12,21 @@ from typing import Optional
 from typing import Tuple
 
 import torch
-from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
 
+from anemoi.models.distributed.khop_edges import is_edge_index_dst_sorted
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
+
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
-def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj, Tensor]:
-    """Sort edge indices by destination node."""
-    _, perm = index_sort(edge_index[1], max_value=max_value, stable=True)
-    return edge_index[:, perm], perm
-
-
-def is_edge_index_dst_sorted(edge_index: Adj) -> bool:
-    """Check whether edge_index is sorted by destination node (edge_index[1])."""
-    dst = edge_index[1]
-    if dst.numel() <= 1:
-        return True
-    return bool(torch.all(dst[1:] >= dst[:-1]).item())
-
-
 def edge_index_to_csc(
-    edge_index: Adj, num_nodes: Optional[Tuple[int, int]] = None, reverse: bool = True, assume_sorted: bool = False
+    edge_index: Adj,
+    num_nodes: Optional[Tuple[int, int]] = None,
+    reverse: bool = True,
+    edges_are_dst_sorted: bool = False,
 ):
     """Convert edge indices to CSC format, optionally also building reverse (CSR-like) metadata.
 
@@ -43,7 +34,7 @@ def edge_index_to_csc(
         edge_index (LongTensor): [2, num_edges] edge indices (src, dst).
         num_nodes (Tuple[int, int], optional): (num_src, num_dst).
         reverse (bool): If True, also build CSR-like info for per-source iteration.
-        assume_sorted (bool): If True, assume the edge indices are already sorted by dst nodes.
+        edges_are_dst_sorted (bool): If True, assume the edge indices are already sorted by dst nodes.
 
     Returns:
         (row, colptr), perm[, (rowptr, edge_id_per_src, edge_dst)]:
@@ -55,11 +46,11 @@ def edge_index_to_csc(
             edge_dst: destination node per edge (CSC order)
     """
     perm = None
-    if not assume_sorted:
+    if not edges_are_dst_sorted:
         edge_index, perm = sort_edge_index_by_dst(edge_index)
     elif ANEMOI_DEBUG_SHARDING:
         assert is_edge_index_dst_sorted(edge_index), (
-            "edge_index_to_csc called with assume_sorted=True but edge_index is not sorted by destination node. "
+            "edge_index_to_csc called with edges_are_dst_sorted=True but edge_index is not sorted by destination node. "
             "This indicates a bug in edge sorting/sharding."
         )
 

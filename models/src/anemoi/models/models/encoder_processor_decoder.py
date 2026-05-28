@@ -245,7 +245,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 encoder_edge_attr,
                 encoder_edge_index,
                 enc_edge_shard_sizes,
-                enc_edges_dst_sorted,
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -266,7 +265,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edges_are_dst_sorted=enc_edges_dst_sorted,
             )
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
@@ -279,7 +277,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             processor_edge_attr,
             processor_edge_index,
             proc_edge_shard_sizes,
-            proc_edges_dst_sorted,
         ) = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
@@ -292,7 +289,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
-            edges_are_dst_sorted=proc_edges_dst_sorted,
         )
 
         # Latent skip connection
@@ -307,10 +303,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-                dec_edges_dst_sorted,
-            ) = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size, model_comm_group=model_comm_group
-            )
+            ) = self.decoder_graph_provider[
+                dataset_name
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
@@ -326,7 +321,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-                edges_are_dst_sorted=dec_edges_dst_sorted,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

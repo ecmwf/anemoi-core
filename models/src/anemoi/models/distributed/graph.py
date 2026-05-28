@@ -19,13 +19,7 @@ from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-
-
-def model_is_distributed(
-    model_comm_group: ProcessGroup | None = None,
-) -> bool:
-    """Return whether a model communication group spans multiple ranks."""
-    return model_comm_group is not None and model_comm_group.size() > 1
+from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
 
 
 def ensure_sharded(

@@ -300,7 +300,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 encoder_edge_attr,
                 encoder_edge_index,
                 enc_edge_shard_sizes,
-                enc_edges_dst_sorted,
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -321,7 +320,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 edge_index=encoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                edges_are_dst_sorted=enc_edges_dst_sorted,
             )
             x_data_latent_dict[dataset_name] = x_data_latent
 
@@ -339,7 +337,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                         down_level_edge_attr,
                         down_level_edge_index,
                         down_edge_shard_sizes,
-                        down_edges_dst_sorted,
                     ) = self.down_level_processor_graph_providers[src_hidden_name].get_edges(
                         batch_size=batch_size,
                         model_comm_group=model_comm_group,
@@ -355,7 +352,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                         edge_attr=down_level_edge_attr,
                         edge_index=down_level_edge_index,
                         model_comm_group=model_comm_group,
-                        edges_are_dst_sorted=down_edges_dst_sorted,
                     )
 
                 # Compute edges for downscale mapper
@@ -363,7 +359,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     downscale_edge_attr,
                     downscale_edge_index,
                     ds_edge_shard_sizes,
-                    ds_edges_dst_sorted,
                 ) = self.downscale_graph_providers[src_hidden_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
@@ -384,7 +379,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     edge_index=downscale_edge_index,
                     model_comm_group=model_comm_group,
                     keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                    edges_are_dst_sorted=ds_edges_dst_sorted,
                 )
 
             dataset_latents[dataset_name] = x_latent
@@ -405,7 +399,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     upscale_edge_attr,
                     upscale_edge_index,
                     us_edge_shard_sizes,
-                    us_edges_dst_sorted,
                 ) = self.upscale_graph_providers[src_hidden_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
@@ -426,7 +419,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     edge_index=upscale_edge_index,
                     model_comm_group=model_comm_group,
                     keep_x_dst_sharded=True,
-                    edges_are_dst_sorted=us_edges_dst_sorted,
                 )
 
                 # Processing at same level
@@ -436,7 +428,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                         up_level_edge_attr,
                         up_level_edge_index,
                         up_edge_shard_sizes,
-                        up_edges_dst_sorted,
                     ) = self.up_level_processor_graph_providers[dst_hidden_name].get_edges(
                         batch_size=batch_size,
                         model_comm_group=model_comm_group,
@@ -452,7 +443,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                             edges=up_edge_shard_sizes,
                         ),
                         model_comm_group=model_comm_group,
-                        edges_are_dst_sorted=up_edges_dst_sorted,
                     )
 
             # Do not pass x_data_latent to the decoder
@@ -467,7 +457,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-                dec_edges_dst_sorted,
             ) = self.decoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
@@ -487,7 +476,6 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-                edges_are_dst_sorted=dec_edges_dst_sorted,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
