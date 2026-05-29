@@ -74,13 +74,11 @@ class CRPS(BaseLoss):
 
     def mask_nans(self, pred: torch.Tensor, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Mask CRPS inputs while preserving each tensor's ensemble size."""
-        if self.ignore_nans:
-            target_nan_mask = torch.isnan(target).any(dim=2, keepdim=True)
-            pred_nan_mask = torch.isnan(pred).any(dim=2, keepdim=True)
-            nan_mask = target_nan_mask | pred_nan_mask
-            target = target.masked_fill(nan_mask, 0.0)
-            pred = pred.masked_fill(nan_mask, 0.0)
-
+        target_nan_mask = torch.isnan(target).any(dim=2, keepdim=True)
+        pred_nan_mask = torch.isnan(pred).any(dim=2, keepdim=True)
+        nan_mask = target_nan_mask | pred_nan_mask
+        target = target.masked_fill(nan_mask, 0.0)
+        pred = pred.masked_fill(nan_mask, 0.0)
         return pred, target
 
     def _kernel_crps(
@@ -173,7 +171,8 @@ class CRPS(BaseLoss):
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
-        y_pred, y_target = self.mask_nans(y_pred, y_target)
+        if self.ignore_nans:
+            y_pred, y_target = self.mask_nans(y_pred, y_target)
 
         y_target = einops.rearrange(y_target, "bs t 1 latlon v -> bs t v latlon 1")
         y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")

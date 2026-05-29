@@ -23,6 +23,7 @@ Notes
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 from typing import Literal
 
@@ -324,20 +325,16 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        def compute_spectral_crps() -> torch.Tensor:
+        context = torch.amp.autocast(device_type=pred.device.type, enabled=False) if self.no_autocast else nullcontext()
+        with context:
             # -> [..., modes, vars]
             pred_spec = self._to_spectral_flat(pred)
             tgt_spec = self._to_spectral_flat(target)
 
             pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
             tgt_spec = einops.rearrange(tgt_spec, "b t 1 m v -> b t v m 1")
-            return self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
 
-        if self.no_autocast:
-            with torch.amp.autocast(device_type=pred.device.type, enabled=False):
-                crps = compute_spectral_crps()
-        else:
-            crps = compute_spectral_crps()
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         scaled = self.scale(
