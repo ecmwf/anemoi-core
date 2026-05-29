@@ -10,6 +10,7 @@
 import datetime
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -20,6 +21,9 @@ from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 
 class RolloutConfig:
@@ -66,7 +70,6 @@ class Forecaster(BaseTask):
         validation_rollout: int | None = None,
         **kwargs,
     ) -> None:
-
         self.timestep = frequency_to_timedelta(timestep)
         self.num_input_steps = multistep_input
         self.num_output_steps = multistep_output
@@ -114,7 +117,7 @@ class Forecaster(BaseTask):
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
         if mode == "training":
-            rollout_step = self.rollout.maximum
+            rollout_step = self.rollout.step
         elif mode == "validation":
             rollout_step = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
         else:
@@ -124,7 +127,7 @@ class Forecaster(BaseTask):
                 self.__class__.__name__,
             )
             validation_rollout = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
-            rollout_step = max(self.rollout.maximum, validation_rollout)
+            rollout_step = max(self.rollout.step, validation_rollout)
 
         return self._compute_rollout_offsets(rollout_step)
 
@@ -223,9 +226,10 @@ class Forecaster(BaseTask):
             sync_dist=False,
         )
 
-    def on_train_epoch_end(self, current_epoch: int) -> None:
+    def on_train_epoch_end(self, current_epoch: int, datamodule: "AnemoiDatasetsDataModule") -> None:
         if self.rollout.should_increase(current_epoch):
             self.rollout.increase()
+            datamodule.recalculate_relative_date_indices(datasets=["training", "validation"])
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""

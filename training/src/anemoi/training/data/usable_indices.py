@@ -14,13 +14,14 @@ import numpy as np
 
 if TYPE_CHECKING:
     from anemoi.training.data.data_reader import BaseAnemoiReader
+    from anemoi.training.utils.time_indices import TimeIndices
 
 LOGGER = logging.getLogger(__name__)
 
 
 def compute_valid_data_indices(
     data_readers: dict[str, "BaseAnemoiReader"],
-    relative_date_indices: dict[str, np.ndarray | list[int]],
+    relative_date_indices: dict[str, "TimeIndices"],
 ) -> np.ndarray:
     """Return valid date indices.
 
@@ -46,13 +47,13 @@ def compute_valid_data_indices(
             msg = f"No valid date indices found for data reader '{dataset_name}': {ds}"
             raise ValueError(msg)
 
-        LOGGER.info("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
+        LOGGER.debug("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
 
     if len(valid_date_indices_intersection) == 0:
         msg = "No valid date indices found after intersection across all datasets."
         raise ValueError(msg)
 
-    LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
+    LOGGER.debug("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
 
     return valid_date_indices_intersection
 

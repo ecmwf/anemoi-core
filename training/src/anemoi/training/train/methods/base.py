@@ -1130,7 +1130,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         super().lr_scheduler_step(scheduler, metric)
 
     def on_train_epoch_end(self) -> None:
-        self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        self.task.on_train_epoch_end(current_epoch=self.current_epoch, datamodule=self.trainer.datamodule)
 
     def configure_optimizers(
         self,
