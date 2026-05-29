@@ -461,7 +461,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         # Apply migrations to handle state_dict key changes from older checkpoints.
         # These are idempotent: already-migrated checkpoints are unaffected.
-        _chunking_fix_migration(checkpoint)
         _trainable_edge_perm_fix_migration(checkpoint, model=self)
         self._update_checkpoint_state_dict_for_load(checkpoint)
 
