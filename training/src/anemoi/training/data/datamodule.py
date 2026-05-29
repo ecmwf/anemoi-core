@@ -10,11 +10,12 @@
 
 import logging
 from collections import defaultdict
+from collections.abc import Iterator
 from functools import cached_property
-from multiprocessing import Manager
 from typing import Literal
 
 import pytorch_lightning as pl
+import torch
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -28,6 +29,43 @@ from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
+
+_SHARED_LIST_MAX_SIZE = 1024
+
+
+class SharedListProxy:
+    """Variable-length shared-memory list backed by torch tensors.
+
+    Uses POSIX shared memory directly — no server process, no IPC sockets — so it avoids
+    the extra resident-set overhead and the fragility of a background Manager
+    process being OOM-killed.
+
+    Works with all DataLoader multiprocessing contexts (fork, spawn,
+    forkserver) because PyTorch serialises shared-tensor handles rather than
+    copying the underlying data.
+    """
+
+    def __init__(self, values: list[int], max_size: int = _SHARED_LIST_MAX_SIZE) -> None:
+        self._data = torch.zeros(max_size, dtype=torch.long).share_memory_()
+        self._len = torch.zeros(1, dtype=torch.long).share_memory_()
+        self[:] = values
+
+    def __setitem__(self, key: slice, values: list[int]) -> None:
+        n = len(values)
+        if n > len(self._data):
+            msg = f"{self.__class__.__name__} capacity {len(self._data)} exceeded by {n} elements."
+            raise ValueError(msg)
+        self._data[:n] = torch.tensor(values, dtype=torch.long)
+        self._len[0] = n
+
+    def __getitem__(self, index: int) -> int:
+        return int(self._data[index])
+
+    def __len__(self) -> int:
+        return int(self._len[0])
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self._data[: len(self)].tolist())
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -64,7 +102,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
-        self._mp_manager = Manager()
         self._relative_date_indices_values: dict[str, dict] = defaultdict(dict)
         self._data_readers: dict[str, dict] = {}
 
@@ -136,12 +173,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         for ds in relative_date_indices:
             if ds in self._relative_date_indices_values[label]:
-                val = self._relative_date_indices_values[label][ds]
-                val[:] = relative_date_indices[ds]
+                # Update in-place so all workers immediately see the new values via shared memory
+                self._relative_date_indices_values[label][ds][:] = relative_date_indices[ds]
             else:
-                val = self._mp_manager.list(relative_date_indices[ds])
-
-            self._relative_date_indices_values[label][ds] = val
+                self._relative_date_indices_values[label][ds] = SharedListProxy(relative_date_indices[ds])
 
         return self._relative_date_indices_values[label]
 
@@ -213,13 +248,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
-
-    def teardown(self, stage: str | None = None) -> None:
-        """Shut down the multiprocessing manager to clean up the background server process."""
-        if hasattr(self, "_mp_manager") and self._mp_manager is not None:
-            self._mp_manager.shutdown()
-            self._mp_manager = None
-        super().teardown(stage)
 
     def fill_metadata(self, metadata: dict) -> None:
         """Fill metadata dictionary with dataset metadata."""
