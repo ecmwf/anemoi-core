@@ -44,7 +44,11 @@ def _data_indices_single() -> dict[str, IndexCollection]:
     return {"data": _make_minimal_index_collection(_NAME_TO_INDEX)}
 
 
-# ── Forecaster: offsets and steps ─────────────────────────────────────────────
+def _data_indices_multi() -> dict[str, IndexCollection]:
+    return {
+        "meps": _make_minimal_index_collection(_NAME_TO_INDEX),
+        "radar": _make_minimal_index_collection(_NAME_TO_INDEX),
+    }
 
 
 def test_forecaster_single_input_offset() -> None:
@@ -102,9 +106,6 @@ def test_forecaster_metric_name_encodes_rollout_step() -> None:
     assert task.get_metric_name(rollout_step=3) == "_rstep3"
 
 
-# ── Forecaster: rollout curriculum ────────────────────────────────────────────
-
-
 def test_forecaster_rollout_increases_on_epoch_end() -> None:
     """on_train_epoch_end increments rollout.step up to maximum."""
     task = Forecaster(
@@ -147,15 +148,11 @@ def test_forecaster_rollout_no_increment_when_zero() -> None:
     assert task.rollout.step == 1
 
 
-# ── Forecaster: batch slicing ─────────────────────────────────────────────────
-
-
 def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     """get_inputs extracts multistep_input time steps from the batch."""
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
-    # offsets = [-6h, 0h, +6h] → 3 time steps in batch
     batch = {"data": torch.randn(b, 3, e, g, v)}
     x = task.get_inputs(batch, data_indices)
     assert x["data"].shape[1] == 2  # multistep_input=2
@@ -178,7 +175,78 @@ def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
     assert set(input_indices).isdisjoint(set(output_indices))
 
 
-# ── Forecaster: _advance_dataset_input ────────────────────────────────────────
+def test_forecaster_mixed_frequency_inputs_use_dataset_specific_requested_times() -> None:
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 1, "maximum": 1},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["meps", "radar"],
+            "meps": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"meps": [0]},
+                    "relative_date_input_indices_validation_by_dataset": {"meps": [0]},
+                    "relative_date_indices_training_by_dataset": {"meps": [0]},
+                    "relative_date_indices_validation_by_dataset": {"meps": [0]},
+                },
+            },
+            "radar": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"radar": [0, 1]},
+                    "relative_date_input_indices_validation_by_dataset": {"radar": [0, 1]},
+                    "relative_date_indices_training_by_dataset": {"radar": [0, 1, 2]},
+                    "relative_date_indices_validation_by_dataset": {"radar": [0, 1, 2]},
+                },
+            },
+        },
+    }
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+
+    batch = {
+        "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
+        "radar": torch.tensor(
+            [[[[[3.0, 30.0]]], [[[4.0, 40.0]]], [[[5.0, 50.0]]]]],
+            dtype=torch.float32,
+        ),
+    }
+
+    x = task.get_inputs(batch, _data_indices_multi())
+
+    assert x["meps"].shape == (1, 1, 1, 1, 2)
+    assert x["radar"].shape == (1, 2, 1, 1, 2)
+
+
+def test_forecaster_preserves_explicit_empty_input_window_from_metadata() -> None:
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="5m",
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["meps"],
+            "meps": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"meps": []},
+                    "relative_date_indices_training_by_dataset": {"meps": [0]},
+                },
+            },
+        },
+    }
+
+    task.configure_from_metadata(metadata)
+    batch = {
+        "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
+    }
+    x = task.get_inputs(batch, {"meps": _make_minimal_index_collection(_NAME_TO_INDEX)})
+
+    assert task.dataset_input_relative_times_by_dataset["meps"] == []
+    assert task._requested_input_relative_times("meps") == []
+    assert x["meps"].shape == (1, 0, 1, 1, 2)
 
 
 @pytest.mark.parametrize(
@@ -236,7 +304,6 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     output_mask = Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask")
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
 
-    # tensor dims: (batch, time, ens, grid, variable)
     x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
     batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
@@ -253,8 +320,180 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
         grid_shard_slice=slice(None),
     )
 
-    # prognostic variable, 1st grid point (cutout_mask=True) should be from y_pred,
-    # 2nd grid point (cutout_mask=False) should be from batch
     torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
-    # forcing variable should be refreshed from batch for both grid points
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
+
+
+def test_forecaster_preserves_datamodule_mixed_frequency_timing_metadata() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 1, "maximum": 2},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["data"],
+            "data": {
+                "timesteps": {
+                    "relative_date_indices_training_by_dataset": {"data": [0, 2]},
+                    "relative_date_indices_validation_by_dataset": {"data": [0, 2]},
+                },
+            },
+        },
+    }
+
+    task.fill_metadata(metadata)
+    assert task.dataset_time_maps == {}
+    task.configure_from_metadata(metadata)
+
+    timesteps = metadata["metadata_inference"]["data"]["timesteps"]
+    assert timesteps["relative_date_indices_training_by_dataset"]["data"] == [0, 2]
+    assert task.dataset_time_maps["data"] == {0: 0, 2: 1}
+
+
+def test_forecaster_advance_input_reuses_latest_available_mixed_frequency_timestep() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 1, "maximum": 2},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["data"],
+            "data": {
+                "timesteps": {
+                    "relative_date_indices_training_by_dataset": {"data": [0, 2]},
+                    "relative_date_indices_validation_by_dataset": {"data": [0, 2]},
+                },
+            },
+        },
+    }
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+    data_indices = {
+        "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
+    }
+
+    batch = {
+        "data": torch.tensor(
+            [
+                [
+                    [[[1.0, 10.0]]],
+                    [[[3.0, 30.0]]],
+                ],
+            ],
+            dtype=torch.float32,
+        ),
+    }
+    x = task.get_inputs(batch, data_indices)
+    y = task.get_targets(batch, rollout_step=1)
+    y_pred = {"data": torch.tensor([[[[[100.0]]]]], dtype=torch.float32)}
+
+    updated = task.advance_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask={"data": NoOutputMask()},
+        grid_shard_slice={"data": None},
+    )
+
+    torch.testing.assert_close(y["data"][0, 0, 0, 0, 0], torch.tensor(3.0))
+    torch.testing.assert_close(updated["data"][0, 0, 0, 0, 0], torch.tensor(100.0))
+    torch.testing.assert_close(updated["data"][0, 0, 0, 0, 1], torch.tensor(10.0))
+
+
+def test_forecaster_mixed_frequency_advance_input_preserves_ensemble_dimension() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 1, "maximum": 2},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["data"],
+            "data": {
+                "timesteps": {
+                    "relative_date_indices_training_by_dataset": {"data": [0, 2]},
+                    "relative_date_indices_validation_by_dataset": {"data": [0, 2]},
+                },
+            },
+        },
+    }
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+    data_indices = {
+        "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
+    }
+
+    batch = {
+        "data": torch.tensor(
+            [
+                [
+                    [[[1.0, 10.0]]],
+                    [[[3.0, 30.0]]],
+                ],
+            ],
+            dtype=torch.float32,
+        ),
+    }
+    x = task.get_inputs(batch, data_indices)
+    y_pred = {"data": torch.tensor([[[[[100.0]], [[200.0]]]]], dtype=torch.float32)}
+
+    updated = task.advance_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask={"data": NoOutputMask()},
+        grid_shard_slice={"data": None},
+    )
+
+    assert updated["data"].shape == (1, 1, 2, 1, 2)
+    torch.testing.assert_close(updated["data"][0, 0, :, 0, 0], torch.tensor([100.0, 200.0]))
+    torch.testing.assert_close(updated["data"][0, 0, :, 0, 1], torch.tensor([10.0, 10.0]))
+
+
+def test_forecaster_mixed_frequency_advance_input_checks_batch_bounds() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 1, "maximum": 4},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["data"],
+            "data": {
+                "timesteps": {
+                    "relative_date_indices_training_by_dataset": {"data": [0, 2, 4]},
+                    "relative_date_indices_validation_by_dataset": {"data": [0, 2, 4]},
+                },
+            },
+        },
+    }
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+    data_indices = {
+        "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
+    }
+
+    x = {"data": torch.zeros((1, 1, 1, 1, 2), dtype=torch.float32)}
+    y_pred = {"data": torch.zeros((1, 1, 1, 1, 1), dtype=torch.float32)}
+    batch = {"data": torch.zeros((1, 2, 1, 1, 2), dtype=torch.float32)}
+
+    with pytest.raises(ValueError, match="batch only has 2 time steps"):
+        task.advance_input(
+            x,
+            y_pred,
+            batch,
+            rollout_step=3,
+            data_indices=data_indices,
+            output_mask={"data": NoOutputMask()},
+            grid_shard_slice={"data": None},
+        )

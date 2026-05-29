@@ -189,14 +189,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.n_step_input = self.task.num_input_timesteps
         self.n_step_output = self.task.num_output_timesteps
+        self.n_step_input_by_dataset = {
+            dataset_name: len(self.task._requested_input_relative_times(dataset_name))
+            for dataset_name in self.dataset_names
+        }
+        self.n_step_output_by_dataset = {
+            dataset_name: len(self.task._requested_output_relative_times(dataset_name))
+            for dataset_name in self.dataset_names
+        }
+        model_n_step_input: int | dict[str, int] = self.n_step_input
+        model_n_step_output: int | dict[str, int] = self.n_step_output
+        if any(value != self.task.num_input_timesteps for value in self.n_step_input_by_dataset.values()):
+            model_n_step_input = self.n_step_input_by_dataset
+        if any(value != self.task.num_output_timesteps for value in self.n_step_output_by_dataset.values()):
+            model_n_step_output = self.n_step_output_by_dataset
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            n_step_input=self.n_step_input,
-            n_step_output=self.n_step_output,
+            n_step_input=model_n_step_input,
+            n_step_output=model_n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
@@ -288,7 +302,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.is_first_step = True
 
-        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
+        LOGGER.info(
+            "GraphModule with n_step_input=%s n_step_output=%s per_dataset_input=%s per_dataset_output=%s",
+            self.n_step_input,
+            self.n_step_output,
+            self.n_step_input_by_dataset,
+            self.n_step_output_by_dataset,
+        )
         self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -325,7 +345,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
 
-        LOGGER.debug("n_step_input: %d", self.n_step_input)
+        LOGGER.debug("n_step_input_by_dataset: %s", self.n_step_input_by_dataset)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
