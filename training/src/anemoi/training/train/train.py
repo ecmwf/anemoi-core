@@ -306,6 +306,31 @@ class AnemoiTrainer(ABC):
         if initialized_datasets:
             LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
+    def _validate_transfer_learning_units(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate variable unit compatibility between checkpoint and current dataset.
+
+        Compares the variables_metadata stored on the model (extracted from the checkpoint
+        during loading) with the current dataset's variables_metadata. For shared datasets,
+        the variables are assumed to match exactly.
+
+        Raises
+        ------
+        ValueError
+            If variables have incompatible units between checkpoint and dataset.
+
+        Warns
+        -----
+        If variables_metadata is missing from either the checkpoint or the current dataset,
+        a warning is logged and the check is skipped.
+        """
+        from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
+
+        ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
+
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
@@ -344,6 +369,8 @@ class AnemoiTrainer(ABC):
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
             self._validate_transfer_learning_datasets(model)
+            # Validate variable units between checkpoint and current dataset
+            self._validate_transfer_learning_units(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
