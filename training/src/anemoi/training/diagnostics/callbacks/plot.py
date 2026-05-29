@@ -45,6 +45,7 @@ from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -344,16 +345,20 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         super().__init__(dataset_names=dataset_names, plotting_settings=plotting_settings)
         self.every_n_batches = every_n_batches or 750
 
-    def _additional_plot_kwargs(self, pl_module: pl.LightningModule) -> dict[str, Any]:
-        """Return callback-specific keyword arguments for the plot call."""
-        del pl_module
+    def _plot_kwargs_from_output(
+        self,
+        pl_module: pl.LightningModule,
+        output: TrainingStepOutput,
+    ) -> dict[str, Any]:
+        """Extra plot keyword arguments from step output."""
+        del pl_module, output
         return {}
 
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]] | dict[str, torch.Tensor]],
+        output: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         **kwargs,
@@ -365,20 +370,16 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
                 for dataset_name, dataset_tensor in batch.items()
             }
-            # output: (loss, [pred_dict1, pred_dict2, ...]); all tasks return a list of per-step dicts.
-            preds = output[1]
+            preds = output.predictions
             if not isinstance(preds, list):
 
                 raise TypeError(preds)
-            output = [
-                output[0],
-                [
-                    {
-                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
-                        for dataset_name, dataset_pred in pred.items()
-                    }
-                    for pred in preds
-                ],
+            gathered_predictions = [
+                {
+                    dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                    for dataset_name, dataset_pred in pred.items()
+                }
+                for pred in preds
             ]
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
@@ -393,7 +394,12 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
-            plot_kwargs = self._additional_plot_kwargs(pl_module)
+            plot_kwargs = self._plot_kwargs_from_output(pl_module, output)
+            output = TrainingStepOutput(
+                loss=output.loss,
+                metrics=output.metrics,
+                predictions=gathered_predictions,
+            )
             self.plot(
                 trainer,
                 pl_module,
@@ -724,7 +730,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
@@ -758,7 +764,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 )
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
-                y_hat = outputs[1][i][dataset_name]
+                y_hat = outputs.predictions[i][dataset_name]
                 y_true = pl_module.task.get_targets(
                     batch={dataset_name: batch[dataset_name]},
                     data_indices=pl_module.data_indices,
@@ -796,7 +802,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         self,
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        output: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
@@ -867,7 +873,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
-        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -879,12 +885,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             The LightningModule instance.
         dataset_name : str
             The name of the dataset to process.
-        outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
-            The outputs from the model. The second element must be a list of dicts
-            (one per outer step). Tasks with a single step (e.g. one-step transport
-            objectives, temporal downscaling) must return [y_pred] so that ``for x in outputs[1]``
-            iterates over steps; if they return the dict directly, iteration would
-            be over dataset names and indexing would fail.
+        outputs : TrainingStepOutput
+            The outputs from the model. The predictions must be a list of dicts
+            (one per outer step).
         batch : dict[str, torch.Tensor]
             The batch of data.
         members : int | list[int] | None, optional
@@ -903,11 +906,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
             self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
 
-        # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
         assert isinstance(
-            outputs[1],
+            outputs.predictions,
             list,
-        ), "outputs[1] must be a list of per-step dicts."
+        ), "outputs.predictions must be a list of per-step dicts."
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
@@ -915,7 +917,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
 
         data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
-        output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs[1], members=members)
+        output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
 
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(
             data[1:, ...],
@@ -971,7 +973,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         focus_area: list[dict] | None = None,
         prediction_label: str = "pred",
         auxiliary_label: str = "corrupted targets",
-        plot_transport_conditioned_target: bool = False,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1017,10 +1018,6 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.colormaps = colormaps
         self.prediction_label = prediction_label
         self.auxiliary_label = auxiliary_label
-        self.plot_transport_conditioned_target = plot_transport_conditioned_target
-        if self.plot_transport_conditioned_target:
-            self.per_sample = max(self.per_sample, 7)
-        self._missing_conditioned_target_warning_logged = False
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -1036,27 +1033,21 @@ class PlotSample(BasePlotAdditionalMetrics):
         exp_log_tag = f"{self.exp_log_tag_prefix}_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{focus_tag}"
         return tag, exp_log_tag
 
-    def _additional_plot_kwargs(self, pl_module: pl.LightningModule) -> dict[str, Any]:
+    def _plot_kwargs_from_output(
+        self,
+        pl_module: pl.LightningModule,
+        output: TrainingStepOutput,
+    ) -> dict[str, Any]:
         """Return the optional corrupted-target field for sample plots."""
-        if not self.plot_transport_conditioned_target:
+        auxiliary_output = output.plot_kwargs.get("auxiliary_output")
+        if auxiliary_output is None:
             return {}
 
-        conditioned_target = getattr(pl_module, "_last_transport_conditioned_target", None)
-        if conditioned_target is None:
-            if not self._missing_conditioned_target_warning_logged:
-                LOGGER.warning(
-                    "%s has plot_transport_conditioned_target=true, but no validation conditioned "
-                    "transport target was found.",
-                    type(self).__name__,
-                )
-                self._missing_conditioned_target_warning_logged = True
-            return {}
-
-        conditioned_target = {
+        auxiliary_output = {
             dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
-            for dataset_name, dataset_tensor in conditioned_target.items()
+            for dataset_name, dataset_tensor in auxiliary_output.items()
         }
-        return {"auxiliary_output": conditioned_target}
+        return {"auxiliary_output": auxiliary_output}
 
     @rank_zero_only
     def _plot(
@@ -1064,7 +1055,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
@@ -1325,7 +1316,7 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
@@ -1440,7 +1431,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         dataset_names: list[str],
-        outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]],
+        outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,

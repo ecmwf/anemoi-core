@@ -123,8 +123,6 @@ class PlotSampleSchema(BaseModel):
     "Label used for the prediction panels."
     auxiliary_label: str = Field(default="corrupted targets")
     "Label used for the optional panel that shows the corrupted target seen by the model."
-    plot_transport_conditioned_target: bool = Field(default=False)
-    "Add a panel for the corrupted transport target when the training method provides it."
 
 
 class PlotSpectrumSchema(BaseModel):

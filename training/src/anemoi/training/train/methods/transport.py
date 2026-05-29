@@ -22,6 +22,7 @@ from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObj
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import TransportObjective
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -498,7 +499,7 @@ class TransportTraining(BaseTransportTraining):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+    ) -> TrainingStepOutput:
         """Run one training or validation step for the selected transport objective."""
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         prepared_target = self.prediction_mode.prepare_target(batch, x)
@@ -509,22 +510,18 @@ class TransportTraining(BaseTransportTraining):
 
         metric_prediction = None
         metric_target = None
+        plot_kwargs: dict[str, dict[str, torch.Tensor]] = {}
         if validation_mode:
-            # Store the corrupted target for optional validation plots. Tendency
-            # prediction first converts it back to state space so it can be
-            # shown next to normal state samples.
             conditioned_endpoint = self.prediction_mode.reconstruct_prediction(
                 prepared_objective.conditioned_target,
                 prepared_target,
             )
-            self._last_transport_conditioned_target = {
+            plot_kwargs["auxiliary_output"] = {
                 dataset_name: target.detach() for dataset_name, target in conditioned_endpoint.items()
             }
             endpoint_prediction = self.transport_objective.reconstruct_endpoint(prediction, prepared_objective)
             metric_prediction = self.prediction_mode.reconstruct_prediction(endpoint_prediction, prepared_target)
             metric_target = self.prediction_mode.prepare_metric_target(prepared_target)
-        else:
-            self._last_transport_conditioned_target = None
 
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
@@ -539,4 +536,4 @@ class TransportTraining(BaseTransportTraining):
             use_reentrant=False,
         )
 
-        return loss, metrics, [y_pred]
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=[y_pred], plot_kwargs=plot_kwargs)

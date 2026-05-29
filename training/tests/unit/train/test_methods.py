@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -46,6 +47,9 @@ from anemoi.training.train.methods.transport_base import PreparedTransportObject
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
+
+if TYPE_CHECKING:
+    from anemoi.training.train.step_output import TrainingStepOutput
 
 
 class DummyLoss(torch.nn.Module):
@@ -212,13 +216,13 @@ def _data_indices_single() -> dict[str, IndexCollection]:
 
 
 def _assert_step_return_format(
-    loss: torch.Tensor,
-    y_preds: list,
+    output: TrainingStepOutput,
     expected_len: int,
     dataset_name: str = "data",
 ) -> None:
-    """Assert the (loss, metrics, y_preds) contract of _step."""
-    assert isinstance(loss, torch.Tensor)
+    """Assert the structured output contract of _step."""
+    assert isinstance(output.loss, torch.Tensor)
+    y_preds = output.predictions
     assert isinstance(y_preds, list)
     assert len(y_preds) == expected_len
     for pred in y_preds:
@@ -728,10 +732,10 @@ def test_single_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # batch time-steps correspond to offsets [0h, +6h]
     batch = {"data": torch.randn(b, 2, e, g, v)}
-    loss, _, y_preds = module._step(batch, validation_mode=False)
+    output = module._step(batch, validation_mode=False)
 
-    _assert_step_return_format(loss, y_preds, expected_len=1)
-    assert y_preds[0]["data"].shape == (b, 1, e, g, v)
+    _assert_step_return_format(output, expected_len=1)
+    assert output.predictions[0]["data"].shape == (b, 1, e, g, v)
 
 
 def test_single_training_step_with_autoencoder(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -750,9 +754,9 @@ def test_single_training_step_with_autoencoder(monkeypatch: pytest.MonkeyPatch) 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # Autoencoder: single time step at t=0
     batch = {"data": torch.randn(b, 1, e, g, v)}
-    loss, _, y_preds = module._step(batch, validation_mode=False)
+    output = module._step(batch, validation_mode=False)
 
-    _assert_step_return_format(loss, y_preds, expected_len=1)
+    _assert_step_return_format(output, expected_len=1)
 
 
 def test_single_training_step_with_temporal_downscaler(
@@ -779,9 +783,9 @@ def test_single_training_step_with_temporal_downscaler(
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [0h, 6h, 12h, 18h] → 4 time steps
     batch = {"data": torch.randn(b, 4, e, g, v)}
-    loss, _, y_preds = module._step(batch, validation_mode=False)
+    output = module._step(batch, validation_mode=False)
 
-    _assert_step_return_format(loss, y_preds, expected_len=1)
+    _assert_step_return_format(output, expected_len=1)
 
 
 # ── SingleTraining: loss averaging ────────────────────────────────────────────
@@ -815,10 +819,10 @@ def test_single_training_loss_is_averaged_over_num_steps(
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, 2, e, g, v)}
-    loss, _, _ = module._step(batch, validation_mode=False)
+    output = module._step(batch, validation_mode=False)
 
     # Expected average: 3.0 = (2.0 + 4.0) / 2
-    assert torch.isclose(loss, torch.tensor(3.0)), f"Expected 3.0, got {loss.item()}"
+    assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
 
 
 def test_single_training_advance_input_called_once_per_step(
@@ -896,10 +900,10 @@ def test_edm_transport_training_step_with_forecaster() -> None:
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets=[0h, +6h] → 2 time steps
     batch = {"data": torch.randn(b, 2, e, g, v)}
-    loss, _, y_preds = forecaster._step(batch={"data": batch["data"]}, validation_mode=False)
+    output = forecaster._step(batch={"data": batch["data"]}, validation_mode=False)
 
-    _assert_step_return_format(loss, y_preds, expected_len=1)
-    assert y_preds[0]["data"].shape == (b, 1, e, g, v)
+    _assert_step_return_format(output, expected_len=1)
+    assert output.predictions[0]["data"].shape == (b, 1, e, g, v)
 
 
 # ── EnsembleTraining: expand/collapse helpers ──────────────────────────────────
@@ -976,13 +980,13 @@ def test_ensemble_training_step_with_forecaster(
     b, e_orig, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets=[0h, +6h] → 2 time steps; ensemble dim=1 (will be expanded to nens_per_device=2)
     batch = {"data": torch.randn(b, 2, e_orig, g, v)}
-    loss, _, y_preds = forecaster._step(batch=batch, validation_mode=False)
+    output = forecaster._step(batch=batch, validation_mode=False)
 
-    assert isinstance(loss, torch.Tensor)
-    assert isinstance(y_preds, list)
-    assert len(y_preds) == task.num_steps  # 1 rollout step
+    assert isinstance(output.loss, torch.Tensor)
+    assert isinstance(output.predictions, list)
+    assert len(output.predictions) == task.num_steps  # 1 rollout step
     # y_pred shape: (b, n_step_output, nens_per_device, g, v)
-    assert y_preds[0]["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
+    assert output.predictions[0]["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
 
 
 # ── Multi-step rollout correctness ────────────────────────────────────────────
@@ -1032,10 +1036,10 @@ def test_single_training_multi_rollout_accumulates_one_pred_per_step(
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
     batch = {"data": torch.randn(b, 4, e, g, v)}
-    _, _, y_preds = module._step(batch, validation_mode=False)
+    output = module._step(batch, validation_mode=False)
 
-    assert len(y_preds) == 3, f"Expected 3 y_pred entries for rollout=3, got {len(y_preds)}"
-    for pred in y_preds:
+    assert len(output.predictions) == 3, f"Expected 3 y_pred entries for rollout=3, got {len(output.predictions)}"
+    for pred in output.predictions:
         assert pred["data"].shape == (b, 1, e, g, v)
 
 
@@ -1223,10 +1227,10 @@ def test_ensemble_training_multi_rollout_accumulates_one_pred_per_step(
     monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
 
     batch = {"data": torch.randn(b, 2, e, g, v)}
-    _, _, y_preds = forecaster._step(batch=batch, validation_mode=False)
+    output = forecaster._step(batch=batch, validation_mode=False)
 
-    assert len(y_preds) == 2, f"Expected 2 y_pred entries for rollout=2, got {len(y_preds)}"
-    for pred in y_preds:
+    assert len(output.predictions) == 2, f"Expected 2 y_pred entries for rollout=2, got {len(output.predictions)}"
+    for pred in output.predictions:
         assert pred["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
 
 
@@ -1498,10 +1502,10 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     assert captured["target_vars"] == len(data_indices["data"].model.output.full)
 
 
-def test_transport_validation_stores_conditioned_target_for_plotting(
+def test_transport_validation_returns_conditioned_target_for_plotting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TransportTraining stores the validation conditioned target consumed by PlotSample."""
+    """TransportTraining returns the validation conditioned target consumed by PlotSample."""
 
     class _DummyTransportObjective:
         def __init__(self) -> None:
@@ -1574,14 +1578,15 @@ def test_transport_validation_stores_conditioned_target_for_plotting(
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
 
     batch = {"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))}
-    forecaster._step(batch=batch, validation_mode=True)
+    output = forecaster._step(batch=batch, validation_mode=True)
 
     assert objective.conditioned_target is not None
+    auxiliary_output = output.plot_kwargs["auxiliary_output"]
     torch.testing.assert_close(
-        forecaster._last_transport_conditioned_target["data"],
+        auxiliary_output["data"],
         objective.conditioned_target["data"],
     )
-    assert forecaster._last_transport_conditioned_target["data"].requires_grad is False
+    assert auxiliary_output["data"].requires_grad is False
 
 
 def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_target(

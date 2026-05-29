@@ -28,6 +28,7 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapt
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
 # Suite of Unit Tests for Plotting Callbacks
@@ -254,6 +255,18 @@ class _IdentityProcessor:
         return self
 
 
+def _step_output(
+    predictions: list[dict[str, torch.Tensor]],
+    plot_kwargs: dict[str, Any] | None = None,
+) -> TrainingStepOutput:
+    return TrainingStepOutput(
+        loss=torch.tensor(0.0),
+        metrics={},
+        predictions=predictions,
+        plot_kwargs={} if plot_kwargs is None else plot_kwargs,
+    )
+
+
 # ---- BasePlotAdditionalMetrics.process: input/output shapes ----
 
 
@@ -278,9 +291,8 @@ def test_process_forecaster_output_shapes():
         nlatlon=nlatlon,
     )
     batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
-    # outputs: (loss, [pred_0, pred_1, ...]); each pred[dataset] (bs, n_step_output, ens, latlon, nvar)
-    outputs = (
-        torch.tensor(0.0),
+    # each pred[dataset] shape is (bs, n_step_output, ens, latlon, nvar)
+    outputs = _step_output(
         [
             {"data": torch.randn(batch_size, n_step_output, n_ens, nlatlon, nvar)},
             {"data": torch.randn(batch_size, n_step_output, n_ens, nlatlon, nvar)},
@@ -297,14 +309,13 @@ def test_process_forecaster_output_shapes():
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
 
 
-def test_plot_sample_uses_transport_conditioned_target_when_enabled():
-    """PlotSample forwards the captured conditioned target as an auxiliary plot tensor when enabled."""
+def test_plot_sample_uses_auxiliary_output_from_validation_output():
+    """PlotSample forwards auxiliary output from validation metadata."""
     callback = PlotSample(
         sample_idx=0,
         parameters=["a", "b"],
         accumulation_levels_plot=[0.5],
         dataset_names=["data"],
-        plot_transport_conditioned_target=True,
     )
 
     batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
@@ -312,12 +323,11 @@ def test_plot_sample_uses_transport_conditioned_target_when_enabled():
     pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
     pl_module.model.post_processors = {"data": _IdentityProcessor()}
     conditioned_target = {"data": torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0)}
-    pl_module._last_transport_conditioned_target = conditioned_target
 
     batch = {"data": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
-    output = (
-        torch.tensor(0.0),
+    output = _step_output(
         [{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}],
+        plot_kwargs={"auxiliary_output": conditioned_target},
     )
     trainer = MagicMock()
     trainer.current_epoch = 0
@@ -327,8 +337,9 @@ def test_plot_sample_uses_transport_conditioned_target_when_enabled():
 
     plotted_output = callback.plot.call_args.args[3]
     plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
-    torch.testing.assert_close(plotted_output[1][0]["data"], output[1][0]["data"])
+    torch.testing.assert_close(plotted_output.predictions[0]["data"], output.predictions[0]["data"])
     torch.testing.assert_close(plotted_auxiliary["data"], conditioned_target["data"])
+    assert plotted_output.plot_kwargs == {}
 
 
 def test_process_time_interpolator_output_shapes():
@@ -347,8 +358,7 @@ def test_process_time_interpolator_output_shapes():
     n_time = 1 + total_targets + 1  # 4 time steps in the batch
 
     batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
             {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
@@ -379,8 +389,7 @@ def test_process_temporal_downscaler_multi_out_squeeze():
     batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
     # Simulate multi-out: each output (1, 1, 1, nlatlon, nvar) so cat gives (2, 1, 1, nlatlon, nvar);
     # after squeeze(0) we get (2, 1, nlatlon, nvar)
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)},
             {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)},
@@ -469,8 +478,7 @@ def test_plot_loss_temporal_downscaler():
     batch_size, nlatlon = 2, 10
     n_time = 4
     batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
@@ -525,8 +533,7 @@ def test_plot_loss_single_step_transport():
     n_time = n_step_input + n_step_output + 1
     batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     # Single output (no rollout)
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
@@ -586,8 +593,7 @@ def test_plot_loss_forecaster():
     n_time = n_step_input + output_times * n_step_output + 1
     batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     # One prediction per rollout step
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
     )
     callback.loss = {"data": MSELoss()}
@@ -635,8 +641,7 @@ def test_plot_spectrum_temporal_downscaler():
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
@@ -683,8 +688,7 @@ def test_plot_spectrum_forecaster():
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(rollout_steps)],
     )
     trainer = MagicMock()
@@ -726,8 +730,7 @@ def test_plot_histogram_temporal_downscaler():
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
@@ -774,8 +777,7 @@ def test_plot_histogram_forecaster():
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(validation_rollout)],
     )
     trainer = MagicMock()

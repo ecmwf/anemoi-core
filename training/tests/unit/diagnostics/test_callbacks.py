@@ -21,6 +21,7 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
+from anemoi.training.train.step_output import TrainingStepOutput
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
@@ -165,11 +166,11 @@ def test_rollout_eval_handles_dict_batch(n_ensemble):
     pl_module.device = torch.device("cpu")
     pl_module.n_step_input = 1
     pl_module.n_step_output = 1
-    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
-    pl_module._step.return_value = (
-        torch.tensor(0.125),
-        {"metric1": torch.tensor(0.25)},
-        None,
+    # _step returns aggregated output over all rollout steps.
+    pl_module._step.return_value = TrainingStepOutput(
+        loss=torch.tensor(0.125),
+        metrics={"metric1": torch.tensor(0.25)},
+        predictions=[],
     )
 
     trainer = MagicMock()
@@ -237,7 +238,7 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
     callback.on_validation_batch_end(
         trainer=trainer,
         pl_module=pl_module,
-        output=(torch.tensor(0.0), []),
+        output=TrainingStepOutput(loss=torch.tensor(0.0), metrics={}, predictions=[]),
         batch={"data": torch.zeros((1, 1, 1, 3, 2))},
         batch_idx=0,
     )
