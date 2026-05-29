@@ -130,7 +130,9 @@ Rollout behavior:
 
 -  When time indices are inferred, the dataloader uses
    ``multistep_input + rollout * multistep_output`` to determine how many timesteps
-   to load.
+   to load. During rollout training, this is based on the current
+   ``rollout.step`` (not the maximum), and the dataloader indices are recalculated
+   when the rollout increases.
 -  If ``multistep_output`` is greater than ``multistep_input``, only the most recent
    ``multistep_input`` outputs are fed into the next rollout step.
 

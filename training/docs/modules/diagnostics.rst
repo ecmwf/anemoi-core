@@ -22,7 +22,7 @@ functionality to use both Weights & Biases and Tensorboard.
 The callbacks can also be used to evaluate forecasts over longer
 rollouts beyond the forecast time that the model is trained on. The
 number of rollout steps for verification (or forecast iteration steps)
-is set using ``config.dataloader.validation_rollout =
+is set using ``config.task.validation_rollout =
 *num_of_rollout_steps*``.
 
 Callbacks are configured in the config file under the
@@ -38,7 +38,7 @@ callback, any other kwarg is passed to the callback's constructor.
    callbacks:
       - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
       rollout:
-      - ${dataloader.validation_rollout}
+      - ${task.validation_rollout}
       frequency: 20
 
 Plotting callbacks are configured in a similar way, but they are
