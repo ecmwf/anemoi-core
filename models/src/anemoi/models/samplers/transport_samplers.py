@@ -269,7 +269,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                     ) * denoised_solver[dataset_name]
             else:
                 # Second order multistep
-                h_last = -torch.log(sigmas[i - 1] + 1e-10) - t if i > 0 else h
+                h_last = t - (-torch.log(sigmas[i - 1] + 1e-10)) if i > 0 else h
                 r = h_last / h
 
                 coeff1 = 1 + 1 / (2 * r)
