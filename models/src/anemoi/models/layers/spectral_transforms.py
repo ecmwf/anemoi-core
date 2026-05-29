@@ -15,6 +15,7 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
+from anemoi.models.layers.custom_dct import build_dct2d_backend
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
@@ -185,18 +186,45 @@ class FFT2D(SpectralTransform):
 
 
 class DCT2D(SpectralTransform):
-    """2D Discrete Cosine Transform."""
+    """2D Discrete Cosine Transform.
 
-    def __init__(self, x_dim: int, y_dim: int, **kwargs) -> None:
+    Parameters
+    ----------
+    x_dim : int
+        Width of the 2D spatial field.
+    y_dim : int
+        Height of the 2D spatial field.
+    backend : str
+        DCT2D backend to use.  ``"torch_dct"`` (default) preserves the
+        original behaviour; ``"custom_dct"`` uses the ROCm-safe matmul
+        implementation. Passed via config key ``dct_backend`` to avoid
+        clashing with the CRPS ``backend`` parameter.
+    dct_backend_kwargs : dict | None
+        Extra keyword arguments forwarded to the backend constructor
+        (e.g. ``{"norm": "ortho"}`` for ``custom_dct``).
+    """
+
+    def __init__(
+        self,
+        x_dim: int,
+        y_dim: int,
+        *,
+        dct_backend: str = "torch_dct",
+        dct_backend_kwargs: dict | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__()
+        del kwargs
         self.x_dim = x_dim
         self.y_dim = y_dim
+        self._backend = build_dct2d_backend(
+            dct_backend,
+            y_dim=y_dim,
+            x_dim=x_dim,
+            **(dct_backend_kwargs or {}),
+        )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
-        try:
-            from torch_dct import dct_2d
-        except ImportError:
-            raise ImportError("torch_dct is required for DCT2D transform. ")
         b, t, e, points, v = data.shape
         assert points == self.x_dim * self.y_dim
 
@@ -206,8 +234,8 @@ class DCT2D(SpectralTransform):
             x=self.x_dim,
             y=self.y_dim,
         )
-        x = dct_2d(x)
-        return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
+        x = self._backend(x)
+        return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, t=t, e=e, v=v)
 
 
 class RegularSHT(SpectralTransform):
