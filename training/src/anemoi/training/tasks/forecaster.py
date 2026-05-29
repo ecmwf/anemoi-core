@@ -38,7 +38,7 @@ class RolloutConfig:
 
     def should_increase(self, current_epoch: int) -> bool:
         """Check if rollout should be increased at the end of the current epoch."""
-        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0
+        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0 and self.step < self.maximum
 
     def increase(self) -> None:
         """Increase the rollout window by one step."""
@@ -54,9 +54,12 @@ class Forecaster(BaseTask):
     ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
 
     For rollout training the ``offset`` property extends the output
-    offsets up to ``rollout_max`` steps so the datamodule loads enough
-    time steps, while ``steps`` only iterates over the current
-    ``rollout`` value which grows via ``on_train_epoch_end``.
+    offsets up to the current ``rollout.step`` so the datamodule loads
+    the required time steps. The ``steps`` method iterates over the
+    current ``rollout.step`` which grows via ``on_train_epoch_end``.
+    When the rollout increases, the datamodule's
+    ``recalculate_relative_date_indices`` is called so that workers
+    load the updated number of time steps.
     """
 
     name: str = "forecaster"

@@ -77,7 +77,7 @@ class TestMultiDataset:
         empty_dataset = data_readers["dataset_b"]
         err_msg = f"No valid date indices found for data reader 'dataset_b': {empty_dataset}"
         with pytest.raises(ValueError, match=re.escape(err_msg)):
-            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices).relative_date_indices
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """Test that MultiDataset raises ValueError when intersection of valid indices is empty."""
@@ -99,4 +99,4 @@ class TestMultiDataset:
 
         # Constructing MultiDataset should raise ValueError
         with pytest.raises(ValueError, match="No valid date indices found after intersection across all datasets"):
-            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices).relative_date_indices

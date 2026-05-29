@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -42,6 +43,11 @@ _NAME_TO_INDEX: dict[str, int] = {"A": 0, "B": 1}
 def _data_indices_single() -> dict[str, IndexCollection]:
     """Minimal data_indices for a single dataset named 'data'."""
     return {"data": _make_minimal_index_collection(_NAME_TO_INDEX)}
+
+
+@pytest.fixture
+def mock_datamodule() -> MagicMock:
+    return MagicMock()
 
 
 # ── Forecaster: offsets and steps ─────────────────────────────────────────────
@@ -127,7 +133,7 @@ def test_forecaster_metric_name_encodes_rollout_step() -> None:
 # ── Forecaster: rollout curriculum ────────────────────────────────────────────
 
 
-def test_forecaster_rollout_increases_on_epoch_end() -> None:
+def test_forecaster_rollout_increases_on_epoch_end(mock_datamodule: MagicMock) -> None:
     """on_train_epoch_end increments rollout.step up to maximum."""
     task = Forecaster(
         multistep_input=1,
@@ -137,13 +143,15 @@ def test_forecaster_rollout_increases_on_epoch_end() -> None:
         rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
     )
     assert task.rollout.step == 1
-    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(0, datamodule=mock_datamodule)
     assert task.rollout.step == 2
-    task.on_train_epoch_end(1)
+    task.on_train_epoch_end(1, datamodule=mock_datamodule)
     assert task.rollout.step == 3
+    assert mock_datamodule.recalculate_relative_date_indices.call_count == 2
+    mock_datamodule.recalculate_relative_date_indices.assert_called_with(datasets=["training", "validation"])
 
 
-def test_forecaster_rollout_does_not_exceed_maximum() -> None:
+def test_forecaster_rollout_does_not_exceed_maximum(mock_datamodule: MagicMock) -> None:
     """rollout.step is capped at maximum even when on_train_epoch_end is called repeatedly."""
     task = Forecaster(
         multistep_input=1,
@@ -152,11 +160,12 @@ def test_forecaster_rollout_does_not_exceed_maximum() -> None:
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
     for epoch in range(10):
-        task.on_train_epoch_end(epoch)
+        task.on_train_epoch_end(epoch, datamodule=mock_datamodule)
     assert task.rollout.step == 2
+    assert mock_datamodule.recalculate_relative_date_indices.call_count == 1
 
 
-def test_forecaster_rollout_no_increment_when_zero() -> None:
+def test_forecaster_rollout_no_increment_when_zero(mock_datamodule: MagicMock) -> None:
     """epoch_increment=0 means rollout.step stays at start permanently."""
     task = Forecaster(
         multistep_input=1,
@@ -165,8 +174,9 @@ def test_forecaster_rollout_no_increment_when_zero() -> None:
         rollout={"start": 1, "epoch_increment": 0, "maximum": 5},
     )
     for epoch in range(10):
-        task.on_train_epoch_end(epoch)
+        task.on_train_epoch_end(epoch, datamodule=mock_datamodule)
     assert task.rollout.step == 1
+    mock_datamodule.recalculate_relative_date_indices.assert_not_called()
 
 
 # ── Forecaster: batch slicing ─────────────────────────────────────────────────

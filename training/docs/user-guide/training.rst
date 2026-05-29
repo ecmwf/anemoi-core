@@ -504,12 +504,12 @@ closer to the use case of forecasting arbitrary lead timestep through
 autoreggresive iteration of the model.
 
 In most cases, in the first stage of training, the model is trained for
-many epochs to perdict only one step (i.e. rollout.max = 1). Once this
+many epochs to predict only one step (i.e. rollout.maximum = 1). Once this
 is completed, there is a second stage of training, which uses *rollout*
 to fine-tune the model error at longer leadtimes. The model begins with
 a rollout loss defined by ``rollout.start``, usually 1, and then every n
 epochs (defined by rollout.epoch_increment) the rollout value increases
-up till ``rollout.max``.
+up till ``rollout.maximum``.
 
 .. code:: yaml
 
@@ -518,7 +518,7 @@ up till ``rollout.max``.
       # increase rollout every n epochs
       epoch_increment: 1
       # maximum rollout to use
-      max: 12
+      maximum: 12
 
 This two stage approach requires the model training to be restarted
 after stage one, see instructions below. The user should make sure to

@@ -446,8 +446,120 @@ Default sampler settings live under
      sampler:
        sampler: heun
 
-These defaults can be overridden at inference time with
-``schedule_params`` and ``sampler_params`` passed to ``predict_step``.
-For stochastic interpolants, use the same structure with
-``sampling_schedule.schedule_type: unit_time`` and a vector-field sampler
-such as ``heun`` or ``euler``.
+Changes in training config
+==========================
+
+The training configuration for diffusion models requires changes:
+
+.. code:: yaml
+
+   # Select diffusion model task
+   # For standard diffusion:
+   training_method: anemoi.training.train.methods.DiffusionTraining
+
+   # For tendency-based diffusion:
+   training_method: anemoi.training.train.methods.DiffusionTendencyTraining
+
+   # Standard training configuration remains similar
+   multistep_input: 2
+   rollout:
+     start: 1
+     maximum: 1
+
+The training method must be set to the appropriate diffusion training class
+to handle the diffusion-specific forward pass with preconditioning and
+noise injection.
+
+Changes in loss computation
+===========================
+
+The diffusion training uses WeightedMSELoss which handles noise weights
+properly:
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+          your_dataset_name:
+              _target_: anemoi.training.losses.WeightedMSELoss
+
+During training, the :class:`GraphDiffusionForecaster` automatically
+passes the required `weights` based on the noise level to the loss
+function.
+
+Diffusion model variants
+=========================
+
+There are two variants of diffusion models available:
+
+**Standard Diffusion**
+----------------------
+
+Uses `graphtransformer_diffusion.yaml` or `transformer_diffusion.yaml`:
+
+-  Predicts the denoised state directly
+-  Applies noise to the target state during training
+-  Model class: :class:`AnemoiDiffusionModelEncProcDec`
+-  Training method: :class:`DiffusionTraining`
+-  Use single-step rollout (`rollout.maximum: 1`)
+
+**Tendency-based Diffusion**
+----------------------------
+
+Uses `graphtransformer_diffusiontend.yaml` or
+`transformer_diffusiontend.yaml`:
+
+-  Predicts the tendency (change) between timesteps
+-  Applies noise to the tendency rather than the state
+-  Model class: :class:`AnemoiDiffusionTendModelEncProcDec`
+-  Training method: :class:`DiffusionTendencyTraining`
+-  Requires `statistics_tendencies` for normalization
+-  Use single-step rollout (`rollout.maximum: 1`)
+
+Choose the variant based on your specific use case.
+
+Diffusion example config
+=========================
+
+A minimal config file for standard diffusion training:
+
+.. code:: yaml
+
+   defaults:
+   - data: zarr
+   - dataloader: native_grid
+   - diagnostics: evaluation
+   - system: example
+   - graph: multi_scale
+   - model: graphtransformer_diffusion  # Use diffusion model
+   - task: forecaster
+   - training: diffusion                 # Use diffusion training config
+   - _self_
+
+   # Select training method for diffusion
+   training:
+     training_method: anemoi.training.train.methods.DiffusionTraining
+
+   config_validation: True
+
+For tendency-based diffusion, change the model config and model task:
+
+.. code:: yaml
+
+   defaults:
+   - data: zarr
+   - dataloader: native_grid
+   - diagnostics: evaluation
+   - system: example
+   - graph: multi_scale
+   - model: graphtransformer_diffusiontend  # Use tendency diffusion model
+   - task: forecaster
+   - training: diffusion                     # Same training config
+   - _self_
+
+   # Select training method for tendency-based diffusion
+   training:
+     training_method: anemoi.training.train.methods.DiffusionTendencyTraining
+
+   # Ensure statistics_tendencies are available
+   config_validation: True
