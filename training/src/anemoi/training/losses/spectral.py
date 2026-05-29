@@ -131,7 +131,7 @@ class SpectralLoss(BaseLoss):
 
 
 class SpectralAMSELoss(SpectralLoss):
-    r"""AMSE loss in spectral domain.
+    r"""Adjusted Mean Squared Error (AMSE) loss in spectral domain.
 
     Implements the AMSE formula from Subich et al. (arXiv:2501.19374, 2025):
 
@@ -173,7 +173,13 @@ class SpectralAMSELoss(SpectralLoss):
       over the zonal-frequency profile at each :math:`L`.
     """
 
-    eps: float = 1e-8
+    def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # assert if PSD is defined for the transform, since AMSE relies on it
+        assert hasattr(self.transform, "power_spectral_density") and callable(
+            self.transform.power_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a PSD method"
+        self.eps = eps
 
     def forward(
         self,
@@ -192,15 +198,15 @@ class SpectralAMSELoss(SpectralLoss):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        with torch.amp.autocast(device_type="cuda", enabled=False):
+        with torch.amp.autocast(device_type=pred.device.type, enabled=False):
             # transform to spectral domain: [B, T, E, grid, vars] -> [B, T, E, L, M, vars]
             # don't flatten to modes here since we need to calculate PSD and coherence per-L
             pred_spec = self.transform.forward(pred)
             target_spec = self.transform.forward(target)
 
             # per-L PSD: [B, T, E, L, vars]
-            psd_pred = (torch.abs(pred_spec) ** 2).sum(dim=-2)
-            psd_target = (torch.abs(target_spec) ** 2).sum(dim=-2)
+            psd_pred = self.transform.power_spectral_density(pred_spec)
+            psd_target = self.transform.power_spectral_density(target_spec)
             # cross-spectrum summed over M: [B, T, E, L, vars]
             cross = torch.real(pred_spec * torch.conj(target_spec)).sum(dim=-2)
 
@@ -211,11 +217,8 @@ class SpectralAMSELoss(SpectralLoss):
             # per-L AMSE: [B, T, E, L, vars]
             amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
 
-        # sum over L (dim 3) -> [B, T, E, 1, vars] (dummy grid dim for scale/reduce compat)
-        amse = amse_per_l.sum(dim=TensorDim.GRID.value, keepdim=True)
-
         result = self.scale(
-            amse,
+            amse_per_l,
             scaler_indices,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,

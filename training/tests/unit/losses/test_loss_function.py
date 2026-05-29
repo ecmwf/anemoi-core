@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import einops
+import hydra
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -20,7 +21,6 @@ from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import RMSELoss
-from anemoi.training.losses import SpectralAMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
@@ -30,7 +30,7 @@ from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
-spectral_losses = [SpectralL2Loss, SpectralAMSELoss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
+spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
 losses += spectral_losses
 
 
@@ -493,11 +493,50 @@ def test_iter_leaf_losses_flat() -> None:
     assert leaves[0] is loss
 
 
+def _octahedral_expected_points(nlat: int) -> int:
+    half = [4 * (i + 1) + 16 for i in range(nlat // 2)]
+    nlon = half + half[::-1]
+    return int(sum(nlon))
+
+
+def test_sht_amse_loss() -> None:
+    nlat = 8
+    nvars = 3
+    expected_points = _octahedral_expected_points(nlat)
+
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.spectral.SpectralAMSELoss",
+                "transform": "octahedral_sht",
+                "nlat": nlat,
+                "scalers": [],
+            },
+        ),
+    )
+    pred = torch.zeros((2, 1, 1, expected_points, nvars))
+    target = torch.zeros_like(pred)
+    out = loss(pred, target, squash=False)
+    assert out.shape == (nvars,), "squash=False should return per-variable loss"
+    out_total = loss(pred, target, squash=True)
+    assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
+
+    # fail for transform without PSD method (e.g. FFT2D)
+    with pytest.raises(hydra.errors.InstantiationException):
+        _ = get_loss_function(
+            DictConfig(
+                {
+                    "_target_": "anemoi.training.losses.spectral.SpectralAMSELoss",
+                    "transform": "fft2d",
+                    "x_dim": 710,
+                    "y_dim": 640,
+                    "scalers": [],
+                },
+            ),
+        )
+
+
 def test_octahedral_sht_loss() -> None:
-    def _octahedral_expected_points(nlat: int) -> int:
-        half = [4 * (i + 1) + 16 for i in range(nlat // 2)]
-        nlon = half + half[::-1]
-        return int(sum(nlon))
 
     nlat = 8
     nvars = 3
@@ -523,13 +562,6 @@ def test_octahedral_sht_loss() -> None:
     target_wrong = torch.zeros_like(pred_wrong)
     with pytest.raises(AssertionError):
         _ = loss(pred_wrong, target_wrong, squash=True)
-
-
-def _expected_octahedral_points(truncation: int) -> int:
-    # full globe reduced-octahedral points for ecTrans definition
-    # NH lons: 20 + 4*i, i=0..T  => sum_NH = 2*(T+1)*(T+10)
-    # full globe doubles:        => 4*(T+1)*(T+10)
-    return 4 * (truncation + 1) * (truncation + 10)
 
 
 def test_spectral_crps_fft_and_dct() -> None:
@@ -592,10 +624,6 @@ def test_spectral_crps_with_target_without_ensemble_dim() -> None:
 
 
 def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
-    def _octahedral_expected_points(nlat: int) -> int:
-        half = [20 + 4 * i for i in range(nlat // 2)]
-        return int(sum(half + half[::-1]))
-
     bs, ens, nvars = 2, 4, 2
     nlat = 8
     points = _octahedral_expected_points(nlat)

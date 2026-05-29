@@ -210,7 +210,15 @@ class DCT2D(SpectralTransform):
         return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
-class RegularSHT(SpectralTransform):
+class SHT(SpectralTransform):
+    """Spherical Harmonic Transform (SHT) baseclass."""
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-L power spectral density: sum over M of |coeff|^2."""
+        return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
+
+
+class RegularSHT(SHT):
     """SHT on a regular lon-lat grid."""
 
     def __init__(
@@ -246,7 +254,7 @@ class RegularSHT(SpectralTransform):
         return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class ReducedSHT(SpectralTransform):
+class ReducedSHT(SHT):
     """SHT on a reduced Gaussian grid."""
 
     def __init__(
@@ -304,7 +312,7 @@ class ReducedSHT(SpectralTransform):
         return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class OctahedralSHT(SpectralTransform):
+class OctahedralSHT(SHT):
     """SHT on an octahedral reduced grid."""
 
     def __init__(
