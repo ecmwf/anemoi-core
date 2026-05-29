@@ -635,6 +635,7 @@ def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
     out = loss(pred, target)
     assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"
 
+
 def test_mse_ignore_nans() -> None:
     """MSELoss should ignore NaNs with ignore_nans=True."""
     pred = torch.randn(3, 4, 5, 6, 7)
