@@ -139,12 +139,11 @@ class TCPCacheClient:
 
 #TODO change to overwriting the dataset insetad of data module?
 class DatasetCache(AnemoiDatasetsDataModule):
-    def __init__(self, ds, cache_root, dataset_path, proc_group=None, hostname_suffix=None, remote_backend="zarr"):
+    def __init__(self, ds, cache_root, dataset_path, proc_group=None, hostname_suffix=None, log_cache_stats=True):
         self.ds=ds
         self.cache_root = Path(cache_root)
         self.dataset_path=dataset_path
         self.proc_group = proc_group
-        self.remote_backend = remote_backend  # "zarr" (HTTP zarr) or "tcp" (raw socket + uncompressed npy)
         
         # For multi-dataset scenarios, we cache the first dataset by default
         # In the future, this could be made configurable
@@ -156,11 +155,13 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # optional suffix which will be appended to hostnames
         self.hostname_suffix=hostname_suffix
         
-        # Cache statistics - use shared memory for cross-process visibility
-        self.cache_hits_local = Value('i', 0)  # 'i' = signed int
-        self.cache_hits_remote = Value('i', 0)
-        self.cache_misses = Value('i', 0)
-        self.total_fetches = Value('i', 0)
+        self.log_cache_stats = log_cache_stats
+        if self.log_cache_stats:
+            # Cache statistics - use shared memory for cross-process visibility
+            self.cache_hits_local = Value('i', 0)  # 'i' = signed int
+            self.cache_hits_remote = Value('i', 0)
+            self.cache_misses = Value('i', 0)
+            self.total_fetches = Value('i', 0)
         
         # Store the wrapped dataset to prevent it from being recreated
         self._cached_ds_train = None
@@ -183,7 +184,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
     @abstractmethod
     def _start_server(self, directory, port):
         """Start the server that will serve cached files to other nodes. Only called on node leaders."""
-        pass
+        raise NotImplementedError("_start_server must be implemented by subclasses of DatasetCache")
 
     @abstractmethod
     def _fetch_remote(self, date, verbose=False):
@@ -405,7 +406,8 @@ class DatasetCache(AnemoiDatasetsDataModule):
     def fetch(self, date, verbose=False) -> np.ndarray:
         """ Reads cache regsitry, based on result fetches file from local SSD, remote SSD or filesytem"""
 
-        self.total_fetches.value += 1
+        if self.log_cache_stats:
+            self.total_fetches.value += 1
 
         cache_hits = self.check_cache(date)
         
@@ -415,18 +417,20 @@ class DatasetCache(AnemoiDatasetsDataModule):
             self._add_to_cache(date, data)
             
             # Logging and stats update
-            self.cache_misses.value += 1
-            if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
+            if self.log_cache_stats:
+                self.cache_misses.value += 1
+                if verbose or (self.total_fetches.value % 10 == 0):
+                    LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         elif self.node_id in cache_hits:
             #Cache hit on local node SSD – read from shared zarr cache
             data = self.cache[date]            
 
             # Logging and stats update
-            self.cache_hits_local.value += 1
-            if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
+            if self.log_cache_stats:
+                self.cache_hits_local.value += 1
+                if verbose or (self.total_fetches.value % 10 == 0):
+                    LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
                 
         else:
             #cache hit on remote node SSD
@@ -434,9 +438,10 @@ class DatasetCache(AnemoiDatasetsDataModule):
             data = self._fetch_remote(date, remote_node_id, verbose=verbose)
 
             # Logging and stats update
-            self.cache_hits_remote.value += 1
-            if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
+            if self.log_cache_stats:
+                self.cache_hits_remote.value += 1
+                if verbose or (self.total_fetches.value % 10 == 0):
+                    LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
             
         return data
 
