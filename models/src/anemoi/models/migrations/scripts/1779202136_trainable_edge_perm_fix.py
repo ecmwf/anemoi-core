@@ -47,7 +47,7 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
         LOGGER.info("Skipping trainable edge permutation migration because no model was provided.")
         return ckpt
 
-    state_dict = ckpt["state_dict"]
+    state_dict = ckpt.get("state_dict", {})
 
     for key in [k for k in list(state_dict.keys()) if "graph_provider" in k and k.endswith(_TRAINABLE_SUFFIX)]:
         provider_path = key[: -len(_TRAINABLE_SUFFIX)]
