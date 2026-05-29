@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.tasks.offsets import BaseTaskOffsets
 from anemoi.training.utils.time_indices import normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
@@ -27,10 +28,10 @@ class BaseTask(ABC):
     input and output time offsets as ``timedelta`` objects. The base class
     provides:
 
-    * An ``_offsets`` property that is the union of input and output offsets,
+    * An ``offsets.all`` property that is the union of input and output offsets,
       used by the datamodule to determine which time steps to load.
     * ``get_inputs`` / ``get_targets`` to split a loaded batch into model
-      inputs and targets based on position within ``_offsets``.
+      inputs and targets based on position within ``offsets.all``.
 
     Attributes
     ----------
@@ -53,14 +54,8 @@ class BaseTask(ABC):
 
     name: str
 
-    def __init__(
-        self,
-        input_offsets: list[datetime.timedelta],
-        output_offsets: list[datetime.timedelta],
-    ) -> None:
-        self._input_offsets = sorted(input_offsets)
-        self._output_offsets = sorted(output_offsets)
-        self._offsets = sorted(set(self._input_offsets + self._output_offsets))
+    def __init__(self, offsets: BaseTaskOffsets) -> None:
+        self.offsets = offsets
 
     def steps(self, mode: str = "training") -> Iterable[dict]:  # noqa: ARG002
         """Get the steps for the task."""
@@ -69,12 +64,12 @@ class BaseTask(ABC):
     @property
     def num_input_timesteps(self) -> int:
         """Number of input time steps."""
-        return len(self._input_offsets)
+        return len(self.offsets.input)
 
     @property
     def num_output_timesteps(self) -> int:
         """Number of output time steps."""
-        return len(self._output_offsets)
+        return len(self.offsets.output)
 
     @property
     def num_steps(self) -> int:
@@ -87,26 +82,26 @@ class BaseTask(ABC):
 
     def get_input_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of input time offsets."""
-        return self._input_offsets
+        return self.offsets.input
 
     def get_output_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Return the output offsets for a given step.
 
-        The default implementation returns ``self._output_offsets``.
+        The default implementation returns ``self.offsets.output``.
         Subclasses may override this to shift outputs per rollout step.
         """
-        return self._output_offsets
+        return self.offsets.output
 
     def get_offsets(self, **_kwargs) -> list[datetime.timedelta]:
         """Get the list of offsets for a given mode (e.g. "training", "validation", "test").
 
-        By default, this returns ``self._offsets``, but can be overridden by subclasses to return
+        By default, this returns ``self.offsets.all``, but can be overridden by subclasses to return
         different offsets per mode for example (e.g different rollout in training vs validation).
         """
-        return self._offsets
+        return self.offsets.all
 
     def _offsets_to_batch_indices(self, offsets: list[datetime.timedelta], **kwargs) -> list[int]:
-        """Map a list of offsets to their positions in ``self._offsets``."""
+        """Map a list of offsets to their positions in ``self.offsets.all``."""
         full = self.get_offsets(**kwargs)
         return [full.index(o) for o in offsets]
 
