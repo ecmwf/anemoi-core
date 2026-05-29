@@ -195,8 +195,11 @@ class DCT2D(SpectralTransform):
     y_dim : int
         Height of the 2D spatial field.
     backend : str
-        DCT2D backend to use.
-    backend_kwargs : dict | None
+        DCT2D backend to use.  ``"torch_dct"`` (default) preserves the
+        original behaviour; ``"custom_dct"`` uses the ROCm-safe matmul
+        implementation. Passed via config key ``dct_backend`` to avoid
+        clashing with the CRPS ``backend`` parameter.
+    dct_backend_kwargs : dict | None
         Extra keyword arguments forwarded to the backend constructor
         (e.g. ``{"norm": "ortho"}`` for ``custom_dct``).
     """
@@ -206,8 +209,8 @@ class DCT2D(SpectralTransform):
         x_dim: int,
         y_dim: int,
         *,
-        backend: str = "torch_dct",
-        backend_kwargs: dict | None = None,
+        dct_backend: str = "torch_dct",
+        dct_backend_kwargs: dict | None = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -215,10 +218,10 @@ class DCT2D(SpectralTransform):
         self.x_dim = x_dim
         self.y_dim = y_dim
         self._backend = build_dct2d_backend(
-            backend,
+            dct_backend,
             y_dim=y_dim,
             x_dim=x_dim,
-            **(backend_kwargs or {}),
+            **(dct_backend_kwargs or {}),
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
