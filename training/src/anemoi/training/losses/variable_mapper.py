@@ -18,6 +18,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
+from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -304,7 +305,7 @@ class LossVariableMapper(BaseLossWrapper):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **kwargs,
