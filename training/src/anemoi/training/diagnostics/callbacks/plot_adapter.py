@@ -14,19 +14,63 @@ Groups the plot-related hooks so task classes expose one attribute
 
 The EnsemblePlotAdapterWrapper allows to wrap any task-specific adapter,
 adding ensemble member handling without modifying the inner adapter's logic.
+
+PlotPayload holds the pre-processed (gathered, denormalized) data for a
+single validation batch.  BasePlotAdapter.prepare_payload() produces it
+once and caches it so that multiple callbacks sharing the same adapter
+avoid redundant gather/denorm/mask work.
 """
 
 from __future__ import annotations
 
+import copy
+import logging
 from abc import ABC
 from abc import abstractmethod
+from dataclasses import dataclass
+from dataclasses import field
 from typing import TYPE_CHECKING
 from typing import Any
+
+import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    import pytorch_lightning as pl
+    import torch
+
     from anemoi.training.tasks.base import BaseTask
+
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class PlotPayload:
+    """Processed batch data ready for plotting callbacks.
+
+    Produced once per batch by ``BasePlotAdapter.prepare_payload`` and shared
+    across all callbacks that use that batch.
+
+    Attributes
+    ----------
+    batch_idx : int
+        The validation batch index this payload was produced for.
+    batch : dict[str, torch.Tensor]
+        Gathered (full-grid) batch tensors keyed by dataset name.
+    outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
+        Gathered model outputs: (loss_scales, [pred_dict_per_step, ...]).
+    post_processors : dict[str, Any]
+        Deep-copied, CPU-resident post-processors keyed by dataset name.
+    latlons : dict[str, np.ndarray]
+        Latitude/longitude arrays in degrees, keyed by dataset name.
+    """
+
+    batch_idx: int
+    batch: dict[str, torch.Tensor]
+    outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
+    post_processors: dict[str, Any]
+    latlons: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 class BasePlotAdapter(ABC):
@@ -34,6 +78,7 @@ class BasePlotAdapter(ABC):
 
     def __init__(self, task: BaseTask) -> None:
         self._task = task
+        self._cached_payload: PlotPayload | None = None
 
     @property
     def is_ensemble(self) -> bool:
@@ -52,6 +97,87 @@ class BasePlotAdapter(ABC):
     def prepare_loss_batch(self, batch: dict) -> dict:
         """Prepare batch for loss plotting. No-op for non-ensemble adapters."""
         return batch
+
+    def prepare_payload(
+        self,
+        pl_module: pl.LightningModule,
+        batch: dict[str, torch.Tensor],
+        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]] | dict[str, torch.Tensor]],
+        batch_idx: int,
+    ) -> PlotPayload:
+        """Gather, denormalize, and cache batch data for plotting.
+
+        This method performs the expensive shared pre-processing (distributed
+        gather, post-processor deep-copy, latlon extraction) exactly once per
+        batch.  Subsequent calls with the same ``batch_idx`` return the cached
+        payload.
+
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            The Lightning module (provides allgather_batch, model, etc.).
+        batch : dict[str, torch.Tensor]
+            Raw validation batch keyed by dataset name.
+        output : tuple
+            Raw model output: (loss_scales, preds).  ``preds`` must be a list
+            of per-step dicts.
+        batch_idx : int
+            Current validation batch index, used as cache key.
+
+        Returns
+        -------
+        PlotPayload
+            Gathered, CPU-resident data ready for plotting.
+        """
+        if self._cached_payload is not None and self._cached_payload.batch_idx == batch_idx:
+            return self._cached_payload
+
+        # 1. Gather batch shards across ranks
+        gathered_batch = {
+            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+            for dataset_name, dataset_tensor in batch.items()
+        }
+
+        # 2. Gather prediction shards
+        preds = output[1]
+        if not isinstance(preds, list):
+            msg = f"output[1] must be a list of per-step dicts, got {type(preds).__name__}"
+            raise TypeError(msg)
+        gathered_outputs: tuple[Any, list[dict[str, torch.Tensor]]] = (
+            output[0],
+            [
+                {
+                    dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                    for dataset_name, dataset_pred in pred.items()
+                }
+                for pred in preds
+            ],
+        )
+
+        # 3. Deep-copy post-processors, gather nan_locations, move to CPU
+        post_processors = copy.deepcopy(pl_module.model.post_processors)
+        for dataset_name in post_processors:
+            for post_processor in post_processors[dataset_name].processors.values():
+                if hasattr(post_processor, "nan_locations"):
+                    post_processor.nan_locations = pl_module.allgather_batch(
+                        post_processor.nan_locations,
+                        dataset_name,
+                    )
+            post_processors[dataset_name] = post_processors[dataset_name].cpu()
+
+        # 4. Extract latlons (radians -> degrees)
+        latlons: dict[str, np.ndarray] = {}
+        for dataset_name in gathered_batch:
+            latlons[dataset_name] = np.rad2deg(pl_module.model.model._graph_data[dataset_name].x.detach().cpu().numpy())
+
+        self._cached_payload = PlotPayload(
+            batch_idx=batch_idx,
+            batch=gathered_batch,
+            outputs=gathered_outputs,
+            post_processors=post_processors,
+            latlons=latlons,
+        )
+        return self._cached_payload
 
     @abstractmethod
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
@@ -141,6 +267,7 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     def __init__(self, inner: BasePlotAdapter) -> None:
         self._inner = inner
         self._task = inner._task
+        self._cached_payload: PlotPayload | None = None
 
     @property
     def is_ensemble(self) -> bool:

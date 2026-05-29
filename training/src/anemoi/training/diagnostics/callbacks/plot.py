@@ -355,45 +355,19 @@ class BasePerBatchPlotCallback(BasePlotCallback):
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
 
-            # gather tensors if necessary
-            batch = {
-                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
-                for dataset_name, dataset_tensor in batch.items()
-            }
-            # output: (loss, [pred_dict1, pred_dict2, ...]); all tasks return a list of per-step dicts.
-            preds = output[1]
-            if not isinstance(preds, list):
+            # Delegate gathering, post-processor setup, and latlon extraction
+            # to the adapter's cached prepare_payload.
+            payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, output, batch_idx)
 
-                raise TypeError(preds)
-            output = [
-                output[0],
-                [
-                    {
-                        dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
-                        for dataset_name, dataset_pred in pred.items()
-                    }
-                    for pred in preds
-                ],
-            ]
-            # When running in Async mode, it might happen that in the last epoch these tensors
-            # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-            # but internal ones would be on the cpu), The lines below allow to address this problem
-            self.post_processors = copy.deepcopy(pl_module.model.post_processors)
-            for dataset_name in self.post_processors:
-                for post_processor in self.post_processors[dataset_name].processors.values():
-                    if hasattr(post_processor, "nan_locations"):
-                        post_processor.nan_locations = pl_module.allgather_batch(
-                            post_processor.nan_locations,
-                            dataset_name,
-                        )
-                self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
+            self.post_processors = payload.post_processors
+            self.latlons = payload.latlons
 
             self.plot(
                 trainer,
                 pl_module,
                 self.dataset_names,
-                output,
-                batch,
+                payload.outputs,
+                payload.batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
                 **kwargs,
@@ -893,8 +867,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             self.latlons = {}
 
         if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+            # Fallback: extract latlons if not already populated by prepare_payload
+            self.latlons[dataset_name] = np.rad2deg(
+                pl_module.model.model._graph_data[dataset_name].x.detach().cpu().numpy(),
+            )
 
         # All tasks return (loss, metrics, list of per-step dicts) from _step; on_validation_batch_end enforces list.
         assert isinstance(
