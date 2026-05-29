@@ -217,6 +217,12 @@ class SHT(SpectralTransform):
         """Return per-L power spectral density: sum over M of |coeff|^2."""
         return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
 
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-L cross-spectral density."""
+        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
+            dim=-2
+        )
+
 
 class RegularSHT(SHT):
     """SHT on a regular lon-lat grid."""

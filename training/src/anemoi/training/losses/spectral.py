@@ -179,6 +179,9 @@ class SpectralAMSELoss(SpectralLoss):
         assert hasattr(self.transform, "power_spectral_density") and callable(
             self.transform.power_spectral_density,
         ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a PSD method"
+        assert hasattr(self.transform, "cross_spectral_density") and callable(
+            self.transform.cross_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
         self.eps = eps
 
     def forward(
@@ -208,7 +211,7 @@ class SpectralAMSELoss(SpectralLoss):
             psd_pred = self.transform.power_spectral_density(pred_spec)
             psd_target = self.transform.power_spectral_density(target_spec)
             # cross-spectrum summed over M: [B, T, E, L, vars]
-            cross = torch.real(pred_spec * torch.conj(target_spec)).sum(dim=-2)
+            cross = self.transform.cross_spectral_density(pred_spec, target_spec)
 
             amp_pred = torch.sqrt(psd_pred + self.eps)
             amp_target = torch.sqrt(psd_target + self.eps)
