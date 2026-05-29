@@ -379,7 +379,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x_out.dtype
+                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype
             )
 
         return x_out_dict
