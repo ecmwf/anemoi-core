@@ -200,8 +200,3 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
             }
             metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
-
-            dataset_metadata = datasets_config.get(dataset_name, {})
-            variables_metadata = dataset_metadata.get("variables_metadata")
-            if variables_metadata is not None:
-                metadata["metadata_inference"][dataset_name]["variables_metadata"] = variables_metadata

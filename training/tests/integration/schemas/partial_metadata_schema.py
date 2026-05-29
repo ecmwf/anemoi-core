@@ -42,7 +42,6 @@ PARTIAL_METADATA_SCHEMA = {
                 "ensemble": None,
                 "grid": None,
             },
-            "variables_metadata": None,
         },
     },
 }
