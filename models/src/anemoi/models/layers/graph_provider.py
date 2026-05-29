@@ -166,7 +166,8 @@ class StaticGraphProvider(BaseGraphProvider):
 
         # sort all edge indices by dst at this stage to avoid expensive reordering operations later:
         edge_index, perm = sort_edge_index_by_dst(graph.edge_index, max_value=dst_size)
-        edge_attr_tensor = torch.cat([graph[attr][perm] for attr in edge_attributes], axis=1)
+        edge_attr_tensor = torch.cat([graph[attr] for attr in edge_attributes], axis=1)
+        edge_attr_tensor = edge_attr_tensor.index_select(0, perm)
 
         self.register_buffer("perm", perm, persistent=False)
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
@@ -383,7 +384,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         # Build graph from coordinates
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
         edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
-        edge_attr = edge_attr[perm]
+        edge_attr = edge_attr.index_select(0, perm)
 
         if shard_edges:
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
