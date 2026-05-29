@@ -39,10 +39,10 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.training.utils.variables_metadata import check_loss_tree_variable_units
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
 if TYPE_CHECKING:

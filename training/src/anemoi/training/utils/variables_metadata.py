@@ -109,7 +109,10 @@ def check_loss_variable_units_compatibility(
         )
         return
 
-    for pred_var, target_var in zip(predicted_variables, target_variables, strict=False):
+    for pred_var, target_var in zip(predicted_variables, target_variables, strict=True):
+
+        if pred_var == target_var:
+            continue
 
         if pred_var not in variables_metadata:
             LOG.warning(
@@ -140,26 +143,6 @@ def check_loss_variable_units_compatibility(
                 f"target variable '{target_var}' are not compatible: {reason}"
             )
             raise ValueError(msg)
-
-
-def check_loss_tree_variable_units(
-    loss: object,
-    variables_metadata: dict[str, dict] | None,
-) -> None:
-    """Walk a loss tree and check unit compatibility for any variable-mapped losses.
-
-    Recurses into composite losses (e.g. ``CombinedLoss``) to find all
-    ``LossVariableMapper`` instances and validate their predicted/target pairs.
-    """
-    predicted_variables = getattr(loss, "predicted_variables", None)
-    target_variables = getattr(loss, "target_variables", None)
-
-    if predicted_variables is not None and target_variables is not None:
-        check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata)
-
-    # Recurse into composite losses (e.g. CombinedLoss.losses)
-    for sub_loss in getattr(loss, "losses", []):
-        check_loss_tree_variable_units(sub_loss, variables_metadata)
 
 
 @lru_cache
