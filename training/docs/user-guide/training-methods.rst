@@ -243,8 +243,11 @@ Use :class:`~anemoi.training.train.methods.transport.TransportTraining`
 with ``prediction_mode: state`` for state-space targets or
 ``prediction_mode: tendency`` for tendency-space targets. The model must
 use :class:`AnemoiTransportModelEncProcDec` or
-:class:`AnemoiTransportTendModelEncProcDec`; the plain GNN model is not
-supported.
+:class:`AnemoiTransportTendModelEncProcDec`.
+
+.. warning::
+
+   The plain GNN model is not supported for transport objective training.
 
 Top-level configs
 =================
