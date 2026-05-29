@@ -3,35 +3,37 @@
 import logging
 
 import pytorch_lightning as pl
-import torch.distributed as dist
 
 LOGGER = logging.getLogger(__name__)
 
 
 class CacheSyncCallback(pl.Callback):
     """Synchronize cache registry across all ranks after first validation epoch.
-    
+
     This callback ensures all ranks call update_global_view() at the same synchronized point,
     avoiding deadlocks from async calls during data fetching.
     """
 
-    def __init__(self, cache=None):
+    def __init__(self, cache: object) -> None:
         super().__init__()
         self.sync_done = False
-        self.cache=cache # need to consume cache arg
+        self.cache = cache  # need to consume cache arg
 
-    def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-    #def on_train_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx) -> None:
+    def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:  # noqa: ARG002
         if not self.sync_done:
             # Check if datamodule has the cache functionality
             if hasattr(trainer.datamodule, "update_global_view"):
-                LOGGER.info(f"Rank {trainer.global_rank}: Synchronizing distributed cache registry... {trainer.datamodule.cache_registry=}")
+                LOGGER.info(
+                    "Rank %s: Synchronizing distributed cache registry... %s",
+                    trainer.global_rank,
+                    trainer.datamodule.cache_registry,
+                )
                 trainer.datamodule.update_global_view()
-                LOGGER.info(f"Rank {trainer.global_rank}: Cache registry synchronized successfully.")
+                LOGGER.info("Rank %s: Cache registry synchronized successfully.", trainer.global_rank)
                 self.sync_done = True
             else:
                 LOGGER.warning(
-                    f"Rank {trainer.global_rank}: DataModule does not have update_global_view() method. "
-                    "Skipping cache synchronization."
+                    "Rank %s: DataModule does not have update_global_view() method. Skipping cache synchronization.",
+                    trainer.global_rank,
                 )
                 self.sync_done = True  # Don't keep trying

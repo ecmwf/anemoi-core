@@ -29,7 +29,6 @@ from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
-
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -40,9 +39,9 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -612,15 +611,21 @@ class AnemoiTrainer(ABC):
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
-        
-        #TODO move to better place
+
+        # TODO(cathal): move to better place
         if getattr(self.config.system.hardware, "cache_dir", None) is not None:
-            LOGGER.info(f"'config.system.hardware.cache_dir' given. Caching dataset under '{self.config.system.hardware.cache_dir}'")
-            #import pdb
-            #breakpoint()
-            dataset_path=f"{self.config.system.input.dataset}"
-            suffix=getattr(self.config.system.hardware, "hostname_suffix", None)
-            self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.system.hardware.cache_dir, dataset_path=dataset_path, hostname_suffix=suffix)
+            LOGGER.info(
+                "'config.system.hardware.cache_dir' given. Caching dataset under '%s'",
+                self.config.system.hardware.cache_dir,
+            )
+            dataset_path = f"{self.config.system.input.dataset}"
+            suffix = getattr(self.config.system.hardware, "hostname_suffix", None)
+            self.datamodule = DatasetCache(
+                ds=self.datamodule,
+                cache_root=self.config.system.hardware.cache_dir,
+                dataset_path=dataset_path,
+                hostname_suffix=suffix,
+            )
 
         self.prepare_compilation()
 
@@ -632,6 +637,7 @@ class AnemoiTrainer(ABC):
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
         LOGGER.debug("---- DONE. ----")
+
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:

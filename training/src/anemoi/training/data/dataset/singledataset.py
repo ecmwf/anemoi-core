@@ -25,6 +25,7 @@ from anemoi.training.utils.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
+
 class NativeGridDataset(IterableDataset):
     """Iterable dataset for AnemoI data on the arbitrary grids."""
 
@@ -36,7 +37,6 @@ class NativeGridDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "generic",
-        cache = None,
     ) -> None:
         """Initialize (part of) the dataset state.
 
@@ -89,29 +89,11 @@ class NativeGridDataset(IterableDataset):
 
         # relative index of dates to extract
         self.relative_date_indices = relative_date_indices
-        
-        self.cache=cache
-        LOGGER.info(f"{self.cache.is_initalised=}")
-        #if use_cache:
-        #    self.cache=DatasetCache(
-        #        cache_root=str(os.getenv("TMPDIR")),
-        #        dataset_path="/home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2022-6h-v6.zarr",
-        #        ds=self.data,
-        #        )
-        #else:
-        #    self.cache = None
 
     @cached_property
     def statistics(self) -> dict:
         """Return dataset statistics."""
         return self.data.statistics
-
-    def __getitem__(self, index) -> np.ndarray:
-        if self.cache is not None:
-            #check the cache first, the cache will fallback to self.ds in the case of a miss
-            return self.cache[index]
-        else:
-            return self.data[index]
 
     @cached_property
     def statistics_tendencies(self) -> dict:
@@ -149,21 +131,21 @@ class NativeGridDataset(IterableDataset):
         for every relative_date_index i.
         """
         return get_usable_indices(
-                self.data.missing,
-                len(self.data),
-                np.array(self.relative_date_indices, dtype=np.int64),
-                self.data.trajectory_ids,
-                )
+            self.data.missing,
+            len(self.data),
+            np.array(self.relative_date_indices, dtype=np.int64),
+            self.data.trajectory_ids,
+        )
 
     def set_comm_group_info(
-            self,
-            global_rank: int,
-            model_comm_group_id: int,
-            model_comm_group_rank: int,
-            model_comm_num_groups: int,
-            reader_group_rank: int,
-            reader_group_size: int,
-            ) -> None:
+        self,
+        global_rank: int,
+        model_comm_group_id: int,
+        model_comm_group_rank: int,
+        model_comm_num_groups: int,
+        reader_group_rank: int,
+        reader_group_size: int,
+    ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
         Parameters
@@ -194,14 +176,14 @@ class NativeGridDataset(IterableDataset):
         assert self.reader_group_size >= 1, "reader_group_size must be positive"
 
         LOGGER.debug(
-                "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
-                "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
-                global_rank,
-                model_comm_group_id,
-                model_comm_group_rank,
-                model_comm_num_groups,
-                reader_group_rank,
-                )
+            "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
+            "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d",
+            global_rank,
+            model_comm_group_id,
+            model_comm_group_rank,
+            model_comm_num_groups,
+            reader_group_rank,
+        )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Called by worker_init_func on each copy of dataset.
@@ -231,14 +213,14 @@ class NativeGridDataset(IterableDataset):
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
         LOGGER.info(
-                "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
-                worker_id,
-                os.getpid(),
-                self.global_rank,
-                self.model_comm_group_id,
-                low,
-                high,
-                )
+            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
+            worker_id,
+            os.getpid(),
+            self.global_rank,
+            self.model_comm_group_id,
+            low,
+            high,
+        )
 
         base_seed = get_base_seed()
 
@@ -248,27 +230,20 @@ class NativeGridDataset(IterableDataset):
         sanity_rnd = self.rng.random(1)
 
         LOGGER.info(
-                (
-                    "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
-                    "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
-                    ),
-                worker_id,
-                self.label,
-                os.getpid(),
-                self.global_rank,
-                self.model_comm_group_id,
-                self.model_comm_group_rank,
-                self.sample_comm_group_id,
-                base_seed,
-                sanity_rnd,
-                )
-
-    #def get(self, index):
-    #    result = self.cache[index]
-    #    if result is None:
-    #        result= self.data[index]
-    #        self.cache[index] = result
-    #    return result
+            (
+                "Worker %d (%s, pid %d, glob. rank %d, model comm group %d, "
+                "group_rank %d, seed group id %d, base_seed %d, sanity rnd %f)"
+            ),
+            worker_id,
+            self.label,
+            os.getpid(),
+            self.global_rank,
+            self.model_comm_group_id,
+            self.model_comm_group_rank,
+            self.sample_comm_group_id,
+            base_seed,
+            sanity_rnd,
+        )
 
     def __iter__(self) -> torch.Tensor:
         """Return an iterator over the dataset.
@@ -281,27 +256,27 @@ class NativeGridDataset(IterableDataset):
         """
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
-                    self.valid_date_indices,
-                    size=len(self.valid_date_indices),
-                    replace=False,
-                    )[self.chunk_index_range]
+                self.valid_date_indices,
+                size=len(self.valid_date_indices),
+                replace=False,
+            )[self.chunk_index_range]
         else:
             shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
 
         LOGGER.debug(
-                (
-                    "Worker pid %d, label %s, worker id %d, global_rank %d, "
-                    "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
-                    ),
-                os.getpid(),
-                self.label,
-                self.worker_id,
-                self.global_rank,
-                self.model_comm_group_id,
-                self.model_comm_group_rank,
-                self.sample_comm_group_id,
-                shuffled_chunk_indices[:10],
-                )
+            (
+                "Worker pid %d, label %s, worker id %d, global_rank %d, "
+                "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
+            ),
+            os.getpid(),
+            self.label,
+            self.worker_id,
+            self.global_rank,
+            self.model_comm_group_id,
+            self.model_comm_group_rank,
+            self.sample_comm_group_id,
+            shuffled_chunk_indices[:10],
+        )
 
         for i in shuffled_chunk_indices:
             start = i + self.relative_date_indices[0]
@@ -313,7 +288,7 @@ class NativeGridDataset(IterableDataset):
             grid_shard_indices = self.grid_indices.get_shard_indices(self.reader_group_rank)
             if isinstance(grid_shard_indices, slice):
                 # Load only shards into CPU memory
-                x = self[start:end:timeincrement, :, :, grid_shard_indices] # check cache
+                x = self[start:end:timeincrement, :, :, grid_shard_indices]
 
             else:
                 # Load full grid in CPU memory, select grid_shard after
