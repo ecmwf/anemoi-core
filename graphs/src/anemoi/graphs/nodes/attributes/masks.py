@@ -181,4 +181,4 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
             "StretchedTriNodes"
         ], f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
         lam_mask = nodes["_area_mask_builder"].get_mask(nodes.x)
-        return torch.from_numpy(lam_mask)
+        return lam_mask
