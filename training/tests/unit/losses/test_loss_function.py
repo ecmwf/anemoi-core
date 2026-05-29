@@ -621,9 +621,6 @@ def test_spectral_crps_with_target_without_ensemble_dim() -> None:
 
 
 def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:
-    def _octahedral_expected_points(nlat: int) -> int:
-        half = [20 + 4 * i for i in range(nlat // 2)]
-        return int(sum(half + half[::-1]))
 
     bs, ens, nvars = 2, 4, 2
     nlat = 8
