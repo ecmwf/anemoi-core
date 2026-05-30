@@ -149,7 +149,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        if self.decoding_target_forcing == "prognostic+forcing":
+        if not hasattr(self, "decoding_target_forcing") or self.decoding_target_forcing == "prognostic+forcing":
             target_features = x_input_data
         elif self.decoding_target_forcing == "forcings":
             target_features = x_input_data[..., self._decoding_forcing_input_idx[dataset_name]]
