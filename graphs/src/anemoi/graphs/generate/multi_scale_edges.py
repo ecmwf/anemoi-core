@@ -86,10 +86,10 @@ class StretchedTriNodesEdgeBuilder(BaseIcosahedronEdgeStrategy):
 
     def get_edges(self, nodes: NodeStorage, x_hops: int, scale_resolutions: list[int]) -> NodeStorage:
         from anemoi.graphs.generate import tri_icosahedron
-        from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+        from anemoi.graphs.generate.masks import AreaMaskBuilder
 
-        all_points_mask_builder = KNNAreaMaskBuilder("all_nodes", 1.0)
-        all_points_mask_builder.fit_coords(nodes.x.cpu().numpy())
+        all_points_mask_builder = AreaMaskBuilder("all_nodes", 1.0)
+        all_points_mask_builder.fit_coords(nodes.x)
 
         if x_hops == 1:
             LOGGER.debug("Using tri-mesh only strategy for x_hops=1 multiscale-edge building.")
