@@ -119,7 +119,7 @@ class Forecaster(BaseTask):
             rollout_step = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
         else:
             LOGGER.debug(
-                "Unknown mode '%s' for %s.get_offsets(), defaulting to training rollout.",
+                "Unknown mode '%s' for %s.get_offsets(); using offsets for the longest configured rollout.",
                 mode,
                 self.__class__.__name__,
             )
