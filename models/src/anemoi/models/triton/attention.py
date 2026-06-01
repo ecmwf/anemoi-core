@@ -324,7 +324,8 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 @triton.jit
 def _attn_fwd(
     sm_scale,  # softmax scaling factor.
-    M,  # pointer to output maxes, used for numerical stability in softmax calculation, with shape [Z*H*N_CTX]
+    M,  # pointer to row-wise softmax max values (m_i), shape [Z*H*n_ctx_rounded]
+    INV_L,  # pointer to row-wise inverse softmax sum (1/l_i), shape [Z*H*n_ctx_rounded]
     Z,  # batch size
     H,  # num heads
     # tensor descriptors or raw pointers, depending on hardware support for host descriptors. If raw pointers are passed, they will be converted to tensor descriptors in the kernel with block sizes determined by autotuning
@@ -455,9 +456,13 @@ def _attn_fwd(
         UNEVEN_CTX,
     )
     # epilogue
-    m_i += tl.math.log2(l_i)
-    acc = acc / l_i[:, None]
+    # Save m_max and inv_l separately so the backward can compute
+    # p = exp2(qk*scale - m_max) * inv_l without the fp precision loss
+    # that can occur when forming the combined M = m + log2(l).
+    inv_l_i = 1.0 / l_i
+    acc = acc * inv_l_i[:, None]
     m_ptrs = M + off_hz * n_ctx_rounded + offs_fixed  # Use n_ctx_rounded since M is allocated with that dimension
+    inv_l_ptrs = INV_L + off_hz * n_ctx_rounded + offs_fixed
 
     # ***** 6) store output *****
 
@@ -465,6 +470,7 @@ def _attn_fwd(
     if UNEVEN_CTX and tail_case:
         # mask the store to m so that we dont write out-of-bounds values when N_CTX is not divisible by BLOCK_FIXED.
         tl.store(m_ptrs, m_i, mask=offs_fixed < N_CTX)
+        tl.store(inv_l_ptrs, inv_l_i, mask=offs_fixed < N_CTX)
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
         # o is a tensor descriptor which doesnt support different block sizes, so access o as a regular pointer with 2D indexing
         offs_d = tl.arange(0, HEAD_DIM)
@@ -472,6 +478,7 @@ def _attn_fwd(
         tl.store(o_ptrs, acc.to(dtype), mask=offs_fixed[:, None] < N_CTX)
     else:
         tl.store(m_ptrs, m_i)
+        tl.store(inv_l_ptrs, inv_l_i)
         desc_o.store([fixed_offset, 0], acc.to(dtype))
 
 
@@ -520,7 +527,8 @@ def _attn_bwd_dkdv(
     # raw pointers for dk and dv when using uneven ctx, to handle the dynamic block sizes and masked stores required for uneven ctx
     dk_ptr,
     dv_ptr,
-    M,  # pointer to output maxes from forward pass
+    M,  # pointer to row-wise softmax max values (m_i) saved by forward
+    INV_L,  # pointer to row-wise inverse softmax sum (1/l_i) saved by forward
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
@@ -618,6 +626,7 @@ def _attn_bwd_dkdv(
 
     # offset pointers for batch/head into M, and D arrays
     M += off_chz
+    INV_L += off_chz
     D += off_chz
 
     tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
@@ -693,11 +702,13 @@ def _attn_bwd_dkdv(
             # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
             qT = tl.where(curr_offs[None, :] < N_CTX, qT, 0.0)
 
-        # Load m before computing qk to reduce pipeline stall.
+        # Load m and inv_l before computing qk to reduce pipeline stall.
         if UNEVEN_CTX and tail_iter_block:
             m = tl.load(M + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            inv_l = tl.load(INV_L + curr_offs, mask=curr_offs < N_CTX, other=0.0)
         else:
             m = tl.load(M + curr_offs)
+            inv_l = tl.load(INV_L + curr_offs)
         qkT = tl.dot(k, qT)
 
         # Apply masking.
@@ -713,8 +724,11 @@ def _attn_bwd_dkdv(
             mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
             qkT = tl.where(mask, qkT, MINUS_INF)
 
-        # Apply exponent after masking, improves numerical stability and accuracy
-        pT = tl.math.exp2(qkT - m[None, :])
+        # Apply exponent after masking, then multiply by inv_l to get the
+        # normalised softmax probability.  Keeping m_max and inv_l separate
+        # (rather than the combined M = m + log2(l) used on the main branch)
+        # avoids fp precision loss when m and log2(l) differ greatly.
+        pT = tl.math.exp2(qkT - m[None, :]) * inv_l[None, :]
 
         do = desc_do.load([iter_offset, 0])
         if UNEVEN_CTX and tail_iter_block:
@@ -775,7 +789,8 @@ def _attn_bwd_dq(
     desc_do,
     desc_dq,
     dq_ptr,  # raw pointer for dq when using uneven ctx, to handle the dynamic block sizes and masked stores required for uneven ctx
-    M,  # pointer to output maxes from forward pass
+    M,  # pointer to row-wise softmax max values (m_i) saved by forward
+    INV_L,  # pointer to row-wise inverse softmax sum (1/l_i) saved by forward
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
@@ -870,6 +885,7 @@ def _attn_bwd_dq(
 
     # offset pointers for batch/head into M and D arrays
     M += off_chz
+    INV_L += off_chz
     D += off_chz
 
     # generate offset array for fixed block
@@ -888,9 +904,11 @@ def _attn_bwd_dq(
 
     if UNEVEN_CTX and tail_fixed_block:
         m = tl.load(M + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # Add masking to prevent loading garbage values
+        inv_l = tl.load(INV_L + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)
         Di = tl.load(D + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)
     else:
         m = tl.load(M + offs_fixed)
+        inv_l = tl.load(INV_L + offs_fixed)
         Di = tl.load(D + offs_fixed)
     m = m[:, None]
 
@@ -966,9 +984,17 @@ def _attn_bwd_dq(
             mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
             qk = tl.where(mask, qk, MINUS_INF)
 
-        # Apply exponent after masking, improves numerical stability and accuracy
-        p = tl.math.exp2(qk - m)
+        # Apply exponent after masking, then multiply by inv_l for the
+        # normalised softmax probability (see _attn_bwd_dkdv for rationale).
+        p = tl.math.exp2(qk - m) * inv_l[:, None]
         # Compute dP and dS.
+        # NOTE: dp - Di still suffers from cancellation when the softmax is
+        # very sharp (v[j*] ≈ out[i]) because both are O(1) scalars and their
+        # difference is computed after the dot-product accumulation.  The
+        # element-wise fix used in the graph-transformer kernel (gt.py) cannot
+        # be applied here: v[j] lives in the iter tile while out[i] lives in
+        # the fixed tile, so dot(do[i], v[j]-out[i]) cannot be expressed as a
+        # single tl.dot without restructuring to a non-tiled per-query loop.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
         # Compute dQ.
@@ -1095,6 +1121,9 @@ class TritonAttention(torch.autograd.Function):
         # Pad M tensor to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_FIXED.
         uneven_ctx = n_ctx_rounded != n_ctx
         M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
+        # Allocate separate inv_l tensor (1/l_i per token) instead of the combined
+        # M = m + log2(l) used on the main branch.  See _attn_fwd epilogue for rationale.
+        inv_l = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
         # Convert tensors from raw pointers to (host) tensor descriptors if the system supports it,
         # Tensor descriptors encode the shape, stride and block shape and pass this information to the compiler, allowing further optimisations and use of hardware features like TMA.
@@ -1112,7 +1141,8 @@ class TritonAttention(torch.autograd.Function):
 
         _attn_fwd[grid](
             sm_scale,  # scaling factor applied to softmax
-            M,  # output maxes for numerical stability, used in backward pass
+            M,  # row-wise softmax max values
+            inv_l,  # row-wise inverse softmax sum
             q.shape[0],  # number of batches
             q.shape[1],  # number of heads
             # tensor descriptors for inputs and outputs
@@ -1137,13 +1167,13 @@ class TritonAttention(torch.autograd.Function):
         ctx.window = window
         ctx.n_ctx = n_ctx
 
-        ctx.save_for_backward(q, k, v, o, M)
+        ctx.save_for_backward(q, k, v, o, M, inv_l)
 
         return o
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, o, M = ctx.saved_tensors
+        q, k, v, o, M, inv_l = ctx.saved_tensors
 
         if do.shape == o.shape and do.stride() != o.stride():
             do = do.reshape(o.shape)
@@ -1205,6 +1235,7 @@ class TritonAttention(torch.autograd.Function):
             dk,
             dv,
             M,
+            inv_l,
             delta,  #
             ctx.sm_scale,
             Z=BATCH,
@@ -1229,6 +1260,7 @@ class TritonAttention(torch.autograd.Function):
             # need to pass raw pointer in uneven ctx case
             dq,
             M,
+            inv_l,
             delta,  #
             ctx.sm_scale,
             Z=BATCH,
