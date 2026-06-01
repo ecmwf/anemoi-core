@@ -27,20 +27,20 @@ class RolloutEval(Callback):
     distributed synchronization.
     """
 
-    def __init__(self, rollout: list[int] | ListConfig, every_n_batches: int) -> None:
+    def __init__(self, rollout: list[int | None] | ListConfig, every_n_batches: int) -> None:
         """Initialize RolloutEval callback.
 
         Parameters
         ----------
-        rollout : list[int] | ListConfig
-            Rollout lengths for evaluation
+        rollout : list[int | None] | ListConfig
+            Rollout lengths for evaluation. ``[None]`` follows the task validation rollout.
         every_n_batches : int
             Frequency of rollout evaluation, runs every `n` validation batches
 
         """
         super().__init__()
 
-        assert isinstance(rollout, list | ListConfig), f"rollout must be a list of ints, got {type(rollout)}"
+        assert isinstance(rollout, list | ListConfig), f"rollout must be a list of ints or None, got {type(rollout)}"
         rollout_values = list(rollout)
 
         LOGGER.debug(
@@ -49,7 +49,12 @@ class RolloutEval(Callback):
             every_n_batches,
         )
         self.rollout = rollout_values
-        self.max_rollout = max(rollout_values)
+        self.follow_task_validation_rollout = False
+        if rollout_values == [None]:
+            self.follow_task_validation_rollout = True
+            self.max_rollout = None
+        else:
+            self.max_rollout = max(rollout_values)
         self.every_n_batches = every_n_batches
 
     def _eval(
@@ -60,6 +65,9 @@ class RolloutEval(Callback):
         batch_tensor = batch
         if isinstance(batch, dict):
             batch_tensor = next(iter(batch.values()))
+
+        if self.follow_task_validation_rollout:
+            self.max_rollout = len(tuple(pl_module.task.steps("validation")))
 
         assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
             "Batch length not sufficient for requested validation rollout length! "
