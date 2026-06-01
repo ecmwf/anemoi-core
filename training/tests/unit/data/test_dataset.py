@@ -106,6 +106,7 @@ class TestNativeGridDataset:
 
         assert dataset.data is not None
         assert drop_vars[0] not in dataset.variables
+        assert drop_vars[0] not in dataset.metadata.get("variables_metadata", {})
         assert len(dataset.variables) == len(original_vars) - 1
 
     @skip_if_offline

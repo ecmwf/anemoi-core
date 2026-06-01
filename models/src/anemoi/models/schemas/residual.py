@@ -52,6 +52,9 @@ class TruncatedConnectionSchema(BaseModel):
     truncation_config: TruncationConfigDiskSchema | TruncationConfigOnTheFlySchema | None = None
     edge_weight_attribute: str | None = None
     src_node_weight_attribute: str | None = None
+    truncation_down_edges_name: tuple[str, str, str] | None = None
+    truncation_up_edges_name: tuple[str, str, str] | None = None
+    data_node_name: str | None = None
     autocast: bool = False
     row_normalize: bool = False
     # Deprecated: pass inside truncation_config instead.
