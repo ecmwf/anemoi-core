@@ -361,6 +361,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
             self.post_processors = payload.post_processors
             self.latlons = payload.latlons
+            self._payload = payload
 
             self.plot(
                 trainer,
@@ -840,6 +841,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
+        Uses the cached denormalized tensors from the payload when available,
+        avoiding redundant post-processing across callbacks that share the same
+        batch.
+
         Parameters
         ----------
         pl_module : pl.LightningModule
@@ -878,23 +883,39 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             list,
         ), "outputs[1] must be a list of per-step dicts."
 
-        # prepare input and output tensors for plotting one dataset specified by dataset_name
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
 
-        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
+        # Use lazily-computed denormalized tensors from the payload (computed once
+        # on first access, shared across all callbacks on this batch).
+        payload = getattr(self, "_payload", None)
+        if payload is not None and dataset_name in payload.feature_indices:
+            denormed_input, denormed_output = payload.get_denormalized(dataset_name)
+            data = denormed_input[self.sample_idx]
+            output_tensor = torch.cat(
+                tuple(
+                    pl_module.plot_adapter.select_members(
+                        denormed_output[step_idx, self.sample_idx : self.sample_idx + 1],
+                        members,
+                    )
+                    for step_idx in range(denormed_output.shape[0])
+                ),
+            )
+        else:
+            # Fallback for callers without a payload (e.g. direct process() calls)
+            input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
 
-        data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
-        output_tensor = torch.cat(
-            tuple(
-                pl_module.plot_adapter.select_members(
-                    self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                        self.sample_idx : self.sample_idx + 1
-                    ],
-                    members,
-                )
-                for x in outputs[1]
-            ),
-        )
+            data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
+            output_tensor = torch.cat(
+                tuple(
+                    pl_module.plot_adapter.select_members(
+                        self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
+                            self.sample_idx : self.sample_idx + 1
+                        ],
+                        members,
+                    )
+                    for x in outputs[1]
+                ),
+            )
 
         output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
         output_tensor = (

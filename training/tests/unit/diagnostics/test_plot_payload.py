@@ -233,3 +233,163 @@ class TestPreparePayload:
 
         # pi/2 radians = 90 degrees
         np.testing.assert_allclose(payload.latlons["data"], 90.0, atol=1e-5)
+
+
+class TestGetDenormalized:
+    """Tests for PlotPayload.get_denormalized lazy denormalization."""
+
+    def test_get_denormalized_returns_tensors(self) -> None:
+        """get_denormalized returns (denormed_input, denormed_output) tensors."""
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module(nlatlon=50)
+        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
+        output = (
+            torch.tensor(0.0),
+            [{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+        denormed_input, denormed_output = payload.get_denormalized("data")
+
+        assert isinstance(denormed_input, torch.Tensor)
+        assert isinstance(denormed_output, torch.Tensor)
+
+    def test_denormed_input_shape(self) -> None:
+        """denormed_input has shape matching batch[dataset][..., feature_indices]."""
+        batch_size, nlatlon, nvar = 2, 50, 3
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module(nlatlon=nlatlon)
+        batch = {"data": torch.randn(batch_size, 4, 1, nlatlon, nvar)}
+        output = (
+            torch.tensor(0.0),
+            [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
+        )
+
+        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+        denormed_input, _ = payload.get_denormalized("data")
+
+        assert denormed_input.shape == (batch_size, 4, 1, nlatlon, nvar)
+
+    def test_denormed_output_shape(self) -> None:
+        """denormed_output has shape (n_steps, batch, n_step_out, ens, grid, vars)."""
+        batch_size, nlatlon, nvar, n_steps = 2, 50, 3, 2
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": n_steps},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module(nlatlon=nlatlon)
+        batch = {"data": torch.randn(batch_size, 4, 1, nlatlon, nvar)}
+        output = (
+            torch.tensor(0.0),
+            [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)} for _ in range(n_steps)],
+        )
+
+        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+        _, denormed_output = payload.get_denormalized("data")
+
+        assert denormed_output.shape[0] == n_steps
+        assert denormed_output.shape[1] == batch_size
+
+    def test_caches_result(self) -> None:
+        """Calling get_denormalized twice returns the same cached tensors."""
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module()
+        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
+        output = (
+            torch.tensor(0.0),
+            [{"data": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=5)
+
+        result1 = payload.get_denormalized("data")
+        result2 = payload.get_denormalized("data")
+
+        assert result1[0] is result2[0]
+        assert result1[1] is result2[1]
+
+    def test_not_computed_until_accessed(self) -> None:
+        """Denormalization is lazy: not computed until get_denormalized is called."""
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module()
+        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
+        output = (
+            torch.tensor(0.0),
+            [{"data": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+
+        # Before get_denormalized, cache is empty
+        assert "data" not in payload._denormed_input
+        assert "data" not in payload._denormed_output
+
+        # After, it's populated
+        payload.get_denormalized("data")
+        assert "data" in payload._denormed_input
+        assert "data" in payload._denormed_output
+
+    def test_multiple_datasets_independent(self) -> None:
+        """Each dataset gets its own independent denormalized tensors."""
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module(nlatlon=50)
+        # Add a second dataset
+        post_proc_b = _identity_post_processor()
+        pl_module.model.post_processors["data_b"] = post_proc_b
+        pl_module.data_indices["data_b"] = pl_module.data_indices["data"]
+        pl_module.output_mask["data_b"] = NoOutputMask()
+        graph_data_mock_b = MagicMock()
+        graph_data_mock_b.x = torch.zeros(50, 2)
+        pl_module.model.model._graph_data["data_b"] = graph_data_mock_b
+
+        batch = {"data": torch.randn(2, 4, 1, 50, 3), "data_b": torch.randn(2, 4, 1, 50, 3)}
+        output = (
+            torch.tensor(0.0),
+            [{"data": torch.randn(2, 1, 1, 50, 3), "data_b": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+
+        result_a = payload.get_denormalized("data")
+        result_b = payload.get_denormalized("data_b")
+
+        assert result_a[0] is not result_b[0]

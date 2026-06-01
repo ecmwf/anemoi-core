@@ -33,12 +33,12 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 import numpy as np
+import torch
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     import pytorch_lightning as pl
-    import torch
 
     from anemoi.training.tasks.base import BaseTask
 
@@ -52,6 +52,10 @@ class PlotPayload:
     Produced once per batch by ``BasePlotAdapter.prepare_payload`` and shared
     across all callbacks that use that batch.
 
+    Denormalization is lazy: only computed on the first call to
+    ``get_denormalized(dataset_name)``.  Callbacks that never call it
+    (e.g. PlotLoss) pay no denormalization cost.
+
     Attributes
     ----------
     batch_idx : int
@@ -64,6 +68,8 @@ class PlotPayload:
         Deep-copied, CPU-resident post-processors keyed by dataset name.
     latlons : dict[str, np.ndarray]
         Latitude/longitude arrays in degrees, keyed by dataset name.
+    feature_indices : dict[str, Any]
+        Per-dataset feature indices (from data_indices[ds].data.output.full).
     """
 
     batch_idx: int
@@ -71,6 +77,35 @@ class PlotPayload:
     outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
     post_processors: dict[str, Any]
     latlons: dict[str, np.ndarray] = field(default_factory=dict)
+    feature_indices: dict[str, Any] = field(default_factory=dict)
+
+    # Lazy denormalization cache (populated on first get_denormalized call)
+    _denormed_input: dict[str, torch.Tensor] = field(default_factory=dict, repr=False)
+    _denormed_output: dict[str, torch.Tensor] = field(default_factory=dict, repr=False)
+
+    def get_denormalized(self, dataset_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return denormalized (input, output) tensors for a dataset, computing once.
+
+        The full batch is denormalized on first call and cached. Subsequent calls
+        for the same dataset return the cached tensors. Callbacks that never call
+        this (e.g. PlotLoss) pay no denormalization cost.
+        """
+        if dataset_name not in self._denormed_input:
+            feat_idx = self.feature_indices[dataset_name]
+            input_tensor = self.batch[dataset_name].detach().cpu()[..., feat_idx]
+            self._denormed_input[dataset_name] = self.post_processors[dataset_name](input_tensor)
+
+            self._denormed_output[dataset_name] = torch.stack(
+                [
+                    self.post_processors[dataset_name](
+                        x[dataset_name][:, ...].detach().cpu(),
+                        in_place=False,
+                    )
+                    for x in self.outputs[1]
+                ],
+            )
+
+        return self._denormed_input[dataset_name], self._denormed_output[dataset_name]
 
 
 class BasePlotAdapter(ABC):
@@ -170,12 +205,18 @@ class BasePlotAdapter(ABC):
         for dataset_name in gathered_batch:
             latlons[dataset_name] = np.rad2deg(pl_module.model.model._graph_data[dataset_name].x.detach().cpu().numpy())
 
+        # 5. Store feature indices for lazy denormalization
+        feature_indices: dict[str, Any] = {}
+        for dataset_name in gathered_batch:
+            feature_indices[dataset_name] = pl_module.data_indices[dataset_name].data.output.full
+
         self._cached_payload = PlotPayload(
             batch_idx=batch_idx,
             batch=gathered_batch,
             outputs=gathered_outputs,
             post_processors=post_processors,
             latlons=latlons,
+            feature_indices=feature_indices,
         )
         return self._cached_payload
 
