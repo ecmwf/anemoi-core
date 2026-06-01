@@ -78,7 +78,8 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
-        for rollout_step in range(self._task.validation_rollout):
+        for validation_step_kwargs in self._task.steps("validation"):
+            rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
             output_data = data[output_time_indices, ...]
