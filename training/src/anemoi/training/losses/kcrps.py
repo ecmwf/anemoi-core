@@ -17,6 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
+from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
 
@@ -74,8 +75,8 @@ class CRPS(BaseLoss):
 
     def mask_nans(self, pred: torch.Tensor, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Mask CRPS inputs while preserving each tensor's ensemble size."""
-        target_nan_mask = torch.isnan(target).any(dim=2, keepdim=True)
-        pred_nan_mask = torch.isnan(pred).any(dim=2, keepdim=True)
+        target_nan_mask = torch.isnan(target).any(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
+        pred_nan_mask = torch.isnan(pred).any(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
         nan_mask = target_nan_mask | pred_nan_mask
         target = target.masked_fill(nan_mask, 0.0)
         pred = pred.masked_fill(nan_mask, 0.0)
