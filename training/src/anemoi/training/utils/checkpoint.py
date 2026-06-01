@@ -85,7 +85,7 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     # Modifications to the model occur on cpu, 
     # The model will be sent to GPU when trainer.fit() is called
     LOGGER.debug("Loading checkpoint to device: cpu")
-    checkpoint = torch.load(ckpt_path, weights_only=False, map_location='cpu')
+    checkpoint = torch.load(ckpt_path, weights_only=False, map_location="cpu")
 
     # apply chunking migration (fails silently otherwise leading to hard to debug issues)
     # this is due to loading with strict=False, planning to make this more robust in the future
