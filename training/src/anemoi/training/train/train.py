@@ -334,6 +334,10 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
+
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu, 
+                # The model will be sent to GPU when trainer.fit() is called
                 model = training_method.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
