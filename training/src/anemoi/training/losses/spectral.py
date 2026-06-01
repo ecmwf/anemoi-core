@@ -166,14 +166,9 @@ class SpectralAMSELoss(SpectralLoss):
     - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
-    - ``fft2d`` / ``dct2d``: :math:`L` is the meridional frequency index and
-      :math:`M` is the zonal frequency index. The sum over :math:`M` gives
-      per-meridional-wavenumber power spectra. This is mathematically valid but
-      no longer corresponds to the spherical-harmonic-motivated formulation of
-      the paper. For ``dct2d``, coefficients are real-valued; computing coherence
-      per coefficient before summing would degenerate to :math:`\pm 1`, but the
-      :math:`M`-sum here avoids this by computing coherence as a cosine similarity
-      over the zonal-frequency profile at each :math:`L`.
+    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
+      implementations of ``power_spectral_density()`` and
+      ``cross_spectral_density()`` compatible with the AMSE formulation.
     """
 
     def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
