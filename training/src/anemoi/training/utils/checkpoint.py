@@ -82,7 +82,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
     # Load the checkpoint
     # Load to CPU explictly, to avoid loading entire model on GPU initially
-    # Modifications to the model occur on cpu, 
+    # Modifications to the model occur on cpu,
     # The model will be sent to GPU when trainer.fit() is called
     LOGGER.debug("Loading checkpoint to device: cpu")
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location="cpu")

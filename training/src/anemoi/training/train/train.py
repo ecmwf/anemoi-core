@@ -336,7 +336,7 @@ class AnemoiTrainer(ABC):
                 kwargs.pop("data_indices")
 
                 # Load to CPU explictly, to avoid loading entire model on GPU initially
-                # Modifications to the model occur on cpu, 
+                # Modifications to the model occur on cpu,
                 # The model will be sent to GPU when trainer.fit() is called
                 model = training_method.load_from_checkpoint(
                     self.last_checkpoint,
