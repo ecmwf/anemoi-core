@@ -20,6 +20,7 @@ from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
+from .spectral import SpectralAMSELoss
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
 from .variable_mapper import LossVariableMapper
@@ -38,6 +39,7 @@ __all__ = [
     "MSELoss",
     "MultiscaleLossWrapper",
     "RMSELoss",
+    "SpectralAMSELoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
     "TimeAggregateLossWrapper",
