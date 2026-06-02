@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-#from anemoi.training.losses.base import FunctionalLoss
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.training.losses.base import BaseLoss
 from torch_geometric.data import HeteroData
 from torch_geometric.utils import remove_self_loops
@@ -123,6 +123,16 @@ class BaseGradientLoss(BaseLoss):
 
         self.edge_index = edge_index
         self.edge_weight = edge_weight
+        self.graph = graph
+
+        self.graph_provider = create_graph_provider(
+            graph=self.graph,
+            edge_attributes=['edge_weight'],
+            src_size=self.num_nodes,
+            dst_size=self.num_nodes,
+            trainable_size=0,
+        ) 
+
 
     def forward(
         self,
@@ -168,13 +178,25 @@ class BaseGradientLoss(BaseLoss):
         """
 
         is_sharded = grid_shard_slice is not None
+        batch_size = pred.shape[0]
+
+        edge_attr, edge_index, edge_shard_sizes = self.graph_provider.get_edges(
+            batch_size=batch_size,
+            model_comm_group=group,
+        )
+        del edge_shard_sizes
+
+        edge_weight = edge_attr
+
 
         difference = pred - target
 
         gradient_difference_metric = self.gradient_metric_layer(
             difference,
-            edge_index = self.edge_index,
-            edge_weight = self.edge_weight,
+            # edge_index = self.edge_index,
+            # edge_weight = self.edge_weight,
+            edge_index = edge_index,
+            edge_weight = edge_weight,
         )
         
         out = gradient_difference_metric
