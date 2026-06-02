@@ -143,13 +143,13 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str) -> None:
     module : torch.nn.Module
         Pytorch model
     target_name : str
-        The name of the submodule to freeze.
+        The name of the submodule to freeze. Examples: "encoder", "encoder.lam".
     """
     for name, child in module.named_children():
         # If this is the target submodule, freeze its parameters
         if name == target_name:
+            LOGGER.info("Freezing submodule: %s (%s)", child.__class__.__name__, name)
             for param in child.parameters():
-                LOGGER.info("Freezing parameter: %s", param.shape)
                 param.requires_grad = False
         elif target_name.startswith(name + "."):
             new_target = target_name.replace(name + ".", "", 1)
