@@ -35,7 +35,9 @@ from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.kcrps import AlmostFairKernelCRPS
+from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.kcrps import CRPS
+from anemoi.training.losses.kcrps import CRPSBackend
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -115,14 +117,16 @@ class SpectralLoss(BaseLoss):
         transform
             Spectral transform type.
         ignore_nans
-            Whether to ignore NaNs in the loss computation.
+            Spectral losses cannot handle missing values;
+            ignore_nans must be False.
         scalers
             Kept for Hydra/config backwards compatibility. This module does not
             consume this argument directly (scaling is handled by BaseLoss).
         kwargs
             Additional arguments for the spectral transform.
         """
-        super().__init__(ignore_nans=ignore_nans)
+        assert not ignore_nans, "Spectral losses cannot handle missing values; ignore_nans must be False"
+        BaseLoss.__init__(self, ignore_nans=ignore_nans)
 
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
         _ = scalers  # intentionally unused
@@ -187,11 +191,54 @@ class PowerSpectrumLoss(SpectralLoss):
            diff = (amp(pred) - amp(target))²
 
     4. Apply scalers and reduce to produce the final scalar loss.
+class SpectralAMSELoss(SpectralLoss):
+    r"""Adjusted Mean Squared Error (AMSE) loss in spectral domain.
+
+    Implements the AMSE formula from Subich et al. (arXiv:2501.19374, 2025):
 
     .. math::
-        \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
-                                   - \sum_m |F_{lm}|^2 \bigr)^2 .
+
+        \text{AMSE} = \sum_L \left[
+            \left( \sqrt{S^\text{pred}_L} - \sqrt{S^\text{target}_L} \right)^2
+            + 2 \max\!\left(S^\text{pred}_L,\, S^\text{target}_L\right)
+              \left(1 - \gamma_L \right)
+        \right]
+
+    where
+
+    .. math::
+
+        S_L = \sum_M \left| c_{L,M} \right|^2, \qquad
+        \gamma_L = \frac{
+            \operatorname{Re}\!\left[\sum_M c^\text{pred}_{L,M}
+                \overline{c^\text{target}_{L,M}}\right]
+        }{
+            \sqrt{S^\text{pred}_L}\,\sqrt{S^\text{target}_L} + \varepsilon
+        }.
+
+    The sum over :math:`M` is performed before the nonlinear AMSE computation.
+
+    The physical interpretation of :math:`L` and :math:`M` depends on the
+    spectral transform:
+
+    - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
+      and :math:`M` is the zonal wavenumber, consistent with the original paper.
+      The sum over :math:`M` gives per-total-wavenumber power spectra.
+    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
+      implementations of ``power_spectral_density()`` and
+      ``cross_spectral_density()`` compatible with the AMSE formulation.
     """
+
+    def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # assert if PSD is defined for the transform, since AMSE relies on it
+        assert hasattr(self.transform, "power_spectral_density") and callable(
+            self.transform.power_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a PSD method"
+        assert hasattr(self.transform, "cross_spectral_density") and callable(
+            self.transform.cross_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
+        self.eps = eps
 
     def forward(
         self,
@@ -203,29 +250,39 @@ class PowerSpectrumLoss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        sc_pred = self.transform.forward(pred)
-        sc_target = self.transform.forward(target)
-        pred_amp = torch.sum(
-            sc_pred.real**2 + sc_pred.imag**2,
-            dim=-2,
-        )  # sum over order (M) dim to get power per wavenumber
-        target_amp = torch.sum(sc_target.real**2 + sc_target.imag**2, dim=-2)
-        diff = (pred_amp - target_amp) ** 2
+        with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+            # transform to spectral domain: [B, T, E, grid, vars] -> [B, T, E, L, M, vars]
+            # don't flatten to modes here since we need to calculate PSD and coherence per-L
+            pred_spec = self.transform.forward(pred)
+            target_spec = self.transform.forward(target)
 
-        _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
+            # per-L PSD: [B, T, E, L, vars]
+            psd_pred = self.transform.power_spectral_density(pred_spec)
+            psd_target = self.transform.power_spectral_density(target_spec)
+            # cross-spectrum summed over M: [B, T, E, L, vars]
+            cross = self.transform.cross_spectral_density(pred_spec, target_spec)
+
+            amp_pred = torch.sqrt(psd_pred + self.eps)
+            amp_target = torch.sqrt(psd_target + self.eps)
+            coherence = cross / (amp_pred * amp_target + self.eps)
+
+            # per-L AMSE: [B, T, E, L, vars]
+            amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
+
         result = self.scale(
-            diff,
+            amse_per_l,
             scaler_indices,
-            without_scalers=without_scalers,
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogSpectralDistance(SpectralLoss):
@@ -241,6 +298,7 @@ class LogSpectralDistance(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -260,7 +318,7 @@ class LogSpectralDistance(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return torch.sqrt(self.reduce(result, squash=squash, group=group) + eps)
+        return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
 
 
 class FourierCorrelationLoss(SpectralLoss):
@@ -276,6 +334,7 @@ class FourierCorrelationLoss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -299,7 +358,7 @@ class FourierCorrelationLoss(SpectralLoss):
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogFFT2Distance(LogSpectralDistance):
@@ -323,7 +382,7 @@ class LogFFT2Distance(LogSpectralDistance):
         )
 
 
-class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
+class SpectralCRPSLoss(SpectralLoss, CRPS):
     """CRPS computed in spectral space using arbitrary spectral transforms.
 
     Works with:
@@ -345,6 +404,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         x_dim: int | None = None,
         y_dim: int | None = None,
         alpha: float = 1.0,
+        backend: CRPSBackend = "stable",
         no_autocast: bool = True,
         ignore_nans: bool = False,
         scalers: list | None = None,
@@ -358,7 +418,9 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             scalers=scalers,
             **kwargs,
         )
+        self._validate_arguments(alpha, backend)
         self.alpha = alpha
+        self.backend = backend
         self.no_autocast = no_autocast
 
     def forward(
@@ -371,7 +433,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        **kwargs,  # noqa: ARG002
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -384,9 +446,9 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
         tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
         if self.no_autocast:
             with torch.amp.autocast(device_type="cuda", enabled=False):
-                crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+                crps = self._kernel_crps(pred_spec, tgt_spec)
         else:
-            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+            crps = self._kernel_crps(pred_spec, tgt_spec)
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         _assert_spectral_scalers_compatible(self.scaler, crps.size(TensorDim.GRID))
@@ -396,7 +458,7 @@ class SpectralCRPSLoss(SpectralLoss, AlmostFairKernelCRPS):
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(scaled, squash=squash, group=group)
+        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
 
     @property
     def name(self) -> str:

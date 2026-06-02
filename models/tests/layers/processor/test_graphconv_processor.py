@@ -15,6 +15,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
@@ -89,11 +90,11 @@ class TestGNNProcessor:
         x = torch.rand(
             (self.NUM_NODES, graphconv_init.num_channels), device=next(graphconv_processor.parameters()).device
         )
-        shard_shapes = [list(x.shape)]
+        shape_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
 
         # Run forward pass of processor
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        output = graphconv_processor.forward(x, batch_size, shard_shapes, edge_attr, edge_index)
+        output = graphconv_processor.forward(x, batch_size, shape_info, edge_attr, edge_index)
         assert output.shape == (self.NUM_NODES, graphconv_init.num_channels)
 
         # Generate dummy target and loss function

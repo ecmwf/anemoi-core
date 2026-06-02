@@ -14,8 +14,8 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from anemoi.training.data.dataset import NativeGridDataset
-from anemoi.training.data.dataset import create_dataset
+from anemoi.training.data.data_reader import NativeGridDataset
+from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -106,6 +106,7 @@ class TestNativeGridDataset:
 
         assert dataset.data is not None
         assert drop_vars[0] not in dataset.variables
+        assert drop_vars[0] not in dataset.metadata.get("variables_metadata", {})
         assert len(dataset.variables) == len(original_vars) - 1
 
     @skip_if_offline

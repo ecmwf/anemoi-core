@@ -15,6 +15,7 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 LOGGER = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
-        apply_filter: bool = True,
+        apply_filter: bool = False,
         nodes_slice: tuple[int, int | None] | None = None,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
@@ -209,7 +210,21 @@ class DCT2D(SpectralTransform):
         return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
-class RegularSHT(SpectralTransform):
+class SHT(SpectralTransform):
+    """Spherical Harmonic Transform (SHT) baseclass."""
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-L power spectral density: sum over M of |coeff|^2."""
+        return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
+
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-L cross-spectral density."""
+        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
+            dim=-2
+        )
+
+
+class RegularSHT(SHT):
     """SHT on a regular lon-lat grid."""
 
     def __init__(
@@ -245,7 +260,7 @@ class RegularSHT(SpectralTransform):
         return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class ReducedSHT(SpectralTransform):
+class ReducedSHT(SHT):
     """SHT on a reduced Gaussian grid."""
 
     def __init__(
@@ -303,7 +318,7 @@ class ReducedSHT(SpectralTransform):
         return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class OctahedralSHT(SpectralTransform):
+class OctahedralSHT(SHT):
     """SHT on an octahedral reduced grid."""
 
     def __init__(
@@ -339,3 +354,63 @@ class OctahedralSHT(SpectralTransform):
         x = einops.rearrange(data, "b t e p v -> (b t e v) p")
         coeffs = self._sht(x)  # complex: (b*t*e*v, L, M)
         return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, t=t, e=e, v=v)
+
+
+class InverseSpectralTransform(torch.nn.Module):
+    """Abstract base class for inverse spectral transforms.
+
+    Input: complex tensor [..., l, m] (spectral coefficients).
+    Output: real tensor [..., points] (spatial domain).
+    """
+
+    @abc.abstractmethod
+    def forward(self, data: torch.Tensor) -> torch.Tensor: ...
+
+
+class InverseRegularSHT(InverseSpectralTransform):
+    """Inverse SHT on a regular lon-lat grid.
+
+    Parameters
+    ----------
+    nlat : int
+        Number of latitudes.
+    truncation : int | None
+        Spectral truncation. Defaults to nlat // 2 - 1.
+    """
+
+    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        super().__init__()
+        self.nlat = nlat
+        self.nlon = 2 * nlat
+        self.lons_per_lat = [self.nlon] * self.nlat
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)
+
+
+class InverseOctahedralSHT(InverseSpectralTransform):
+    """Inverse SHT on an octahedral reduced grid.
+
+    Parameters
+    ----------
+    nlat : int
+        Number of latitudes.
+    truncation : int | None
+        Spectral truncation. Defaults to nlat // 2 - 1.
+    """
+
+    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        super().__init__()
+        self.nlat = nlat
+        self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
+        self.lons_per_lat += list(reversed(self.lons_per_lat))
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)
