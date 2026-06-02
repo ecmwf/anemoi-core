@@ -20,7 +20,9 @@ from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import RMSELoss
+from anemoi.training.losses import SpectralAMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
@@ -29,14 +31,38 @@ from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
-spectral_losses = [SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
+spectral_losses = [
+    SpectralCRPSLoss,
+    FourierCorrelationLoss,
+    LogSpectralDistance,
+]  # configuration of losses that require a spectral transform
+spectral_sht_losses = [SpectralAMSELoss, PowerSpectrumLoss]  # losses only defined for spherical harmonic transforms
 losses += spectral_losses
+losses += spectral_sht_losses
 
 
 def _make_loss(target: str, **kwargs) -> BaseLoss:
     cfg = {"_target_": target, "scalers": []}
     cfg.update(kwargs)
     return get_loss_function(DictConfig(cfg))
+
+
+def _loss_dic(loss_cls: type[BaseLoss], **extra) -> dict:
+    """Build a Hydra-compatible config dict for a loss class with appropriate transform kwargs."""
+    base = {"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}
+    if loss_cls in spectral_losses:
+        # configuration of losses that require a spectral transform, use fft2d and a small rectangular grid for testing
+        base.update(
+            {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
+        )
+    elif loss_cls in spectral_sht_losses:
+        # configuration of losses that require a spherical harmonic transform (power_spectral_density defined)
+        # use a small octahedral grid for testing
+        base.update(
+            {"transform": "octahedral_sht", "nlat": 8},
+        )
+    base.update(extra)
+    return base
 
 
 def _assert_variable_and_scalar_shapes(
@@ -56,7 +82,12 @@ def _assert_variable_and_scalar_shapes(
     losses,
 )
 def test_manual_init(loss_cls: type[BaseLoss]) -> None:
-    loss = loss_cls(x_dim=4, y_dim=4) if loss_cls in spectral_losses else loss_cls()
+    if loss_cls in spectral_sht_losses:
+        loss = loss_cls(transform="octahedral_sht", nlat=8)  # spherical harmonic transform with small octahedral grid
+    elif loss_cls in spectral_losses:
+        loss = loss_cls(transform="fft2d", x_dim=4, y_dim=4)  # 2D transform with small rectangular grid
+    else:
+        loss = loss_cls()
     assert isinstance(loss, BaseLoss)
 
 
@@ -336,18 +367,7 @@ def test_grid_invariance(
     losses,
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = (
-        {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-        }
-        if loss_cls not in spectral_losses
-        else {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "x_dim": 4,
-            "y_dim": 4,
-        }
-    )
-    loss = get_loss_function(DictConfig(loss_dic))
+    loss = get_loss_function(DictConfig(_loss_dic(loss_cls)))
     assert isinstance(loss, BaseLoss)
 
 
@@ -356,21 +376,8 @@ def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = (
-        {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": ["test"],
-        }
-        if loss_cls not in spectral_losses
-        else {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": ["test"],
-            "x_dim": 4,
-            "y_dim": 4,
-        }
-    )
     loss = get_loss_function(
-        DictConfig(loss_dic),
+        DictConfig(_loss_dic(loss_cls, scalers=["test"])),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -384,21 +391,8 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = (
-        {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": ["*"],
-        }
-        if loss_cls not in spectral_losses
-        else {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": ["*"],
-            "x_dim": 4,
-            "y_dim": 4,
-        }
-    )
     loss = get_loss_function(
-        DictConfig(loss_dic),
+        DictConfig(_loss_dic(loss_cls, scalers=["*"])),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -412,21 +406,8 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = (
-        {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": [],
-        }
-        if loss_cls not in spectral_losses
-        else {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": [],
-            "x_dim": 4,
-            "y_dim": 4,
-        }
-    )
     loss = get_loss_function(
-        DictConfig(loss_dic),
+        DictConfig(_loss_dic(loss_cls, scalers=[])),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -438,21 +419,8 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
-    loss_dic = (
-        {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "scalers": ["*", "!test"],
-        }
-        if loss_cls not in spectral_losses
-        else {
-            "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
-            "x_dim": 4,
-            "y_dim": 4,
-            "scalers": ["*", "!test"],
-        }
-    )
     loss = get_loss_function(
-        DictConfig(loss_dic),
+        DictConfig(_loss_dic(loss_cls, scalers=["*", "!test"])),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
