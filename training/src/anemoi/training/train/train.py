@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import hydra
+import numpy as np
 import pytorch_lightning as pl
 import torch
 from hydra.utils import get_class
@@ -48,6 +49,7 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -151,12 +153,20 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def initial_seed(self) -> int:
-        """Base seed recorded for the run."""
+        """Initial seed for the RNG.
+
+        This sets the same initial seed for all ranks. Ranks are re-seeded in the
+        strategy to account for model communication groups.
+        """
         initial_seed = get_base_seed()
+        rnd_seed = pl.seed_everything(initial_seed, workers=True)
+        np_rng = np.random.default_rng(rnd_seed)
+        (torch.rand(1), np_rng.random())
         LOGGER.info(
-            "Base seed: Rank %d, initial seed %d",
+            "Initial seed: Rank %d, initial seed %d, running with random seed: %d",
             self.strategy.global_rank,
             initial_seed,
+            rnd_seed,
         )
         return initial_seed
 
@@ -338,10 +348,11 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        training_method = get_class(self.config.training.training_method)
+        training_method_cfg = self.config.training.method
+        training_method_cls = get_class(training_method_cfg._target_)
         seed_torch_rng_sources(self.initial_seed, self.strategy.global_rank, reset_synced=True)
         with use_synced_torch_rng():
-            model = training_method(**kwargs)  # Task -> pl.LightningModule
+            model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -355,7 +366,7 @@ class AnemoiTrainer(ABC):
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
                 with use_synced_torch_rng():
-                    model = training_method.load_from_checkpoint(
+                    model = training_method_cls.load_from_checkpoint(
                         self.last_checkpoint,
                         **kwargs,
                         strict=False,

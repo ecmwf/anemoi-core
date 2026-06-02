@@ -32,7 +32,8 @@ gradient_clip:
   algorithm: value
 
 # select model
-training_method: anemoi.training.train.methods.EnsembleTraining
+method:
+  _target_: anemoi.training.train.methods.EnsembleTraining
 
 # number of ensemble members per device
 ensemble_size_per_device: 4
