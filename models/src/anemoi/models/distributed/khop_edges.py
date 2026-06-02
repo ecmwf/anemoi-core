@@ -276,17 +276,20 @@ def shard_edges_1hop(
     Parameters
     ----------
     edge_attr : Tensor
-        Edge attributes
+        Edge attributes.
     edge_index : Adj
-        Edge index
+        Edge index.
     src_size : int
-        Number of source nodes
+        Number of source nodes.
     dst_size : int
-        Number of destination nodes
+        Number of destination nodes.
     model_comm_group : ProcessGroup, optional
-        Model communication group
+        Model communication group.
     edges_are_dst_sorted : bool, optional
-        Whether edges are already sorted by destination node (default: True)
+        Whether `edge_index` and `edge_attr` are already ordered by destination node.
+        Edges from graph providers already are. Pass False for custom full-graph
+        edges that are not ordered this way. If edges are already sharded, each rank
+        is expected to already have the right edges for its local destination nodes.
 
     Returns
     -------
@@ -422,21 +425,22 @@ def sort_edges_1hop_chunks(
     Parameters
     ----------
     num_nodes : Union[int, tuple[int, int]]
-        Number of (target) nodes in Graph, or tuple (src, dst) for bipartite graph
+        Number of target nodes in the graph, or tuple (src, dst) for a bipartite graph.
     edge_attr : Tensor
-        Edge attributes
+        Edge attributes.
     edge_index : Adj
-        Edge index
+        Edge index.
     num_chunks : int
-        Number of chunks to split into
+        Number of chunks to split into.
     edges_are_dst_sorted : bool, optional
-        Whether edge_index is already sorted by destination node (default: True).
-        When True, uses fast O(1) slicing.
+        Whether `edge_index` and `edge_attr` are already ordered by destination node.
+        Edges from graph providers already are. Pass False for custom full-graph
+        edges that are not ordered this way.
 
     Returns
     -------
     tuple[list[Tensor], list[Adj]]
-        List of edge attribute chunks, list of edge_index chunks
+        List of edge attribute chunks and edge index chunks.
     """
     if edges_are_dst_sorted:
         return _sort_edges_1hop_chunks_fast(num_nodes, edge_attr, edge_index, num_chunks)
@@ -513,13 +517,13 @@ def _sort_edges_1hop_sharding(
     Parameters
     ----------
     num_nodes : Union[int, tuple[int, int]]
-        Number of (target) nodes in Graph
+        Number of target nodes in the graph.
     edge_attr : Tensor
-        edge attributes
+        Edge attributes.
     edge_index : Adj
-        edge index
+        Edge index.
     mgroup : ProcessGroup
-        model communication group
+        Model communication group.
 
     Returns
     -------
@@ -559,18 +563,18 @@ def _sort_edges_1hop_chunks_subgraph(
     Parameters
     ----------
     num_nodes : Union[int, tuple[int, int]]
-        Number of (target) nodes in Graph, tuple for bipartite graph
+        Number of target nodes in the graph, or tuple for a bipartite graph.
     edge_attr : Tensor
-        edge attributes
+        Edge attributes.
     edge_index : Adj
-        edge index
+        Edge index.
     num_chunks : int
-        number of chunks
+        Number of chunks.
 
     Returns
     -------
     tuple[list[Tensor], list[Adj]]
-        list of sorted edge attribute chunks, list of sorted edge_index chunks
+        List of sorted edge attribute chunks and sorted edge index chunks.
     """
     from torch_geometric.utils import bipartite_subgraph
 
@@ -611,20 +615,20 @@ def _get_k_hop_edges(
     Parameters
     ----------
     nodes : Tensor
-        destination nodes
+        Destination nodes.
     edge_attr : Tensor
-        edge attributes
+        Edge attributes.
     edge_index : Adj
-        edge index
+        Edge index.
     num_hops : int, optional
-        number of required hops, by default 1
+        Number of required hops, by default 1.
     num_nodes : int, optional
-        total number of nodes
+        Total number of nodes.
 
     Returns
     -------
     tuple[Adj, Tensor]
-        K-hop subgraph of edge attributes and edge index
+        K-hop subgraph of edge attributes and edge index.
     """
     from torch_geometric.utils import k_hop_subgraph
     from torch_geometric.utils import mask_to_index
@@ -648,17 +652,16 @@ def drop_unconnected_src_nodes(
     Parameters
     ----------
     x_src : Tensor
-        source node features
+        Source node features.
     edge_index : Adj
-        edge index
+        Edge index.
     num_nodes : tuple[int, int]
-        number of nodes in graph (src, dst)
+        Number of nodes in graph (src, dst).
 
     Returns
     -------
     tuple[Tensor, Adj, Tensor]
-        reduced node features, relabeled edge index (contiguous, starting from 0),
-        indices of connected source nodes
+        Reduced node features, relabeled edge index, and indices of connected source nodes.
     """
     from torch_geometric.utils import bipartite_subgraph
 

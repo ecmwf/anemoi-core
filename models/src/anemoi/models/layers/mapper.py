@@ -101,27 +101,40 @@ class BaseMapper(nn.Module, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
-    ):
+    ) -> Tensor | PairTensor:
         """Forward pass of the mapper.
 
         Parameters
         ----------
         x : PairTensor
-            Input tensor pair (source, destination)
+            Input tensor pair (source, destination).
         batch_size : int
-            Batch size
+            Batch size.
         shard_info : BipartiteGraphShardInfo
             Shard metadata. Each field is a list of per-rank partition sizes
             along the sharded dimension, or None if the tensor is replicated.
         edge_attr : Tensor, optional
-            Edge attributes (required for graph-based mappers)
+            Edge attributes (required for graph-based mappers).
         edge_index : Adj, optional
-            Edge indices (required for graph-based mappers)
+            Edge indices (required for graph-based mappers).
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         keep_x_dst_sharded : bool, optional
-            Whether to keep destination sharded, by default False
+            Whether to keep destination sharded, by default False.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        **kwargs : dict
+            Additional keyword arguments passed to the mapper implementation.
+
+        Returns
+        -------
+        Tensor or PairTensor
+            Mapper output tensor or tensor pair.
         """
         pass
 
@@ -768,6 +781,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -785,7 +799,12 @@ class GNNBaseMapper(BaseMapper, ABC):
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             edge_attr, edge_index, shard_sizes_edges = shard_edges_1hop(
-                edge_attr, edge_index, size[0], size[1], model_comm_group
+                edge_attr,
+                edge_index,
+                size[0],
+                size[1],
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
 
         shard_info = BipartiteGraphShardInfo(
@@ -837,6 +856,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             edge_index=edge_index,
             model_comm_group=model_comm_group,
             keep_x_dst_sharded=keep_x_dst_sharded,
+            edges_are_dst_sorted=edges_are_dst_sorted,
             **kwargs,
         )
 
@@ -1062,6 +1082,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             edge_index,
             model_comm_group,
             keep_x_dst_sharded,
+            edges_are_dst_sorted=edges_are_dst_sorted,
             **kwargs,
         )
         return x_dst
