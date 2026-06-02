@@ -146,7 +146,7 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: s
         The name of the submodule to freeze. Examples: "encoder", "encoder.lam".
     base_target : str
         Used for logging to show the full path of the current module being checked. Should not be set by the user.
-    
+
     Returns
     -------
     bool
