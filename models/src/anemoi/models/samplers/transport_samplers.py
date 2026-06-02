@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import math
 from abc import ABC
 from abc import abstractmethod
 from typing import Callable
@@ -16,8 +15,9 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
 
-DenoisingFunction = Callable[
+TransportModelFunction = Callable[
     [
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
@@ -27,230 +27,20 @@ DenoisingFunction = Callable[
     ],
     dict[str, torch.Tensor],
 ]
+DenoisingFunction = TransportModelFunction
+VectorFieldFunction = TransportModelFunction
 
-# Tolerance used when treating an explicitly provided final schedule value as zero.
-DEFAULT_FINAL_SIGMA_EPS = 1e-10
 
-
-def _expand_sigma(sigma: torch.Tensor, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    """Broadcast scalar sigma to per-dataset model-conditioning shape."""
+def _expand_scalar_condition(value: torch.Tensor, y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Expand one scalar condition so each dataset can pass it to the model."""
     return {
-        dataset_name: sigma.view(1, 1, 1, 1, 1).expand(y_data.shape[0], 1, y_data.shape[2], 1, 1).to(y_data.dtype)
+        dataset_name: value.view(1, 1, 1, 1, 1).expand(y_data.shape[0], 1, y_data.shape[2], 1, 1).to(y_data.dtype)
         for dataset_name, y_data in y.items()
     }
 
 
-class NoiseScheduler(ABC):
-    """Base class for noise schedulers."""
-
-    def __init__(
-        self,
-        sigma_max: float,
-        sigma_min: float,
-        num_steps: int,
-    ):
-        self._validate_scheduler_parameters(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
-
-        self.sigma_max = sigma_max
-        self.sigma_min = sigma_min
-        self.num_steps = num_steps
-
-    def get_schedule(
-        self,
-        device: torch.device = None,
-        dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> torch.Tensor:
-        """Generate noise schedule.
-
-        Parameters
-        ----------
-        device : torch.device
-            Device to create tensors on
-        dtype_compute : torch.dtype
-            Data type for the noise schedule computation
-        **kwargs
-            Additional scheduler-specific parameters
-
-        Returns
-        -------
-        torch.Tensor
-            Noise schedule with shape (num_steps + 1,)
-        """
-        sigmas = self._build_schedule(
-            device=device,
-            dtype_compute=dtype_compute,
-            **kwargs,
-        )
-        self._validate_schedule(sigmas)
-        return self._finalize_schedule(sigmas)
-
-    @abstractmethod
-    def _build_schedule(
-        self,
-        device: torch.device = None,
-        dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> torch.Tensor:
-        """Generate the scheduler-specific path before final-zero finalization."""
-        pass
-
-    @staticmethod
-    def _validate_scheduler_parameters(sigma_max: float, sigma_min: float, num_steps: int) -> None:
-        if sigma_min <= 0:
-            raise ValueError("sigma_min must be strictly positive; the final zero is added separately.")
-        if sigma_max <= 0:
-            raise ValueError("sigma_max must be strictly positive.")
-        if sigma_max < sigma_min:
-            raise ValueError("sigma_max must be greater than or equal to sigma_min.")
-        if num_steps < 1:
-            raise ValueError("num_steps must be at least 1.")
-
-    def _validate_schedule(self, sigmas: torch.Tensor) -> None:
-        if sigmas.ndim != 1:
-            raise ValueError(f"Sigma schedule must be 1D, got shape {tuple(sigmas.shape)}.")
-        if sigmas.numel() == 0:
-            raise ValueError("Sigma schedule must contain at least one value.")
-        if not torch.isfinite(sigmas).all():
-            raise ValueError("Sigma schedule must contain only finite values.")
-        if sigmas.numel() == self.num_steps + 1:
-            last = sigmas[-1].item()
-            if last < 0 or last > DEFAULT_FINAL_SIGMA_EPS:
-                raise ValueError("Sigma schedule with an explicit final value must end at zero.")
-
-    def _finalize_schedule(self, sigmas: torch.Tensor) -> torch.Tensor:
-        if sigmas.numel() == self.num_steps + 1:
-            if sigmas[-1].item() != 0.0:
-                sigmas = sigmas.clone()
-                sigmas[-1] = 0.0
-            return sigmas
-
-        if sigmas.numel() != self.num_steps:
-            raise ValueError(
-                f"Sigma schedule must contain {self.num_steps} values before the final zero, "
-                f"or {self.num_steps + 1} including it; got {sigmas.numel()}.",
-            )
-
-        return torch.cat((sigmas, sigmas.new_zeros(1)))
-
-
-class KarrasScheduler(NoiseScheduler):
-    """Karras et al. EDM schedule."""
-
-    def __init__(
-        self,
-        sigma_max: float,
-        sigma_min: float,
-        num_steps: int,
-        rho: float = 7.0,
-        **kwargs,
-    ):
-        super().__init__(sigma_max, sigma_min, num_steps)
-        self.rho = rho
-
-    def _build_schedule(
-        self,
-        device: torch.device = None,
-        dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> torch.Tensor:
-        if self.num_steps == 1:
-            return torch.tensor([self.sigma_max], device=device, dtype=dtype_compute)
-
-        step_indices = torch.arange(self.num_steps, device=device, dtype=dtype_compute)
-        sigmas = (
-            self.sigma_max ** (1.0 / self.rho)
-            + step_indices
-            / (self.num_steps - 1.0)
-            * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
-        ) ** self.rho
-
-        return sigmas
-
-
-class LinearScheduler(NoiseScheduler):
-    """Linear schedule in sigma space."""
-
-    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
-        super().__init__(sigma_max, sigma_min, num_steps)
-
-    def _build_schedule(
-        self,
-        device: torch.device = None,
-        dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> torch.Tensor:
-        sigmas = torch.linspace(
-            self.sigma_max,
-            self.sigma_min,
-            self.num_steps,
-            device=device,
-            dtype=dtype_compute,
-        )
-
-        return sigmas
-
-
-class CosineScheduler(NoiseScheduler):
-    """Cosine schedule."""
-
-    def __init__(
-        self,
-        sigma_max: float,
-        sigma_min: float,
-        num_steps: int,
-        s: float = 0.008,
-        **kwargs,
-    ):
-        super().__init__(sigma_max, sigma_min, num_steps)
-        self.s = s  # small offset to prevent singularity
-
-    def _build_schedule(
-        self,
-        device: torch.device = None,
-        dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> torch.Tensor:
-        # Parameterize the cosine schedule over the sigma range we actually want,
-        # so the schedule stays descending between sigma_max and sigma_min.
-        theta_max = math.atan(self.sigma_max)
-        theta_min = math.atan(self.sigma_min)
-        t_max = (2 * theta_max / math.pi) * (1 + self.s) - self.s
-        t_min = (2 * theta_min / math.pi) * (1 + self.s) - self.s
-
-        t = torch.linspace(t_max, t_min, self.num_steps, device=device, dtype=dtype_compute)
-        alpha_bar = torch.cos((t + self.s) / (1 + self.s) * torch.pi / 2) ** 2
-        sigmas = torch.sqrt((1 - alpha_bar) / alpha_bar)
-
-        return sigmas
-
-
-class ExponentialScheduler(NoiseScheduler):
-    """Exponential schedule (linear in log space)."""
-
-    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
-        super().__init__(sigma_max, sigma_min, num_steps)
-
-    def _build_schedule(
-        self,
-        device: torch.device = None,
-        dtype_compute: torch.dtype = torch.float64,
-        **kwargs,
-    ) -> torch.Tensor:
-        log_sigmas = torch.linspace(
-            torch.log(torch.tensor(self.sigma_max, dtype=dtype_compute)),
-            torch.log(torch.tensor(self.sigma_min, dtype=dtype_compute)),
-            self.num_steps,
-            device=device,
-            dtype=dtype_compute,
-        )
-        sigmas = torch.exp(log_sigmas)
-
-        return sigmas
-
-
-class DiffusionSampler(ABC):
-    """Base class for diffusion samplers."""
+class EDMDiffusionSampler(ABC):
+    """Base class for EDM diffusion samplers."""
 
     @abstractmethod
     def sample(
@@ -263,36 +53,36 @@ class DiffusionSampler(ABC):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        """Perform diffusion sampling.
+        """Run EDM diffusion sampling from the initial noisy field to a clean prediction.
 
         Parameters
         ----------
         x : dict[str, torch.Tensor]
-            Input conditioning data with shape (batch, time, ensemble, grid, vars)
+            Input conditioning data with shape (batch, time, ensemble, grid, vars).
         y : dict[str, torch.Tensor]
-            Initial noise tensor with shape (batch, time, ensemble, grid, vars)
+            Initial noise tensor with shape (batch, time, ensemble, grid, vars).
         sigmas : torch.Tensor
             Noise schedule with shape (num_steps + 1,). The final value is
-            expected to be exact zero after NoiseScheduler finalization.
+            expected to be exact zero after sigma schedule finalization.
         denoising_fn : Callable
-            Function that performs denoising
+            Function that performs denoising.
         model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
+            Process group for distributed training.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
         **kwargs
-            Additional sampler-specific parameters
+            Additional sampler-specific parameters.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            Sampled output with shape (batch, time, ensemble, grid, vars)
+            Sampled output with shape (batch, time, ensemble, grid, vars).
         """
         pass
 
 
-class EDMHeunSampler(DiffusionSampler):
+class EDMHeunSampler(EDMDiffusionSampler):
     """EDM Heun sampler with stochastic churn following Karras et al."""
 
     def __init__(
@@ -303,7 +93,6 @@ class EDMHeunSampler(DiffusionSampler):
         S_noise: float = 1.0,
         dtype: torch.dtype = torch.float64,
         eps_prec: float = 1e-10,
-        **kwargs,
     ):
         self.S_churn = S_churn
         self.S_min = S_min
@@ -349,7 +138,17 @@ class EDMHeunSampler(DiffusionSampler):
                 sigma_effective = sigma_i + gamma * sigma_i
 
                 for dataset_name in y_solver:
-                    epsilon = torch.randn_like(y_solver[dataset_name]) * S_noise
+                    dataset_grid_shard_sizes = (
+                        grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
+                    )
+                    epsilon = (
+                        randn_like_with_grid_sharding(
+                            y_solver[dataset_name],
+                            model_comm_group=model_comm_group,
+                            grid_shard_sizes=dataset_grid_shard_sizes,
+                        )
+                        * S_noise
+                    )
                     y_solver[dataset_name] = (
                         y_solver[dataset_name] + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
                     )
@@ -359,7 +158,7 @@ class EDMHeunSampler(DiffusionSampler):
             # Cast for model evaluation: run denoiser in model/input dtype.
             y_model = {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
-            sigma_effective_expanded = _expand_sigma(sigma_effective, y_model)
+            sigma_effective_expanded = _expand_scalar_condition(sigma_effective, y_model)
 
             D1 = denoising_fn(
                 x,
@@ -386,7 +185,7 @@ class EDMHeunSampler(DiffusionSampler):
                     dataset_name: y_next_data.to(x[dataset_name].dtype)
                     for dataset_name, y_next_data in y_next_solver.items()
                 }
-                sigma_next_expanded = _expand_sigma(sigma_next, y_next_model)
+                sigma_next_expanded = _expand_scalar_condition(sigma_next, y_next_model)
 
                 D2 = denoising_fn(
                     x,
@@ -413,13 +212,12 @@ class EDMHeunSampler(DiffusionSampler):
         return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
 
 
-class DPMpp2MSampler(DiffusionSampler):
+class DPMpp2MSampler(EDMDiffusionSampler):
     """DPM++ 2M sampler (DPM-Solver++ with 2nd order multistep)."""
 
     def __init__(
         self,
         dtype: torch.dtype = torch.float64,
-        **kwargs,
     ):
         self.dtype = dtype
         pass  # No parameters needed for DPM++ 2M
@@ -451,7 +249,7 @@ class DPMpp2MSampler(DiffusionSampler):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
 
-            sigma_expanded = _expand_sigma(sigma, y)
+            sigma_expanded = _expand_scalar_condition(sigma, y)
             denoised = denoising_fn(x, y, sigma_expanded, model_comm_group, grid_shard_sizes)
             denoised_solver = {dataset_name: den.to(dtype) for dataset_name, den in denoised.items()}
 
@@ -471,7 +269,7 @@ class DPMpp2MSampler(DiffusionSampler):
                     ) * denoised_solver[dataset_name]
             else:
                 # Second order multistep
-                h_last = -torch.log(sigmas[i - 1] + 1e-10) - t if i > 0 else h
+                h_last = t - (-torch.log(sigmas[i - 1] + 1e-10)) if i > 0 else h
                 r = h_last / h
 
                 coeff1 = 1 + 1 / (2 * r)
@@ -487,15 +285,142 @@ class DPMpp2MSampler(DiffusionSampler):
         return y
 
 
-# Registry mappings for string-based selection
-NOISE_SCHEDULERS = {
-    "karras": KarrasScheduler,
-    "linear": LinearScheduler,
-    "cosine": CosineScheduler,
-    "exponential": ExponentialScheduler,
-}
-
 DIFFUSION_SAMPLERS = {
     "heun": EDMHeunSampler,
     "dpmpp_2m": DPMpp2MSampler,
+}
+
+
+class VectorFieldSampler(ABC):
+    """Base class for ODE samplers that integrate a learned vector field."""
+
+    @abstractmethod
+    def sample(
+        self,
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        times: torch.Tensor,
+        vector_field_fn: VectorFieldFunction,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Move the field along the provided time grid."""
+        pass
+
+
+class VectorFieldEulerSampler(VectorFieldSampler):
+    """First-order Euler sampler for learned ODE vector fields."""
+
+    def __init__(
+        self,
+        dtype: torch.dtype = torch.float64,
+    ) -> None:
+        self.dtype = dtype
+
+    def sample(
+        self,
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        times: torch.Tensor,
+        vector_field_fn: VectorFieldFunction = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        if vector_field_fn is None:
+            raise ValueError("VectorFieldEulerSampler requires a vector_field_fn callable.")
+        dtype = kwargs.get("dtype", self.dtype)
+        times = times.to(dtype)
+        y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
+
+        for i in range(len(times) - 1):
+            time_i = times[i]
+            time_next = times[i + 1]
+            dt = time_next - time_i
+
+            y_model = {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
+            time_expanded = _expand_scalar_condition(time_i, y_model)
+            vector_field = vector_field_fn(
+                x,
+                y_model,
+                time_expanded,
+                model_comm_group,
+                grid_shard_sizes,
+            )
+
+            for dataset_name in y_solver:
+                y_solver[dataset_name] = y_solver[dataset_name] + dt * vector_field[dataset_name].to(dtype)
+
+        return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
+
+
+class VectorFieldHeunSampler(VectorFieldSampler):
+    """Second-order Heun sampler for deterministic bridge models."""
+
+    def __init__(
+        self,
+        dtype: torch.dtype = torch.float64,
+    ) -> None:
+        self.dtype = dtype
+
+    def sample(
+        self,
+        x: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        times: torch.Tensor,
+        vector_field_fn: VectorFieldFunction = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        if vector_field_fn is None:
+            raise ValueError("VectorFieldHeunSampler requires a vector_field_fn callable.")
+        dtype = kwargs.get("dtype", self.dtype)
+        times = times.to(dtype)
+        y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
+
+        for i in range(len(times) - 1):
+            time_i = times[i]
+            time_next = times[i + 1]
+            dt = time_next - time_i
+
+            y_model = {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
+            time_i_expanded = _expand_scalar_condition(time_i, y_model)
+            vector_field_1 = vector_field_fn(
+                x,
+                y_model,
+                time_i_expanded,
+                model_comm_group,
+                grid_shard_sizes,
+            )
+
+            y_predictor = {
+                dataset_name: y_solver[dataset_name] + dt * vector_field_1[dataset_name].to(dtype)
+                for dataset_name in y_solver
+            }
+            y_next_model = {
+                dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_predictor.items()
+            }
+            time_next_expanded = _expand_scalar_condition(time_next, y_next_model)
+            vector_field_2 = vector_field_fn(
+                x,
+                y_next_model,
+                time_next_expanded,
+                model_comm_group,
+                grid_shard_sizes,
+            )
+
+            for dataset_name in y_solver:
+                y_solver[dataset_name] = (
+                    y_solver[dataset_name]
+                    + dt * (vector_field_1[dataset_name].to(dtype) + vector_field_2[dataset_name].to(dtype)) / 2
+                )
+
+        return {dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_solver.items()}
+
+
+VECTOR_FIELD_SAMPLERS = {
+    "euler": VectorFieldEulerSampler,
+    "heun": VectorFieldHeunSampler,
 }
