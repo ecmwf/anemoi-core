@@ -394,6 +394,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -430,6 +431,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
             **kwargs,
         )
 
@@ -461,19 +463,16 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             "edge_index": edge_index,
             "model_comm_group": model_comm_group,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            "edges_are_dst_sorted": edges_are_dst_sorted,
             **kwargs,
         }
 
         if self.shard_strategy == "edges":
-            return self.mapper_forward_with_edge_sharding(
-                **kwargs_forward,
-                edges_are_dst_sorted=edges_are_dst_sorted,
-            )
+            return self.mapper_forward_with_edge_sharding(**kwargs_forward)
         else:  # self.shard_strategy == "heads"
             return maybe_checkpoint(
                 self.mapper_forward_with_heads_sharding,
                 self.gradient_checkpointing,
-                edges_are_dst_sorted=edges_are_dst_sorted,
                 **kwargs_forward,
             )
 
