@@ -48,6 +48,7 @@ decoder:
 residual:
   _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
   step: -1 # use the latest step as skip connection
+  drop: [] # variable names to not include in the skip connection (subset of prognostic variables)
 
 output_mask:
   _target_: anemoi.training.utils.masks.NoOutputMask
