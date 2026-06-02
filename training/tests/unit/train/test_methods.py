@@ -906,7 +906,7 @@ def test_edm_transport_training_step_with_forecaster() -> None:
     assert output.predictions[0]["data"].shape == (b, 1, e, g, v)
 
 
-# ── EnsembleTraining: expand/collapse helpers ──────────────────────────────────
+# ── EnsembleTraining: expand helper ────────────────────────────────────────────
 
 
 def test_ensemble_expand_ens_dim_tiles_ensemble_dimension() -> None:
@@ -921,29 +921,11 @@ def test_ensemble_expand_ens_dim_tiles_ensemble_dimension() -> None:
     assert expanded["data"].shape == (b, t, 3, g, v)
 
 
-def test_ensemble_collapse_ens_dim_takes_first_ensemble_member() -> None:
-    """_collapse_ens_dim selects index 0 along the ensemble dimension."""
-    forecaster = EnsembleTraining.__new__(EnsembleTraining)
-    pl.LightningModule.__init__(forecaster)
-
-    b, t, e, g, v = 2, 4, 1, 4, 2
-    sentinel = torch.full((b, t, g, v), 99.0)
-    batch_tensor = torch.zeros(b, t, e, g, v)
-    batch_tensor[:, :, 0, :, :] = sentinel
-    batch = {"data": batch_tensor}
-
-    collapsed = forecaster._collapse_ens_dim(batch)
-    assert collapsed["data"].shape == (b, t, g, v)
-    assert torch.all(collapsed["data"] == sentinel)
-
-
 # ── EnsembleTraining._step integration ────────────────────────────────────────
 
 
-def test_ensemble_training_step_with_forecaster(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """EnsembleTraining._step expands ensemble, runs forward, and collapses before loss."""
+def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EnsembleTraining._step expands inputs and keeps target ensemble dimension for loss."""
     data_indices = _data_indices_single()
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
 
@@ -965,13 +947,16 @@ def test_ensemble_training_step_with_forecaster(
     forecaster.loss_supports_sharding = False
     forecaster.metrics_support_sharding = True
 
+    target_shapes = []
+
     def _stub_compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],
-        _y: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
         *_args: Any,
         **_kwargs: Any,
     ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
         ref = next(iter(y_pred.values()))
+        target_shapes.append(next(iter(y.values())).shape)
         return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _stub_compute_loss_metrics)
@@ -987,6 +972,7 @@ def test_ensemble_training_step_with_forecaster(
     assert len(output.predictions) == task.num_steps  # 1 rollout step
     # y_pred shape: (b, n_step_output, nens_per_device, g, v)
     assert output.predictions[0]["data"].shape == (b, 1, forecaster.nens_per_device, g, v)
+    assert target_shapes == [torch.Size((b, 1, 1, g, v))]
 
 
 # ── Multi-step rollout correctness ────────────────────────────────────────────
@@ -2052,7 +2038,8 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
         y: torch.Tensor,
         **kwargs: Any,
     ) -> torch.Tensor:
-        del self, y_pred, y
+        del self, y_pred
+        captured["loss_target_shape"] = y.shape
         captured["loss_kwargs"] = kwargs
         return torch.tensor(0.0)
 
@@ -2062,7 +2049,8 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
         y: torch.Tensor,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
-        del self, y_pred, y
+        del self, y_pred
+        captured["metric_target_shape"] = y.shape
         captured["metric_kwargs"] = kwargs
         return {"dummy": torch.tensor(1.0)}
 
@@ -2071,7 +2059,7 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     monkeypatch.setattr(EnsembleTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
 
     y_pred = torch.randn(2, 1, 2, 4, 3)
-    y = torch.randn(2, 1, 4, 3)
+    y = torch.randn(2, 1, 1, 4, 3)
     loss, metrics, y_pred_ens = forecaster.compute_dataset_loss_metrics(
         y_pred=y_pred,
         y=y,
@@ -2085,31 +2073,13 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     assert isinstance(loss, torch.Tensor)
     assert isinstance(metrics["dummy"], torch.Tensor)
     assert y_pred_ens.shape == y_pred.shape
+    assert captured["loss_target_shape"] == y.shape
+    assert captured["metric_target_shape"] == y.shape
     assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["loss_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
     assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
     assert captured["metric_kwargs"]["rollout_step"] == 3
-
-
-def test_ensemble_make_targets_requires_singleton_ensemble_dim() -> None:
-    """EnsembleTraining._make_targets must assert the ensemble dim is a singleton."""
-    data_indices = _data_indices_single()
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
-
-    forecaster = EnsembleTraining.__new__(EnsembleTraining)
-    pl.LightningModule.__init__(forecaster)
-    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
-    forecaster.n_step_input = 1
-    forecaster.n_step_output = 1
-
-    # Ensemble dim=2 (shape[2]=2) should trigger the singleton-ensemble assertion.
-    # Use rollout_step=0 (start=0), requiring a batch with at least input+output=2 time steps.
-    b, t, e, g, v = 2, 2, 2, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn((b, t, e, g, v), dtype=torch.float32)}
-
-    with pytest.raises(AssertionError, match="Expected singleton ensemble dimension"):
-        forecaster._collapse_ens_dim(batch)
 
 
 # ── per-step metric key suffixes ──────────────────────────────────────────────

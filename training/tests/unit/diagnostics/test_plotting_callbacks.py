@@ -1023,7 +1023,7 @@ def test_ensemble_plot_adapter_select_members():
 
 
 def test_ensemble_plot_adapter_prepare_loss_batch():
-    """Test EnsemblePlotAdapterWrapper.prepare_loss_batch squeezes to member 0."""
+    """Test EnsemblePlotAdapterWrapper.prepare_loss_batch keeps ensemble shape."""
     task = MagicMock()
     inner = ForecasterPlotAdapter(task)
     adapter = EnsemblePlotAdapterWrapper(inner)
@@ -1031,8 +1031,8 @@ def test_ensemble_plot_adapter_prepare_loss_batch():
     batch = {"data": torch.randn(2, 5, 3, 100, 5)}  # (batch, time, members, grid, vars)
     result = adapter.prepare_loss_batch(batch)
 
-    assert result["data"].shape == (2, 5, 100, 5)
-    assert torch.equal(result["data"], batch["data"][:, :, 0, :, :])
+    assert result["data"].shape == (2, 5, 3, 100, 5)
+    assert torch.equal(result["data"], batch["data"])
 
 
 def test_ensemble_plot_adapter_delegates_to_inner():

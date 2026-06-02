@@ -151,24 +151,6 @@ class EnsembleTraining(BaseTrainingModule):
 
         return x
 
-    def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Collapse ensemble dimension.
-
-        Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
-        dimension.
-        """
-        y: dict[str, torch.Tensor] = {}
-        for dataset_name, target in batch.items():
-            msg = (
-                "Expected singleton ensemble dimension in target for "
-                f"{dataset_name}, got shape {tuple(target.shape)}."
-            )
-            assert target.ndim == 5 and target.shape[2] == 1, msg
-            y[dataset_name] = target[:, :, 0, :, :]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-
-        return y
-
     def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
@@ -254,8 +236,7 @@ class EnsembleTraining(BaseTrainingModule):
         for task_step_kwargs in task_steps:
             y_pred = self(x, **task_step_kwargs)
 
-            y_full = self.task.get_targets(batch, **task_step_kwargs)
-            y = self._collapse_ens_dim(y_full)
+            y = self.task.get_targets(batch, **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
