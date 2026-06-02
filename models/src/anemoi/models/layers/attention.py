@@ -371,18 +371,18 @@ class FlexAttentionWrapper(nn.Module):
         try:
             from torch.nn.attention.flex_attention import create_block_mask
             from torch.nn.attention.flex_attention import flex_attention
-        except ImportError as exc:
+        except ImportError as e:
             raise ImportError(
                 "Flex attention is not available in this PyTorch installation. "
                 "Please upgrade PyTorch or select a different attention backend."
-            ) from exc
+            ) from e
 
         self.attention = flex_attention
         self.create_block_mask = create_block_mask
         self.block_mask = None
         self._block_mask_key = None
         self._compile = True
-        self._use_flash4_backend = False  # TODO(cathal): check torch and flashv4 version
+        self._use_flash4_backend = False
 
         if not kwargs.get("use_triton_backend", False):
 
@@ -435,9 +435,6 @@ class FlexAttentionWrapper(nn.Module):
         # for some reason this triggers for 4 heads and 64 embed dim
         # assert query.shape[3]//query.shape[1] >= 16, "Flex attention requires that embedding dimension per head is at least 16. Please increase attn_channels or decrease num_heads to use flex attention."
 
-        from torch.nn.attention.flex_attention import create_block_mask
-        from torch.nn.attention.flex_attention import flex_attention
-
         def sliding_window_mask(b, h, q_idx, kv_idx):
             return torch.abs(q_idx - kv_idx) <= window_size
 
@@ -448,13 +445,13 @@ class FlexAttentionWrapper(nn.Module):
             mask_shape = (1, 1, N_CTX, N_CTX)
             block_mask_kwargs = {}
             compiled_block_mask = torch.compile(
-                create_block_mask
+                self.create_block_mask
             )  # REQUIRED, otherwise entire seq_len^2 array will be materialised
             block_mask = compiled_block_mask(mask_mod, *mask_shape, query.device, **block_mask_kwargs)
 
         if self._compile:
             flex_flash = torch.compile(
-                partial(flex_attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
+                partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
             )
 
         return flex_flash(query, key, value)
