@@ -21,8 +21,8 @@ from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
 from .spectral import PowerSpectrumLoss
-from .spectral import SpectralCRPSLoss
 from .spectral import SpectralAMSELoss
+from .spectral import SpectralCRPSLoss
 from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 
