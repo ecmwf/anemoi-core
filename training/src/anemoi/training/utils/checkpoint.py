@@ -159,6 +159,7 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: s
             for param in child.parameters():
                 LOGGER.info("Freezing parameter %s: %s", base_target + name, param.shape)
                 param.requires_grad = False
+            are_submodules_found = True
         elif target_name.startswith(name + "."):
             new_target = target_name.replace(name + ".", "", 1)
             is_found = freeze_submodule_by_name(child, new_target, base_target=base_target + name + ".")
