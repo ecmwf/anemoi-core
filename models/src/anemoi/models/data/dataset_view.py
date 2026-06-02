@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from typing import Any
-
+from functools import cached_property
 import einops
 import numpy as np
 import torch
@@ -47,11 +47,18 @@ class SourceView(ABC):
 
     name: str
     data: torch.Tensor | list[torch.Tensor]
+    variables: list[str]
+    statistics: dict[str, torch.Tensor]
     coordinates: torch.Tensor | list[torch.Tensor] | None
     layout: TensorLayout
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     grid_shard_indices: Any = None
     boundaries: list[tuple[slice, ...]] | None = None
+
+    @cached_property
+    def name_to_index(self) -> dict[str, int]:
+        """Mapping from variable name to index along the variables axis."""
+        return {name: idx for idx, name in enumerate(self.variables)}
 
     def select(self, **kwargs) -> "SourceView":
         """Return a new view restricted to the given indices along logical dimensions.
@@ -174,7 +181,9 @@ class GriddedSourceView(SourceView):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = self._index_vars(self.data, indices)
-        return dataclass_replace(self, data=new_data)
+        new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
+        new_statistics = {k: v[indices] for k, v in self.statistics.items()}
+        return dataclass_replace(self, data=new_data, variables=new_variables, statistics=new_statistics)
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSourceView":
         """Return a new view restricted to the given time indices.
@@ -262,7 +271,9 @@ class TabularSourceView(SourceView):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = [self._index_vars(t, indices) for t in self.data]
-        return dataclass_replace(self, data=new_data)
+        new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
+        new_statistics = {k: v[indices] for k, v in self.statistics.items()}
+        return dataclass_replace(self, data=new_data, variables=new_variables, statistics=new_statistics)
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSourceView":
         """Return a new view restricted to the given time indices.

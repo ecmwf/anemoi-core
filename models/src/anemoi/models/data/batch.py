@@ -18,9 +18,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
+import numpy as np
 
 import torch
-from torch.utils.data import default_collate
+from torch.utils.data import dataset, default_collate
 
 from anemoi.models.data.dataset_view import SourceView, create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
@@ -122,6 +123,8 @@ class Batch:
     timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = field(default_factory=dict)
     grid_shard_indices: dict[str, Any] = field(default_factory=dict)
     layouts: dict[str, TensorLayout] = field(default_factory=dict)
+    variables: dict[str, list[str]] = field(default_factory=dict)
+    statistics: dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -180,6 +183,8 @@ class Batch:
         return create_source_view(
             name=dataset_name,
             data=self.data[dataset_name],
+            variables=self.variables.get(dataset_name),
+            statistics=self.statistics[dataset_name],
             coordinates=self.coordinates.get(dataset_name),
             is_static=self.is_static_coords(dataset_name),
             timedeltas=self.timedeltas.get(dataset_name),
@@ -242,6 +247,8 @@ class Batch:
             timedeltas=new_timedeltas,
             grid_shard_indices=self.grid_shard_indices,
             layouts=self.layouts,
+            variables=self.variables,
+            statistics=self.statistics,
         )
 
     def pin_memory(self) -> "Batch":
@@ -266,6 +273,8 @@ class Batch:
             timedeltas=new_timedeltas,
             grid_shard_indices=self.grid_shard_indices,
             layouts=self.layouts,
+            variables=self.variables,
+            statistics=self.statistics,
         )
 
     def with_data(self, new_data: dict[str, torch.Tensor | list[torch.Tensor]]) -> "Batch":
@@ -298,6 +307,8 @@ class Batch:
                 timedeltas=self.timedeltas,
                 grid_shard_indices=self.grid_shard_indices,
                 layouts=self.layouts,
+                variables=self.variables,
+                statistics=self.statistics,
             )
 
         new_data_keys = set(new_data.keys())
@@ -311,6 +322,8 @@ class Batch:
             timedeltas={name: self.timedeltas[name] for name in new_data_keys if name in self.timedeltas},
             grid_shard_indices={name: self.grid_shard_indices[name] for name in new_data_keys},
             layouts={name: self.layouts[name] for name in new_data_keys},
+            variables={name: self.variables[name] for name in new_data_keys},
+            statistics=self.statistics,
         )
 
     def apply(
@@ -361,6 +374,8 @@ class Batch:
             timedeltas=new_timedeltas,
             grid_shard_indices=self.grid_shard_indices,
             layouts=self.layouts,
+            variables=self.variables,
+            statistics=self.statistics,
         )
 
     def select(self, **kwargs) -> "Batch":
@@ -429,6 +444,8 @@ class Batch:
         collated_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         collated_coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         collated_timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        collated_variables: dict[str, list[str]] = {}
+        collated_statistics: dict[str, np.ndarray] = {}
         per_dataset_metadata: dict[str, dict[str, list[Any]]] = {}
 
         for name in dataset_names:
@@ -439,6 +456,14 @@ class Batch:
             # ``ObservationDataReader._unpack_sample``). Gridded samples
             # never carry it, so this is a self-describing dispatch.
             is_sparse = BOUNDARIES_META_KEY in sample_meta
+            
+            if "variables" in first_payload:
+                collated_variables[name] = first_payload["variables"]
+                # Assumed that all samples have the same variables
+            
+            if "statistics" in first_payload:
+                collated_statistics[name] = first_payload["statistics"]
+                # Assumed that all samples have the same variables and statistics
 
             if is_sparse:
                 if name in static:
@@ -554,6 +579,8 @@ class Batch:
             timedeltas=collated_timedeltas,
             grid_shard_indices=collated_grid_shard_indices,
             layouts=collated_layouts,
+            variables=collated_variables,
+            statistics=collated_statistics,
         )
         LOGGER.debug("Batch.collate produced:\n%r", batch)
         return batch
