@@ -4,7 +4,9 @@ from typing import Never
 
 import pytest
 import torch
+from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -58,6 +60,26 @@ class DummyModel(torch.nn.Module):
 
         self.pre_processors_tendencies = torch.nn.ModuleDict({"data": pre_tend})
         self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})
+
+
+def _make_static_graph_provider(trainable_size: int = 2) -> StaticGraphProvider:
+    graph = HeteroData()
+    graph.edge_index = torch.tensor([[0, 1, 2, 0], [1, 0, 1, 0]], dtype=torch.long)
+    graph.edge_attr = torch.tensor([[0.0], [1.0], [2.0], [3.0]], dtype=torch.float32)
+
+    return StaticGraphProvider(
+        graph=graph,
+        edge_attributes=["edge_attr"],
+        src_size=3,
+        dst_size=2,
+        trainable_size=trainable_size,
+    )
+
+
+class DummyGraphModel(torch.nn.Module):
+    def __init__(self, trainable_size: int = 2) -> None:
+        super().__init__()
+        self.graph_provider = _make_static_graph_provider(trainable_size)
 
 
 class DummyTrainingModule(BaseTrainingModule):
@@ -249,6 +271,32 @@ def test_transfer_learning_loading_populates_ckpt_indices_from_dict(tmp_path: Pa
         "era5": {"t2m": 0, "u10": 1},
         "cerra": {"t2m": 0, "tp": 1},
     }
+
+
+def test_transfer_learning_loading_filters_trainable_edge_mismatch_before_migration(tmp_path: Path) -> None:
+    new_module = _make_dummy_module(DummyGraphModel(trainable_size=2), update_states=False, update_tendencies=False)
+    trainable_key = "model.graph_provider.trainable.trainable"
+    layout_version_key = "model.graph_provider.trainable_layout_version"
+    trainable_before = new_module.state_dict()[trainable_key].clone()
+
+    state_dict = new_module.state_dict()
+    state_dict[trainable_key] = torch.ones(2, 2)
+    del state_dict[layout_version_key]
+
+    checkpoint = {
+        "state_dict": state_dict,
+        "hyper_parameters": {
+            "config": _make_minimal_ckpt_config(),
+            "data_indices": {"data": SimpleNamespace(name_to_index={})},
+        },
+    }
+    ckpt_path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, ckpt_path)
+
+    transfer_learning_loading(new_module, ckpt_path)
+
+    assert torch.equal(new_module.state_dict()[trainable_key], trainable_before)
+    assert new_module.state_dict()[layout_version_key].item() == 1
 
 
 def test_transfer_learning_loading_raises_on_old_checkpoint_data_indices_format(tmp_path: Path) -> None:

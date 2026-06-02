@@ -34,6 +34,19 @@ trainable_edge_perm_fix_migration = importlib.import_module(
 LOGGER = logging.getLogger(__name__)
 
 
+def _filter_state_dict_size_mismatches(
+    state_dict: dict[str, torch.Tensor],
+    model_state_dict: dict[str, torch.Tensor],
+) -> None:
+    for key in list(state_dict):
+        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+            LOGGER.info("Skipping loading parameter: %s", key)
+            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
+            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
+
+            del state_dict[key]
+
+
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
     """Load the lightning checkpoint and extract the pytorch model and its metadata.
 
@@ -95,23 +108,15 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     # Refresh processor stats from the current dataset if configured.
     model._update_checkpoint_state_dict_for_load(checkpoint)
 
-    # Runtime migration: the graph-provider permutation depends on instantiated provider state.
-    checkpoint = trainable_edge_perm_fix_migration(checkpoint, model)
-
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
+    _filter_state_dict_size_mismatches(state_dict, model.state_dict())
 
-    model_state_dict = model.state_dict()
+    # Runtime migration: the graph-provider permutation depends on instantiated provider state.
+    checkpoint = trainable_edge_perm_fix_migration(checkpoint, model)
+    state_dict = checkpoint["state_dict"]
 
-    for key in state_dict.copy():
-        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
-            LOGGER.info("Skipping loading parameter: %s", key)
-            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
-            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
-
-            del state_dict[key]  # Remove the mismatched key
-
-    # Load the filtered st-ate_dict into the model
+    # Load the filtered state_dict into the model
     model.load_state_dict(state_dict, strict=False)
 
     ## Needed for data indices check
