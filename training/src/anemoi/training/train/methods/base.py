@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -43,6 +44,11 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+_chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
+_trainable_edge_perm_fix_migration = importlib.import_module(
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+).migrate
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -454,6 +460,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 state_dict[full_key] = value
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+        # Apply migrations to handle state_dict key changes from older checkpoints.
+        # These are idempotent: already-migrated checkpoints are unaffected.
+        _trainable_edge_perm_fix_migration(checkpoint, model=self)
         self._update_checkpoint_state_dict_for_load(checkpoint)
 
         self._ckpt_model_name_to_index = {
