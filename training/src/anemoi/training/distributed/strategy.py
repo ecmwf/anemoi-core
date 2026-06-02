@@ -68,6 +68,8 @@ def register_gradient_scaling_hooks(
 def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     """Seed the random number generators for the rank."""
     base_seed = get_base_seed()
+    # Set up the synced stream here. Lightning sets the usual rank-local random
+    # streams after this call, using the seed returned here.
     independent_seed = seed_torch_rng_sources(
         base_seed,
         global_rank,

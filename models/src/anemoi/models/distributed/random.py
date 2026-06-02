@@ -33,6 +33,9 @@ class TorchRNGState:
 _synced_seed: int | None = None
 _synced_state: TorchRNGState | None = None
 _synced_context_depth = 0
+# These values belong to this Python process. Training uses one process per
+# rank, and this code should be called from the main training thread. Dataloader
+# workers have their own processes and do not share these values.
 
 
 def _normalize_seed(seed: int) -> int:
@@ -76,6 +79,16 @@ def _get_current_rng_state() -> TorchRNGState:
     return TorchRNGState(cpu=torch.get_rng_state().clone(), cuda=_get_cuda_rng_state())
 
 
+def _cuda_devices_in_state(state: TorchRNGState) -> set[int]:
+    """Return CUDA device ids saved in ``state``."""
+    return set(state.cuda)
+
+
+def _current_cuda_devices() -> set[int]:
+    """Return CUDA device ids PyTorch already has random state for."""
+    return set(_get_cuda_rng_state())
+
+
 def _clone_rng_state(state: TorchRNGState) -> TorchRNGState:
     """Copy a saved random state so later changes cannot modify the original."""
     return TorchRNGState(
@@ -114,11 +127,19 @@ def _ensure_synced_state() -> None:
         )
         raise RuntimeError(msg)
 
-    # CUDA can be started after setup. When that happens, add matching CUDA
-    # state to the synced stream before the first synced CUDA draw.
-    current_cuda_devices = set(_get_cuda_rng_state())
-    missing_cuda_devices = current_cuda_devices.difference(_synced_state.cuda)
+    # CUDA may start after setup but before this context is used. Add CUDA state
+    # before the first synced CUDA draw. CUDA must not start for the first time
+    # while this context is already active, because then there is no old CUDA
+    # state to restore afterwards.
+    missing_cuda_devices = _current_cuda_devices().difference(_cuda_devices_in_state(_synced_state))
     if missing_cuda_devices:
+        if _synced_context_depth > 0:
+            msg = (
+                "CUDA was initialized for the first time inside an active "
+                "use_synced_torch_rng() context. Initialize CUDA before "
+                "entering the synced context."
+            )
+            raise RuntimeError(msg)
         new_state = _make_rng_state(_synced_seed)
         for device in missing_cuda_devices:
             _synced_state.cuda[device] = new_state.cuda[device]
@@ -245,12 +266,21 @@ def use_synced_torch_rng() -> Iterator[None]:
 
     # Save the default rank-local stream, then temporarily install the synced one.
     default_state = _get_current_rng_state()
+    cuda_devices_at_entry = _cuda_devices_in_state(default_state)
     _set_current_rng_state(_synced_state)
     _synced_context_depth = 1
     try:
         yield
     finally:
         # Save how far the synced stream moved, then restore the rank-local stream.
-        _synced_state = _get_current_rng_state()
+        current_state = _get_current_rng_state()
         _synced_context_depth = 0
         _set_current_rng_state(default_state)
+        new_cuda_devices = _cuda_devices_in_state(current_state).difference(cuda_devices_at_entry)
+        if new_cuda_devices:
+            msg = (
+                "CUDA was initialized inside use_synced_torch_rng(). "
+                "Initialize CUDA before entering the synced random context."
+            )
+            raise RuntimeError(msg)
+        _synced_state = current_state

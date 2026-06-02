@@ -87,6 +87,24 @@ def test_synced_context_can_be_scoped_by_model_group() -> None:
     assert not torch.allclose(group_0_synced, group_1_synced)
 
 
+def test_seed_default_seeds_default_stream_with_independent_seed() -> None:
+    base_seed = 1234
+    global_rank = 4
+
+    independent_seed = seed_torch_rng_sources(
+        base_seed,
+        global_rank=global_rank,
+        seed_default=True,
+        reset_synced=True,
+    )
+    default_after_seed = torch.rand(4)
+
+    torch.manual_seed(independent_seed)
+    expected_default = torch.rand(4)
+
+    torch.testing.assert_close(default_after_seed, expected_default)
+
+
 def test_synced_context_restores_and_advances_separate_rng_state() -> None:
     base_seed = 4321
 
@@ -139,3 +157,25 @@ def test_checkpointed_synced_context_preserves_recomputed_rng_state() -> None:
     torch.testing.assert_close(forward_noise, expected_forward_noise)
     torch.testing.assert_close(x.grad, forward_noise)
     torch.testing.assert_close(next_after_checkpoint, expected_next)
+
+
+def test_synced_context_fails_if_cuda_starts_inside_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_seed = 2468
+    original_get_current_rng_state = random_utils._get_current_rng_state
+    call_count = 0
+
+    seed_torch_rng_sources(base_seed, global_rank=0, reset_synced=True)
+
+    def get_current_rng_state_with_new_cuda_device() -> random_utils.TorchRNGState:
+        nonlocal call_count
+        call_count += 1
+        state = original_get_current_rng_state()
+        if call_count == 2:
+            state.cuda[0] = torch.empty_like(state.cpu)
+        return state
+
+    monkeypatch.setattr(random_utils, "_get_current_rng_state", get_current_rng_state_with_new_cuda_device)
+
+    with pytest.raises(RuntimeError, match="CUDA was initialized inside use_synced_torch_rng"):
+        with use_synced_torch_rng():
+            pass
