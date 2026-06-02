@@ -51,7 +51,13 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
 
     state_dict = ckpt.get("state_dict", {})
 
-    for provider_path, graph_provider in model.named_modules():
+    try:
+        named_modules = list(model.named_modules())
+    except AttributeError:
+        LOGGER.info("Model does not support named_modules(). Skipping trainable edge permutation migration.")
+        return ckpt
+
+    for provider_path, graph_provider in named_modules:
         if not isinstance(graph_provider, StaticGraphProvider):
             continue
 
