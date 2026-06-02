@@ -896,6 +896,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edges_are_dst_sorted: bool = True,
         **layer_kwargs,
     ):
         x_skip = x
@@ -933,7 +934,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             edge_index,
             size,
             num_chunks=1,
-            edges_are_dst_sorted=layer_kwargs.get("edges_are_dst_sorted", True),
+            edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
         if self.shard_strategy == "heads":
@@ -1029,6 +1030,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ):
         x_skip = x
@@ -1067,7 +1069,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             edge_index,
             size,
             num_chunks,
-            edges_are_dst_sorted=kwargs.get("edges_are_dst_sorted", True),
+            edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
         out = self.shard_output_seq(out, bipartite_shard_info, head_shard_sizes, batch_size, model_comm_group)
