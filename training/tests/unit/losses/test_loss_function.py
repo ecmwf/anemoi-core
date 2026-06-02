@@ -20,7 +20,6 @@ from anemoi.training.losses import LogCoshLoss
 from anemoi.training.losses import LogSpectralDistance
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
-from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import WeightedMSELoss
@@ -30,7 +29,7 @@ from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
-spectral_losses = [PowerSpectrumLoss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
+spectral_losses = [SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
 losses += spectral_losses
 
 
@@ -499,22 +498,37 @@ def _octahedral_expected_points(nlat: int) -> int:
     return int(sum(nlon))
 
 
-def test_sht_amse_loss() -> None:
+@pytest.mark.parametrize(
+    "loss_target",
+    [
+        ("anemoi.training.losses.spectral.SpectralAMSELoss"),
+        ("anemoi.training.losses.spectral.PowerSpectrumLoss"),
+    ],
+)
+def test_sht_powerspectraldensity_loss(loss_target: str) -> None:
+    # test loss functions that use the power spectral density,
+    # which is only implemented for the SHT transforms which require an octahedral grid
     nlat = 8
     nvars = 3
     expected_points = _octahedral_expected_points(nlat)
 
-    loss = _make_loss("anemoi.training.losses.spectral.SpectralAMSELoss", transform="octahedral_sht", nlat=nlat)
+    loss = _make_loss(loss_target, transform="octahedral_sht", nlat=nlat)
     pred = torch.zeros((2, 1, 1, expected_points, nvars))
     target = torch.zeros_like(pred)
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+    # Loss should fail with wrong grid size
+    pred_wrong = torch.zeros((2, 1, 1, expected_points + 1, nvars))
+    target_wrong = torch.zeros_like(pred_wrong)
+    with pytest.raises(AssertionError):
+        _ = loss(pred_wrong, target_wrong, squash=True)
 
     # fail for transform without PSD method (e.g. FFT2D)
     with pytest.raises(hydra.errors.InstantiationException):
         _ = get_loss_function(
             DictConfig(
                 {
-                    "_target_": "anemoi.training.losses.spectral.SpectralAMSELoss",
+                    "_target_": loss_target,
                     "transform": "fft2d",
                     "x_dim": 710,
                     "y_dim": 640,
@@ -522,22 +536,6 @@ def test_sht_amse_loss() -> None:
                 },
             ),
         )
-
-
-def test_octahedral_sht_loss() -> None:
-
-    nlat = 8
-    nvars = 3
-    expected_points = _octahedral_expected_points(nlat)
-
-    loss = _make_loss("anemoi.training.losses.spectral.PowerSpectrumLoss", transform="octahedral_sht", nlat=nlat)
-    pred = torch.zeros((2, 1, 1, expected_points, nvars))
-    target = torch.zeros_like(pred)
-    _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
-    pred_wrong = torch.zeros((2, 1, 1, expected_points + 1, nvars))
-    target_wrong = torch.zeros_like(pred_wrong)
-    with pytest.raises(AssertionError):
-        _ = loss(pred_wrong, target_wrong, squash=True)
 
 
 def test_spectral_crps_fft_and_dct() -> None:

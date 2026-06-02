@@ -292,6 +292,12 @@ class PowerSpectrumLoss(SpectralLoss):
                                    - \sum_m |F_{lm}|^2 \bigr)^2 .
     """
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        assert hasattr(self.transform, "power_spectral_density") and callable(
+            self.transform.power_spectral_density,
+        ), "spectral transform used in PowerSpectrumLoss must contain a power_spectral_density method"
+
     def forward(
         self,
         pred: torch.Tensor,
@@ -310,11 +316,8 @@ class PowerSpectrumLoss(SpectralLoss):
 
         sc_pred = self.transform.forward(pred)
         sc_target = self.transform.forward(target)
-        pred_amp = torch.sum(
-            sc_pred.real**2 + sc_pred.imag**2,
-            dim=-2,
-        )  # sum over order (M) dim to get power per wavenumber
-        target_amp = torch.sum(sc_target.real**2 + sc_target.imag**2, dim=-2)
+        pred_amp = self.transform.power_spectral_density(sc_pred)
+        target_amp = self.transform.power_spectral_density(sc_target)
         diff = (pred_amp - target_amp) ** 2
 
         _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
