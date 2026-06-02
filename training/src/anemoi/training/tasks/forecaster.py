@@ -63,7 +63,7 @@ class Forecaster(BaseTask):
         multistep_output: int,
         timestep: str,
         rollout: dict | None = None,
-        validation_rollout: int = 1,
+        validation_rollout: int | None = None,
         **kwargs,
     ) -> None:
 
@@ -89,7 +89,9 @@ class Forecaster(BaseTask):
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
         """Return the current steps configuration based on the rollout step."""
-        max_rollout = self.validation_rollout if mode == "validation" else self.rollout.step
+        max_rollout = self.rollout.step
+        if mode == "validation" and self.validation_rollout is not None:
+            max_rollout = self.validation_rollout
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
@@ -114,20 +116,24 @@ class Forecaster(BaseTask):
         if mode == "training":
             rollout_step = self.rollout.maximum
         elif mode == "validation":
-            rollout_step = self.validation_rollout
+            rollout_step = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
         else:
             LOGGER.debug(
-                "Unknown mode '%s' for %s.get_offsets(), defaulting to training rollout.",
+                "Unknown mode '%s' for %s.get_offsets(); using offsets for the longest configured rollout.",
                 mode,
                 self.__class__.__name__,
             )
-            rollout_step = max(self.rollout.maximum, self.validation_rollout)
+            validation_rollout = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
+            rollout_step = max(self.rollout.maximum, validation_rollout)
 
         return self._compute_rollout_offsets(rollout_step)
 
-    def get_output_offsets(self, rollout_step: int = 0, mode: str = "training", **_kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(
+        self,
+        rollout_step: int = 0,
+        **_kwargs,
+    ) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
-        rollout_step = rollout_step if mode == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 

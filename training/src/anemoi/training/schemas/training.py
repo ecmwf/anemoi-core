@@ -252,11 +252,12 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
-    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
-    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
-    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
-    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
+    fcl = "anemoi.training.losses.FourierCorrelationLoss"
+    lsd = "anemoi.training.losses.LogSpectralDistance"
+    logfft2d = "anemoi.training.losses.LogFFT2Distance"
+    spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
+    spectral_l2 = "anemoi.training.losses.SpectralL2Loss"
+    spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -409,7 +410,7 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
 
     class Config(BaseModel.Config):
@@ -427,11 +428,12 @@ def _loss_discriminator(v: Any) -> str:
     if target == "anemoi.training.losses.CRPS":
         return "crps"
     if target in {
-        "anemoi.training.losses.spectral.FourierCorrelationLoss",
-        "anemoi.training.losses.spectral.LogSpectralDistance",
-        "anemoi.training.losses.spectral.LogFFT2Distance",
-        "anemoi.training.losses.spectral.SpectralCRPSLoss",
-        "anemoi.training.losses.spectral.SpectralL2Loss",
+        "anemoi.training.losses.FourierCorrelationLoss",
+        "anemoi.training.losses.LogSpectralDistance",
+        "anemoi.training.losses.LogFFT2Distance",
+        "anemoi.training.losses.SpectralCRPSLoss",
+        "anemoi.training.losses.SpectralL2Loss",
+        "anemoi.training.losses.SpectralAMSELoss",
     }:
         return "spectral"
     if target == "anemoi.training.losses.HuberLoss":
