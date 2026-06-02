@@ -171,27 +171,6 @@ class SpectralLoss(BaseLoss):
         return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
 
 
-class PowerSpectrumLoss(SpectralLoss):
-    r"""L2 loss on power-per-wavenumber in spectral domain.
-
-    This loss compares the power spectrum
-    (energy per total wavenumber) of prediction and target.
-
-    **Steps:**
-
-    1. Apply the spectral transform to ``pred`` and ``target``.
-       The result has shape ``(..., L, M, variables)`` where ``L`` is the total
-       wavenumber and ``M`` is the zonal wavenumber.
-    2. Compute the power per total wavenumber by summing ``|coeff|²`` over the
-       zonal wavenumber dimension ``M``::
-
-           amp(x) = sum_m |X(l, m)|²      shape: (..., L, variables)
-
-    3. Compute the squared difference of the power spectra::
-
-           diff = (amp(pred) - amp(target))²
-
-    4. Apply scalers and reduce to produce the final scalar loss.
 class SpectralAMSELoss(SpectralLoss):
     r"""Adjusted Mean Squared Error (AMSE) loss in spectral domain.
 
@@ -284,6 +263,68 @@ class SpectralAMSELoss(SpectralLoss):
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+
+
+class PowerSpectrumLoss(SpectralLoss):
+    r"""L2 loss on power-per-wavenumber in spectral domain.
+
+    This loss compares the power spectrum
+    (energy per total wavenumber) of prediction and target.
+
+    **Steps:**
+
+    1. Apply the spectral transform to ``pred`` and ``target``.
+       The result has shape ``(..., L, M, variables)`` where ``L`` is the total
+       wavenumber and ``M`` is the zonal wavenumber.
+    2. Compute the power per total wavenumber by summing ``|coeff|²`` over the
+       zonal wavenumber dimension ``M``::
+
+           amp(x) = sum_m |X(l, m)|²      shape: (..., L, variables)
+
+    3. Compute the squared difference of the power spectra::
+
+           diff = (amp(pred) - amp(target))²
+
+    4. Apply scalers and reduce to produce the final scalar loss.
+
+    .. math::
+        \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
+                                   - \sum_m |F_{lm}|^2 \bigr)^2 .
+    """
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        del kwargs  # unused
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
+
+        sc_pred = self.transform.forward(pred)
+        sc_target = self.transform.forward(target)
+        pred_amp = torch.sum(
+            sc_pred.real**2 + sc_pred.imag**2,
+            dim=-2,
+        )  # sum over order (M) dim to get power per wavenumber
+        target_amp = torch.sum(sc_target.real**2 + sc_target.imag**2, dim=-2)
+        diff = (pred_amp - target_amp) ** 2
+
+        _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
+        result = self.scale(
+            diff,
+            scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
+        return self.reduce(result, squash=squash, group=group)
 
 
 class LogSpectralDistance(SpectralLoss):
