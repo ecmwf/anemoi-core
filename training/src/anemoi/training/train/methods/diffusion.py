@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.utils.index_space import IndexSpace
@@ -204,7 +205,8 @@ class BaseDiffusionTraining(BaseTrainingModule):
             ), "Batch or ensemble dimension mismatch across datasets when sampling diffusion noise."
 
         base_shape = (batch_size, ensemble_size)
-        rnd_uniform = torch.rand(base_shape, device=device)
+        with use_synced_torch_rng():
+            rnd_uniform = torch.rand(base_shape, device=device)
         sigma_base = (
             sigma_max ** (1.0 / rho) + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
         ) ** rho

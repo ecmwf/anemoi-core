@@ -10,6 +10,7 @@
 
 import logging
 import math
+from typing import Any
 from typing import Optional
 
 from hydra.errors import InstantiationException
@@ -17,6 +18,7 @@ from hydra.utils import instantiate
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.distributed.random import synced_torch_rng_checkpoint_context
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -60,27 +62,43 @@ class CheckpointWrapper(nn.Module):
         self.module = module
 
     def forward(self, *args, **kwargs):
-        return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
+        return checkpoint(
+            self.module,
+            *args,
+            **kwargs,
+            use_reentrant=False,
+            context_fn=synced_torch_rng_checkpoint_context,
+        )
 
 
-def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
+def maybe_checkpoint(func, enabled: bool, *args, **kwargs) -> Any:
     """Conditionally apply gradient checkpointing to a function.
 
     Parameters
     ----------
     func : callable
-        The function to potentially wrap with checkpointing
+        The function to potentially wrap with checkpointing.
     enabled : bool
-        Whether to apply gradient checkpointing
+        Whether to apply gradient checkpointing.
     *args, **kwargs
-        Arguments to pass to the function
+        Arguments to pass to the function.
 
     Returns
     -------
-    The result of calling func with the provided arguments
+    Any
+        The result of calling func with the provided arguments.
     """
     if enabled:
-        return checkpoint(func, *args, **kwargs, use_reentrant=False)
+        return checkpoint(
+            func,
+            *args,
+            **kwargs,
+            use_reentrant=False,
+            # This is PyTorch's default. Keep it explicit here because this
+            # helper also preserves the synced random stream.
+            preserve_rng_state=True,
+            context_fn=synced_torch_rng_checkpoint_context,
+        )
     return func(*args, **kwargs)
 
 

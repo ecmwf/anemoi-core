@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from anemoi.models.distributed.random import seed_torch_rng_sources
 from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
 from anemoi.models.samplers import diffusion_samplers
 
@@ -87,6 +88,8 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
 
 
 def test_sample_passes_zero_terminated_schedule_to_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
+
     class DummyScheduler(diffusion_samplers.NoiseScheduler):
         def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, **kwargs):
             super().__init__(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
@@ -157,6 +160,8 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
     sampler_name: str,
     sampler_config: dict[str, float],
 ) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
+
     model = AnemoiDiffusionModelEncProcDec.__new__(AnemoiDiffusionModelEncProcDec)
     model.inference_defaults = SimpleNamespace(
         noise_scheduler={"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.02, "num_steps": 6},

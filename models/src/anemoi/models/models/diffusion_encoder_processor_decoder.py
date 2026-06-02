@@ -23,6 +23,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -728,7 +729,8 @@ class AnemoiDiffusionModelEncProcDec(BaseGraphModel):
             # Initialize output with noise
             batch_size, ensemble_size, grid_size = x_data.shape[0], x_data.shape[2], x_data.shape[-2]
             shape = (batch_size, self.n_step_output, ensemble_size, grid_size, self.num_output_channels[dataset_name])
-            y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigma_i.dtype) * sigma_i[0]
+            with use_synced_torch_rng():
+                y_init[dataset_name] = torch.randn(shape, device=x_data.device, dtype=sigma_i.dtype) * sigma_i[0]
 
         # Build diffusion sampler config dict from all inference defaults
         diffusion_sampler_config = dict(self.inference_defaults.diffusion_sampler)
@@ -1119,12 +1121,16 @@ class AnemoiDiffusionTendModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         Parameters
         ----------
         x : dict[str, torch.Tensor]
-            Input tensor with shape {dataset_name: (bs, ens, latlon, nvar)}
+            Input tensor with shape {dataset_name: (bs, ens, latlon, nvar)}.
+        grid_shard_sizes : DatasetShardSizes | None
+            Grid shard sizes for each dataset when the input is sharded.
+        model_comm_group : ProcessGroup | None
+            Model communication group used for sharded tensors.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            Truncated tensor with same shape as input
+            Truncated tensor with same shape as input.
         """
         x_skips = {}
 

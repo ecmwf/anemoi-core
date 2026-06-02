@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import hydra
-import numpy as np
 import pytorch_lightning as pl
 import torch
 from hydra.utils import get_class
@@ -34,6 +33,8 @@ from anemoi.graphs.create import load_graph_from_file
 from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.distributed.random import seed_torch_rng_sources
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -150,20 +151,12 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def initial_seed(self) -> int:
-        """Initial seed for the RNG.
-
-        This sets the same initial seed for all ranks. Ranks are re-seeded in the
-        strategy to account for model communication groups.
-        """
+        """Base seed recorded for the run."""
         initial_seed = get_base_seed()
-        rnd_seed = pl.seed_everything(initial_seed, workers=True)
-        np_rng = np.random.default_rng(rnd_seed)
-        (torch.rand(1), np_rng.random())
         LOGGER.info(
-            "Initial seed: Rank %d, initial seed %d, running with random seed: %d",
+            "Base seed: Rank %d, initial seed %d",
             self.strategy.global_rank,
             initial_seed,
-            rnd_seed,
         )
         return initial_seed
 
@@ -346,7 +339,9 @@ class AnemoiTrainer(ABC):
         }
 
         training_method = get_class(self.config.training.training_method)
-        model = training_method(**kwargs)  # Task -> pl.LightningModule
+        seed_torch_rng_sources(self.initial_seed, self.strategy.global_rank, reset_synced=True)
+        with use_synced_torch_rng():
+            model = training_method(**kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -359,12 +354,13 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = training_method.load_from_checkpoint(
-                    self.last_checkpoint,
-                    **kwargs,
-                    strict=False,
-                    weights_only=False,  # required for Pytorch Lightning 2.6
-                )
+                with use_synced_torch_rng():
+                    model = training_method.load_from_checkpoint(
+                        self.last_checkpoint,
+                        **kwargs,
+                        strict=False,
+                        weights_only=False,  # required for Pytorch Lightning 2.6
+                    )
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config

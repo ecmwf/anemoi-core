@@ -20,6 +20,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.random import seed_torch_rng_sources
 from anemoi.models.preprocessing import Processors
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
@@ -693,6 +694,7 @@ def test_single_training_advance_input_called_once_per_step(monkeypatch: pytest.
 
 def test_diffusion_training_step_with_forecaster() -> None:
     """DiffusionTraining._step returns a single (loss, metrics, [y_pred]) for a one-step forecaster."""
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
 
     class _DummyDiffusionWrapper:
         """Wraps DummyDiffusionModel to match model.model.fwd_with_preconditioning API."""
@@ -1156,6 +1158,7 @@ def test_ensemble_training_uses_data_full_target_layout(monkeypatch: pytest.Monk
 
 def test_diffusion_training_uses_data_full_target_layout(monkeypatch: pytest.MonkeyPatch) -> None:
     """DiffusionTraining._step must pass target_layout=DATA_FULL with the full batch slice as y."""
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
 
     class _DummyDiffusionWrapper:
         def __init__(self, inner: DummyDiffusionModel) -> None:

@@ -15,6 +15,7 @@ from typing import Optional
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.distributed.shapes import DatasetShardSizes
 
 DenoisingFunction = Callable[
@@ -349,7 +350,8 @@ class EDMHeunSampler(DiffusionSampler):
                 sigma_effective = sigma_i + gamma * sigma_i
 
                 for dataset_name in y_solver:
-                    epsilon = torch.randn_like(y_solver[dataset_name]) * S_noise
+                    with use_synced_torch_rng():
+                        epsilon = torch.randn_like(y_solver[dataset_name]) * S_noise
                     y_solver[dataset_name] = (
                         y_solver[dataset_name] + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
                     )
