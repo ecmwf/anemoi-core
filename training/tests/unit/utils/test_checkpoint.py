@@ -8,9 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import pytest
-from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 import torch
 from torch import nn
+
+from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 
 
 @pytest.fixture
@@ -29,7 +30,6 @@ def model() -> torch.nn.Module:
 
 def test_freeze_submodule(model: torch.nn.Module) -> None:
     """Test the freeze_submodule_by_name function."""
-
     freeze_submodule_by_name(model, "sequential.0")
 
     assert model.lin1.weight.requires_grad
@@ -39,7 +39,6 @@ def test_freeze_submodule(model: torch.nn.Module) -> None:
 
 def test_freeze_module(model: torch.nn.Module) -> None:
     """Test the freeze_submodule_by_name function."""
-
     freeze_submodule_by_name(model, "sequential")
 
     assert model.lin1.weight.requires_grad
