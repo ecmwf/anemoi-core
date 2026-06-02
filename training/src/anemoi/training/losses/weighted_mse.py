@@ -13,6 +13,7 @@ import logging
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class WeightedMSELoss(MSELoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         """Calculates the weighted MSE loss.
 
@@ -66,6 +68,9 @@ class WeightedMSELoss(MSELoss):
             Weighted MSE loss
         """
         is_sharded = grid_shard_slice is not None
+
+        pred, target = self.mask_nans(pred, target)
+
         out = self.calculate_difference(pred, target)
 
         if weights is not None:
@@ -73,4 +78,4 @@ class WeightedMSELoss(MSELoss):
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(out, squash, group=group if is_sharded else None)
+        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

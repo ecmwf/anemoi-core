@@ -9,8 +9,11 @@
 
 """Plot adapter: single entry point for diagnostics callbacks.
 
-Groups the five plot-related hooks so task classes expose one attribute
+Groups the plot-related hooks so task classes expose one attribute
 (plot_adapter) instead of five small methods.
+
+The EnsemblePlotAdapterWrapper allows to wrap any task-specific adapter,
+adding ensemble member handling without modifying the inner adapter's logic.
 """
 
 from __future__ import annotations
@@ -23,171 +26,95 @@ from typing import Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from anemoi.training.tasks.base import BaseTask
+
 
 class BasePlotAdapter(ABC):
     """Abstract plotting contract. Subclasses define output_times, get_init_step, iter_plot_samples."""
 
-    def __init__(self, task: Any) -> None:
+    def __init__(self, task: BaseTask) -> None:
         self._task = task
 
     @property
-    @abstractmethod
-    def output_times(self) -> int:
-        """Number of rollout/outer steps for plotting."""
-        ...
+    def is_ensemble(self) -> bool:
+        return False
 
-    @abstractmethod
-    def get_init_step(self, rollout_step: int) -> int:
-        """Input step index for a given rollout step."""
-        ...
-
-    def get_total_plot_targets(self, output_times: int | None = None) -> int:
-        if output_times is None:
-            output_times = self.output_times
-        return output_times
-
-    @property
-    def loss_plot_times(self) -> int:
-        return 1
-
-    def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        del rollout_step
+    def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return output_tensor
 
+    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:  # noqa: ARG002
+        """Select ensemble members from tensor. No-op for non-ensemble adapters."""
+        return tensor
+
+    def prepare_loss_batch(self, batch: dict) -> dict:
+        """Prepare batch for loss plotting. No-op for non-ensemble adapters."""
+        return batch
+
     @abstractmethod
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, Any, str] | tuple[Any, Any, str]]:
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         """Yield (x, y_true, y_pred, tag_suffix) or (sample, recon, tag) per plot sample."""
         ...
 
 
 class ForecasterPlotAdapter(BasePlotAdapter):
-    """Rollout forecaster: multiple loss plots, n_step_output targets per step, multi-step iter."""
+    """Plot Adapter to adapt plots to the rollout set-up of the Forecaster Task.
 
-    @property
-    def output_times(self) -> int:
-        return max(1, self._task.rollout)
+    Handles multiple loss plots, n_step_output targets per step, multi-step iter.
+    """
 
-    def get_init_step(self, rollout_step: int) -> int:
-        del rollout_step
-        return 0
-
-    def get_total_plot_targets(self, output_times: int | None = None) -> int:
-        if output_times is None:
-            output_times = self.output_times
-        return output_times * self._task.n_step_output
-
-    @property
-    def loss_plot_times(self) -> int:
-        return self.output_times
+    def get_init_step(self) -> int:
+        return -1
 
     def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        return self._task.n_step_input + rollout_step * self._task.n_step_output
+        return self._task.num_input_timesteps + rollout_step * self._task.num_output_timesteps
 
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
-        task = self._task
-        max_out_steps = min(task.n_step_output, max_out_steps or task.n_step_output)
-        for rollout_step in range(output_times):
-            init_step = self.get_init_step(rollout_step)
-            x = data[init_step, ...].squeeze()
-            for out_step in range(max_out_steps):
-                truth_idx = rollout_step * task.n_step_output + out_step + 1
-                y_true = data[truth_idx, ...].squeeze()
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        input_time_indices = self._task.get_batch_input_indices()
+
+        input_data = data[input_time_indices, ...]
+
+        x = input_data[self.get_init_step(), ...].squeeze()
+
+        for validation_step_kwargs in self._task.steps("validation"):
+            rollout_step = validation_step_kwargs["rollout_step"]
+            output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
+
+            output_data = data[output_time_indices, ...]
+
+            for out_step in range(self._task.num_output_timesteps):
+                y_true = output_data[out_step, ...].squeeze()
                 y_pred = output_tensor[rollout_step, out_step, ...]
                 y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
                 yield x, y_true, y_pred, f"rstep{rollout_step:02d}_out{out_step:02d}"
 
 
-class DiffusionPlotAdapter(BasePlotAdapter):
-    """Diffusion: inherits from base task (not forecaster), single step, forecaster-like loss/plot layout."""
+class TemporalDownscalerPlotAdapter(BasePlotAdapter):
+    """Plot Adapter for TemporalDownscaler Task.
 
-    @property
-    def output_times(self) -> int:
-        return 1
+    Handles squeezing (1, n_step_output, ...) -> (n_step_output, ...).
+    """
 
-    def get_init_step(self, rollout_step: int) -> int:
-        del rollout_step
+    def get_init_step(self) -> int:
         return 0
 
-    def get_total_plot_targets(self, output_times: int | None = None) -> int:
-        if output_times is None:
-            output_times = self.output_times
-        return output_times * self._task.n_step_output
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        input_time_indices = self._task.get_batch_input_indices()
+        output_time_indices = self._task.get_batch_output_indices()
 
-    @property
-    def loss_plot_times(self) -> int:
-        return 1
+        input_data = data[input_time_indices, ...]
+        output_data = data[output_time_indices, ...]
 
-    def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        return self._task.n_step_input + rollout_step * self._task.n_step_output
-
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
-        del output_times, max_out_steps
-        init_step = self.get_init_step(0)
-        x = data[init_step, ...].squeeze()
-        y_true = data[1, ...].squeeze()
-        y_pred = output_tensor[0, ...]
-        y_pred = y_pred.squeeze() if hasattr(y_pred, "squeeze") else y_pred
-        yield x, y_true, y_pred, "istep01"
-
-
-class InterpolatorPlotAdapter(BasePlotAdapter):
-    """Interpolator: loss-plot batch start at n_step_input, one sample per step."""
-
-    @property
-    def output_times(self) -> int:
-        return len(self._task.interp_times)
-
-    def get_init_step(self, rollout_step: int) -> int:
-        return rollout_step
-
-    def get_loss_plot_batch_start(self, rollout_step: int) -> int:
-        del rollout_step
-        return self._task.n_step_input
-
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, Any, str]]:
-        del max_out_steps
-        for rollout_step in range(output_times):
-            init_step = self.get_init_step(rollout_step)
-            x = data[init_step, ...].squeeze()
-            y_true = data[rollout_step + 1, ...].squeeze()
+        x = input_data[self.get_init_step(), ...].squeeze()
+        for output_step in range(self._task.num_output_timesteps):
+            y_true = output_data[output_step].squeeze()
             pred = (
-                output_tensor[rollout_step, 0]
-                if getattr(output_tensor, "ndim", 0) >= 4
-                else output_tensor[rollout_step]
+                output_tensor[output_step, 0] if getattr(output_tensor, "ndim", 0) >= 4 else output_tensor[output_step]
             )
             y_pred = pred.squeeze() if hasattr(pred, "squeeze") else pred
-            yield x, y_true, y_pred, f"istep{rollout_step + 1:02d}"
-
-
-class InterpolatorMultiOutPlotAdapter(InterpolatorPlotAdapter):
-    """Multi-out interpolator: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
+            yield x, y_true, y_pred, f"istep{output_step + 1:02d}"
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         if getattr(output_tensor, "ndim", 0) == 5 and getattr(output_tensor, "shape", (0,))[0] == 1:
@@ -196,24 +123,60 @@ class InterpolatorMultiOutPlotAdapter(InterpolatorPlotAdapter):
 
 
 class AutoencoderPlotAdapter(BasePlotAdapter):
-    """Autoencoder: single (sample, recon, tag) yield."""
+    """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
-    @property
-    def output_times(self) -> int:
-        return 1
-
-    def get_init_step(self, rollout_step: int) -> int:
-        del rollout_step
-        return 0
-
-    def iter_plot_samples(
-        self,
-        data: Any,
-        output_tensor: Any,
-        output_times: int,
-        max_out_steps: int | None = None,
-    ) -> Iterator[tuple[Any, Any, str]]:
-        del output_times, max_out_steps
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
-        yield sample, recon, "recon"
+        yield sample, sample, recon, "recon"
+
+
+class EnsemblePlotAdapterWrapper(BasePlotAdapter):
+    """Wraps any task-specific adapter, adding ensemble member handling.
+
+    This adapter decorates an inner (task-specific) adapter to handle the
+    extra ensemble dimension present in ensemble training outputs.
+    Batch shape convention: (B, T, E, G, V) where E is ensemble members.
+    """
+
+    def __init__(self, inner: BasePlotAdapter) -> None:
+        self._inner = inner
+        self._task = inner._task
+
+    @property
+    def is_ensemble(self) -> bool:
+        return True
+
+    def get_loss_plot_batch_start(self, **kwargs) -> int:
+        return self._inner.get_loss_plot_batch_start(**kwargs)
+
+    def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
+        return self._inner.prepare_plot_output_tensor(output_tensor)
+
+    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:
+        """Slice ensemble members from dim 2 of the output tensor.
+
+        Parameters
+        ----------
+        tensor : Any
+            Tensor with shape (..., members, grid, vars).
+        members : int | list[int] | None
+            Members to select. None returns all members, int/list selects specific members.
+
+        Returns
+        -------
+        Any
+            Tensor with selected ensemble members.
+        """
+        if members is None:
+            return tensor
+        if not isinstance(members, list):
+            members = [members]
+        return tensor[:, :, members, ...]
+
+    def prepare_loss_batch(self, batch: dict) -> dict:
+        """Squeeze ensemble dim to member 0 for loss plotting."""
+        return {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
+
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor)
