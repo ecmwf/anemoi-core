@@ -27,7 +27,7 @@ def model() -> torch.nn.Module:
     return SubModule()
 
 
-def test_freeze_submodule_by_name(model: torch.nn.Module) -> None:
+def test_freeze_submodule(model: torch.nn.Module) -> None:
     """Test the freeze_submodule_by_name function."""
 
     freeze_submodule_by_name(model, "sequential.0")
@@ -35,3 +35,13 @@ def test_freeze_submodule_by_name(model: torch.nn.Module) -> None:
     assert model.lin1.weight.requires_grad
     assert not model.sequential[0].weight.requires_grad
     assert model.sequential[1].weight.requires_grad
+
+
+def test_freeze_module(model: torch.nn.Module) -> None:
+    """Test the freeze_submodule_by_name function."""
+
+    freeze_submodule_by_name(model, "sequential")
+
+    assert model.lin1.weight.requires_grad
+    assert not model.sequential[0].weight.requires_grad
+    assert not model.sequential[1].weight.requires_grad
