@@ -268,6 +268,7 @@ class ReducedSHT(SHT):
         self,
         grid: str,
         truncation: int | None = None,
+        use_cuda_ring_fft: bool = False,
         use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
@@ -279,6 +280,8 @@ class ReducedSHT(SHT):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_cuda_ring_fft : bool
+            Whether to use the CUDA ring FFT extension for supported reduced grids.
         use_graphed_rfft : bool
             Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
             higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
@@ -312,6 +315,7 @@ class ReducedSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
             use_graphed_rfft=use_graphed_rfft,
         )
 
@@ -332,6 +336,7 @@ class OctahedralSHT(SHT):
         self,
         nlat: int,
         truncation: int | None = None,
+        use_cuda_ring_fft: bool = False,
         use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
@@ -344,6 +349,8 @@ class OctahedralSHT(SHT):
             on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_cuda_ring_fft : bool
+            Whether to use the CUDA ring FFT extension for supported reduced grids.
         use_graphed_rfft : bool
             Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
@@ -354,6 +361,7 @@ class OctahedralSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
             use_graphed_rfft=use_graphed_rfft,
         )
 
@@ -389,11 +397,19 @@ class InverseRegularSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    use_cuda_ring_fft : bool
+        Whether to use the CUDA ring FFT extension for supported reduced grids.
     **kwargs : dict
         Additional keyword arguments (ignored).
     """
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_cuda_ring_fft: bool = False,
+        **kwargs,
+    ) -> None:
         """Initialize InverseRegularSHT.
 
         Parameters
@@ -402,6 +418,8 @@ class InverseRegularSHT(InverseSpectralTransform):
             Number of latitudes.
         truncation : int | None
             Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        use_cuda_ring_rfft : bool
+            Whether to use the CUDA ring FFT extension for supported reduced grids.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -410,7 +428,9 @@ class InverseRegularSHT(InverseSpectralTransform):
         self.nlon = 2 * nlat
         self.lons_per_lat = [self.nlon] * self.nlat
         self._isht = InverseSphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -426,11 +446,19 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    use_cuda_ring_fft : bool
+        Whether to use the CUDA ring FFT extension for supported reduced grids.
     **kwargs : dict
         Additional keyword arguments (ignored).
     """
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_cuda_ring_fft: bool = False,
+        **kwargs,
+    ) -> None:
         """Initialize InverseOctahedralSHT.
 
         Parameters
@@ -439,6 +467,8 @@ class InverseOctahedralSHT(InverseSpectralTransform):
             Number of latitudes.
         truncation : int | None
             Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        use_cuda_ring_fft : bool
+            Whether to use the CUDA ring FFT extension for supported reduced grids.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -449,6 +479,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:

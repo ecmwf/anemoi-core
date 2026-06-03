@@ -60,6 +60,45 @@ def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
     raise ValueError(f"Unknown grid_kind={grid_kind!r}")
 
 
+def test_forward_reuses_converted_weight_buffer() -> None:
+    direct = SphericalHarmonicTransform(lons_per_lat=[16] * 8, truncation=3)
+    x = torch.randn(2, direct.n_grid_points, dtype=torch.float32)
+
+    assert direct.weight.dtype == torch.float64
+    direct(x)
+
+    weight = direct.weight
+    assert weight.dtype == torch.float32
+    assert weight.device == x.device
+
+    direct(x)
+    assert direct.weight is weight
+
+
+def test_inverse_reuses_converted_pct_buffer() -> None:
+    inverse = InverseSphericalHarmonicTransform(lons_per_lat=[16] * 8, truncation=3)
+    x = random_spectral_array(truncation=3, dtype=torch.float32)
+
+    assert inverse.pct.dtype == torch.float64
+    inverse(x)
+
+    pct = inverse.pct
+    assert pct.dtype == torch.float32
+    assert pct.device == x.device
+
+    inverse(x)
+    assert inverse.pct is pct
+
+
+def test_reduced_grouped_rfft_matches_ring_loop() -> None:
+    direct = SphericalHarmonicTransform(lons_per_lat=[4, 6, 4, 8, 6], truncation=2)
+    x = torch.randn(2, direct.n_grid_points, dtype=torch.float32)
+
+    assert direct.rfft_rings.__name__ == "rfft_rings_reduced_auto"
+    torch.testing.assert_close(direct.rfft_rings(x), direct.rfft_rings_reduced_naive(x))
+    torch.testing.assert_close(direct.rfft_rings_reduced_grouped(x), direct.rfft_rings_reduced_naive(x))
+
+
 @pytest.fixture
 def sht_setup(request):
     # Choose GPUs if available
@@ -132,6 +171,23 @@ def test_idempotency_inverse_direct(sht_setup):
         maxdiff = max(maxdiff, torch.abs((ref - got) / ref).max().item())
 
     assert maxdiff < tolerance
+
+
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
+def test_direct_linearity(sht_setup):
+    dtype = sht_setup["dtype"]
+    tolerance = sht_setup["tolerance"]
+    direct = sht_setup["direct"]
+
+    target = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
+    pred = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
+
+    torch.testing.assert_close(
+        direct(pred - target),
+        direct(pred) - direct(target),
+        rtol=tolerance,
+        atol=tolerance,
+    )
 
 
 @pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
