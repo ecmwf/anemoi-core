@@ -61,6 +61,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
+        self.epoch = 0
+
     @cached_property
     def statistics(self) -> dict:
         """Return statistics from all training datasets."""
@@ -134,6 +136,24 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
             label=label,
+            epoch=self.epoch,
+            rollout=len(tuple(self.task.steps(label))),
+        )
+
+    def set_epoch(self, epoch: int) -> None:
+        """Update epoch-dependent dataset state before the next DataLoader worker launch."""
+        self.epoch = epoch
+        if "ds_train" not in self.__dict__:
+            return
+
+        self.ds_train.set_epoch(
+            epoch,
+            rollout=len(tuple(self.task.steps("training"))),
+            relative_date_indices=compute_relative_date_indices(
+                self.task,
+                self.ds_train.data_readers,
+                mode="training",
+            ),
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
@@ -157,7 +177,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=True,
+            persistent_workers=False,
             **extra,
         )
 

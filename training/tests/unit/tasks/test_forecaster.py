@@ -117,6 +117,24 @@ def test_forecaster_steps_reflect_validation_rollout() -> None:
     assert list(task.steps("testing")) == [{"rollout_step": 0}]
 
 
+def test_forecaster_training_offsets_reflect_current_rollout() -> None:
+    """Training offsets grow with the current rollout instead of always using the configured maximum."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
+    )
+
+    assert task.get_offsets(mode="training") == [datetime.timedelta(0), datetime.timedelta(hours=6)]
+    task.on_train_epoch_end(0)
+    assert task.get_offsets(mode="training") == [
+        datetime.timedelta(0),
+        datetime.timedelta(hours=6),
+        datetime.timedelta(hours=12),
+    ]
+
+
 def test_forecaster_metric_name_encodes_rollout_step() -> None:
     """get_metric_name returns a string containing the rollout step index."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
