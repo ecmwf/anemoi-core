@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 
-from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.base import PipelineStage
+from anemoi.training.checkpoint.modifiers.base import ModelModifier
+
+if TYPE_CHECKING:
+    from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
 
 
-class FreezingModifierStage(PipelineStage):
+class FreezingModifierStage(ModelModifier):
     """Freezes specified submodules. Native PipelineStage — full feature port.
 
     Parameters
