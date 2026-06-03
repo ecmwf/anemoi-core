@@ -84,9 +84,11 @@ def _gt_fwd(
     V_ptr,  # [N_src, H, C]
     E_ptr,  # [M, H, C]
     M_ptr,  # [M, H]
+    INV_L_ptr,
     ROW_ptr,  # [M]
     COLPTR_ptr,  # [N_dst+1]
     OUT_ptr,  # [N_dst, H, C]
+    OUT_FP32_ptr,
     N_dst,
     H: tl.constexpr,
     C: tl.constexpr,
@@ -108,16 +110,20 @@ def _gt_fwd(
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
     num_edges = neigh_end - neigh_start
 
+    h_off = tl.arange(0, H_pad)
+    m_off = dst_idx * H + h_off
+
     if num_edges == 0:
         zeros = tl.zeros((H_pad,), dtype=tl.float32)  # m initialised as torch.float32
-        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pad)
-        tl.store(M_off, zeros, mask=H_mask)
-        zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
+        tl.store(M_ptr + m_off, zeros, mask=H_mask)
+        tl.store(INV_L_ptr + m_off, zeros, mask=H_mask)
+        zeros = tl.zeros((H_pad * C_pad,), dtype=tl.float32)
         OUT_off = OUT_ptr + dst_off
-        tl.store(OUT_off, zeros, mask=H_C_mask)
+        tl.store(OUT_FP32_ptr + dst_off, zeros, mask=H_C_mask)
+        tl.store(OUT_off, zeros.to(out_dtype), mask=H_C_mask)
         return
 
-    q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    q = tl.load(Q_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
     acc = tl.zeros((H_pad, C_pad), dtype=tl.float32)  # output accumulator, pending normalization by l_i
     l_i = tl.zeros((H_pad,), dtype=tl.float32)  # sum of attention weights
     m_i = tl.full((H_pad,), value=-float("inf"), dtype=tl.float32)  # running max for stability
@@ -129,14 +135,14 @@ def _gt_fwd(
 
     # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
-        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        e = tl.load(edge_ptr, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
         # src neighbor index: rowptr[e_idx]
         src_idx = tl.load(ROW_ptr + e_idx)
 
         src_off = src_idx * H * C + H_C_off
-        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        k = tl.load(K_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
         k_e = k + e
         v_e = v + e
@@ -161,7 +167,9 @@ def _gt_fwd(
         e_idx += 1
 
     # final normalization: divide by sum of attention weights
-    acc = acc / l_i[:, None]
+    inv_l_i = 1.0 / l_i
+    acc = acc * inv_l_i[:, None]
+    tl.store(OUT_FP32_ptr + dst_off, acc.reshape(H_pad * C_pad), mask=H_C_mask)
     tl.store(
         OUT_ptr + dst_off,
         acc.to(out_dtype).reshape(
@@ -170,12 +178,8 @@ def _gt_fwd(
         mask=H_C_mask,
     )
 
-    # store m_i + log(l_i) for backward
-    m_start = dst_idx * H
-    m_off = m_start + tl.arange(0, H_pad)
-
-    m_i += tl.log(l_i)
     tl.store(M_ptr + m_off, m_i, mask=H_mask)
+    tl.store(INV_L_ptr + m_off, inv_l_i, mask=H_mask)
 
 
 @triton.jit
@@ -184,13 +188,13 @@ def _gt_bwd_dst_pass(
     K_ptr,
     V_ptr,
     E_ptr,
-    OUT_ptr,  # saved forward outputs o_i
-    M_ptr,  # saved m_i + ln l_i
+    M_ptr,  # saved m_i
+    INV_L_ptr,
     ROW_ptr,  # [M] (edge -> src)
     COLPTR_ptr,  # [N_dst + 1]
+    OUT_ptr,  # saved forward outputs o_i
     D_OUT_ptr,  # [N_dst * H * C]
     D_Q_ptr,  # OUT
-    D_ptr,  # [N_dst * H]
     N_dst,
     H: tl.constexpr,
     C: tl.constexpr,
@@ -211,21 +215,22 @@ def _gt_bwd_dst_pass(
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        # store D_j = <d_out, out> = 0 and dQ = 0
-        zeros = tl.zeros((H_pad,), dtype=tl.float32)
-        tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
 
-    d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    out = tl.load(OUT_ptr + dst_off, H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+    out = tl.load(OUT_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
     # D_j = <d_out, out> for one-pass computation of dQ
     Dj = tl.sum(d_out * out, axis=-1)  # [H]
 
-    q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    q = tl.load(Q_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+    m_off = dst_idx * H + tl.arange(0, H_pad)
+    m_j = tl.load(M_ptr + m_off, mask=H_mask, other=float("inf")).to(tl.float32)
+    inv_l_j = tl.load(INV_L_ptr + m_off, mask=H_mask, other=0.0).to(tl.float32)
+    sum_alpha_ke = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    sum_alpha_dalpha_ke = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
@@ -233,32 +238,30 @@ def _gt_bwd_dst_pass(
 
     # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
-        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        e = tl.load(edge_ptr, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
         src = tl.load(ROW_ptr + e_idx)
         src_off = src * H * C + H_C_off
-        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        k = tl.load(K_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         # score and alpha using saved M
-        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        alpha_ij = tl.exp(s_ij - m_j)
+        alpha_ij = tl.exp(s_ij - m_j) * inv_l_j
 
-        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
         ve = v + e
 
         dalpha = tl.sum(d_out * ve, axis=-1)
-        dS = alpha_ij * (dalpha - Dj)
-
-        dq += dS[:, None] * ke * qk_scale
+        alpha_dalpha = alpha_ij * dalpha
+        sum_alpha_ke += alpha_ij[:, None] * ke
+        sum_alpha_dalpha_ke += alpha_dalpha[:, None] * ke
 
         # move to next edge
         edge_ptr += H * C
         e_idx += 1
 
-    # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
+    dq = (sum_alpha_dalpha_ke - Dj[:, None] * sum_alpha_ke) * qk_scale
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
@@ -277,8 +280,9 @@ def _gt_bwd_src_pass(
     ROWPTR_ptr,  # [N_src+1]
     EDGE_IDS_ptr,  # [M] edge id list grouped by src
     EDGE_DST_ptr,  # [M] dst node for each edge
-    D_ptr,  # [N_dst * H] D_j from pass dst-pass
     M_ptr,  # [N_dst * H] saved m_j from fwd
+    INV_L_ptr,
+    OUT_ptr,
     D_OUT_ptr,  # [N_dst * H * C]
     D_K_ptr,  # [N_src * H * C]
     D_V_ptr,  # [N_src * H * C]
@@ -294,7 +298,7 @@ def _gt_bwd_src_pass(
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-    _, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
 
     start = tl.load(ROWPTR_ptr + src_idx)
     end = tl.load(ROWPTR_ptr + src_idx + 1)
@@ -308,8 +312,8 @@ def _gt_bwd_src_pass(
 
     # src-side k, v (shared for all edges)
     src_off = src_idx * H * C + H_C_off
-    k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+    k = tl.load(K_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+    v = tl.load(V_ptr + src_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
     accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
@@ -325,22 +329,23 @@ def _gt_bwd_src_pass(
 
         # get saved tensors for dst node
         dst_off = dst * H * C + H_C_off
-        q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
-        Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
+        q = tl.load(Q_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+        out = tl.load(OUT_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
+        m_off = dst * H + tl.arange(0, H_pad)
+        m_j = tl.load(M_ptr + m_off, mask=H_mask, other=float("inf")).to(tl.float32)
+        inv_l_j = tl.load(INV_L_ptr + m_off, mask=H_mask, other=0.0).to(tl.float32)
 
         e_off = e_idx * H * C + H_C_off
-        e = tl.load(E_ptr + e_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        e = tl.load(E_ptr + e_off, mask=H_C_mask, other=0.0).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
         ve = v + e
 
         # some recomputations from dst-pass
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        alpha_ij = tl.exp(s_ij - m_j)
-        dalpha = tl.sum(d_out * ve, axis=-1)
-        dS = alpha_ij * (dalpha - Dj)
+        alpha_ij = tl.exp(s_ij - m_j) * inv_l_j
+        dS = alpha_ij * tl.sum(d_out * (ve - out), axis=-1)
 
         # per-edge k, v contributions, summing up to per-edge e contribution
         dV_edge = alpha_ij[:, None] * d_out
@@ -407,18 +412,19 @@ class GraphTransformerFunction(torch.autograd.Function):
         N_dst, H, C = q.shape
         out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
         m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+        inv_l = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
         # fix: write output in float32 for backward stability, then cast back to input dtype at the end of forward
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
+        _gt_fwd[(N_dst,)](q, k, v, e, m, inv_l, row, colptr, out_saved, out_saved, N_dst, H, C, tl.float32)
 
         # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+        ctx.save_for_backward(q, k, v, e, out_saved, m, inv_l, row, colptr, rowptr, edge_ids, edge_dst)
         return out_saved.to(q.dtype)
 
     @staticmethod
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+        q, k, v, e, out_saved, m, inv_l, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
@@ -441,14 +447,13 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
-        # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+        # Pass A: destination nodes (computes dQ)
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, m, inv_l, row, colptr, out_saved, d_out, dQ, N_dst, H, C, grad_dtype)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype
+            q, k, v, e, rowptr, edge_ids, edge_dst, m, inv_l, out_saved, d_out, dK, dV, dE, N_src, H, C, grad_dtype
         )
 
         return dQ, dK, dV, dE, None, None
