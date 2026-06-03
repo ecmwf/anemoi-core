@@ -209,6 +209,13 @@ def synced_torch_rng_checkpoint_context() -> tuple[AbstractContextManager[None],
     def forward_context() -> Iterator[None]:
         """Save the synced stream before the original checkpointed forward pass."""
         nonlocal forward_seed, forward_state
+        if _synced_context_depth > 0:
+            msg = (
+                "Activation checkpointing inside an active use_synced_torch_rng() "
+                "context is not supported. Move the use_synced_torch_rng() call "
+                "inside the checkpointed function instead."
+            )
+            raise RuntimeError(msg)
         if _synced_seed is not None and _synced_state is not None:
             forward_seed = _synced_seed
             forward_state = _clone_rng_state(_synced_state)
@@ -266,7 +273,6 @@ def use_synced_torch_rng() -> Iterator[None]:
 
     # Save the default rank-local stream, then temporarily install the synced one.
     default_state = _get_current_rng_state()
-    cuda_devices_at_entry = _cuda_devices_in_state(default_state)
     _set_current_rng_state(_synced_state)
     _synced_context_depth = 1
     try:
@@ -276,11 +282,14 @@ def use_synced_torch_rng() -> Iterator[None]:
         current_state = _get_current_rng_state()
         _synced_context_depth = 0
         _set_current_rng_state(default_state)
-        new_cuda_devices = _cuda_devices_in_state(current_state).difference(cuda_devices_at_entry)
-        if new_cuda_devices:
-            msg = (
-                "CUDA was initialized inside use_synced_torch_rng(). "
-                "Initialize CUDA before entering the synced random context."
-            )
-            raise RuntimeError(msg)
         _synced_state = current_state
+
+    new_cuda_devices = _cuda_devices_in_state(current_state).difference(
+        _cuda_devices_in_state(default_state),
+    )
+    if new_cuda_devices:
+        msg = (
+            "CUDA was initialized inside use_synced_torch_rng(). "
+            "Initialize CUDA before entering the synced random context."
+        )
+        raise RuntimeError(msg)

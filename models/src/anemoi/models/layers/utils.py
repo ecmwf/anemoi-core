@@ -67,6 +67,7 @@ class CheckpointWrapper(nn.Module):
             *args,
             **kwargs,
             use_reentrant=False,
+            preserve_rng_state=True,
             context_fn=synced_torch_rng_checkpoint_context,
         )
 

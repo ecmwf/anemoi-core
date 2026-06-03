@@ -132,6 +132,20 @@ def test_synced_context_restores_and_advances_separate_rng_state() -> None:
     assert torch.allclose(second_synced, combined_synced[4:])
 
 
+def test_nested_synced_context_is_transparent() -> None:
+    seed_torch_rng_sources(42, global_rank=0, reset_synced=True)
+    with use_synced_torch_rng():
+        a = torch.rand(4)
+        with use_synced_torch_rng():
+            b = torch.rand(4)
+
+    seed_torch_rng_sources(42, global_rank=0, reset_synced=True)
+    with use_synced_torch_rng():
+        expected = torch.rand(8)
+
+    torch.testing.assert_close(torch.cat([a, b]), expected)
+
+
 def test_checkpointed_synced_context_preserves_recomputed_rng_state() -> None:
     base_seed = 2468
     x = torch.ones(8, requires_grad=True)
@@ -157,6 +171,18 @@ def test_checkpointed_synced_context_preserves_recomputed_rng_state() -> None:
     torch.testing.assert_close(forward_noise, expected_forward_noise)
     torch.testing.assert_close(x.grad, forward_noise)
     torch.testing.assert_close(next_after_checkpoint, expected_next)
+
+
+def test_checkpoint_inside_synced_context_fails_loudly() -> None:
+    seed_torch_rng_sources(2468, global_rank=0, reset_synced=True)
+    x = torch.ones(8, requires_grad=True)
+
+    def fn(input_tensor: torch.Tensor) -> torch.Tensor:
+        return input_tensor * 2
+
+    with pytest.raises(RuntimeError, match="Activation checkpointing inside an active use_synced_torch_rng"):
+        with use_synced_torch_rng():
+            maybe_checkpoint(fn, True, x)
 
 
 def test_synced_context_fails_if_cuda_starts_inside_context(monkeypatch: pytest.MonkeyPatch) -> None:
