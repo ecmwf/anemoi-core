@@ -239,13 +239,22 @@ class SphericalHarmonicTransform(Module):
             Fourier space field [..., latitude, zonal wavenumber m]
         """
 
+        if x.dtype == torch.float16:
+            cdtype = torch.complex32
+        elif x.dtype == torch.float32:
+            cdtype = torch.complex64
+        elif x.dtype == torch.float64:
+            cdtype = torch.complex128
+        else:
+            raise TypeError(f"SphericalHarmonicTransform:rfft_rings_reduced Unsupported dtype: {x.dtype}")
+
         # Prepare zero-padded output tensor for filling with rfft
         output_tensor = torch.zeros(
             *x.shape[:-1],
             end_lat - start_lat,
             max(self.lons_per_lat) // 2 + 1,
             device=x.device,
-            dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128,
+            dtype=cdtype,
         )
 
         # Do a real-to-complex FFT on each latitude
