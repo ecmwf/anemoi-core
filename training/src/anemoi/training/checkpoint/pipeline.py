@@ -544,9 +544,11 @@ class CheckpointPipeline:
     async def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute the pipeline.
 
-        Main entry point for pipeline execution. Uses async or sync
-        execution based on the async_execution flag. This method can
-        be called from both async and sync contexts.
+        Main entry point for pipeline execution. This method is always
+        asynchronous and delegates to :meth:`execute_async`; await it from
+        an async context, or wrap it with ``asyncio.run`` from a sync one.
+        Use :meth:`execute_sync` if you need a blocking call that manages
+        the event loop for you.
 
         Parameters
         ----------

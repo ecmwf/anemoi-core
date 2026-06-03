@@ -13,9 +13,8 @@ This guide covers configuration of the checkpoint pipeline system.
 The checkpoint pipeline provides a composable system for:
 
 -  **Applying loading strategies** (weights-only, transfer learning,
-   warm/cold start) — implemented today
--  **Loading checkpoints** from various sources — planned (acquisition
-   layer, see below)
+   warm/cold start)
+-  **Loading checkpoints** from various sources (local, HTTP, S3)
 -  **Modifying models** after loading (freezing, adapters) — planned
 
 *****************
@@ -55,33 +54,33 @@ Sources define where to fetch checkpoints.
 
 .. note::
 
-   Source implementations (LocalSource, S3Source, HTTPSource) are not
-   yet part of this package — they are the checkpoint acquisition layer
-   tracked in PR #464 (issue #458). The patterns below show the intended
-   API.
+   Source implementations (LocalSource, S3Source, HTTPSource) are part
+   of this package (checkpoint acquisition layer, PR #464 / issue #458).
+   Wiring the pipeline into the trainer is the Phase 3 integration work
+   (issue #495).
 
-Local Files (Planned)
----------------------
+Local Files
+-----------
+
+``LocalSource`` reads its path from ``checkpoint_path`` on the pipeline
+context rather than from a stage argument:
 
 .. code:: yaml
 
    stages:
      - _target_: anemoi.training.checkpoint.sources.LocalSource
-       path: /path/to/checkpoint.ckpt
 
-Amazon S3 (Planned)
--------------------
+Amazon S3
+---------
 
 .. code:: yaml
 
    stages:
      - _target_: anemoi.training.checkpoint.sources.S3Source
-       bucket: my-models
-       key: checkpoints/model-v1.ckpt
-       region: us-east-1
+       url: s3://my-models/checkpoints/model-v1.ckpt
 
-HTTP/HTTPS (Planned)
---------------------
+HTTP/HTTPS
+----------
 
 .. code:: yaml
 
