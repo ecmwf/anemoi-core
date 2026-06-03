@@ -77,6 +77,7 @@ class BaseGraphModel(nn.Module):
             self.encoded_dataset_names = self.dataset_names
         self.decoding_target_forcing = model_config.model.get("decoding_target_forcing", "prognostic+forcing")
         assert self.decoding_target_forcing in ["prognostic+forcing", "forcings", "none"], f"Invalid value for decoding_target_forcing: {self.decoding_target_forcing}"
+        LOGGER.info(f"Decoding target forcing: {self.decoding_target_forcing}")
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.num_channels = model_config.model.num_channels
