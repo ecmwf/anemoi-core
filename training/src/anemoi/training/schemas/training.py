@@ -252,11 +252,12 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
-    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
-    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
-    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
-    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
+    fcl = "anemoi.training.losses.FourierCorrelationLoss"
+    lsd = "anemoi.training.losses.LogSpectralDistance"
+    logfft2d = "anemoi.training.losses.LogFFT2Distance"
+    spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
+    spectral_l2 = "anemoi.training.losses.SpectralL2Loss"
+    spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
 
 
 class BaseLossSchema(BaseModel):
@@ -409,7 +410,7 @@ class HuberLossSchema(BaseLossSchema):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
 
     class Config(BaseModel.Config):
@@ -427,11 +428,12 @@ def _loss_discriminator(v: Any) -> str:
     if target == "anemoi.training.losses.CRPS":
         return "crps"
     if target in {
-        "anemoi.training.losses.spectral.FourierCorrelationLoss",
-        "anemoi.training.losses.spectral.LogSpectralDistance",
-        "anemoi.training.losses.spectral.LogFFT2Distance",
-        "anemoi.training.losses.spectral.SpectralCRPSLoss",
-        "anemoi.training.losses.spectral.SpectralL2Loss",
+        "anemoi.training.losses.FourierCorrelationLoss",
+        "anemoi.training.losses.LogSpectralDistance",
+        "anemoi.training.losses.LogFFT2Distance",
+        "anemoi.training.losses.SpectralCRPSLoss",
+        "anemoi.training.losses.SpectralL2Loss",
+        "anemoi.training.losses.SpectralAMSELoss",
     }:
         return "spectral"
     if target == "anemoi.training.losses.HuberLoss":
@@ -616,30 +618,53 @@ class BaseTrainingSchema(BaseModel):
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
+class SingleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.SingleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the single training method."
+
+
+class EnsembleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.EnsembleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the ensemble training method."
+
+
+class TransportTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.TransportTraining"] = Field(..., alias="_target_")
+    "Hydra target for the transport training method."
+
+
+def _training_method_discriminator(v: Any) -> str:
+    method = v.get("method", {}) if hasattr(v, "get") else getattr(v, "method", None)
+    return method.get("_target_", "") if hasattr(method, "get") else getattr(method, "target_", "")
+
+
 class SingleTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
-    "Training objective."
+    method: SingleTrainingMethodSchema
+    "Training method."
 
 
 class EnsembleTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
-    "Training objective."
+    method: EnsembleTrainingMethodSchema
+    "Training method."
 
 
-class DiffusionTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
-    "Training objective."
+class TransportTrainingConfigSchema(BaseModel):
+    prediction_mode: Literal["state", "tendency"] = "state"
+    "Endpoint semantics for the transport objective."
+    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
+    "Transport objective used to perturb targets and train the model."
 
 
-class DiffusionTendencyTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTendencyTraining"] = Field(
-        ...,
-        alias="training_method",
-    )
-    "Training objective."
+class TransportTrainingSchema(BaseTrainingSchema):
+    method: TransportTrainingMethodSchema
+    "Training method."
+    transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
+    "Transport training configuration."
 
 
 TrainingSchema = Annotated[
-    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendencyTrainingSchema,
-    Discriminator("training_method"),
+    Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
+    | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
+    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
+    Discriminator(_training_method_discriminator),
 ]
