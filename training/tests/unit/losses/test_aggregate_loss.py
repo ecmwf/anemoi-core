@@ -180,7 +180,7 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
 def test_crps_returns_scalar_tensor(agg_op: str) -> None:
     """TimeAggregateLossWrapper with CRPS should return a scalar for each agg type."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper([agg_op], _make_crps_loss())
     result = wrapper(pred, target)
     assert isinstance(result, torch.Tensor)
@@ -190,7 +190,7 @@ def test_crps_returns_scalar_tensor(agg_op: str) -> None:
 def test_crps_multiple_agg_ops_return_scalar() -> None:
     """Multiple aggregation types should accumulate into a single scalar."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper(["mean", "diff"], _make_crps_loss())
     result = wrapper(pred, target)
     assert result.numel() == 1
@@ -200,7 +200,7 @@ def test_crps_loss_accumulates_across_agg_ops() -> None:
     """Combined CRPS wrapper loss equals average of individual wrapper losses."""
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
     loss_mean = TimeAggregateLossWrapper(["mean"], inner)(pred, target)
     loss_diff = TimeAggregateLossWrapper(["diff"], inner)(pred, target)
@@ -214,7 +214,7 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
     """CRPS wrapper with time-reduction passes keepdim=True aggregated tensors to inner loss."""
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
     if agg_op == "min":
         pred_agg = torch.amin(pred, dim=1, keepdim=True)
@@ -235,7 +235,7 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
 def test_crps_wrapper_forwards_explicit_squash_mode() -> None:
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     pred_mean = torch.mean(pred, dim=1, keepdim=True)
     target_mean = torch.mean(target, dim=1, keepdim=True)
 
@@ -262,15 +262,34 @@ def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None
 
 
 def test_ignore_nans_flag() -> None:
-    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
-    assert wrapper.avg_function is torch.nanmean
-    assert wrapper.sum_function is torch.nansum
+    inner = _make_loss()
+    inner.ignore_nans = True
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.ignore_nans
+
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    pred.requires_grad_()
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target[..., 0, 0] = torch.nan
+
+    result = wrapper(pred, target)
+    assert torch.isfinite(result).all(), "Expected finite loss with ignore_nans=True"
+    (grad,) = torch.autograd.grad(result, pred, retain_graph=True)
+    assert torch.isfinite(grad).all(), "Expected finite gradients"
 
 
 def test_default_no_ignore_nans() -> None:
-    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss())
-    assert wrapper.avg_function is torch.mean
-    assert wrapper.sum_function is torch.sum
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert not wrapper.ignore_nans
+
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    pred.requires_grad_()
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target[..., 0, 0] = torch.nan
+
+    result = wrapper(pred, target)
+    assert torch.isnan(result).any(), "Expected nan in loss with ignore_nans=False"
 
 
 # ---------------------------------------------------------------------------

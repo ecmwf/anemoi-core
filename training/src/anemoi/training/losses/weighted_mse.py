@@ -13,15 +13,16 @@ import logging
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.mse import MSELoss
 
 LOGGER = logging.getLogger(__name__)
 
 
 class WeightedMSELoss(MSELoss):
-    """Weighted MSE loss for use with diffusion models.
+    """Weighted MSE loss for use with EDM diffusion models.
 
-    This loss applies weights to the MSE difference
+    This loss applies weights to the MSE difference.
     """
 
     name: str = "weighted_mse"
@@ -37,36 +38,41 @@ class WeightedMSELoss(MSELoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         """Calculates the weighted MSE loss.
 
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs).
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, lat*lon, n_outputs).
         weights : torch.Tensor | None, optional
-            Weights to apply to the MSE difference, by default None
+            Weights to apply to the MSE difference, by default None.
         squash : bool, optional
-            Average last dimension, by default True
-        scaler_indices: tuple[int,...], optional
-            Indices to subset the calculated scaler with, by default None
-        without_scalers: list[str] | list[int] | None, optional
-            list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
-            By default None
+            Average last dimension, by default True.
+        scaler_indices : tuple[int, ...], optional
+            Indices to subset the calculated scaler with, by default None.
+        without_scalers : list[str] | list[int] | None, optional
+            List of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
+            By default None.
         grid_shard_slice : slice, optional
-            Slice of the grid if x comes sharded, by default None
-        group: ProcessGroup, optional
-            Distributed group to reduce over, by default None
+            Slice of the grid if x comes sharded, by default None.
+        group : ProcessGroup, optional
+            Distributed group to reduce over, by default None.
+        squash_mode : str, optional
+            Squashing strategy, by default "avg".
 
         Returns
         -------
         torch.Tensor
-            Weighted MSE loss
+            Weighted MSE loss.
         """
         is_sharded = grid_shard_slice is not None
+
+        pred, target = self.mask_nans(pred, target)
+
         out = self.calculate_difference(pred, target)
 
         if weights is not None:
