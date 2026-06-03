@@ -13,6 +13,25 @@ Checkpoint sources are responsible for acquiring checkpoint data from
 various locations (local filesystem, S3, HTTP, etc.) and populating
 the pipeline context with the loaded data and detected format.
 
+Source selection is **explicit**: the user picks which source class
+runs by listing its fully-qualified name under ``_target_`` in the
+Hydra checkpoint config. There is no scheme-based dispatcher that
+maps ``s3://`` URLs to ``S3Source`` automatically — that choice is
+left to whoever writes the config, so a future caller could (for
+instance) use ``LocalSource`` against a FUSE-mounted S3 path without
+the pipeline trying to interpret the scheme. Each source's
+``supports(...)`` classmethod exists for opt-in validation, not for
+automatic dispatch.
+
+Concretely, if a user configures ``LocalSource`` with an ``s3://``
+URI (without a FUSE mount), the URI is interpreted as a literal
+local path: ``Path("s3://bucket/key").resolve()`` does not exist on
+disk, so ``LocalSource.process(...)`` raises
+:class:`~anemoi.training.checkpoint.exceptions.CheckpointNotFoundError`.
+Callers that want scheme-based routing should perform their own
+dispatch (e.g., by inspecting ``urlparse(uri).scheme``) before
+selecting a ``_target_``.
+
 Example
 -------
 >>> class LocalSource(CheckpointSource):

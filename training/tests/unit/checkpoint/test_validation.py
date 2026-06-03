@@ -60,9 +60,8 @@ class TestValidateEnvironmentSetup:
 
     def test_optional_deps_are_info_only(self) -> None:
         result = CheckpointPipelineValidator.validate_environment_setup()
-        # Missing safetensors / lightning never becomes an issue.
+        # Missing optional deps (e.g. Lightning) must never become an issue.
         joined = " ".join(result["issues"])
-        assert "safetensors" not in joined.lower()
         assert "lightning" not in joined.lower()
 
     def test_missing_torch_reported_as_issue(self, monkeypatch: pytest.MonkeyPatch) -> None:

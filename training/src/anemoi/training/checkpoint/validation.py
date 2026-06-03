@@ -127,11 +127,10 @@ class CheckpointPipelineValidator:
                     info.append("CUDA not available (CPU only)")
 
         # Optional dependencies — absence is informational, never fatal.
-        for name, label in (("safetensors", "safetensors"), ("pytorch_lightning", "PyTorch Lightning")):
-            if importlib.util.find_spec(name) is None:
-                info.append(f"{label} not installed (optional)")
-            else:
-                info.append(f"{label} available")
+        if importlib.util.find_spec("pytorch_lightning") is None:
+            info.append("PyTorch Lightning not installed (optional)")
+        else:
+            info.append("PyTorch Lightning available")
 
         return {
             "status": _status_from_buckets(issues, warnings),

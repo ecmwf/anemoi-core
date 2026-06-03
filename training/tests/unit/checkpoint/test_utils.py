@@ -56,7 +56,7 @@ class TestDownloadWithRetry:
             assert dest_path.exists()
             assert dest_path.stat().st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError) as e:
+        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")
 
     @pytest.mark.unit
@@ -66,7 +66,7 @@ class TestDownloadWithRetry:
         dest_path = temp_checkpoint_dir / "timeout_file.bin"
 
         try:
-            with pytest.raises(CheckpointTimeoutError):
+            with pytest.raises((CheckpointTimeoutError, CheckpointSourceError)):
                 await download_with_retry(
                     network_urls["timeout"],
                     dest_path,

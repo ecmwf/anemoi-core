@@ -25,12 +25,12 @@ Example
 -------
 >>> from anemoi.training.checkpoint import CheckpointPipeline, CheckpointContext
 >>> from anemoi.training.checkpoint.sources import LocalSource
->>> from anemoi.training.checkpoint.loading import LoadingStrategy
+>>> from anemoi.training.checkpoint.loading import WeightsOnlyLoader
 >>>
 >>> # Build a pipeline manually
 >>> pipeline = CheckpointPipeline([
 ...     LocalSource(path='/tmp/checkpoint.pt'),
-...     # Add a loading strategy here
+...     WeightsOnlyLoader(strict=False),
 ... ])
 >>>
 >>> # Or build from Hydra config
@@ -39,7 +39,7 @@ Example
 ...     'stages': [
 ...         {'_target_': 'anemoi.training.checkpoint.sources.LocalSource',
 ...          'path': '/tmp/checkpoint.pt'},
-...         {'_target_': 'anemoi.training.checkpoint.loading.LoadingStrategy',
+...         {'_target_': 'anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader',
 ...          'strict': False}
 ...     ]
 ... })
