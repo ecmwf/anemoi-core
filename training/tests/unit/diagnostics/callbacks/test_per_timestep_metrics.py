@@ -59,7 +59,7 @@ def _make_pl_module(
     pl_module = MagicMock()
 
     pred = torch.randn(BS, n_timesteps, n_ens, n_grid, n_var)
-    target = torch.randn(BS, n_timesteps, n_grid, n_var)
+    target = torch.randn(BS, n_timesteps, 1, n_grid, n_var)
 
     # task.get_inputs returns input dict
     pl_module.task.get_inputs.return_value = {"data": torch.randn(BS, 2, n_grid, n_var)}
@@ -70,9 +70,7 @@ def _make_pl_module(
     pl_module.return_value = {"data": pred}
 
     # task.get_targets returns targets
-    y_full = {"data": target.unsqueeze(2)}  # add ens dim for _collapse_ens_dim
-    pl_module.task.get_targets.return_value = y_full
-    pl_module._collapse_ens_dim.return_value = {"data": target}
+    pl_module.task.get_targets.return_value = {"data": target}
 
     # No ensemble comm group (single GPU case)
     pl_module.ens_comm_subgroup = None
