@@ -263,9 +263,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
             # Compute encoder edges at model level
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                encoder_edge_attr,
+                encoder_edge_index,
+                enc_edge_shard_sizes,
+            ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 src_coords=dataset_coords,
                 dst_coords=None,
@@ -328,9 +330,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_skip_dict[src_hidden_name] = x_latent
 
             # Compute edges for downscale mapper
-            downscale_edge_attr, downscale_edge_index, ds_edge_shard_sizes = self.downscale_graph_providers[
-                src_hidden_name
-            ].get_edges(
+            (
+                downscale_edge_attr,
+                downscale_edge_index,
+                ds_edge_shard_sizes,
+            ) = self.downscale_graph_providers[src_hidden_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
@@ -354,7 +358,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Processing hidden-most level
         # Compute edges for main processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
+        (
+            processor_edge_attr,
+            processor_edge_index,
+            proc_edge_shard_sizes,
+        ) = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
@@ -380,9 +388,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             dst_hidden_name = self._graph_name_hidden[i - 1]
 
             # Compute edges for upscale mapper
-            upscale_edge_attr, upscale_edge_index, us_edge_shard_sizes = self.upscale_graph_providers[
-                src_hidden_name
-            ].get_edges(
+            (
+                upscale_edge_attr,
+                upscale_edge_index,
+                us_edge_shard_sizes,
+            ) = self.upscale_graph_providers[src_hidden_name].get_edges(
                 batch_size=batch_size,
                 src_coords=None,
                 dst_coords=batch.node_coords(dataset_name),
@@ -436,7 +446,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_out_dict = {}
         for dataset_name in dataset_names:
             # Compute decoder edges
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
+            (
+                decoder_edge_attr,
+                decoder_edge_index,
+                dec_edge_shard_sizes,
+            ) = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 

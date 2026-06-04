@@ -302,9 +302,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
             # Compute encoder edges at model level
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                encoder_edge_attr,
+                encoder_edge_index,
+                enc_edge_shard_sizes,
+            ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 src_coords=dataset_coords,
                 dst_coords=None,
@@ -361,9 +363,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     )
 
                 # Compute edges for downscale mapper
-                downscale_edge_attr, downscale_edge_index, ds_edge_shard_sizes = self.downscale_graph_providers[
-                    src_hidden_name
-                ].get_edges(
+                (
+                    downscale_edge_attr,
+                    downscale_edge_index,
+                    ds_edge_shard_sizes,
+                ) = self.downscale_graph_providers[src_hidden_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
                 )
@@ -399,9 +403,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 dst_hidden_name = self._graph_name_hidden[i - 1]
 
                 # Compute edges for upscale mapper
-                upscale_edge_attr, upscale_edge_index, us_edge_shard_sizes = self.upscale_graph_providers[
-                    src_hidden_name
-                ].get_edges(
+                (
+                    upscale_edge_attr,
+                    upscale_edge_index,
+                    us_edge_shard_sizes,
+                ) = self.upscale_graph_providers[src_hidden_name].get_edges(
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
                 )
@@ -456,9 +462,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             )
 
             # Compute decoder edges
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                decoder_edge_attr,
+                decoder_edge_index,
+                dec_edge_shard_sizes,
+            ) = self.decoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 src_coords=None,
                 dst_coords=dataset_coords,

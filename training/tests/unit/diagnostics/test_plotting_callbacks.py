@@ -11,6 +11,7 @@
 
 from collections.abc import Callable
 from typing import Any
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -27,6 +28,7 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapt
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
 # Suite of Unit Tests for Plotting Callbacks
@@ -240,6 +242,31 @@ def _identity_post_processor() -> Callable[[torch.Tensor | Any], torch.Tensor | 
     return _call
 
 
+class _IdentityProcessor:
+    """Shape-preserving processor with the small API used by plotting callbacks."""
+
+    processors: ClassVar[dict] = {}
+
+    def __call__(self, x, in_place=False) -> torch.Tensor | Any:
+        del in_place
+        return x.clone() if isinstance(x, torch.Tensor) else x
+
+    def cpu(self) -> "_IdentityProcessor":
+        return self
+
+
+def _step_output(
+    predictions: list[dict[str, torch.Tensor]],
+    plot_kwargs: dict[str, Any] | None = None,
+) -> TrainingStepOutput:
+    return TrainingStepOutput(
+        loss=torch.tensor(0.0),
+        metrics={},
+        predictions=predictions,
+        plot_kwargs={} if plot_kwargs is None else plot_kwargs,
+    )
+
+
 # ---- BasePlotAdditionalMetrics.process: input/output shapes ----
 
 
@@ -264,9 +291,8 @@ def test_process_forecaster_output_shapes():
         nlatlon=nlatlon,
     )
     batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
-    # outputs: (loss, [pred_0, pred_1, ...]); each pred[dataset] (bs, n_step_output, ens, latlon, nvar)
-    outputs = (
-        torch.tensor(0.0),
+    # each pred[dataset] shape is (bs, n_step_output, ens, latlon, nvar)
+    outputs = _step_output(
         [
             {"data": torch.randn(batch_size, n_step_output, n_ens, nlatlon, nvar)},
             {"data": torch.randn(batch_size, n_step_output, n_ens, nlatlon, nvar)},
@@ -281,6 +307,39 @@ def test_process_forecaster_output_shapes():
     assert data.shape == (1 + total_targets + 1, n_ens, nlatlon, nvar), data.shape
     # output_tensor: (output_times, n_step_output, n_ens, nlatlon, nvar) after mask
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
+
+
+def test_plot_sample_uses_auxiliary_output_from_validation_output():
+    """PlotSample forwards auxiliary output from validation metadata."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data"],
+    )
+
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
+    pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
+    conditioned_target = {"data": torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0)}
+
+    batch = {"data": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
+    output = _step_output(
+        [{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}],
+        plot_kwargs={"auxiliary_output": conditioned_target},
+    )
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+
+    callback.plot = MagicMock()
+    callback.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+
+    plotted_output = callback.plot.call_args.args[3]
+    plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
+    torch.testing.assert_close(plotted_output.predictions[0]["data"], output.predictions[0]["data"])
+    torch.testing.assert_close(plotted_auxiliary["data"], conditioned_target["data"])
+    assert plotted_output.plot_kwargs == {}
 
 
 def test_process_time_interpolator_output_shapes():
@@ -299,8 +358,7 @@ def test_process_time_interpolator_output_shapes():
     n_time = 1 + total_targets + 1  # 4 time steps in the batch
 
     batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
             {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
@@ -331,8 +389,7 @@ def test_process_temporal_downscaler_multi_out_squeeze():
     batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
     # Simulate multi-out: each output (1, 1, 1, nlatlon, nvar) so cat gives (2, 1, 1, nlatlon, nvar);
     # after squeeze(0) we get (2, 1, nlatlon, nvar)
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)},
             {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)},
@@ -421,8 +478,7 @@ def test_plot_loss_temporal_downscaler():
     batch_size, nlatlon = 2, 10
     n_time = 4
     batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
@@ -448,8 +504,8 @@ def test_plot_loss_temporal_downscaler():
         assert mock_output_figure.call_count == 1
 
 
-def test_plot_loss_diffusion():
-    """PlotLoss._plot with diffusion (forecaster, output_times=1) produces one figure."""
+def test_plot_loss_single_step_transport():
+    """PlotLoss._plot with a one-step transport model produces one figure."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
@@ -477,8 +533,7 @@ def test_plot_loss_diffusion():
     n_time = n_step_input + n_step_output + 1
     batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     # Single output (no rollout)
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}],
     )
     callback.loss = {"data": MSELoss()}
@@ -503,7 +558,7 @@ def test_plot_loss_diffusion():
             batch_idx=0,
             epoch=0,
         )
-        # Diffusion has output_times=1, so one figure
+        # One-step transport models have output_times=1, so one figure.
         assert mock_output_figure.call_count == 1
 
 
@@ -538,8 +593,7 @@ def test_plot_loss_forecaster():
     n_time = n_step_input + output_times * n_step_output + 1
     batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
     # One prediction per rollout step
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
     )
     callback.loss = {"data": MSELoss()}
@@ -587,8 +641,7 @@ def test_plot_spectrum_temporal_downscaler():
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
@@ -635,8 +688,7 @@ def test_plot_spectrum_forecaster():
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(rollout_steps)],
     )
     trainer = MagicMock()
@@ -678,8 +730,7 @@ def test_plot_histogram_temporal_downscaler():
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
@@ -726,8 +777,7 @@ def test_plot_histogram_forecaster():
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
-    outputs = (
-        torch.tensor(0.0),
+    outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(validation_rollout)],
     )
     trainer = MagicMock()
@@ -875,6 +925,47 @@ def test_plots_plot_predicted_multilevel_flat_sample_returns_figure():
     plt.close(fig)
 
 
+def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
+    """plot_predicted_multilevel_flat_sample can add the corrupted-target panel."""
+    import matplotlib.pyplot as plt
+
+    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+
+    parameters = {0: ("t2m", False), 1: ("tp", True)}
+    nlatlon, nvar = 12, 2
+    latlons = np.stack(
+        [np.linspace(50, 55, nlatlon), np.linspace(0, 5, nlatlon)],
+        axis=1,
+    )
+    rng = np.random.default_rng()
+    x = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_true = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_pred = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    auxiliary = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+
+    fig = plot_predicted_multilevel_flat_sample(
+        parameters,
+        7,
+        latlons,
+        0.5,
+        x,
+        y_true,
+        y_pred,
+        auxiliary=auxiliary,
+        auxiliary_label="corrupted targets",
+        datashader=False,
+    )
+
+    assert fig is not None
+    plot_titles = [ax.get_title() for ax in fig.axes]
+    assert any(title == "t2m corrupted targets" for title in plot_titles)
+    assert any(title == "tp corrupted targets" for title in plot_titles)
+    assert "tp increment [pred - input]" not in plot_titles
+    assert "tp persist err" not in plot_titles
+    fig.clear()
+    plt.close(fig)
+
+
 # Ensemble plot tests
 
 
@@ -932,7 +1023,7 @@ def test_ensemble_plot_adapter_select_members():
 
 
 def test_ensemble_plot_adapter_prepare_loss_batch():
-    """Test EnsemblePlotAdapterWrapper.prepare_loss_batch squeezes to member 0."""
+    """Test EnsemblePlotAdapterWrapper.prepare_loss_batch keeps ensemble shape."""
     task = MagicMock()
     inner = ForecasterPlotAdapter(task)
     adapter = EnsemblePlotAdapterWrapper(inner)
@@ -940,8 +1031,8 @@ def test_ensemble_plot_adapter_prepare_loss_batch():
     batch = {"data": torch.randn(2, 5, 3, 100, 5)}  # (batch, time, members, grid, vars)
     result = adapter.prepare_loss_batch(batch)
 
-    assert result["data"].shape == (2, 5, 100, 5)
-    assert torch.equal(result["data"], batch["data"][:, :, 0, :, :])
+    assert result["data"].shape == (2, 5, 3, 100, 5)
+    assert torch.equal(result["data"], batch["data"])
 
 
 def test_ensemble_plot_adapter_delegates_to_inner():

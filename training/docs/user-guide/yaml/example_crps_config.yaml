@@ -27,7 +27,8 @@ data:
 
 # Changes in training
 training:
-  training_method: anemoi.training.train.methods.EnsembleTraining
+  method:
+    _target_: anemoi.training.train.methods.EnsembleTraining
   ensemble_size_per_device: 4
   max_epochs: 20
 

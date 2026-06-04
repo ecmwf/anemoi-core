@@ -371,16 +371,18 @@ class BaseGraphModel(nn.Module):
             implementations unpack ``batch.data`` and ``batch.coordinates`` at the
             top of the method.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        **kwargs
+            Additional model-specific arguments.
 
         Returns
         -------
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if
-            the corresponding input dataset is sharded)
+            the corresponding input dataset is sharded).
         """
         pass
 
@@ -397,29 +399,29 @@ class BaseGraphModel(nn.Module):
         """Prediction step for the model.
 
         Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
-        Subclasses can override this for different behavior (e.g., sampling for diffusion models).
+        Subclasses can override this for different behavior, such as transport sampling.
 
         Parameters
         ----------
         batch : torch.Tensor
-            Input batched data (before pre-processing)
-        pre_processors : nn.Module,
-            Pre-processing module
-        post_processors : nn.Module,
-            Post-processing module
-        n_step_input : int,
-            Number of input timesteps
+            Input batched data (before pre-processing).
+        pre_processors : nn.Module
+            Pre-processing module.
+        post_processors : nn.Module
+            Post-processing module.
+        n_step_input : int
+            Number of input timesteps.
         model_comm_group : Optional[ProcessGroup]
-            Process group for distributed training
+            Process group for distributed training.
         gather_out : bool
-            Whether to gather output tensors across distributed processes
+            Whether to gather output tensors across distributed processes.
         **kwargs
-            Additional arguments
+            Additional arguments.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            Model output (after post-processing)
+            Model output (after post-processing).
         """
         with torch.no_grad():
             dataset_names = list(batch.keys())

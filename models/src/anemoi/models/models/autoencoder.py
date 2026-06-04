@@ -175,9 +175,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             )
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                encoder_edge_attr,
+                encoder_edge_index,
+                enc_edge_shard_sizes,
+            ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 src_coords=dataset_coords,
                 dst_coords=None,
@@ -218,7 +220,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             )
 
             # Compute decoder edges using updated latent representation
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
+            (
+                decoder_edge_attr,
+                decoder_edge_index,
+                dec_edge_shard_sizes,
+            ) = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,

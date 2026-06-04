@@ -83,10 +83,32 @@ def test_forecaster_steps_is_single_element() -> None:
 
 def test_forecaster_steps_reflect_rollout_start() -> None:
     """Rollout start=2 produces two steps at construction time."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2})
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2, "maximum": 2})
     assert list(task.steps("training")) == [{"rollout_step": 0}, {"rollout_step": 1}]
-    assert list(task.steps("validation")) == [{"rollout_step": 0}]
+    assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}]
     assert list(task.steps("testing")) == [{"rollout_step": 0}, {"rollout_step": 1}]
+
+
+def test_forecaster_validation_rollout_none_follows_training_rollout() -> None:
+    """Unset validation_rollout follows the current training rollout."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
+    )
+
+    assert list(task.steps("validation")) == [{"rollout_step": 0}]
+    assert task.get_offsets(mode="validation") == [
+        datetime.timedelta(0),
+        datetime.timedelta(hours=6),
+        datetime.timedelta(hours=12),
+        datetime.timedelta(hours=18),
+    ]
+
+    task.on_train_epoch_end(0)
+
+    assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}]
 
 
 def test_forecaster_steps_reflect_validation_rollout() -> None:
