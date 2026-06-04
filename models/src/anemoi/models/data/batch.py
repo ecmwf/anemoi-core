@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 
 import torch
-from torch.utils.data import dataset, default_collate
+from torch.utils.data import default_collate
 
 from anemoi.models.data.dataset_view import SourceView, create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
