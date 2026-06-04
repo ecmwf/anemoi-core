@@ -78,15 +78,14 @@ class PerTimestepMetrics(Callback):
         y_pred = pl_module(x)
 
         # Get targets
-        y_full = pl_module.task.get_targets(batch)
-        y = pl_module._collapse_ens_dim(y_full) if hasattr(pl_module, "_collapse_ens_dim") else y_full
+        y = pl_module.task.get_targets(batch)
 
         batch_size = next(iter(batch.values())).shape[0]
 
         # For each dataset, compute per-timestep metrics
         for dataset_name in y_pred:
             pred = y_pred[dataset_name]  # (bs, time, ens, grid, var)
-            target = y[dataset_name]  # (bs, time, grid, var)
+            target = y[dataset_name]  # (bs, time, ens, grid, var)
 
             n_timesteps = target.shape[TensorDim.TIME]
 
@@ -110,7 +109,7 @@ class PerTimestepMetrics(Callback):
             for t in range(n_timesteps):
                 # Slice single timestep: remove time dim
                 pred_t = pred[:, t : t + 1, :, :, :]  # keep time dim for post-processor
-                target_t = target[:, t : t + 1, :, :]
+                target_t = target[:, t : t + 1, :, :, :]
 
                 pred_t_post = post_processor(pred_t, in_place=False)
                 target_t_post = post_processor(target_t, in_place=False)

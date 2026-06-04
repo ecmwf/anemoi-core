@@ -309,7 +309,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_latent = sum(dataset_latents.values())
 
         # Processor
-        processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
+        (
+            processor_edge_attr,
+            processor_edge_index,
+            proc_edge_shard_sizes,
+        ) = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
@@ -340,7 +344,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             # Compute decoder edges using updated latent representation
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
+            (
+                decoder_edge_attr,
+                decoder_edge_index,
+                dec_edge_shard_sizes,
+            ) = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
