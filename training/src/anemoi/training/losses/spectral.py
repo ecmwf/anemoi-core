@@ -23,6 +23,7 @@ Notes
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 from typing import Literal
 
@@ -172,6 +173,100 @@ class SpectralLoss(BaseLoss):
         # flatten only transformed spatial/spectral dims into one "mode" axis
         spatial_start_dim = x.ndim - 2
         return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
+
+
+class SpectralAMSELoss(SpectralLoss):
+    r"""Adjusted Mean Squared Error (AMSE) loss in spectral domain.
+
+    Implements the AMSE formula from Subich et al. (arXiv:2501.19374, 2025):
+
+    .. math::
+
+        \text{AMSE} = \sum_L \left[
+            \left( \sqrt{S^\text{pred}_L} - \sqrt{S^\text{target}_L} \right)^2
+            + 2 \max\!\left(S^\text{pred}_L,\, S^\text{target}_L\right)
+              \left(1 - \gamma_L \right)
+        \right]
+
+    where
+
+    .. math::
+
+        S_L = \sum_M \left| c_{L,M} \right|^2, \qquad
+        \gamma_L = \frac{
+            \operatorname{Re}\!\left[\sum_M c^\text{pred}_{L,M}
+                \overline{c^\text{target}_{L,M}}\right]
+        }{
+            \sqrt{S^\text{pred}_L}\,\sqrt{S^\text{target}_L} + \varepsilon
+        }.
+
+    The sum over :math:`M` is performed before the nonlinear AMSE computation.
+
+    The physical interpretation of :math:`L` and :math:`M` depends on the
+    spectral transform:
+
+    - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
+      and :math:`M` is the zonal wavenumber, consistent with the original paper.
+      The sum over :math:`M` gives per-total-wavenumber power spectra.
+    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
+      implementations of ``power_spectral_density()`` and
+      ``cross_spectral_density()`` compatible with the AMSE formulation.
+    """
+
+    def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # assert if PSD is defined for the transform, since AMSE relies on it
+        assert hasattr(self.transform, "power_spectral_density") and callable(
+            self.transform.power_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a PSD method"
+        assert hasattr(self.transform, "cross_spectral_density") and callable(
+            self.transform.cross_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
+        self.eps = eps
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
+        **kwargs,
+    ) -> torch.Tensor:
+        del kwargs  # unused
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
+
+        with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+            # transform to spectral domain: [B, T, E, grid, vars] -> [B, T, E, L, M, vars]
+            # don't flatten to modes here since we need to calculate PSD and coherence per-L
+            pred_spec = self.transform.forward(pred)
+            target_spec = self.transform.forward(target)
+
+            # per-L PSD: [B, T, E, L, vars]
+            psd_pred = self.transform.power_spectral_density(pred_spec)
+            psd_target = self.transform.power_spectral_density(target_spec)
+            # cross-spectrum summed over M: [B, T, E, L, vars]
+            cross = self.transform.cross_spectral_density(pred_spec, target_spec)
+
+            amp_pred = torch.sqrt(psd_pred + self.eps)
+            amp_target = torch.sqrt(psd_target + self.eps)
+            coherence = cross / (amp_pred * amp_target + self.eps)
+
+            # per-L AMSE: [B, T, E, L, vars]
+            amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
+
+        result = self.scale(
+            amse_per_l,
+            scaler_indices,
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            grid_shard_slice=grid_shard_slice,
+        )
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class SpectralL2Loss(SpectralLoss):
@@ -365,17 +460,16 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        # → [..., modes, vars]
-        pred_spec = self._to_spectral_flat(pred)
-        tgt_spec = self._to_spectral_flat(target)
+        context = torch.amp.autocast(device_type=pred.device.type, enabled=False) if self.no_autocast else nullcontext()
+        with context:
+            # -> [..., modes, vars]
+            pred_spec = self._to_spectral_flat(pred)
+            tgt_spec = self._to_spectral_flat(target)
 
-        pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
-        tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
-        if self.no_autocast:
-            with torch.amp.autocast(device_type="cuda", enabled=False):
-                crps = self._kernel_crps(pred_spec, tgt_spec)
-        else:
-            crps = self._kernel_crps(pred_spec, tgt_spec)
+            pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
+            tgt_spec = einops.rearrange(tgt_spec, "b t 1 m v -> b t v m 1")
+            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         scaled = self.scale(
