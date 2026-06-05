@@ -87,6 +87,7 @@ class MultiDataset(IterableDataset):
         if relative_date_indices is None:
             return
 
+        # Refresh which sample dates can provide the currently required time steps.
         self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.

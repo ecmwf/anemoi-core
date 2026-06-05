@@ -149,6 +149,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 continue
 
             dataset = self.__dict__[dataset_name]
+            # Store the current rollout length, and refresh the time steps that must
+            # be loaded for it. The task provides both values: steps() gives the rollout
+            # length, and get_offsets() gives the time steps via compute_relative_date_indices().
             dataset.set_epoch(
                 epoch,
                 rollout=len(tuple(self.task.steps(label))),

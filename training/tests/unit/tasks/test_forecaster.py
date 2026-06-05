@@ -97,16 +97,16 @@ def test_forecaster_validation_rollout_none_follows_training_rollout() -> None:
     )
 
     assert list(task.steps("validation")) == [{"rollout_step": 0}]
-    assert task.get_offsets(mode="validation") == [
-        datetime.timedelta(0),
-        datetime.timedelta(hours=6),
-        datetime.timedelta(hours=12),
-        datetime.timedelta(hours=18),
-    ]
+    assert task.get_offsets(mode="validation") == [datetime.timedelta(0), datetime.timedelta(hours=6)]
 
     task.on_train_epoch_end(0)
 
     assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}]
+    assert task.get_offsets(mode="validation") == [
+        datetime.timedelta(0),
+        datetime.timedelta(hours=6),
+        datetime.timedelta(hours=12),
+    ]
 
 
 def test_forecaster_steps_reflect_validation_rollout() -> None:
