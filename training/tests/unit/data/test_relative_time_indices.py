@@ -26,12 +26,12 @@ def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
     dataset = NativeGridDataset.__new__(NativeGridDataset)
     dataset.data = FakeDataset()
 
-    dataset.get_sample(time_indices=[4, 5, 6], grid_shard_indices=slice(0, 5))
+    dataset.get_sample(0, [4, 5, 6], grid_shard_indices=slice(0, 5))
 
     time_index = dataset.data.last_index[0]
     assert isinstance(time_index, list)
 
-    dataset.get_sample(time_indices=slice(4, 7, 1), grid_shard_indices=slice(0, 5))
+    dataset.get_sample(0, slice(4, 7, 1), grid_shard_indices=slice(0, 5))
 
     time_index = dataset.data.last_index[0]
     assert isinstance(time_index, slice)

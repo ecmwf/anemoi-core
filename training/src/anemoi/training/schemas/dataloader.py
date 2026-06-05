@@ -11,6 +11,7 @@
 import datetime
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
@@ -86,20 +87,24 @@ class NativeDatasetSchema(BaseModel):
     "Ending datetime [inclusive] for sample of the dataset."
 
 
-class TrajectorySchema(PydanticBaseModel):
-    """Trajectory configuration schema."""
+class ForecastSchema(PydanticBaseModel):
+    """Forecast (trajectory) dataset configuration schema.
 
-    start: datetime.datetime = Field(example="2020-02-05T12:00:00")
-    "Starting datetime for the trajectory."
-    length: PositiveInt = Field(example=12)
-    "Length of the trajectory in number of time steps."
+    Selects the ForecastDataset reader for a 5-D ``trajectories``-layout
+    dataset. Step- and base-date subsetting are configured through the dataset
+    definition (``dataset_config``) and forwarded to ``open_dataset``.
+    """
+
+    sampling: Literal["all", "non_overlapping"] = Field(default="non_overlapping")
+    "How anchor positions are drawn within each forecast: every valid step ('all') "
+    "or a non-overlapping stride of windows ('non_overlapping')."
 
 
-class TrajectoryDatasetSchema(NativeDatasetSchema):
-    """Dataset configuration schema."""
+class ForecastDatasetSchema(NativeDatasetSchema):
+    """Forecast dataset configuration schema."""
 
-    trajectory: TrajectorySchema | None = Field(default=None)
-    "Trajectory configuration."
+    forecast: ForecastSchema | None = Field(default=None)
+    "Forecast configuration. When present, the ForecastDataset reader is used."
 
 
 class LoaderSet(BaseModel):
@@ -125,11 +130,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    training: DatasetDict[NativeDatasetSchema | ForecastDatasetSchema]
     "Training DatasetSchema."
-    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    validation: DatasetDict[NativeDatasetSchema | ForecastDatasetSchema]
     "Validation DatasetSchema."
-    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    test: DatasetDict[NativeDatasetSchema | ForecastDatasetSchema]
     "Test DatasetSchema."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
