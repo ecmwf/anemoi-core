@@ -720,8 +720,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 row_normalize=bool(config.get("row_normalize", False)),
             )
 
-        # target-grid mode
-        if not ({"num_nearest_neighbours", "grid", "node_builder"} & config.keys()):
+        # target-grid mode: require its signal key here for a clear error, not a deep KeyError.
+        if config.get("num_nearest_neighbours") is None:
             raise ValueError(
                 "projection config must specify 'matrix_path', 'edges_name', or target-grid "
                 "keys ('num_nearest_neighbours' with 'grid' or 'node_builder')"

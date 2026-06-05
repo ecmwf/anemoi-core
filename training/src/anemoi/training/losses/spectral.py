@@ -158,7 +158,10 @@ class SpectralLoss(BaseLoss):
             raise ValueError(msg)
 
     def _apply_nodes_slice(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.index_select(x, -2, torch.arange(*self.nodes_slice.indices(x.size(-2)), device=x.device))
+        # Slice the grid dim as a view, avoiding an explicit index-tensor allocation.
+        index = [slice(None)] * x.ndim
+        index[TensorDim.GRID] = self.nodes_slice
+        return x[tuple(index)]
 
     def _prepare_spatial(self, x: torch.Tensor) -> torch.Tensor:
         x = self._apply_nodes_slice(x)

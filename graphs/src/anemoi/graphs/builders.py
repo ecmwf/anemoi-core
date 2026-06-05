@@ -123,6 +123,14 @@ def build_node_to_node_projection_subgraph(
     if OmegaConf.is_config(config):
         config = OmegaConf.to_container(config, resolve=True)
 
+    missing = [key for key in ("num_nearest_neighbours", "sigma") if config.get(key) is None]
+    if missing:
+        msg = (
+            f"build_node_to_node_projection_subgraph requires config keys {missing}: "
+            "'num_nearest_neighbours' (int) and 'sigma' (float) are mandatory."
+        )
+        raise ValueError(msg)
+
     num_nearest_neighbours = config["num_nearest_neighbours"]
     sigma = config["sigma"]
 
