@@ -21,8 +21,8 @@ import pytest
 import torch
 import zarr
 
-from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import NativeGridDataset
+from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.time_indices import offset_time_indices
