@@ -14,8 +14,7 @@ from abc import abstractmethod
 
 
 class BaseRollout:
-    """
-    `BaseRollout` is an abstract base class for rollout schedulers.
+    """`BaseRollout` is an abstract base class for rollout schedulers.
 
     A rollout scheduler is an object that manages the rollout of a training loop.
 
@@ -51,8 +50,7 @@ class Static(BaseRollout):
     """`Static` is a rollout scheduler that always returns the same rollout value."""
 
     def __init__(self, value: int, **kwargs):
-        """
-        `Static` is a rollout scheduler that always returns the same rollout value.
+        """`Static` is a rollout scheduler that always returns the same rollout value.
 
         Parameters
         ----------

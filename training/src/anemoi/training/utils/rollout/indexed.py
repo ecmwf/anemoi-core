@@ -20,8 +20,7 @@ LOG = logging.getLogger(__name__)
 
 
 class PositionalIndexed(RolloutScheduler):
-    """
-    `PositionalIndexed` retrieves the rollout value from a list of rollouts based on the current epoch or step.
+    """`PositionalIndexed` retrieves the rollout value from a list of rollouts based on the current epoch or step.
 
     Once the list is exhausted, the rollout will remain at the last value.
     """
@@ -33,8 +32,7 @@ class PositionalIndexed(RolloutScheduler):
         step_type: VALID_STEP_TYPES = "epoch",
         **kwargs,
     ):
-        """
-        `PositionalIndexed` retrieves the rollout value from a list of rollouts based on the current epoch or step.
+        """`PositionalIndexed` retrieves the rollout value from a list of rollouts based on the current epoch or step.
 
         Once the list is exhausted, the rollout will remain at the last value.
 
@@ -108,15 +106,13 @@ class StepPositionalIndexed(PositionalIndexed, InterEpochRolloutMixin):
 
 
 class Lookup(RolloutScheduler):
-    """
-    `Lookup` retrieves the rollout value from a dictionary of rollouts based on the current epoch or step.
+    """`Lookup` retrieves the rollout value from a dictionary of rollouts based on the current epoch or step.
 
     It will return the closest key that is less than or equal to the current epoch or step.
     """
 
     def __init__(self, rollouts: dict[int, int], step_type: VALID_STEP_TYPES = "epoch", **kwargs):
-        """
-        `Lookup` retrieves the rollout value from a dictionary of rollouts based on the current epoch or step.
+        """`Lookup` retrieves the rollout value from a dictionary of rollouts based on the current epoch or step.
 
         It will return the closest key that is less than or equal to the current epoch or step.
 

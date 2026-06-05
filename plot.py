@@ -29,9 +29,10 @@ pre = {}
 
 def plot():
     import matplotlib.pyplot as plt
-    plt.plot(list(map(lambda x: x +1, ideal.keys())), list(ideal.values()), label="Ideal")
-    plt.plot(list(map(lambda x: x +1, pre.keys())), list(pre.values()), label="Pre-fix")
-    plt.plot(list(map(lambda x: x +1, post.keys())), list(post.values()), label="Post-fix")
+
+    plt.plot(list(map(lambda x: x + 1, ideal.keys())), list(ideal.values()), label="Ideal")
+    plt.plot(list(map(lambda x: x + 1, pre.keys())), list(pre.values()), label="Pre-fix")
+    plt.plot(list(map(lambda x: x + 1, post.keys())), list(post.values()), label="Post-fix")
     plt.xlabel("Epoch")
     plt.ylabel("it/s")
     plt.yscale("log")
@@ -40,6 +41,8 @@ def plot():
     plt.grid()
     plt.savefig("rollout.png")
 
+
 if __name__ == "__main__":
     import fire
+
     fire.Fire(plot)

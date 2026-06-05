@@ -33,8 +33,7 @@ class Stepped(RolloutScheduler, IncrementMixin):
         step_type: VALID_STEP_TYPES = STEPTYPE.epoch,
         **kwargs,
     ):
-        """
-        `SteppedRollout` is a base rollout scheduler that steps the rollout value at the end of each n steps or epochs.
+        """`SteppedRollout` is a base rollout scheduler that steps the rollout value at the end of each n steps or epochs.
 
         Parameters
         ----------
@@ -108,8 +107,7 @@ class EpochStepped(Stepped):
     """`EpochStepped` is a rollout scheduler that steps the rollout value at the end of each n epochs."""
 
     def __init__(self, minimum: int, maximum: int, every_n_epochs: int = 1, increment: VALID_INCREMENT_TYPE = 1):
-        """
-        `EpochStepped` is a rollout scheduler that steps the rollout value at the end of each n epochs.
+        """`EpochStepped` is a rollout scheduler that steps the rollout value at the end of each n epochs.
 
         Parameters
         ----------
@@ -142,8 +140,7 @@ class StepStepped(Stepped, InterEpochRolloutMixin):
         *,
         adjust_maximum: VALID_INCREMENT_TYPE = 0,
     ):
-        """
-        `StepStepped` is a rollout scheduler that steps the rollout value at the end of each n steps.
+        """`StepStepped` is a rollout scheduler that steps the rollout value at the end of each n steps.
 
         Parameters
         ----------
