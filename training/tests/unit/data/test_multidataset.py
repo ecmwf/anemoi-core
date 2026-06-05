@@ -83,8 +83,12 @@ class TestMultiDataset:
         data_readers = multi_dataset.data_readers
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
-        mocker.patch.object(data_readers["dataset_a"], "compute_anchors", return_value=np.array([[0, 0], [0, 1], [0, 2]]))
-        mocker.patch.object(data_readers["dataset_b"], "compute_anchors", return_value=np.array([[0, 5], [0, 6], [0, 7]]))
+        mocker.patch.object(
+            data_readers["dataset_a"], "compute_anchors", return_value=np.array([[0, 0], [0, 1], [0, 2]]),
+        )
+        mocker.patch.object(
+            data_readers["dataset_b"], "compute_anchors", return_value=np.array([[0, 5], [0, 6], [0, 7]]),
+        )
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)

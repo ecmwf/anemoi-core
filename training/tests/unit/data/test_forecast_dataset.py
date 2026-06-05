@@ -116,7 +116,7 @@ class TestForecastDataset:
         anchors = reader.compute_anchors([0, 1], sampling="all")
         for seq, pos in anchors:
             # the whole window pos..pos+max_offset stays inside one sequence
-            assert 0 <= pos and pos + 1 < reader.sequence_length(seq)
+            assert pos >= 0 and pos + 1 < reader.sequence_length(seq)
 
     def test_missing_base_date_dropped(self, tmp_path) -> None:
         path = make_trajectories_zarr(str(tmp_path / "m.zarr"), missing=(1,))
