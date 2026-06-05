@@ -141,20 +141,30 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
     def set_epoch(self, epoch: int) -> None:
-        """Update epoch-dependent dataset state before the next DataLoader worker launch."""
+        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
         self.epoch = epoch
-        if "ds_train" not in self.__dict__:
-            return
 
-        self.ds_train.set_epoch(
-            epoch,
-            rollout=len(tuple(self.task.steps("training"))),
-            relative_date_indices=compute_relative_date_indices(
-                self.task,
-                self.ds_train.data_readers,
-                mode="training",
-            ),
-        )
+        for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
+            if dataset_name not in self.__dict__:
+                continue
+
+            dataset = self.__dict__[dataset_name]
+            dataset.set_epoch(
+                epoch,
+                rollout=len(tuple(self.task.steps(label))),
+                relative_date_indices=compute_relative_date_indices(
+                    self.task,
+                    dataset.data_readers,
+                    mode=label,
+                ),
+            )
+
+    def _persistent_workers(self) -> bool:
+        """Return whether DataLoader workers can persist across epochs."""
+        rollout = getattr(self.task, "rollout", None)
+        if rollout is None:
+            return True
+        return rollout.epoch_increment == 0 or rollout.step >= rollout.maximum
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
@@ -177,7 +187,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=False,
+            persistent_workers=self._persistent_workers(),
             **extra,
         )
 
