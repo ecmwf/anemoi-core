@@ -354,7 +354,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         if self.latent_skip:
             # Processor skip connection
-            x_latent = x_latent_proc + x_latent
+            x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}
@@ -376,7 +376,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=bse,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
