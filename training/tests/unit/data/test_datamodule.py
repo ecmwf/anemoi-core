@@ -46,7 +46,7 @@ def _make_datamodule(task: Forecaster) -> AnemoiDatasetsDataModule:
     [
         ({"start": 1, "epoch_increment": 1, "maximum": 3}, False),
         ({"start": 1, "epoch_increment": 0, "maximum": 3}, True),
-        ({"start": 3, "epoch_increment": 1, "maximum": 3}, True),
+        ({"start": 3, "epoch_increment": 1, "maximum": 3}, False),
     ],
 )
 def test_persistent_workers_follow_shared_rollout_progression_policy(

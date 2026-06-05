@@ -164,7 +164,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = getattr(self.task, "rollout", None)
         if rollout is None:
             return True
-        return rollout.epoch_increment == 0 or rollout.step >= rollout.maximum
+        # Workers could also be persisted once rollout.step >= rollout.maximum,
+        # but that would make resumed runs behave differently from uninterrupted
+        # runs.
+        return rollout.epoch_increment == 0
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
