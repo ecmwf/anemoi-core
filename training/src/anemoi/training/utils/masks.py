@@ -28,6 +28,11 @@ class BaseMask:
         return {}
 
     @abstractmethod
+    def as_slice(self) -> slice:
+        error_message = "Method `as_slice` must be implemented in subclass."
+        raise NotImplementedError(error_message)
+
+    @abstractmethod
     def apply(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         error_message = "Method `apply` must be implemented in subclass."
         raise NotImplementedError(error_message)
@@ -50,6 +55,12 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
     @property
     def supporting_arrays(self) -> dict:
         return {"output_mask": self.mask.numpy()}
+
+    def as_slice(self) -> slice:
+        n = int(self.mask.sum())
+        first = int(self.mask.int().argmax())
+        assert bool(self.mask[first : first + n].all()), "Currently only contiguous output_masks are supported."
+        return slice(first, first + n)
 
     def broadcast_like(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         assert x.shape[dim] == len(
@@ -142,6 +153,9 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
 class NoOutputMask(BaseMask):
     """No output mask."""
+
+    def as_slice(self) -> slice:
+        return slice(None)
 
     def apply(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
         return x
