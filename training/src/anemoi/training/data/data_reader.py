@@ -71,6 +71,14 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
         msg = "Missing required 'dataset_config' in dataset reader configuration."
         raise ValueError(msg)
 
+    allowed_keys = {"start", "end", "trajectory"}
+    unknown_keys = set(normalized) - allowed_keys
+    if unknown_keys:
+        unknown = ", ".join(sorted(unknown_keys))
+        allowed = ", ".join(sorted({"dataset_config", *allowed_keys}))
+        msg = f"Unknown dataset reader option(s) [{unknown}]. Allowed top-level keys: {allowed}."
+        raise ValueError(msg)
+
     normalized["dataset_config"] = base_dataset_config
     return normalized
 
@@ -305,8 +313,8 @@ class NativeGridDataset(BaseAnemoiReader):
     """
 
 
-class ForecastDataset(BaseAnemoiReader):
-    """Forecast (trajectory) dataset with an explicit lead-step axis.
+class TrajectoryDataset(BaseAnemoiReader):
+    """Trajectory dataset with an explicit lead-step axis.
 
     Wraps a 5-D ``trajectories``-layout dataset opened through
     :func:`anemoi.datasets.open_dataset` (on-disk shape
@@ -404,14 +412,14 @@ class ForecastDataset(BaseAnemoiReader):
 def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create a data reader based on the dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
-    forecast_config = _as_dict(dataset_config.pop("forecast", None))
+    trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
 
-    if forecast_config is not None:
-        LOGGER.info("Creating ForecastDataset...")
+    if trajectory_config is not None:
+        LOGGER.info("Creating TrajectoryDataset...")
         kwargs = {}
-        if isinstance(forecast_config, dict) and forecast_config.get("sampling") is not None:
-            kwargs["sampling"] = forecast_config["sampling"]
-        return ForecastDataset(**dataset_config, **kwargs)
+        if isinstance(trajectory_config, dict) and trajectory_config.get("sampling") is not None:
+            kwargs["sampling"] = trajectory_config["sampling"]
+        return TrajectoryDataset(**dataset_config, **kwargs)
 
     LOGGER.info("Creating NativeGridDataset...")
     return NativeGridDataset(**dataset_config)

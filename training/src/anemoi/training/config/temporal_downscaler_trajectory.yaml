@@ -1,6 +1,6 @@
 defaults:
 - data: zarr
-- dataloader: forecast_native_grid
+- dataloader: trajectory_native_grid
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
@@ -21,20 +21,20 @@ config_validation: True
 #     num_gpus_per_node: 1
 
 # ============
-# Temporal interpolation (downscaling) trained on a 5-D forecast dataset.
+# Temporal interpolation (downscaling) trained on a 5-D trajectory dataset.
 #
-# The ForecastDataset reader (selected by `dataloader: forecast_native_grid`)
+# The TrajectoryDataset reader (selected by `dataloader: trajectory_native_grid`)
 # exposes each forecast initialisation as an independent sequence with the
 # lead-step as the time axis, so interpolation windows are drawn *within* a
 # single forecast and never cross initialisation boundaries.
 #
 # The task interpolates between input steps 6h apart at 1h resolution
 # (task/temporal_downscaler.yaml: input_timestep 6H, output_timestep 1H), so
-# the forecast dataset must have a 1h step frequency.
+# the trajectory dataset must have a 1h step frequency.
 # ============
 
-# The ForecastDataset reader uses the dataset's own step frequency. The
-# analysis `frequency` requested from open_dataset is not used on the forecast
+# The TrajectoryDataset reader uses the dataset's own step frequency. The
+# analysis `frequency` requested from open_dataset is not used on the trajectory
 # path; it is set to the step frequency (1h) so it matches the task resolution.
 data:
   frequency: 1h

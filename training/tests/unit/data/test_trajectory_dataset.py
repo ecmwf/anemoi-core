@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for the 5-D ForecastDataset reader and the (sequence, position) anchor model.
+"""Tests for the 5-D TrajectoryDataset reader and the (sequence, position) anchor model.
 
 These tests build a small on-disk ``trajectories``-layout zarr and open it through
-``anemoi.datasets.open_dataset`` via the ForecastDataset reader, so the full 5-D path
+``anemoi.datasets.open_dataset`` via the TrajectoryDataset reader, so the full 5-D path
 (reader -> anchors -> get_sample) is exercised end to end.
 """
 
@@ -21,7 +21,7 @@ import pytest
 import torch
 import zarr
 
-from anemoi.training.data.data_reader import ForecastDataset
+from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.usable_indices import compute_valid_anchors
@@ -82,14 +82,14 @@ def traj_path(tmp_path) -> str:
     return make_trajectories_zarr(str(tmp_path / "forecast.zarr"))
 
 
-class TestForecastDataset:
-    def test_factory_creates_forecast_dataset(self, traj_path: str) -> None:
-        reader = create_dataset({"dataset_config": {"dataset": traj_path}, "forecast": {"sampling": "all"}})
-        assert isinstance(reader, ForecastDataset)
+class TestTrajectoryDataset:
+    def test_factory_creates_trajectory_dataset(self, traj_path: str) -> None:
+        reader = create_dataset({"dataset_config": {"dataset": traj_path}, "trajectory": {"sampling": "all"}})
+        assert isinstance(reader, TrajectoryDataset)
         assert reader.default_sampling == "all"
 
     def test_metadata_uses_step_axis(self, traj_path: str) -> None:
-        reader = ForecastDataset(dataset=traj_path)
+        reader = TrajectoryDataset(dataset=traj_path)
         assert reader.num_sequences == 4
         assert reader.sequence_length() == 5
         assert reader.frequency == datetime.timedelta(hours=6)
@@ -98,21 +98,21 @@ class TestForecastDataset:
         assert reader.statistics_tendencies("6h") is None
 
     def test_anchors_default_non_overlapping(self, traj_path: str) -> None:
-        reader = ForecastDataset(dataset=traj_path)  # default sampling = non_overlapping
+        reader = TrajectoryDataset(dataset=traj_path)  # default sampling = non_overlapping
         anchors = reader.compute_anchors([0, 1, 2])
         # window = 3, each of 4 inits yields one anchor at position 0 (1 non-overlapping window fits in 5 steps)
         assert np.array_equal(anchors[:, 0], np.arange(4))
         assert np.array_equal(anchors[:, 1], np.zeros(4))
 
     def test_anchors_all_sampling(self, traj_path: str) -> None:
-        reader = ForecastDataset(dataset=traj_path)
+        reader = TrajectoryDataset(dataset=traj_path)
         anchors = reader.compute_anchors([0, 1, 2], sampling="all")
         # positions 0, 1, 2 valid in each of 4 inits (5 steps, max offset 2) -> 12 anchors
         assert anchors.shape == (12, 2)
         assert set(np.unique(anchors[:, 1])) == {0, 1, 2}
 
     def test_anchors_never_cross_initialisation(self, traj_path: str) -> None:
-        reader = ForecastDataset(dataset=traj_path)
+        reader = TrajectoryDataset(dataset=traj_path)
         anchors = reader.compute_anchors([0, 1], sampling="all")
         for seq, pos in anchors:
             # the whole window pos..pos+max_offset stays inside one sequence
@@ -120,13 +120,13 @@ class TestForecastDataset:
 
     def test_missing_base_date_dropped(self, tmp_path) -> None:
         path = make_trajectories_zarr(str(tmp_path / "m.zarr"), missing=(1,))
-        reader = ForecastDataset(dataset=path)
+        reader = TrajectoryDataset(dataset=path)
         assert reader.missing_sequences == {1}
         anchors = reader.compute_anchors([0, 1], sampling="all")
         assert 1 not in set(anchors[:, 0])  # missing init produces no anchors
 
     def test_get_sample_values_and_shape(self, traj_path: str) -> None:
-        reader = ForecastDataset(dataset=traj_path)
+        reader = TrajectoryDataset(dataset=traj_path)
         rel = [0, 1, 2]
         seq = 2
         positions = offset_time_indices(0, rel)
@@ -141,7 +141,7 @@ class TestForecastDataset:
         assert np.allclose(sample.numpy(), expected)
 
     def test_get_sample_grid_shard(self, traj_path: str) -> None:
-        reader = ForecastDataset(dataset=traj_path)
+        reader = TrajectoryDataset(dataset=traj_path)
         sample = reader.get_sample(0, [0, 1], grid_shard_indices=slice(0, 4))
         assert tuple(sample.shape) == (2, 1, 4, 3)
 
@@ -170,7 +170,7 @@ class TestAnchorModelAnalysis:
 
 
 def test_compute_valid_anchors_intersection(traj_path: str) -> None:
-    reader = ForecastDataset(dataset=traj_path)
+    reader = TrajectoryDataset(dataset=traj_path)
     # Two readers over the same forecast dataset with different windows.
     anchors = compute_valid_anchors(
         {"a": reader, "b": reader},

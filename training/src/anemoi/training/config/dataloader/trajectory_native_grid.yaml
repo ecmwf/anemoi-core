@@ -37,7 +37,7 @@ limit_batches:
 # forecast step is the within-sequence position, so a sample never crosses an
 # initialisation boundary.
 #
-# - The ``forecast`` block selects the ForecastDataset reader. ``sampling``
+# - The ``trajectory`` block selects the TrajectoryDataset reader. ``sampling``
 #   controls how anchor positions are drawn within each forecast:
 #     * non_overlapping : a stride of windows so samples never share a step
 #     * all             : every valid step position
@@ -56,7 +56,7 @@ training:
         drop: []
       start: null
       end: 2020
-      forecast:
+      trajectory:
         sampling: non_overlapping
 
 validation:
@@ -67,7 +67,7 @@ validation:
         drop: []
       start: 2021
       end: 2021
-      forecast:
+      trajectory:
         sampling: non_overlapping
 
 test:
@@ -78,5 +78,5 @@ test:
         drop: []
       start: 2022
       end: null
-      forecast:
+      trajectory:
         sampling: non_overlapping

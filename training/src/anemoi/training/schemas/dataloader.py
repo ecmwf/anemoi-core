@@ -87,10 +87,10 @@ class NativeDatasetSchema(BaseModel):
     "Ending datetime [inclusive] for sample of the dataset."
 
 
-class ForecastSchema(PydanticBaseModel):
-    """Forecast (trajectory) dataset configuration schema.
+class TrajectorySchema(PydanticBaseModel):
+    """Trajectory dataset configuration schema.
 
-    Selects the ForecastDataset reader for a 5-D ``trajectories``-layout
+    Selects the TrajectoryDataset reader for a 5-D ``trajectories``-layout
     dataset. Step- and base-date subsetting are configured through the dataset
     definition (``dataset_config``) and forwarded to ``open_dataset``.
     """
@@ -100,11 +100,11 @@ class ForecastSchema(PydanticBaseModel):
     "or a non-overlapping stride of windows ('non_overlapping')."
 
 
-class ForecastDatasetSchema(NativeDatasetSchema):
-    """Forecast dataset configuration schema."""
+class TrajectoryDatasetSchema(NativeDatasetSchema):
+    """Trajectory dataset configuration schema."""
 
-    forecast: ForecastSchema | None = Field(default=None)
-    "Forecast configuration. When present, the ForecastDataset reader is used."
+    trajectory: TrajectorySchema | None = Field(default=None)
+    "Trajectory configuration. When present, the TrajectoryDataset reader is used."
 
 
 class LoaderSet(BaseModel):
@@ -130,11 +130,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetDict[NativeDatasetSchema | ForecastDatasetSchema]
+    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Training DatasetSchema."
-    validation: DatasetDict[NativeDatasetSchema | ForecastDatasetSchema]
+    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Validation DatasetSchema."
-    test: DatasetDict[NativeDatasetSchema | ForecastDatasetSchema]
+    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Test DatasetSchema."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
