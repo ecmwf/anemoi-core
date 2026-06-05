@@ -9,7 +9,10 @@
 
 
 import logging
+from collections import defaultdict
 from functools import cached_property
+from multiprocessing import Manager
+from typing import Literal
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -60,6 +63,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
+
+        self._mp_manager = Manager()
+        self._relative_date_indices_values: dict[str, dict] = defaultdict(dict)
+        self._data_readers: dict[str, dict] = {}
 
     @cached_property
     def statistics(self) -> dict:
@@ -120,6 +127,24 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Create multi-dataset for testing."""
         return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
 
+    def _get_relative_date_indices(self, data_readers: dict, label: str) -> dict[str, list[int]]:
+        """Compute relative date indices for each dataset based on the task and data readers."""
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+
+        if label not in self._relative_date_indices_values:
+            self._relative_date_indices_values[label] = {}
+
+        for ds in relative_date_indices:
+            if ds in self._relative_date_indices_values[label]:
+                val = self._relative_date_indices_values[label][ds]
+                val[:] = relative_date_indices[ds]
+            else:
+                val = self._mp_manager.list(relative_date_indices[ds])
+
+            self._relative_date_indices_values[label][ds] = val
+
+        return self._relative_date_indices_values[label]
+
     def _get_dataset(
         self,
         config: dict[str, dict],
@@ -127,7 +152,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
-        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        self._data_readers[label] = data_readers
+
+        relative_date_indices = self._get_relative_date_indices(data_readers, label)
 
         return MultiDataset(
             data_readers=data_readers,
@@ -135,6 +162,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             label=label,
         )
+
+    def recalculate_relative_date_indices(
+        self,
+        *,
+        datasets: list[Literal["training", "validation", "test"]] | None = None,
+    ) -> None:
+        """Invalidate cached datasets, allows for recalculation of `relative_date_indices` during training."""
+        if datasets is None:
+            datasets = ["training", "validation", "test"]
+        for ds in datasets:
+            if ds not in self._data_readers:
+                msg = f"No data readers found for dataset '{ds}' when recalculating relative date indices."
+                raise ValueError(msg)
+            self._get_relative_date_indices(self._data_readers[ds], ds)
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
@@ -172,6 +213,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
+
+    def teardown(self, stage: str | None = None) -> None:
+        """Shut down the multiprocessing manager to clean up the background server process."""
+        if hasattr(self, "_mp_manager") and self._mp_manager is not None:
+            self._mp_manager.shutdown()
+            self._mp_manager = None
+        super().teardown(stage)
 
     def fill_metadata(self, metadata: dict) -> None:
         """Fill metadata dictionary with dataset metadata."""

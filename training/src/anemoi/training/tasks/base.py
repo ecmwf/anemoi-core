@@ -11,6 +11,7 @@ import datetime
 import logging
 from abc import ABC
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -18,6 +19,9 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.utils.time_indices import normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
 
 class BaseTask(ABC):
@@ -184,7 +188,7 @@ class BaseTask(ABC):
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 
-    def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
+    def on_train_epoch_end(self, current_epoch: int, datamodule: "AnemoiDatasetsDataModule") -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
 
     def fill_metadata(self, md_dict: dict) -> None:

@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import random
+from collections.abc import Generator
 from functools import cached_property
 
 import numpy as np
@@ -61,15 +62,48 @@ class MultiDataset(IterableDataset):
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
+        self._relative_date_indices = relative_date_indices
 
-        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
-
-        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
+        # Cache for derived properties that depend on _relative_date_indices
+        self._cached_relative_date_indices: dict[str, TimeIndices] | None = None
+        self._cached_valid_date_indices: np.ndarray | None = None
+        self._cached_snapshot: tuple | None = None
 
         self._lazy_init_model_and_reader_group_info()
+
+    def _snapshot_relative_date_indices(self) -> tuple:
+        """Create a hashable snapshot of the current relative date indices for cache invalidation."""
+        return tuple(
+            (name, (indices.start, indices.stop, indices.step) if isinstance(indices, slice) else tuple(indices))
+            for name, indices in self._relative_date_indices.items()
+        )
+
+    def _refresh_cache_if_needed(self) -> None:
+        """Refresh cached derived properties if the underlying relative date indices have changed."""
+        snapshot = self._snapshot_relative_date_indices()
+        if snapshot != self._cached_snapshot:
+            self._cached_snapshot = snapshot
+            self._cached_relative_date_indices = {
+                name: normalize_time_indices(indices) for name, indices in self._relative_date_indices.items()
+            }
+            self._cached_valid_date_indices = compute_valid_data_indices(
+                self.data_readers,
+                self._cached_relative_date_indices,
+            )
+
+    @property
+    def relative_date_indices(self) -> dict[str, TimeIndices]:
+        """Return relative date indices for all data readers, normalised."""
+        self._refresh_cache_if_needed()
+        assert self._cached_relative_date_indices is not None
+        return self._cached_relative_date_indices
+
+    @property
+    def valid_date_indices(self) -> np.ndarray:
+        """Return valid date indices, recomputed when relative date indices change."""
+        self._refresh_cache_if_needed()
+        assert self._cached_valid_date_indices is not None
+        return self._cached_valid_date_indices
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -90,10 +124,6 @@ class MultiDataset(IterableDataset):
         self.ens_comm_group_id = 0
 
         self.shard_sizes = None
-
-        # additional state vars (lazy init)
-        self.n_samples_per_worker = 0
-        self.chunk_index_range: np.ndarray | None = None
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all data readers."""
@@ -238,24 +268,32 @@ class MultiDataset(IterableDataset):
             self.sample_comm_num_groups,
         )
 
-    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Initialize all data readers for this worker."""
-        self.worker_id = worker_id
-
+    def calculate_low_high_index_range(
+        self,
+        n_workers: int,
+        worker_id: int,
+        valid_date_indices: np.ndarray,
+    ) -> tuple[int, int]:
+        """Calculate the number of samples per worker based on the valid date indices and the number of workers."""
         # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
         # note that we need even splits here across DDP ranks, so we might throw away some samples
-        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
+        shard_size = len(valid_date_indices) // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
-
-        self.n_samples_per_worker = shard_size // n_workers
 
         # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
         low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
 
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
+        return low, high
+
+    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
+        """Initialize all data readers for this worker."""
+        self.worker_id = worker_id
+        self.n_workers = n_workers
+
+        low, high = self.calculate_low_high_index_range(self.n_workers, self.worker_id, self.valid_date_indices)
 
         LOGGER.info(
-            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
+            "Worker %d (pid %d, global_rank %d, model comm group %d) has low/high range %d / %d",
             worker_id,
             os.getpid(),
             self.global_rank,
@@ -311,7 +349,7 @@ class MultiDataset(IterableDataset):
 
         return x
 
-    def __iter__(self) -> dict[str, torch.Tensor]:
+    def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Return an iterator that yields dictionaries of synchronized samples.
 
         Returns
@@ -322,14 +360,23 @@ class MultiDataset(IterableDataset):
         """
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization
+        valid_date_indices = self.valid_date_indices
+
+        low, high = self.calculate_low_high_index_range(
+            self.n_workers,
+            self.worker_id,
+            valid_date_indices,
+        )  # Ensure it is up to date if `relative_date_indices` has been changed
+        chunk_index_range = np.arange(low, high, dtype=np.uint32)
+
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
+                valid_date_indices,
+                size=len(valid_date_indices),
                 replace=False,
-            )[self.chunk_index_range]
+            )[chunk_index_range]
         else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
+            shuffled_chunk_indices = valid_date_indices[chunk_index_range]
 
         LOGGER.debug(
             "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
