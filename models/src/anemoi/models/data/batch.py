@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from torch.utils.data import default_collate
 
-from anemoi.models.data.dataset_view import SourceView, create_source_view
+from anemoi.models.data.source_view import SourceView, create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
 
 LOGGER = logging.getLogger(__name__)
@@ -125,6 +125,19 @@ class Batch:
     layouts: dict[str, TensorLayout] = field(default_factory=dict)
     variables: dict[str, list[str]] = field(default_factory=dict)
     statistics: dict[str, np.ndarray] = field(default_factory=dict)
+
+    @property
+    def size(self) -> int:
+        """Number of samples (batch size) in this batch."""
+        batch_sizes = {}
+        for name, view in self.data.items():
+            if isinstance(view, list):
+                batch_sizes[name] = len(view)
+            else:
+                batch_sizes[name] = view.shape[self.layouts[name].batch]
+
+        assert len(set(batch_sizes.values())) == 1, f"Inconsistent batch sizes across datasets: {batch_sizes}"
+        return next(iter(batch_sizes.values()))
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -328,20 +341,24 @@ class Batch:
 
     def apply(
         self,
-        func: Mapping[str, Callable[..., torch.Tensor]] | Callable[..., torch.Tensor],
+        func: Mapping[str, Callable[..., SourceView]] | Callable[..., SourceView],
         **kwargs: Any
     ) -> "Batch":
-        """Return a new batch with one processor applied per dataset(.data).
-        The coordinates, timedeltas and metadata are shared with the
-        receiver via `with_data`.
+        """Return a new batch with one processor applied per dataset.
+
+        Each callable receives a :class:`SourceView` and must return a
+        :class:`SourceView`. The returned view is used to update the
+        full source (data, coordinates, timedeltas, metadata) via
+        :meth:`_update_source`.
         """
-        new_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        batch = self
         for name in self.dataset_names:
             if name not in func:
                 msg = f"No function provided for dataset {name!r}."
                 raise KeyError(msg)
-            new_data[name] = self[name].apply(func[name], **kwargs).data
-        return self.with_data(new_data)
+            updated_view = func[name](batch[name], **kwargs)
+            batch = batch._update_source(name, updated_view)
+        return batch
 
     def _update_source(self, source_name: str, source_view: SourceView) -> "Batch":
         """Return a new batch with one dataset replaced from a ``SourceView``."""

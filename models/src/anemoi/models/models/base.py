@@ -152,7 +152,7 @@ class BaseGraphModel(nn.Module):
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+        self.boundings = build_boundings(model_config.model.bounding, dataset_names=self.dataset_names)
 
     def _hidden_coordinates(self) -> torch.Tensor:
         return self._graph_data[self._graph_name_hidden].x

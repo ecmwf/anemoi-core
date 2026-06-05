@@ -115,7 +115,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, ShardSizes]:
+    ) -> tuple[torch.Tensor, torch.Tensor, "SourceView", ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         grid_shard_sizes = x.grid_shard_indices
@@ -127,7 +127,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x.data,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
-                n_step_output=self.n_step_output,
+                #n_step_output=self.n_step_output,
             )
         else:
             x_skip = None
@@ -184,28 +184,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def _assemble_output(
         self,
         x_out: torch.Tensor,
-        x_skip: torch.Tensor,
+        x_skip: torch.Tensor | None,
         target: "SourceView",
         dtype: torch.dtype,
         dataset_name: str,
-    ):
-        x_out = target.unflatten_data_2d(x_out)
-
-        if isinstance(x_out, list):
-            x_out = [x.clone().to(dtype=dtype) for x in x_out]
-        else:
-            x_out = x_out.clone().to(dtype=dtype)
-
+    ) -> "SourceView":
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        if x_skip is not None:
-            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, variables)."
-            assert (
-                x_skip.shape[1] == x_out.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
-        return x_out
+        pred = target.unflatten_data_2d(x_out)
+
+        if x_skip is not None:
+            assert x_skip.ndim == 5, f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
+            assert (
+                x_skip.shape[1] == pred.data.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
+            pred.data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+
+        return self.boundings[dataset_name](pred)
 
     def _assert_valid_sharding(
         self,
@@ -371,11 +367,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             # Compute decoder edges using updated latent representation
-            (
-                decoder_edge_attr,
-                decoder_edge_index,
-                dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[
+            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(
                 batch_size=batch_size,
@@ -411,7 +403,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         pred = target.with_data(x_out_dict)
-        pred = pred.apply(self.boundings)
         return pred
 
     def fill_metadata(self, md_dict) -> None:

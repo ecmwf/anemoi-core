@@ -16,7 +16,7 @@ from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.batch import SourceView
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data import TensorLayout
 
 
 def _gridded_layout() -> TensorLayout:

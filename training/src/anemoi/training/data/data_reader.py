@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
-from anemoi.models.data.batch import TensorLayout
+from anemoi.models.data import TensorLayout
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.utils.dates import frequency_to_seconds
 

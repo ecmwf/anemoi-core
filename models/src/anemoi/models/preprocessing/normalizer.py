@@ -12,136 +12,119 @@ import logging
 import warnings
 from typing import Optional
 
-import numpy as np
 import torch
 
-from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.preprocessing._caching import cached_parameters
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.data import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
 
 class InputNormalizer(BasePreprocessor):
-    """Normalizes input data with a configurable method."""
+    """Normalizes input data with a configurable method.
 
-    def __init__(
-        self,
-        config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
-    ) -> None:
+    This preprocessor is stateless at forward time: normalization parameters
+    are computed (and cached) from the statistics carried by each
+    :class:`SourceView`, not from registered buffers.
+    """
+
+    def __init__(self, config=None, **kwargs) -> None:
         """Initialize the normalizer.
 
         Parameters
         ----------
         config : DotDict
             configuration object of the processor
-        data_indices : IndexCollection
-            Data indices for input and output variables
-        statistics : dict
-            Data statistics dictionary
         """
-        super().__init__(config, data_indices, statistics)
+        super().__init__(config)
 
-        name_to_index_training_input = self.data_indices.data.input.name_to_index
+        self._validate_normalization_inputs()
 
-        minimum = statistics["minimum"]
-        maximum = statistics["maximum"]
-        mean = statistics["mean"]
-        stdev = statistics["stdev"]
+        # Cache for norm parameters, keyed on (variable_set, device), 2 entries: transform & inverse_transform
+        self._param_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
 
-        # Optionally reuse statistic of one variable for another variable
-        statistics_remap = {}
-        for remap, source in self.remap.items():
-            idx_src, idx_remap = name_to_index_training_input[source], name_to_index_training_input[remap]
-            statistics_remap[idx_remap] = (minimum[idx_src], maximum[idx_src], mean[idx_src], stdev[idx_src])
+    @cached_parameters(key_fn=lambda statistics, name_to_index, device: tuple(name_to_index.keys()))
+    def get_norm_parameters(self, statistics: dict, name_to_index: dict, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute normalization parameters, cached per (variable_set, device).
 
-        # Two-step to avoid overwriting the original statistics in the loop (this reduces dependence on order)
-        for idx, new_stats in statistics_remap.items():
-            minimum[idx], maximum[idx], mean[idx], stdev[idx] = new_stats
+        Parameters
+        ----------
+        statistics : dict
+            Data statistics dictionary (numpy arrays).
+        name_to_index : dict
+            Dictionary mapping variable names to their indices.
+        device : torch.device
+            Target device for the returned tensors.
 
-        self._validate_normalization_inputs(name_to_index_training_input, minimum, maximum, mean, stdev)
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            ``(norm_mul, norm_add)`` tensors of shape ``(len(name_to_index),)``.
+        """
+        minimum = torch.tensor(statistics["minimum"], dtype=torch.float32, device=device)
+        maximum = torch.tensor(statistics["maximum"], dtype=torch.float32, device=device)
+        mean = torch.tensor(statistics["mean"], dtype=torch.float32, device=device)
+        stdev = torch.tensor(statistics["stdev"], dtype=torch.float32, device=device)
 
-        _norm_add = np.zeros((minimum.size,), dtype=np.float32)
-        _norm_mul = np.ones((minimum.size,), dtype=np.float32)
+        norm_mul = torch.ones(len(name_to_index), dtype=torch.float32, device=device)
+        norm_add = torch.zeros(len(name_to_index), dtype=torch.float32, device=device)
+        eps = 1e-8
 
-        for name, i in name_to_index_training_input.items():
+        for name, i in name_to_index.items():
             method = self.methods.get(name, self.default)
 
             if method == "mean-std":
-                LOGGER.debug(f"Normalizing: {name} is mean-std-normalised.")
-                if stdev[i] < (mean[i] * 1e-6):
-                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
-                _norm_mul[i] = 1 / stdev[i]
-                _norm_add[i] = -mean[i] / stdev[i]
+                if stdev[i] < eps:
+                    warnings.warn(f"Variable {name} has near-zero variance. Skipping scale adjustments.")
+                else:
+                    norm_mul[i] = 1.0 / stdev[i]
+                    norm_add[i] = -mean[i] / stdev[i]
 
             elif method == "std":
-                LOGGER.debug(f"Normalizing: {name} is std-normalised.")
-                if stdev[i] < (mean[i] * 1e-6):
-                    warnings.warn(f"Normalizing: the field seems to have only one value {mean[i]}")
-                _norm_mul[i] = 1 / stdev[i]
-                _norm_add[i] = 0
+                if stdev[i] < eps:
+                    warnings.warn(f"Variable {name} has near-zero variance. Skipping scale adjustments.")
+                else:
+                    norm_mul[i] = 1.0 / stdev[i]
 
             elif method == "min-max":
-                LOGGER.debug(f"Normalizing: {name} is min-max-normalised to [0, 1].")
-                x = maximum[i] - minimum[i]
-                if x < 1e-9:
-                    warnings.warn(f"Normalizing: the field {name} seems to have only one value {maximum[i]}.")
-                _norm_mul[i] = 1 / x
-                _norm_add[i] = -minimum[i] / x
+                rng = maximum[i] - minimum[i]
+                if rng < eps:
+                    warnings.warn(f"Variable {name} has a near-zero range. Skipping scale adjustments.")
+                    norm_add[i] = -minimum[i]
+                else:
+                    norm_mul[i] = 1.0 / rng
+                    norm_add[i] = -minimum[i] / rng
 
             elif method == "max":
-                LOGGER.debug(f"Normalizing: {name} is max-normalised to [0, 1].")
-                _norm_mul[i] = 1 / maximum[i]
+                if torch.abs(maximum[i]) < eps:
+                    warnings.warn(f"Variable {name} has a near-zero maximum. Skipping scale adjustments.")
+                else:
+                    norm_mul[i] = 1.0 / maximum[i]
 
             elif method == "none":
-                LOGGER.info(f"Normalizing: {name} is not normalized.")
-
+                continue
             else:
-                raise ValueError[f"Unknown normalisation method for {name}: {method}"]
+                raise ValueError(f"Unknown normalisation method for {name}: {method}")
 
-        # register buffer - this will ensure they get copied to the correct device(s)
-        self.register_buffer("_norm_mul", torch.from_numpy(_norm_mul), persistent=True)
-        self.register_buffer("_norm_add", torch.from_numpy(_norm_add), persistent=True)
-        self.register_buffer("_input_idx", data_indices.data.input.full, persistent=True)
-        self.register_buffer("_output_idx", self.data_indices.data.output.full, persistent=True)
+        return norm_mul, norm_add
 
-        # We need some special handling when target variables are defined.
-        model_output_names = list(self.data_indices.model.output.name_to_index.keys())
-        data_output_names = list(self.data_indices.data.output.name_to_index.keys())
+    def reset_cache(self) -> None:
+        """Clear the cached normalization parameters.
 
-        # Create a boolean mask with same length as _output_idx
-        model_mask = torch.zeros(len(self._output_idx), dtype=torch.bool)
+        Call this if statistics are updated after initialization (rare).
+        """
+        self._param_cache.clear()
 
-        for i, var_name in enumerate(data_output_names):
-            if var_name in model_output_names:
-                # Get the index value for this variable in data.output
-                index_in_data_output = self.data_indices.data.output.name_to_index[var_name]
-                # Find which position in _output_idx has this index value
-                position_in_output_idx = (self._output_idx == index_in_data_output).nonzero(as_tuple=True)[0].item()
-                # Mark this position as True (keep it for model output)
-                model_mask[position_in_output_idx] = True
-
-        _model_output_idx = self._output_idx[model_mask]
-
-        self.register_buffer("_model_output_idx", _model_output_idx, persistent=True)
-
-    def _validate_normalization_inputs(self, name_to_index_training_input: dict, minimum, maximum, mean, stdev):
+    def _validate_normalization_inputs(self):
         assert len(self.methods) == sum(len(v) for v in self.method_config.values()), (
             f"Error parsing methods in InputNormalizer methods ({len(self.methods)}) "
             f"and entries in config ({sum(len(v) for v in self.method_config)}) do not match."
         )
 
-        # Check that all sizes align
-        n = minimum.size
-        assert maximum.size == n, (maximum.size, n)
-        assert mean.size == n, (mean.size, n)
-        assert stdev.size == n, (stdev.size, n)
-
         # Check for typos in method config
         assert isinstance(self.methods, dict)
         for name, method in self.methods.items():
-            assert name in name_to_index_training_input, f"{name} is not a valid variable name"
             assert method in [
                 "mean-std",
                 "std",
@@ -149,88 +132,90 @@ class InputNormalizer(BasePreprocessor):
                 "min-max",
                 "max",
                 "none",
-            ], f"{method} is not a valid normalisation method"
+            ], f"{method} is not a valid normalisation method for variable {name}."
+
+    def _normalise(self, data: torch.Tensor, norm_mul: torch.Tensor, norm_add: torch.Tensor) -> torch.Tensor:
+        return data.mul(norm_mul).add(norm_add)
+
+    def _denormalise(self, data: torch.Tensor, norm_mul: torch.Tensor, norm_add: torch.Tensor) -> torch.Tensor:
+        return data.sub(norm_add).div(norm_mul)
 
     def transform(
         self,
-        x: torch.Tensor,
+        x: SourceView,
         in_place: bool = True,
         data_index: Optional[torch.Tensor] = None,
         **_kwargs,
-    ) -> torch.Tensor:
-        """Normalizes an input tensor x of shape [..., nvars].
-
-        Normalization done in-place unless specified otherwise.
-
-        The default usecase either assume the full batch tensor or the full input tensor.
-        A dataindex is based on the full data can be supplied to choose which variables to normalise.
+    ) -> SourceView:
+        """Normalize a SourceView in the variables dimension.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Data to normalize
+        x : SourceView
+            Data to normalize.
         in_place : bool, optional
-            Normalize in-place, by default True
+            Normalize in-place, by default True.
         data_index : Optional[torch.Tensor], optional
-            Normalize only the specified indices, by default None
+            Deprecated. Subset of variable indices to normalize.
 
         Returns
         -------
-        torch.Tensor
-            _description_
+        SourceView
+            Normalized view.
         """
+        if data_index is not None:
+            warnings.warn(
+                "The 'data_index' parameter is deprecated and will be removed in a future release. "
+                "Use SourceView.select_variables() to narrow the view before calling transform.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if not in_place:
             x = x.clone()
 
-        if data_index is not None:
-            x.mul_(self._norm_mul[data_index]).add_(self._norm_add[data_index])
-        elif x.shape[-1] == len(self._input_idx):
-            x.mul_(self._norm_mul[self._input_idx]).add_(self._norm_add[self._input_idx])
-        else:
-            x.mul_(self._norm_mul).add_(self._norm_add)
+        norm_mul, norm_add = self.get_norm_parameters(x.statistics, x.name_to_index, device=x.device)
+
+        x = x.map_data(self._normalise, norm_mul=norm_mul, norm_add=norm_add)
 
         return x
 
     def inverse_transform(
         self,
-        x: torch.Tensor,
+        x: SourceView,
         in_place: bool = True,
         data_index: Optional[torch.Tensor] = None,
         **_kwargs,
-    ) -> torch.Tensor:
-        """Denormalizes an input tensor x of shape [..., nvars | nvars_pred].
-
-        Denormalization done in-place unless specified otherwise.
-
-        The default usecase either assume the full batch tensor or the full output tensor.
-        A dataindex is based on the full data can be supplied to choose which variables to denormalise.
+    ) -> SourceView:
+        """Denormalize a SourceView in the variables dimension.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Data to denormalize
+        x : SourceView
+            Data to denormalize.
         in_place : bool, optional
-            Denormalize in-place, by default True
+            Denormalize in-place, by default True.
         data_index : Optional[torch.Tensor], optional
-            Denormalize only the specified indices, by default None
+            Deprecated. Subset of variable indices to denormalize.
 
         Returns
         -------
-        torch.Tensor
-            Denormalized data
+        SourceView
+            Denormalized view.
         """
+        if data_index is not None:
+            warnings.warn(
+                "The 'data_index' parameter is deprecated and will be removed in a future release. "
+                "Use SourceView.select_variables() to narrow the view before calling inverse_transform.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if not in_place:
             x = x.clone()
 
-        # Denormalize dynamic or full tensors
-        # input and predicted tensors have different shapes
-        # hence, we mask out the forcing indices
-        if data_index is not None:
-            x.subtract_(self._norm_add[data_index]).div_(self._norm_mul[data_index])
-        elif x.shape[-1] == len(self._output_idx):
-            x.subtract_(self._norm_add[self._output_idx]).div_(self._norm_mul[self._output_idx])
-        elif x.shape[-1] == len(self._model_output_idx):
-            x.subtract_(self._norm_add[self._model_output_idx]).div_(self._norm_mul[self._model_output_idx])
-        else:
-            x.subtract_(self._norm_add).div_(self._norm_mul)
+        norm_mul, norm_add = self.get_norm_parameters(x.statistics, x.name_to_index, device=x.device)
+
+        x = x.map_data(self._denormalise, norm_mul=norm_mul, norm_add=norm_add)
+
         return x

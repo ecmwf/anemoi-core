@@ -44,7 +44,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.models.data.batch import Batch
+from anemoi.models.data import Batch
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
 _chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
@@ -825,7 +825,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch = self._setup_batch_sharding(batch)
 
         # Batch normalization (the underlying ``batch.data`` dict should be mutated in-place)
-        batch = batch.apply(self.model.pre_processors, include_layout=True)
+        batch = batch.apply(self.model.pre_processors)
 
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
@@ -1014,8 +1014,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         del batch_idx
         assert isinstance(batch, Batch), "batch must be a Batch instance"
-        # Get batch size from any dataset's data tensor.
-        batch_size = next(iter(batch.data.values())).shape[0]
 
         step_output = self._step(batch)
         train_loss = step_output.loss.sum()
@@ -1027,7 +1025,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch_size,
+            batch_size=batch.size,
             sync_dist=True,
         )
 
@@ -1053,9 +1051,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         del batch_idx
         assert isinstance(batch, Batch), "batch must be a Batch instance"
 
-        # Get batch size from any dataset's data tensor.
-        batch_size = next(iter(batch.data.values())).shape[0]  # TODO: Move to a batch-level property
-
         with torch.no_grad():
             step_output = self._step(batch, validation_mode=True)
         val_loss_scales = step_output.loss
@@ -1069,7 +1064,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch_size,
+            batch_size=batch.size,
             sync_dist=True,
         )
 
@@ -1086,7 +1081,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     on_step=True,
                     prog_bar=False,
                     logger=self.logger_enabled,
-                    batch_size=batch_size,
+                    batch_size=batch.size,
                     sync_dist=True,
                 )
 
@@ -1102,7 +1097,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     on_step=False,
                     prog_bar=False,
                     logger=self.logger_enabled,
-                    batch_size=batch_size,
+                    batch_size=batch.size,
                     sync_dist=True,
                 )
 

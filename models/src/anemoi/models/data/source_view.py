@@ -98,13 +98,8 @@ class SourceView(ABC):
         pass
 
     @abstractmethod
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
+    def unflatten_data_2d(self, data_2d: torch.Tensor) -> "SourceView":
         """Unflatten a 2D data tensor back to the original grid shape."""
-        pass
-
-    @abstractmethod
-    def apply(self, func: Callable[..., torch.Tensor], **kwargs: Any) -> "SourceView":
-        """Return a new view with ``func`` applied to the data payload."""
         pass
 
     def _time_axis_size(self) -> int:
@@ -144,6 +139,11 @@ class GriddedSourceView(SourceView):
             msg = f"{self.__class__.__name__} data must be a single tensor, not a list."
             raise TypeError(msg)
 
+    @property
+    def device(self) -> torch.device:
+        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
+        return self.data.device
+
     def flatten_data_2d(self) -> torch.Tensor:
         current_pattern = self.layout.pattern
         return einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
@@ -154,23 +154,26 @@ class GriddedSourceView(SourceView):
             return einops.repeat(self.coordinates, "grid latlon -> (batch grid) latlon", batch=batch_size)
         return self.coordinates
 
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> torch.Tensor:
+    def unflatten_data_2d(self, data_2d: torch.Tensor) -> "GriddedSourceView":
         target_layout = self.layout.pattern
         batch_size = self.data.shape[self.layout.batch]
         ensemble_size = self.data.shape[self.layout.ensemble]
         num_out_times = self.data.shape[self.layout.time]
-        return einops.rearrange(
+        new_data = einops.rearrange(
             data_2d,
             f"{self.pattern_for_2d} -> {target_layout}",
             batch=batch_size,
             ensemble=ensemble_size,
             time=num_out_times
         )
+        return dataclass_replace(self, data=new_data)
 
-    def apply(self, func: Callable[..., torch.Tensor], include_layout: bool = False, **kwargs: Any) -> "GriddedSourceView":
-        """Return a new view with ``func`` applied to the data payload."""
-        if include_layout:
-            kwargs["layout"] = self.layout
+    def clone(self) -> "GriddedSourceView":
+        """Return a deep copy of this view (clones the data tensor)."""
+        return dataclass_replace(self, data=self.data.clone())
+
+    def map_data(self, func: Callable, **kwargs) -> "GriddedSourceView":
+        """Apply a function to the data tensor, returning a new view with the same metadata."""
         new_data = func(self.data, **kwargs)
         return dataclass_replace(self, data=new_data)
 
@@ -235,6 +238,11 @@ class TabularSourceView(SourceView):
             msg = f"{self.__class__.__name__} data must be a list of tensors, not a single tensor."
             raise TypeError(msg)
 
+    @property
+    def device(self) -> torch.device:
+        assert isinstance(self.data, list) and len(self.data) > 0, f"{self.__class__.__name__} data must be a non-empty list of tensors."
+        return self.data[0].device
+
     def flatten_data_2d(self) -> torch.Tensor:
         assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
         if len(self.data) > 1:
@@ -251,17 +259,20 @@ class TabularSourceView(SourceView):
         latlon_coords = torch.cat(self.coordinates, dim=0)
         return latlon_coords
 
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> list[torch.Tensor]:
+    def unflatten_data_2d(self, data_2d: torch.Tensor) -> "TabularSourceView":
         assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
         batch_sizes = [data.shape[self.layout.grid] for data in self.data]
         batch_starts = np.cumsum([0] + batch_sizes[:-1])
-        return [data_2d.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
+        new_data = [data_2d.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
+        return dataclass_replace(self, data=new_data)
 
-    def apply(self, func: Callable[..., torch.Tensor], include_layout: bool = False, **kwargs: Any) -> "TabularSourceView":
-        """Return a new view with ``func`` applied to the data payload."""
-        if include_layout:
-            kwargs["layout"] = self.layout
-        new_data = [func(tensor, **kwargs) for tensor in self.data]
+    def clone(self) -> "TabularSourceView":
+        """Return a deep copy of this view (clones each data tensor)."""
+        return dataclass_replace(self, data=[t.clone() for t in self.data])
+
+    def map_data(self, func: Callable, **kwargs) -> "TabularSourceView":
+        """Apply a function to the data tensor, returning a new view with the same metadata."""
+        new_data = [func(t, **kwargs) for t in self.data]
         return dataclass_replace(self, data=new_data)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":

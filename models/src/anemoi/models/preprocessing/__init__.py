@@ -15,6 +15,7 @@ from torch import Tensor
 from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.data import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -109,12 +110,12 @@ class BasePreprocessor(nn.Module):
             for variable in variables
         }
 
-    def forward(self, x, in_place: bool = True, inverse: bool = False, **kwargs) -> Tensor:
+    def forward(self, x: SourceView, in_place: bool = True, inverse: bool = False, **kwargs) -> SourceView:
         """Process the input tensor.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : SourceView
             Input tensor
         in_place : bool
             Whether to process the tensor in place
@@ -125,7 +126,7 @@ class BasePreprocessor(nn.Module):
 
         Returns
         -------
-        torch.Tensor
+        SourceView
             Processed tensor
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
@@ -134,16 +135,18 @@ class BasePreprocessor(nn.Module):
             return self.inverse_transform(x, in_place=in_place, **kwargs)
         return self.transform(x, in_place=in_place, **kwargs)
 
-    def transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
+    def transform(self, x: SourceView, in_place: bool = True, **kwargs) -> SourceView:
         """Process the input tensor."""
         if not in_place:
             x = x.clone()
+
         return x
 
-    def inverse_transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
+    def inverse_transform(self, x: SourceView, in_place: bool = True, **kwargs) -> SourceView:
         """Inverse process the input tensor."""
         if not in_place:
             x = x.clone()
+
         return x
 
 
@@ -173,12 +176,12 @@ class Processors(nn.Module):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} [{'inverse' if self.inverse else 'forward'}]({self.processors})"
 
-    def forward(self, x, in_place: bool = True, **kwargs) -> Tensor:
+    def forward(self, x: SourceView, in_place: bool = True, **kwargs) -> SourceView:
         """Process the input tensor.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : SourceView
             Input tensor
         in_place : bool
             Whether to process the tensor in place
@@ -187,24 +190,13 @@ class Processors(nn.Module):
 
         Returns
         -------
-        torch.Tensor
+        SourceView
             Processed tensor
         """
         for processor in self.processors.values():
             x = processor(x, in_place=in_place, inverse=self.inverse, **kwargs)
 
-        if self.first_run:
-            self.first_run = False
-            self._run_checks(x)
         return x
-
-    def _run_checks(self, x):
-        """Run checks on the processed tensor."""
-        if not self.inverse:
-            # Forward transformation checks:
-            assert not torch.isnan(
-                x
-            ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
 
 
 class StepwiseProcessors(nn.Module):
