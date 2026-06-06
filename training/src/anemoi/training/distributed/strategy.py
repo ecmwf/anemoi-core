@@ -8,7 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 
+import datetime
 import logging
+import os
 
 import numpy as np
 import pytorch_lightning as pl
@@ -21,6 +23,16 @@ from pytorch_lightning.trainer.states import TrainerFn
 from anemoi.training.utils.seeding import get_base_seed
 
 LOGGER = logging.getLogger(__name__)
+
+# Default process-group / NCCL-watchdog timeout. Lower than Lightning's 30 min so a
+# stuck collective on a bad allocation fails fast instead of burning ~0.5 node-h/min
+# (e.g. 128 nodes * 30 min = 64 node-h per dead job). Override per-run via the
+# ANEMOI_PG_TIMEOUT_SEC env var, or with an explicit `strategy.timeout` in the config.
+DEFAULT_PG_TIMEOUT_SEC = 1800
+
+
+def _pg_timeout() -> datetime.timedelta:
+    return datetime.timedelta(seconds=int(os.environ.get("ANEMOI_PG_TIMEOUT_SEC", DEFAULT_PG_TIMEOUT_SEC)))
 
 
 def register_gradient_scaling_hooks(
@@ -135,6 +147,9 @@ class DDPGroupStrategy(DDPStrategy):
             Additional keyword arguments.
 
         """
+        # Fail fast on stuck collectives (config/env can still override; see _pg_timeout).
+        kwargs.setdefault("timeout", _pg_timeout())
+        LOGGER.info("DDPGroupStrategy process-group timeout: %s", kwargs["timeout"])
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
@@ -308,6 +323,9 @@ class DDPEnsGroupStrategy(DDPStrategy):
             Additional keyword arguments.
 
         """
+        # Fail fast on stuck collectives (config/env can still override; see _pg_timeout).
+        kwargs.setdefault("timeout", _pg_timeout())
+        LOGGER.info("DDPGroupStrategy process-group timeout: %s", kwargs["timeout"])
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
