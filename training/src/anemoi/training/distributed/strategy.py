@@ -25,8 +25,7 @@ from anemoi.training.utils.seeding import get_base_seed
 LOGGER = logging.getLogger(__name__)
 
 # Default process-group / NCCL-watchdog timeout. Lower than Lightning's 30 min so a
-# stuck collective on a bad allocation fails fast instead of burning ~0.5 node-h/min
-# (e.g. 128 nodes * 30 min = 64 node-h per dead job). Override per-run via the
+# stuck collective on a bad allocation fails fast
 # ANEMOI_PG_TIMEOUT_SEC env var, or with an explicit `strategy.timeout` in the config.
 DEFAULT_PG_TIMEOUT_SEC = 1800
 
