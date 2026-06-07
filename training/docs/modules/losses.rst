@@ -250,7 +250,7 @@ Supported transforms include:
 .. note::
 
    ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
-   On supported CUDA grids, the default reduced-grid Fourier backend uses the CUDA ring FFT extension. The extension
+   On CUDA-compatible devices, the default reduced-grid Fourier backend uses the CUDA ring FFT extension. The extension
    selects cuFFT when headers and libraries are discoverable, otherwise it uses the direct CUDA backend. Set
    ``use_cuda_ring_fft=False`` or ``ANEMOI_USE_CUDA_RING_FFT=0`` to use the PyTorch fallback. An experimental graph
    implementation can be switched on by setting ``use_graphed_rfft=True`` in the section of the config file
