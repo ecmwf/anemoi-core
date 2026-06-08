@@ -85,6 +85,51 @@ def compute_valid_anchors(
     return intersection
 
 
+<<<<<<< HEAD
+=======
+def get_usable_indices(
+    missing_indices: set[int],
+    series_length: int,
+    relative_indices: np.ndarray | list[int],
+) -> np.ndarray:
+    """Get the usable positions of a sequence with missing positions.
+
+    A position ``p`` is usable if ``p + i`` is within ``[0, series_length)`` and
+    not missing for every relative offset ``i``.
+
+    Parameters
+    ----------
+    missing_indices : set[int]
+        Set of missing positions in the sequence.
+    series_length : int
+        Length of the sequence.
+    relative_indices: np.ndarray | list[int]
+        Array of relative offsets requested at each position.
+
+    Returns
+    -------
+    usable_indices : np.array
+        Array of usable positions.
+    """
+    if isinstance(relative_indices, list):
+        relative_indices = np.array(relative_indices)
+
+    usable_indices = np.arange(series_length)
+
+    # Restrict to positions where all relative offsets are within bounds
+    max_offset = int(max(relative_indices))
+    min_offset = int(min(relative_indices))
+    usable_indices = usable_indices[(usable_indices + min_offset >= 0) & (usable_indices + max_offset < series_length)]
+
+    # Missing positions
+    for i in missing_indices:
+        rel_missing = i - relative_indices  # positions whose relative offsets match the missing one.
+        usable_indices = usable_indices[np.all(usable_indices != rel_missing[:, np.newaxis], axis=0)]
+
+    return usable_indices
+
+
+>>>>>>> d83a476f873f381900e68a8fbe75cc1a8f9b4151
 def compute_valid_data_indices(
     data_readers: dict[str, "BaseAnemoiReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],
