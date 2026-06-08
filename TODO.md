@@ -4,14 +4,16 @@ branch: feat/richer-batch
 
 ### General
 - [ ] Support model parallel (where should sharding logic live?)
-- [ ] Work on processors (normalizer, imputer)
-    - should we pass the full batch structure to the processor?
-    - stateless ??
 - [ ] Updates tests
 - [ ] Update docs
 - [ ] Update schemas
 - [ ] Update ensemble
 - [ ] Update diffusion/transport
+
+### Normalizer
+- remap ???
+- date_index ???
+- implement `.clone()`
 
 ### Batch
 - [ ] Add more information like `ds.metadata` (as variable_metadata ??), `ds.statistics`, ...
