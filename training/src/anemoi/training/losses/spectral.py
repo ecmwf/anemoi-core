@@ -81,7 +81,7 @@ class SpectralLoss(BaseLoss):
             "dct2d",
         ] = "fft2d",
         *,
-        nodes_slice: tuple[int, int | None] | None = None,
+        nodes_slice: slice = slice(None),
         projection_config: object | None = None,
         graph_data: HeteroData | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
@@ -128,7 +128,7 @@ class SpectralLoss(BaseLoss):
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
 
-        self.nodes_slice = slice(*(nodes_slice or (0, None)))
+        self.nodes_slice = nodes_slice
         self.projection_provider = ProjectionGraphProvider.from_config(
             projection_config,
             graph_data=graph_data,
