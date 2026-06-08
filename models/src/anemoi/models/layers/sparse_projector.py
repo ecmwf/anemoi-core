@@ -39,8 +39,8 @@ class SparseProjector(torch.nn.Module):
                 out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
         return torch.stack(out)
 
-    def apply_with_provider(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
-        """Apply projection via *provider*, handling arbitrary leading dimensions.
+    def project(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
+        """Project *batch* through the *provider*'s matrix, handling arbitrary leading dimensions.
 
         Parameters
         ----------

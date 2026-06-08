@@ -285,8 +285,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
     def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply smoothing matrix to predictions and targets for loss computation."""
         if self.smoothing_matrices[i] is not None:
-            x = self.projector.apply_with_provider(x, self.smoothing_matrices[i])
-            y = self.projector.apply_with_provider(y, self.smoothing_matrices[i])
+            x = self.projector.project(x, self.smoothing_matrices[i])
+            y = self.projector.project(y, self.smoothing_matrices[i])
         return x, y
 
     def forward(

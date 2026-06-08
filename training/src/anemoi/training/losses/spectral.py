@@ -163,15 +163,15 @@ class SpectralLoss(BaseLoss):
         index[TensorDim.GRID] = self.nodes_slice
         return x[tuple(index)]
 
-    def _prepare_spatial(self, x: torch.Tensor) -> torch.Tensor:
+    def _select_and_project(self, x: torch.Tensor) -> torch.Tensor:
         x = self._apply_nodes_slice(x)
         if self.projection_provider is not None:
-            x = self.projector.apply_with_provider(x, self.projection_provider)
+            x = self.projector.project(x, self.projection_provider)
         return x
 
     def _to_spectral(self, x: torch.Tensor) -> torch.Tensor:
-        """Prepare the spatial dimension (node slice / projection), then transform to the spectral domain."""
-        return self.transform.forward(self._prepare_spatial(x))
+        """Select the node subset and optionally project to the target grid, then transform to the spectral domain."""
+        return self.transform.forward(self._select_and_project(x))
 
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
         """Transform to spectral domain and flatten the transformed dims into one "mode" axis."""
