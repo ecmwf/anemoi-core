@@ -39,16 +39,16 @@ limit_batches:
 
 # ============
 # ForecastStepDataset configuration
-# The 5D zarr has shape (num_inits, variables, ensemble, forecast_steps, gridpoints).
-# forecast_steps: number of lead-time steps to use per initialization.
-# step_frequency: temporal spacing between consecutive forecast steps.
-# Trajectories are implicit per initialization — no separate trajectory config needed.
+# The dataset must have a 5D ``trajectories`` layout
+# (num_inits, variables, ensemble, steps, gridpoints).
+# forecast_steps and step_frequency are read directly from the dataset;
+# only the ``forecast_steps`` key below is needed as a trigger to select
+# the ForecastStepDataset reader.
 # ============
 
-# Pointers to datasets and model run info
+# Pointer to dataset
 dataset: ${system.input.dataset}
 forecast_steps: 18
-step_frequency: 1h
 
 training:
   datasets:
@@ -58,7 +58,6 @@ training:
       start: null
       end: 2020
       forecast_steps: ${dataloader.forecast_steps}
-      step_frequency: ${dataloader.step_frequency}
 
 validation:
   datasets:
@@ -68,7 +67,6 @@ validation:
       start: 2021
       end: 2021
       forecast_steps: ${dataloader.forecast_steps}
-      step_frequency: ${dataloader.step_frequency}
 
 test:
   datasets:
@@ -77,4 +75,3 @@ test:
         dataset: ${dataloader.dataset}
       start: 2022
       forecast_steps: ${dataloader.forecast_steps}
-      step_frequency: ${dataloader.step_frequency}
