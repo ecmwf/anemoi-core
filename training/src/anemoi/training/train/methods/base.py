@@ -1131,6 +1131,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        self.trainer.datamodule.set_epoch(self.current_epoch + 1)
 
     def configure_optimizers(
         self,
