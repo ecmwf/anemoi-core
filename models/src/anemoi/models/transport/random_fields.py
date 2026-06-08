@@ -10,6 +10,7 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.distributed.shapes import ShardSizes
 
 
@@ -30,7 +31,8 @@ def randn_with_grid_sharding(
     distinct value while keeping ranks reproducible.
     """
     if model_comm_group is None or not grid_shard_sizes:
-        return torch.randn(shape, device=device, dtype=dtype)
+        with use_synced_torch_rng():
+            return torch.randn(shape, device=device, dtype=dtype)
 
     ndim = len(shape)
     if not -ndim <= shard_dim < ndim:
@@ -40,7 +42,8 @@ def randn_with_grid_sharding(
     shard_dim = shard_dim % ndim
     full_shape = list(shape)
     full_shape[shard_dim] = sum(grid_shard_sizes)
-    noise = torch.randn(tuple(full_shape), device=device, dtype=dtype)
+    with use_synced_torch_rng():
+        noise = torch.randn(tuple(full_shape), device=device, dtype=dtype)
     return shard_tensor(noise, shard_dim, list(grid_shard_sizes), model_comm_group)
 
 

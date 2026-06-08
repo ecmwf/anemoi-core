@@ -16,6 +16,9 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
+from anemoi.models.distributed.random import get_synced_torch_seed
+from anemoi.models.distributed.random import seed_torch_rng_sources
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.training.distributed.groups import build_ensemble_layout
 from anemoi.training.distributed.groups import build_model_layout
 from anemoi.training.distributed.groups import build_reader_layout
@@ -65,20 +68,34 @@ def register_gradient_scaling_hooks(
 def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     """Seed the random number generators for the rank."""
     base_seed = get_base_seed()
-    initial_seed = base_seed * (model_comm_group_id + 1)
-    rnd_seed = pl.seed_everything(initial_seed)  # note: workers are seeded independently in dataloader
+    # Set up the synced stream here. Lightning sets the usual rank-local random
+    # streams after this call, using the seed returned here.
+    independent_seed = seed_torch_rng_sources(
+        base_seed,
+        global_rank,
+        sync_group_id=model_comm_group_id,
+        seed_default=False,
+        reset_synced=True,
+    )
+    rnd_seed = pl.seed_everything(independent_seed)  # note: workers are seeded independently in dataloader
     np_rng = np.random.default_rng(rnd_seed)
+    # This draws the first number from the synced stream. It has to run on every
+    # rank so every rank moves the synced stream forward in the same way.
+    with use_synced_torch_rng():
+        synced_sanity_rnd = torch.rand(1)[0]
     sanity_rnd = (torch.rand(1)[0], np_rng.random())
     LOGGER.debug(
         (
-            "Strategy: Rank %d, model comm group id %d, base seed %d, seeded with %d, "
-            "running with random seed: %d, sanity rnd: %s"
+            "Strategy: Rank %d, model comm group id %d, base seed %d, independent seed %d, "
+            "synced seed %d, running with random seed: %d, synced sanity rnd: %s, sanity rnd: %s"
         ),
         global_rank,
         model_comm_group_id,
         base_seed,
-        initial_seed,
+        independent_seed,
+        get_synced_torch_seed(base_seed, model_comm_group_id),
         rnd_seed,
+        synced_sanity_rnd,
         sanity_rnd,
     )
 

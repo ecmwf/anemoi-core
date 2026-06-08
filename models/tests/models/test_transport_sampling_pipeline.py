@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from anemoi.models.distributed.random import seed_torch_rng_sources
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.samplers import transport_samplers
@@ -193,6 +194,7 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
         "ds_b": torch.randn(1, 3, 1, 7, 5, dtype=torch.float32),
     }
 
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     out = model.sample(x)
     assert set(out.keys()) == {"ds_a", "ds_b"}
 
@@ -324,6 +326,7 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
 def test_transport_source_builder_does_not_build_unselected_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0))
     target = {"data": torch.zeros(1, 1, 1, 2, 1)}
 
@@ -347,6 +350,7 @@ def test_transport_source_builder_does_not_build_unselected_reference(
 
 
 def test_transport_source_builder_postprocesses_reference_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     builder = TransportSourceBuilder(TransportSourceSettings(kind="reference_state", scale=0.5, noise_scale=0.25))
     target = {"data": torch.zeros(1, 1, 1, 2, 1, dtype=torch.float64)}
     reference = {"data": torch.full_like(target["data"], 4.0)}
@@ -476,6 +480,7 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
         "dataset_b": torch.randn(2, 2, 1, 7, 6, dtype=torch.bfloat16),
     }
 
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     out = model.sample(x)
 
     assert set(out.keys()) == set(x.keys())
