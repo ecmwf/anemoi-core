@@ -77,6 +77,7 @@ class BaseGraphModel(nn.Module):
             self.encoded_dataset_names = self.dataset_names
         self.decoding_target_forcing = model_config.model.get("decoding_target_forcing", "prognostic+forcing")
         assert self.decoding_target_forcing in ["prognostic+forcing", "forcings", "none"], f"Invalid value for decoding_target_forcing: {self.decoding_target_forcing}"
+        LOGGER.info(f"Decoding target forcing: {self.decoding_target_forcing}")
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.num_channels = model_config.model.num_channels
@@ -122,7 +123,7 @@ class BaseGraphModel(nn.Module):
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
             self._decoding_forcing_input_idx[dataset_name] = [
-                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
+                dataset_indices.model._name_to_index_model_input[name] for name in dataset_indices.model._forcing
             ]
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
@@ -173,7 +174,7 @@ class BaseGraphModel(nn.Module):
             if self.decoding_target_forcing == "prognostic+forcing":
                 return self._calculate_input_dim(dataset_name)
             elif self.decoding_target_forcing == "forcings":
-                return self.node_attributes.attr_ndims[dataset_name] + self.num_input_channels_decoding_forcings[dataset_name]
+                return self.node_attributes.attr_ndims[dataset_name] + self.n_step_input * self.num_input_channels_decoding_forcings[dataset_name]
             elif self.decoding_target_forcing == "none":
                 return self.node_attributes.attr_ndims[dataset_name]
             else:

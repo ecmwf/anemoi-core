@@ -256,6 +256,9 @@ class BaseModelSchema(PydanticBaseModel):
     output_mask: OutputMaskSchemas  # !TODO CHECK!
     "Output mask"
     encoded_dataset_names: list[str] | None = Field(default=None)
+    "List of dataset names to encode. If None, all datasets are encoded."
+    decoding_target_forcing: Literal["none", "forcings", "prognostic+forcing"] = Field(default="none")
+    "Decoding target forcing strategy."
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
     processor: Union[

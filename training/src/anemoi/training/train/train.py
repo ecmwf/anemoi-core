@@ -378,7 +378,7 @@ class AnemoiTrainer(ABC):
             # Freeze the chosen model weights
             LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
             for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
+                freeze_submodule_by_name(model.model.model, submodule_name)
                 LOGGER.info("%s frozen successfully.", submodule_name.upper())
 
         return model
