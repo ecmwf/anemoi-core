@@ -23,7 +23,6 @@ diagnostics:
 system:
   input:
     graph: graph_anemoi_new.pt
-    dataset: aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-forecast-5d.zarr
     loss_matrices_path: null
   hardware:
     accelerator: auto

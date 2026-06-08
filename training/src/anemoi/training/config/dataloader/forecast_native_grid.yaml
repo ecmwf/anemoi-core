@@ -41,37 +41,41 @@ limit_batches:
 # ForecastStepDataset configuration
 # The dataset must have a 5D ``trajectories`` layout
 # (num_inits, variables, ensemble, steps, gridpoints).
-# forecast_steps and step_frequency are read directly from the dataset;
-# only the ``forecast_steps`` key below is needed as a trigger to select
-# the ForecastStepDataset reader.
+# ForecastStepDataset is selected automatically when any of
+# step_start, step_end, step_frequency, or steps appear in dataset_config.
 # ============
 
 # Pointer to dataset
 dataset: ${system.input.dataset}
-forecast_steps: 18
 
 training:
   datasets:
     data:
       dataset_config:
         dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
       start: null
       end: 2020
-      forecast_steps: ${dataloader.forecast_steps}
 
 validation:
   datasets:
     data:
       dataset_config:
         dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
       start: 2021
       end: 2021
-      forecast_steps: ${dataloader.forecast_steps}
 
 test:
   datasets:
     data:
       dataset_config:
         dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
       start: 2022
-      forecast_steps: ${dataloader.forecast_steps}

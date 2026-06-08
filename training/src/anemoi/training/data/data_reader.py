@@ -374,10 +374,12 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = dataset_config.pop("trajectory", {})
-    forecast_steps = dataset_config.pop("forecast_steps", None)
-    dataset_config.pop("step_frequency", None)  # no longer a constructor param; derived from the data
 
-    if forecast_steps is not None:
+    inner_dc = dataset_config.get("dataset_config") or {}
+    has_step_selection = hasattr(inner_dc, "keys") and any(
+        k in inner_dc for k in ("step_start", "step_end", "step_frequency", "steps")
+    )
+    if has_step_selection:
         LOGGER.info("Creating ForecastStepDataset...")
         return ForecastStepDataset(**dataset_config)
 

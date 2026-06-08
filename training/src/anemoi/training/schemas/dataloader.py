@@ -70,6 +70,12 @@ class DatasetConfigSchema(PydanticBaseModel):
     "Optional list of variables to select from the dataset."
     statistics: str | Path | None = Field(default=None)
     "Optional path to custom statistics file."
+    step_start: NonNegativeInt | None = Field(default=None)
+    "First forecast step to include, in hours (inclusive). Selects ForecastStepDataset when set."
+    step_end: PositiveInt | None = Field(default=None)
+    "Last forecast step to include, in hours (inclusive). Selects ForecastStepDataset when set."
+    step_frequency: PositiveInt | None = Field(default=None)
+    "Stride between selected forecast steps, in hours. Selects ForecastStepDataset when set."
 
     # Note this should be extended in the future to have a full schema for the keys
     # supported by open_dataset and be moved to anemoi-datasets.
@@ -84,8 +90,7 @@ class NativeDatasetSchema(BaseModel):
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
-    forecast_steps: PositiveInt | None = Field(default=None)
-    "When set, selects the ForecastStepDataset reader for 5D trajectory datasets."
+
 
 
 class TrajectorySchema(PydanticBaseModel):
