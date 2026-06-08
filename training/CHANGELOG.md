@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.14.0](https://github.com/ecmwf/anemoi-core/compare/training-0.13.0...training-0.14.0) (2026-06-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training, models:** add transport diffusion and stochastic interpolant ([#1096](https://github.com/ecmwf/anemoi-core/issues/1096))
+* loss NaN handling ([#1045](https://github.com/ecmwf/anemoi-core/issues/1045))
+* aggregate losses for temporal downscaler ([#1069](https://github.com/ecmwf/anemoi-core/issues/1069))
+* introduce mlp implementation for gated FFN (swiglu, ...) ([#943](https://github.com/ecmwf/anemoi-core/issues/943))
+
+### Features
+
+* Abstract asynchronous plotting executor ([#1129](https://github.com/ecmwf/anemoi-core/issues/1129)) ([f0743b7](https://github.com/ecmwf/anemoi-core/commit/f0743b78893f04bff18057b68ca81e17f3c777b4))
+* Aggregate losses for temporal downscaler ([#1069](https://github.com/ecmwf/anemoi-core/issues/1069)) ([390ce34](https://github.com/ecmwf/anemoi-core/commit/390ce34c1fbf89bf37cc8733cc500fe2bc7237ee))
+* Callbacks dependencies ([#1128](https://github.com/ecmwf/anemoi-core/issues/1128)) ([f791b75](https://github.com/ecmwf/anemoi-core/commit/f791b75d325e8fcdd9b6507510efa5cde0915d01))
+* Introduce mlp implementation for gated FFN (swiglu, ...) ([#943](https://github.com/ecmwf/anemoi-core/issues/943)) ([2ed3417](https://github.com/ecmwf/anemoi-core/commit/2ed3417906423cd8be7ee432138b94606deaacb9))
+* **models:** Use CUDA graphs to accelerate spectral transforms for reduced grids ([#974](https://github.com/ecmwf/anemoi-core/issues/974)) ([af1fc73](https://github.com/ecmwf/anemoi-core/commit/af1fc73a3b9c0a6a9d37c5cb7313a7d816a9c7e5))
+* **training, models:** Add transport diffusion and stochastic interpolant ([#1096](https://github.com/ecmwf/anemoi-core/issues/1096)) ([ef8b588](https://github.com/ecmwf/anemoi-core/commit/ef8b588db5ce52d064c97cfb47ac981fdafe0430))
+* **training:** Initial spectral AMSE implementation ([#1141](https://github.com/ecmwf/anemoi-core/issues/1141)) ([#1148](https://github.com/ecmwf/anemoi-core/issues/1148)) ([cc21d94](https://github.com/ecmwf/anemoi-core/commit/cc21d947a61313f39fb46f0b32f70bd5ea4c4bd5))
+* **training:** Load only data required for current rollout length ([#1169](https://github.com/ecmwf/anemoi-core/issues/1169)) ([8416f04](https://github.com/ecmwf/anemoi-core/commit/8416f044ba08e8f96d4d66530fd58dbd00865c9a))
+* Units check ([#1140](https://github.com/ecmwf/anemoi-core/issues/1140)) ([c23043d](https://github.com/ecmwf/anemoi-core/commit/c23043d5f3f0a7e558d25b5b249da559c663069f))
+
+
+### Bug Fixes
+
+* Asyncio loop thread management with Python 3.13 ([#1124](https://github.com/ecmwf/anemoi-core/issues/1124)) ([7c9c8aa](https://github.com/ecmwf/anemoi-core/commit/7c9c8aacd24fedb14f8fd3ca2c4ceb923f13fbc1))
+* Ensemble training shape clean-up ([#1154](https://github.com/ecmwf/anemoi-core/issues/1154)) ([ee381d3](https://github.com/ecmwf/anemoi-core/commit/ee381d3bfb1bd23e709c4482ffdd98e13a3222c5))
+* Loss NaN handling ([#1045](https://github.com/ecmwf/anemoi-core/issues/1045)) ([9377a10](https://github.com/ecmwf/anemoi-core/commit/9377a1060179bac7d823d894e2d9e97be0b53e8a))
+* **models:** Hierarchical model with multiple datasets ([#1066](https://github.com/ecmwf/anemoi-core/issues/1066)) ([987aa09](https://github.com/ecmwf/anemoi-core/commit/987aa09dba164f3f447e8391a2ea7a3c074fed4e))
+* **training:** Enable coupling of validation rollout to training rollout ([#1136](https://github.com/ecmwf/anemoi-core/issues/1136)) ([9f9536a](https://github.com/ecmwf/anemoi-core/commit/9f9536ab8322720810633b4a40df2f069d4bd16f))
+* **training:** Gather sharded batches if loss does not support sharding ([#1130](https://github.com/ecmwf/anemoi-core/issues/1130)) ([921358c](https://github.com/ecmwf/anemoi-core/commit/921358cc6bf85ee8137a3f5922bae7e03e473096))
+
 ## [0.13.0](https://github.com/ecmwf/anemoi-core/compare/training-0.12.1...training-0.13.0) (2026-05-14)
 
 
