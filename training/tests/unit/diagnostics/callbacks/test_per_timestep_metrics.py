@@ -35,7 +35,6 @@ def callback_every_2() -> PerTimestepMetrics:
 
 def _make_pl_module(
     n_timesteps: int = TIME,
-    n_ens: int = ENS,
     n_grid: int = GRID,
     n_var: int = NVAR,
 ) -> MagicMock:
@@ -53,7 +52,11 @@ def _make_pl_module(
     pl_module.logger_enabled = True
 
     # calculate_val_metrics returns a dict of metric_name -> tensor
-    def mock_calculate_val_metrics(y_pred, y, **kwargs):
+    def mock_calculate_val_metrics(
+        _y_pred: torch.Tensor,
+        _y: torch.Tensor,
+        **_kwargs: object,
+    ) -> dict[str, torch.Tensor]:
         return {
             "fkcrps_metric/data/pl": torch.tensor(1.0),
             "fkcrps_metric/data/sfc": torch.tensor(2.0),
