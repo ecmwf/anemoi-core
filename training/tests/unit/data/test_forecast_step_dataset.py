@@ -222,7 +222,12 @@ class TestForecastStepDatasetGetSample:
 
     def test_get_sample_with_list_indices(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         sample = ds.get_sample(time_indices=[2, 3, 4], grid_shard_indices=slice(None))
         assert sample.shape == (3, 2, 10, 3)
@@ -230,14 +235,24 @@ class TestForecastStepDatasetGetSample:
 
     def test_get_sample_with_slice_indices(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         sample = ds.get_sample(time_indices=slice(0, 5), grid_shard_indices=slice(None))
         assert sample.shape == (5, 2, 10, 3)
 
     def test_get_sample_second_initialization(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         # Virtual indices 24-26 map to init_idx=1, step_indices=[0,1,2]
         sample = ds.get_sample(time_indices=[24, 25, 26], grid_shard_indices=slice(None))
@@ -245,14 +260,24 @@ class TestForecastStepDatasetGetSample:
 
     def test_get_sample_with_grid_shard_slice(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         sample = ds.get_sample(time_indices=[0, 1], grid_shard_indices=slice(0, 5))
         assert sample.shape == (2, 2, 5, 3)
 
     def test_get_sample_with_grid_shard_array(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         grid_indices = np.array([0, 2, 4, 6, 8])
         sample = ds.get_sample(time_indices=[0, 1, 2], grid_shard_indices=grid_indices)
@@ -260,7 +285,12 @@ class TestForecastStepDatasetGetSample:
 
     def test_get_sample_returns_correct_data(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         sample = ds.get_sample(time_indices=[0, 1, 2], grid_shard_indices=slice(None))
 
@@ -271,7 +301,12 @@ class TestForecastStepDatasetGetSample:
 
     def test_get_sample_none_grid_indices(self) -> None:
         ds = _make_forecast_step_dataset(
-            num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10, forecast_steps=24,
+            num_inits=4,
+            variables=3,
+            ensemble=2,
+            steps=24,
+            gridpoints=10,
+            forecast_steps=24,
         )
         sample = ds.get_sample(time_indices=[0, 1], grid_shard_indices=None)
         assert sample.shape == (2, 2, 10, 3)
@@ -288,7 +323,7 @@ class TestForecastStepDatasetValidation:
 
         fake = Fake4D()
         with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake), pytest.raises(
-            ValueError, match="expects a 5D trajectories dataset"
+            ValueError, match="expects a 5D trajectories dataset",
         ):
             ForecastStepDataset(dataset="fake.zarr")
 
