@@ -104,7 +104,15 @@ class PerTimestepMetrics(Callback):
             post_processor = pl_module.model.post_processors[dataset_name]
             metrics_dict = pl_module.metrics[dataset_name]
             val_metric_ranges = pl_module.val_metric_ranges[dataset_name]
-            grid_shard_slice = pl_module.grid_shard_slice.get(dataset_name)
+
+            # Gather the grid up front when any loss/metric does not support sharding, so non-sharding
+            # metrics (e.g. spectral) get the full grid; gather commutes with post-processing below.
+            pred, target, grid_shard_slice = pl_module._prepare_tensors_for_loss(
+                pred,
+                target,
+                dataset_name=dataset_name,
+                validation_mode=True,
+            )
 
             for t in range(n_timesteps):
                 # Slice single timestep: remove time dim
@@ -130,9 +138,12 @@ class PerTimestepMetrics(Callback):
                             "target_layout": IndexSpace.DATA_FULL,
                         }
                         if getattr(metric, "needs_shard_layout_info", False):
+                            # grid_shard_sizes must stay None once gathered, else an already-full tensor is re-sharded.
                             metric_kwargs.update(
                                 grid_dim=pl_module.grid_dim,
-                                grid_shard_sizes=pl_module.grid_shard_sizes[dataset_name],
+                                grid_shard_sizes=(
+                                    pl_module.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None
+                                ),
                             )
 
                         value = metric(pred_t_post, target_t_post, **metric_kwargs)
