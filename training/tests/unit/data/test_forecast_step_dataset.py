@@ -99,13 +99,18 @@ def _make_forecast_step_dataset(
     num_inits: int = 4,
     variables: int = 3,
     ensemble: int = 2,
-    steps: int = 24,
+    steps: int | None = None,
     gridpoints: int = 10,
     forecast_steps: int = 24,
     step_frequency: str | datetime.timedelta = "1h",
     missing: set[int] | None = None,
 ) -> ForecastStepDataset:
-    """Create a ForecastStepDataset backed by a fake TrajectoriesDataset (no real file I/O)."""
+    """Create a ForecastStepDataset backed by a fake TrajectoriesDataset (no real file I/O).
+
+    ``steps`` defaults to ``forecast_steps`` so that ``data.shape[-2]`` and
+    ``_forecast_steps`` are always consistent, matching what ``open_dataset``
+    would produce in production.
+    """
     if isinstance(step_frequency, str):
         from anemoi.utils.dates import frequency_to_timedelta
 
@@ -113,12 +118,13 @@ def _make_forecast_step_dataset(
     else:
         step_td = step_frequency
 
+    actual_steps = forecast_steps if steps is None else steps
     dataset = ForecastStepDataset.__new__(ForecastStepDataset)
     dataset.data = FakeTrajectoriesDataset(
         num_inits=num_inits,
         variables=variables,
         ensemble=ensemble,
-        steps=steps,
+        steps=actual_steps,
         gridpoints=gridpoints,
         step_frequency=step_td,
         missing=missing,
