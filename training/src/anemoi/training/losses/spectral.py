@@ -137,10 +137,6 @@ class SpectralLoss(BaseLoss):
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
 
-        # Some transforms are proven to be linear, so we can compute the pred - target difference before taking the
-        # transform for those. This reduces the number of required transforms from two to one
-        self.diff_before_transform = False
-
         if transform == "fft2d":
             LOGGER.info("Using FFT2D spectral transform in spectral loss.")
             self.transform = FFT2D(**kwargs)
@@ -152,13 +148,11 @@ class SpectralLoss(BaseLoss):
             # optional args: truncation, use_graphed_rfft
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
-            self.diff_before_transform = True
         elif transform == "octahedral_sht":
             # expected additional args: nlat
             # optional args: truncation, use_graphed_rfft
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
-            self.diff_before_transform = True
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)

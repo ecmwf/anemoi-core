@@ -132,16 +132,35 @@ def test_idempotency_inverse_direct(sht_setup):
     assert maxdiff < tolerance
 
 
-def test_direct_linearity(sht_setup):
-    """Direct transform is linear. We take advantage of this when calculating the L2 spectral loss."""
-
+@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
+def test_multiple_direct_calls(sht_setup):
+    """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
+    Reduced grids only.
+    """
     dtype = sht_setup["dtype"]
     direct = sht_setup["direct"]
 
-    # Pretend target array with shape (b t e v p)
-    target = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
+    before = torch.randn((1, 1, direct.n_grid_points), dtype=dtype)
 
-    # Pretend pred array with shape (b t e v p)
-    pred = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
+    once = direct(before)
 
-    assert torch.allclose(direct(pred - target), direct(pred) - direct(target))
+    twice = direct(before)
+
+    assert torch.all(once == twice)
+
+
+@pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
+def test_direct_with_graphed_reduced_fft(sht_setup):
+    """Check gradients still work for reduced-grid FFT with CUDA graphs on."""
+    dtype = sht_setup["dtype"]
+    direct = sht_setup["direct"]
+
+    x = torch.randn((2, 1, direct.n_grid_points), dtype=dtype, requires_grad=True)
+    y = direct(x)
+    loss = torch.square(torch.abs(y)).mean()
+    loss.backward()
+
+    assert x.grad is not None
+    assert torch.isfinite(x.grad).all()
