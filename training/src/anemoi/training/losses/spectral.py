@@ -169,13 +169,15 @@ class SpectralLoss(BaseLoss):
             x = self.projector.apply_with_provider(x, self.projection_provider)
         return x
 
+    def _to_spectral(self, x: torch.Tensor) -> torch.Tensor:
+        """Prepare the spatial dimension (node slice / projection), then transform to the spectral domain."""
+        return self.transform.forward(self._prepare_spatial(x))
+
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
-        """Transform to spectral domain and flatten spectral dimensions."""
-        x = self._prepare_spatial(x)
-        x_spec = self.transform.forward(x)
-        # flatten only transformed spatial/spectral dims into one "mode" axis
-        spatial_start_dim = x.ndim - 2
-        return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
+        """Transform to spectral domain and flatten the transformed dims into one "mode" axis."""
+        x_spec = self._to_spectral(x)
+        # the transform splits the single grid dim into two spectral dims; flatten them back to one
+        return x_spec.flatten(start_dim=x_spec.ndim - 3, end_dim=-2)
 
 
 class SpectralAMSELoss(SpectralLoss):
@@ -247,8 +249,8 @@ class SpectralAMSELoss(SpectralLoss):
         with torch.amp.autocast(device_type=pred.device.type, enabled=False):
             # transform to spectral domain: [B, T, E, grid, vars] -> [B, T, E, L, M, vars]
             # don't flatten to modes here since we need to calculate PSD and coherence per-L
-            pred_spec = self.transform.forward(pred)
-            target_spec = self.transform.forward(target)
+            pred_spec = self._to_spectral(pred)
+            target_spec = self._to_spectral(target)
 
             # per-L PSD: [B, T, E, L, vars]
             psd_pred = self.transform.power_spectral_density(pred_spec)

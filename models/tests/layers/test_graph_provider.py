@@ -84,11 +84,20 @@ def test_from_config_returns_none_for_empty_dict() -> None:
 
 
 def test_from_config_file_mode(mocker) -> None:
-    from scipy.sparse import eye
+    import numpy as np
+    from scipy.sparse import csr_matrix
 
-    mocker.patch("scipy.sparse.load_npz", return_value=eye(3, format="csr"))
-    provider = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz"})
-    assert isinstance(provider, ProjectionGraphProvider)
+    # rows do not sum to 1, so row_normalize (forwarded to the file path) is observable.
+    mocker.patch("scipy.sparse.load_npz", return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])))
+
+    normalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": True})
+    assert isinstance(normalized, ProjectionGraphProvider)
+    row_sums = normalized.get_edges().to_dense().sum(dim=1)
+    assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
+
+    unnormalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": False})
+    row_sums = unnormalized.get_edges().to_dense().sum(dim=1)
+    assert torch.allclose(row_sums, torch.tensor([4.0, 4.0]), atol=1e-6)
 
 
 def test_from_config_edges_mode() -> None:

@@ -707,7 +707,10 @@ class ProjectionGraphProvider(BaseGraphProvider):
             raise ValueError("projection config must specify at most one of 'matrix_path' or 'edges_name', not both")
 
         if has_matrix:
-            return cls(file_path=config["matrix_path"])
+            return cls(
+                file_path=config["matrix_path"],
+                row_normalize=bool(config.get("row_normalize", False)),
+            )
 
         if has_edges:
             if graph_data is None:
