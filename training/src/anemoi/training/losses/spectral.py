@@ -250,7 +250,7 @@ class SpectralAMSELoss(SpectralLoss):
             # per-L AMSE: [B, T, E, L, vars]
             amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
 
-        _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
+        _assert_spectral_scalers_compatible(self.scaler, amse_per_l.size(TensorDim.GRID))
         result = self.scale(
             amse_per_l,
             scaler_indices,
