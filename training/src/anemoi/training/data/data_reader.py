@@ -350,7 +350,18 @@ class TrajectoryDataset(BaseAnemoiReader):
         end: datetime.datetime | int | None = None,
         sampling: dict | None = None,
     ) -> None:
-        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
+        source = dataset_config if dataset_config is not None else dataset
+        if source is None:
+            msg = "Either dataset or dataset_config must be provided."
+            raise ValueError(msg)
+        # Trajectory datasets use base_start/base_end to filter by initialisation date;
+        # passing start/end would trigger access to .dates which doesn't exist on them.
+        open_kwargs: dict = {}
+        if start is not None:
+            open_kwargs["base_start"] = start
+        if end is not None:
+            open_kwargs["base_end"] = end
+        self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
         self.default_sampling = sampling if sampling is not None else {"stride": None}
 
     @property
