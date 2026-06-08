@@ -121,9 +121,6 @@ class SphericalHarmonicTransform(Module):
         Total number of grid points in the global grid.
     slon : list[int]
         Starting index of each latitude ring in the flattened grid dimension.
-    rlon : list[int]
-        Number of zeros to add to the end of each rFFT output, so that each zonal wavenumber Legendre transform has the
-        same shape.
 
     Methods
     -------
@@ -163,13 +160,28 @@ class SphericalHarmonicTransform(Module):
         # Set offsets to start of each latitude in flattened grid dimension
         self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
 
-        # Set padding for each latitude so every rFFT output ring has the same length
-        self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
-
-        # Use more efficient batched rfft for regular grids
-        if len(set(self.lons_per_lat)) > 1:
-            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced for reduced grid")
+        # Choose the appropriate rfft method based on the grid structure
+        # Every hemisphere latitude is different (e.g. octahedral grid)
+        # No optimised version available yet
+        if len(set(self.lons_per_lat[: self.nlat])) == len(self.lons_per_lat[: self.nlat]):
+            LOGGER.info(
+                "SphericalHarmonicTransform: All latitudes have different number of longitude points, using"
+                "rfft_rings_reduced"
+            )
             self.rfft_rings = self.rfft_rings_reduced
+        # At least two latitudes in a hemisphere are the same (e.g. classic reduced grid)
+        # Use the optimised grouped version
+        elif len(set(self.lons_per_lat[: self.nlat])) > 1:
+            LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_reduced_grouped for reduced grid")
+            self.rfft_rings = self.rfft_rings_reduced_grouped
+            self._nlon_groups = {}
+
+            # For each latitude
+            for lat_idx, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
+                self._nlon_groups.setdefault(nlon, ([], []))
+                self._nlon_groups[nlon][0].append(lat_idx)  # First list stores global latitude indices
+                self._nlon_groups[nlon][1].append(slon)  # Second stores the offsets for each latitude
+        # Else it must be a regular grid
         else:
             LOGGER.info("SphericalHarmonicTransform: Using rfft_rings_regular for regular grid")
             self.rfft_rings = self.rfft_rings_regular
@@ -216,6 +228,43 @@ class SphericalHarmonicTransform(Module):
             output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
 
         return output_tensor
+
+    def rfft_rings_reduced_grouped(self, x: Tensor) -> Tensor:
+        """Performs direct real-to-complex FFT on each latitude ring of a reduced grid, grouping latitudes with the same
+        number of longitudinal points.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
+
+        ring_results = [None] * self.nlat
+        max_m = max(self.lons_per_lat) // 2 + 1
+
+        # For each latitude group
+        for nlon, (ring_indices, slon_offsets) in self._nlon_groups.items():
+            # Collect all latitude lines in this group into one tensor
+            batch = torch.stack([x[..., slon : slon + nlon] for slon in slon_offsets], dim=-2)
+
+            # Do the rFFT
+            fft_result = torch.fft.rfft(batch, norm="forward")
+
+            # Pad the rFFT output
+            if fft_result.shape[-1] < max_m:
+                fft_result = torch.nn.functional.pad(fft_result, (0, max_m - fft_result.shape[-1]))
+
+            # Scatter the results back to the correct latitude lines in the output tensor
+            for j, ring_idx in enumerate(ring_indices):
+                ring_results[ring_idx] = fft_result[..., j : j + 1, :]
+
+        # Cat into one output tensor
+        return torch.cat(ring_results, dim=-2)
 
     def rfft_rings_regular(self, x: Tensor) -> Tensor:
         """Performs direct real-to-complex FFT on each latitude ring of a regular grid.
