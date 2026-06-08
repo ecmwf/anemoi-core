@@ -291,7 +291,8 @@ class ReducedSHT(SHT):
             ``ANEMOI_USE_CUDA_RING_FFT`` environment variable is read and defaults to ``True``.
         use_graphed_rfft : bool
             Whether to use a graphed implementation of the rFFT on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            higher memory usage and may not be supported by all devices. If False, use the CUDA ring FFT backend when
+            available or the PyTorch fallback.
         """
         super().__init__()
 
@@ -361,7 +362,8 @@ class OctahedralSHT(SHT):
             ``ANEMOI_USE_CUDA_RING_FFT`` environment variable is read and defaults to ``True``.
         use_graphed_rfft : bool
             Whether to use a graphed implementation of the rFFT on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            higher memory usage and may not be supported by all devices. If False, use the CUDA ring FFT backend when
+            available or the PyTorch fallback.
         """
         super().__init__()
         self.nlat = nlat
