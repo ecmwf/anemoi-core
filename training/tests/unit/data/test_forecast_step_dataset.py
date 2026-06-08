@@ -329,7 +329,8 @@ class TestForecastStepDatasetValidation:
 
         fake = Fake4D()
         with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake), pytest.raises(
-            ValueError, match="expects a 5D trajectories dataset",
+            ValueError,
+            match="expects a 5D trajectories dataset",
         ):
             ForecastStepDataset(dataset="fake.zarr")
 
