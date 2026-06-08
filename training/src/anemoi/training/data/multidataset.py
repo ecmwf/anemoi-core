@@ -24,7 +24,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import compute_valid_data_indices
+from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
@@ -69,7 +69,15 @@ class MultiDataset(IterableDataset):
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
         self.rollout = rollout
-        self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
+        # Compute valid (sequence, position) anchors and a flat index over them
+        # that the shuffle/shard logic operates on.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+
+        # Normalize the date indices to use slices where possible.
+        self.relative_date_indices = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
 
         self._lazy_init_model_and_reader_group_info()
 
@@ -87,10 +95,11 @@ class MultiDataset(IterableDataset):
         if relative_date_indices is None:
             return
 
-        # Refresh which sample dates can provide the currently required time steps.
-        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
+        # Recompute valid (sequence, position) anchors for the updated rollout.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
 
-        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
+        # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
@@ -324,9 +333,10 @@ class MultiDataset(IterableDataset):
         return slice(start, end)
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
+        sequence, position = (int(v) for v in self.anchors[index])
         x = {}
         for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(index, self.relative_date_indices[name])
+            time_steps = offset_time_indices(position, self.relative_date_indices[name])
             # self.shard_sizes is lazily initalised to None
             # This if statement guards against the case where shard_sizes is not set
             # (e.g. if set_comm_group_info hasn't been called yet)
@@ -335,7 +345,7 @@ class MultiDataset(IterableDataset):
                 grid_indices = slice(start, end)
             else:
                 grid_indices = slice(None)
-            x[name] = dataset.get_sample(time_steps, grid_indices)
+            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
 
         return x
 

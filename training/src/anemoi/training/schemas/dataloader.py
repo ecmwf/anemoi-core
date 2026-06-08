@@ -93,13 +93,18 @@ class NativeDatasetSchema(BaseModel):
 
 
 
-class TrajectorySchema(PydanticBaseModel):
-    """Trajectory configuration schema."""
+class TrajectorySamplingSchema(PydanticBaseModel):
+    """Trajectory anchor sampling configuration."""
 
-    start: str = Field(example="2020-02-05T12:00:00")
-    "Starting datetime for the trajectory."
-    length: PositiveInt = Field(example=12)
-    "Length of the trajectory in number of time steps."
+    stride: int | None = Field(default=None)
+    "Stride between anchor positions. None = window size (non-overlapping); 1 = every position."
+
+
+class TrajectorySchema(PydanticBaseModel):
+    """Trajectory (forecast) reader configuration."""
+
+    sampling: TrajectorySamplingSchema | None = Field(default=None)
+    "Anchor sampling config. stride=None → non-overlapping; stride=1 → all; stride=N → step N."
 
 
 class TrajectoryDatasetSchema(NativeDatasetSchema):
@@ -140,5 +145,7 @@ class DataLoaderSchema(PydanticBaseModel):
     "Test DatasetSchema."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
+    trajectory_sampling: TrajectorySamplingSchema | None = Field(default=None)
+    "Default trajectory anchor sampling used across all splits. stride=None → non-overlapping; stride=N → step N."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used"

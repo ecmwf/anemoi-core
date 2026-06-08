@@ -15,6 +15,9 @@ config_validation: True
 data:
   frequency: null
 
+dataloader:
+  trajectory_sampling:
+    stride: 6  # overlapping windows with stride 6 within each forecast
 diagnostics:
   plot:
     callbacks: []

@@ -18,6 +18,116 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def _intersect_anchor_rows(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Return the ``(sequence, position)`` rows present in both anchor arrays.
+
+    Parameters
+    ----------
+    a, b : np.ndarray
+        Arrays of shape ``(n, 2)`` of ``(sequence, position)`` anchors.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(m, 2)`` with the common anchors, sorted.
+    """
+    if a.size == 0 or b.size == 0:
+        return np.empty((0, 2), dtype=np.int64)
+    dtype = np.dtype((np.void, a.dtype.itemsize * a.shape[1]))
+    common = np.intersect1d(
+        np.ascontiguousarray(a).view(dtype),
+        np.ascontiguousarray(b).view(dtype),
+    )
+    return common.view(a.dtype).reshape(-1, 2)
+
+
+def compute_valid_anchors(
+    data_readers: dict[str, "BaseAnemoiReader"],
+    relative_date_indices: dict[str, np.ndarray | list[int]],
+) -> np.ndarray:
+    """Return the valid ``(sequence, position)`` anchors shared by all readers.
+
+    An anchor ``(s, p)`` is valid if every reader can sample the positions
+    ``p + i`` for all of its relative offsets ``i`` within sequence ``s``.
+    Returns the intersection of the valid anchors across all data readers.
+
+    Parameters
+    ----------
+    data_readers : dict[str, BaseAnemoiReader]
+        Mapping of dataset name to data reader.
+    relative_date_indices : dict[str, np.ndarray | list[int]]
+        Relative offsets (in positions) requested for each reader.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(n_anchors, 2)`` with the shared ``(sequence, position)``
+        anchors.
+    """
+    intersection: np.ndarray | None = None
+    for dataset_name, ds in data_readers.items():
+        anchors = ds.compute_anchors(relative_date_indices[dataset_name])
+
+        if len(anchors) == 0:
+            msg = f"No valid anchors found for data reader '{dataset_name}': {ds}"
+            raise ValueError(msg)
+
+        intersection = anchors if intersection is None else _intersect_anchor_rows(intersection, anchors)
+
+        LOGGER.info("Data reader '%s' has %d valid anchors", dataset_name, len(anchors))
+
+    if intersection is None or len(intersection) == 0:
+        msg = "No valid anchors found after intersection across all datasets."
+        raise ValueError(msg)
+
+    LOGGER.info("MultiDataset has %d valid anchors after intersection.", len(intersection))
+
+    return intersection
+
+
+def get_usable_indices(
+    missing_indices: set[int],
+    series_length: int,
+    relative_indices: np.ndarray | list[int],
+) -> np.ndarray:
+    """Get the usable positions of a sequence with missing positions.
+
+    A position ``p`` is usable if ``p + i`` is within ``[0, series_length)`` and
+    not missing for every relative offset ``i``.
+
+    Parameters
+    ----------
+    missing_indices : set[int]
+        Set of missing positions in the sequence.
+    series_length : int
+        Length of the sequence.
+    relative_indices: np.ndarray | list[int]
+        Array of relative offsets requested at each position.
+
+    Returns
+    -------
+    usable_indices : np.array
+        Array of usable positions.
+    """
+    if isinstance(relative_indices, list):
+        relative_indices = np.array(relative_indices)
+
+    usable_indices = np.arange(series_length)
+
+    # Restrict to positions where all relative offsets are within bounds
+    max_offset = int(max(relative_indices))
+    min_offset = int(min(relative_indices))
+    usable_indices = usable_indices[(usable_indices + min_offset >= 0) & (usable_indices + max_offset < series_length)]
+
+    # Missing positions
+    for i in missing_indices:
+        rel_missing = i - relative_indices  # positions whose relative offsets match the missing one.
+        usable_indices = usable_indices[np.all(usable_indices != rel_missing[:, np.newaxis], axis=0)]
+
+    return usable_indices
+
+
+
 def compute_valid_data_indices(
     data_readers: dict[str, "BaseAnemoiReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],
