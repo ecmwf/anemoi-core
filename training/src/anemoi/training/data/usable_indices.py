@@ -127,7 +127,6 @@ def get_usable_indices(
     return usable_indices
 
 
-
 def compute_valid_data_indices(
     data_readers: dict[str, "BaseAnemoiReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],

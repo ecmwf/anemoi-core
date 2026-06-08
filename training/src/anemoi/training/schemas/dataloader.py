@@ -92,7 +92,6 @@ class NativeDatasetSchema(BaseModel):
     "Ending datetime [inclusive] for sample of the dataset."
 
 
-
 class TrajectorySamplingSchema(PydanticBaseModel):
     """Trajectory anchor sampling configuration."""
 
