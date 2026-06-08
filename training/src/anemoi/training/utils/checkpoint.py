@@ -27,8 +27,24 @@ from anemoi.training.utils.variables_metadata import extract_variables_metadata_
 from anemoi.utils.checkpoints import save_metadata
 
 chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
+trainable_edge_perm_fix_migration = importlib.import_module(
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+).migrate
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _filter_state_dict_size_mismatches(
+    state_dict: dict[str, torch.Tensor],
+    model_state_dict: dict[str, torch.Tensor],
+) -> None:
+    for key in list(state_dict):
+        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+            LOGGER.info("Skipping loading parameter: %s", key)
+            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
+            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
+
+            del state_dict[key]
 
 
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
@@ -94,18 +110,13 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Filter out layers with size mismatch
     state_dict = checkpoint["state_dict"]
+    _filter_state_dict_size_mismatches(state_dict, model.state_dict())
 
-    model_state_dict = model.state_dict()
+    # Runtime migration: the graph-provider permutation depends on instantiated provider state.
+    checkpoint = trainable_edge_perm_fix_migration(checkpoint, model)
+    state_dict = checkpoint["state_dict"]
 
-    for key in state_dict.copy():
-        if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
-            LOGGER.info("Skipping loading parameter: %s", key)
-            LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
-            LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
-
-            del state_dict[key]  # Remove the mismatched key
-
-    # Load the filtered st-ate_dict into the model
+    # Load the filtered state_dict into the model
     model.load_state_dict(state_dict, strict=False)
 
     ## Needed for data indices check

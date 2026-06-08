@@ -31,8 +31,9 @@ gradient_clip:
   val: 32.
   algorithm: value
 
-# select model
-training_method: anemoi.training.train.methods.SingleTraining
+# select training method
+method:
+  _target_: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:

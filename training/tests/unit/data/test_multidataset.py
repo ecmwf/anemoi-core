@@ -58,6 +58,34 @@ class TestMultiDataset:
         expected_indices = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
         assert np.array_equal(valid_indices, expected_indices)
 
+    def test_set_epoch_updates_contiguous_relative_date_indices(self, multi_dataset: MultiDataset) -> None:
+        """Test that set_epoch can update the loaded rollout to contiguous relative date indices."""
+        multi_dataset.set_epoch(
+            2,
+            rollout=3,
+            relative_date_indices={"dataset_a": [0, 1, 2], "dataset_b": [0, 1, 2]},
+        )
+
+        assert multi_dataset.epoch == 2
+        assert multi_dataset.rollout == 3
+        assert multi_dataset.relative_date_indices == {
+            "dataset_a": slice(0, 3, 1),
+            "dataset_b": slice(0, 3, 1),
+        }
+        assert len(multi_dataset.valid_date_indices) > 0
+
+    def test_worker_seed_includes_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
+        """Test that worker RNG seed changes with epoch while staying shared across worker partitions."""
+        mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
+
+        multi_dataset.set_epoch(0)
+        multi_dataset.per_worker_init(n_workers=1, worker_id=0)
+        assert multi_dataset.seed == 1000
+
+        multi_dataset.set_epoch(5)
+        multi_dataset.per_worker_init(n_workers=1, worker_id=0)
+        assert multi_dataset.seed == 1005
+
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """Test that MultiDataset raises ValueError when a dataset has no valid indices."""
         data_readers = multi_dataset.data_readers
