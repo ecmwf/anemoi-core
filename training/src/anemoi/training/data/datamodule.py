@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Callable
 from functools import cached_property
 
 import pytorch_lightning as pl
@@ -172,6 +173,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         # but that would make resumed runs behave differently from uninterrupted
         # runs.
         return rollout.epoch_increment == 0
+
+    def _make_collate_fn(self, ds: MultiDataset) -> Callable[[list[dict]], Batch]:
+        static_coord_datasets = tuple(ds.static_coord_datasets)
+
+        def _collate(samples: list[dict]) -> Batch:
+            return Batch.collate(samples, static_coord_datasets=static_coord_datasets)
+
+        return _collate
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""

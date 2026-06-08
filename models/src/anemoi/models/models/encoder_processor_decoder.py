@@ -127,7 +127,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x.data,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
-                #n_step_output=self.n_step_output,
+                n_step_output=self.n_step_output,
             )
         else:
             x_skip = None
@@ -192,7 +192,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
-        pred = target.unflatten_data_2d(x_out)
+        # clone to make sure we return a copy, not a view
+        # a view cannot be modified in-place by the residual add below without breaking autograd!
+        pred = target.unflatten_data_2d(x_out).clone()
 
         if x_skip is not None:
             assert x_skip.ndim == 5, f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
@@ -270,7 +272,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_data_latent_dict = {}
 
         # Prepare hidden latent
-        hidden_coordinates = self._hidden_coordinates()
+        hidden_coordinates = self._hidden_coordinates().to(batch.device)
         x_hidden_latent = latlons_to_sincos(hidden_coordinates)
         x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=batch_size)
 

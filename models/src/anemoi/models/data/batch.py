@@ -145,6 +145,20 @@ class Batch:
         return tuple(self.data.keys())
 
     @property
+    def device(self) -> torch.device:
+        """Device the batch data lives on.
+
+        This is derived from the first dataset's data payload. 
+        All data tensors are expected to share the same device
+        after the call to :meth:`to`.
+        """
+        if not self.data:
+            raise ValueError("Cannot determine device of an empty batch.")
+        first = next(iter(self.data.values()))
+        tensor = first[0] if isinstance(first, list) else first
+        return tensor.device
+
+    @property
     def static_coord_datasets(self) -> frozenset[str]:
         """Dataset names whose coordinate tensors are static."""
         return frozenset(self.metadata.get(STATIC_COORDS_META_KEY, ()))
