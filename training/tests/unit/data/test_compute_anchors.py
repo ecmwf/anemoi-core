@@ -16,7 +16,6 @@ from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.data_reader import TrajectoryDataset
 
-
 # ---------------------------------------------------------------------------
 # Helpers: lightweight stubs that bypass open_dataset
 # ---------------------------------------------------------------------------
@@ -128,7 +127,7 @@ class TestNativeGridComputeAnchors:
         assert 4 not in positions
 
     def test_invalid_stride_raises(self) -> None:
-        """stride < 1 must raise ValueError."""
+        """Stride < 1 must raise ValueError."""
         reader = _make_native_reader(length=10)
         with pytest.raises(ValueError, match="stride must be >= 1"):
             reader.compute_anchors([0, 1], sampling={"stride": 0})
@@ -203,7 +202,7 @@ class TestTrajectoryComputeAnchors:
         assert len(anchors_override) > len(anchors_default)
 
     def test_explicit_stride_stored_as_default(self) -> None:
-        """sampling kwarg to TrajectoryDataset.__new__ should set default_sampling."""
+        """Sampling kwarg to TrajectoryDataset.__new__ should set default_sampling."""
         reader = _make_trajectory_reader(
             num_sequences=2,
             steps_per_sequence=12,

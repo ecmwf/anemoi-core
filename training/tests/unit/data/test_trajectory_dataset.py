@@ -14,7 +14,6 @@ from typing import ClassVar
 from unittest.mock import patch
 
 import numpy as np
-import pytest
 import torch
 
 from anemoi.training.data.data_reader import TrajectoryDataset
