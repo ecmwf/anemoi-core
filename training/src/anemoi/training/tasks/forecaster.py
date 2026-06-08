@@ -34,7 +34,7 @@ class RolloutConfig:
 
     def should_increase(self, current_epoch: int) -> bool:
         """Check if rollout should be increased at the end of the current epoch."""
-        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0
+        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0 and self.step < self.maximum
 
     def increase(self) -> None:
         """Increase the rollout window by one step."""
@@ -49,10 +49,9 @@ class Forecaster(BaseTask):
     Builds input and output offsets from ``multistep_input``,
     ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
 
-    For rollout training the ``offset`` property extends the output
-    offsets up to ``rollout_max`` steps so the datamodule loads enough
-    time steps, while ``steps`` only iterates over the current
-    ``rollout`` value which grows via ``on_train_epoch_end``.
+    For rollout training, training offsets extend up to the current
+    ``rollout.step`` so the dataloader only loads the required time
+    steps. ``rollout.step`` grows via ``on_train_epoch_end``.
     """
 
     name: str = "forecaster"
@@ -63,7 +62,7 @@ class Forecaster(BaseTask):
         multistep_output: int,
         timestep: str,
         rollout: dict | None = None,
-        validation_rollout: int = 1,
+        validation_rollout: int | None = None,
         **kwargs,
     ) -> None:
 
@@ -89,7 +88,9 @@ class Forecaster(BaseTask):
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
         """Return the current steps configuration based on the rollout step."""
-        max_rollout = self.validation_rollout if mode == "validation" else self.rollout.step
+        max_rollout = self.rollout.step
+        if mode == "validation" and self.validation_rollout is not None:
+            max_rollout = self.validation_rollout
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
@@ -112,22 +113,26 @@ class Forecaster(BaseTask):
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
         if mode == "training":
-            rollout_step = self.rollout.maximum
+            rollout_step = self.rollout.step
         elif mode == "validation":
-            rollout_step = self.validation_rollout
+            rollout_step = self.rollout.step if self.validation_rollout is None else self.validation_rollout
         else:
             LOGGER.debug(
-                "Unknown mode '%s' for %s.get_offsets(), defaulting to training rollout.",
+                "Unknown mode '%s' for %s.get_offsets(); using offsets for the longest configured rollout.",
                 mode,
                 self.__class__.__name__,
             )
-            rollout_step = max(self.rollout.maximum, self.validation_rollout)
+            validation_rollout = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
+            rollout_step = max(self.rollout.maximum, validation_rollout)
 
         return self._compute_rollout_offsets(rollout_step)
 
-    def get_output_offsets(self, rollout_step: int = 0, mode: str = "training", **_kwargs) -> list[datetime.timedelta]:
+    def get_output_offsets(
+        self,
+        rollout_step: int = 0,
+        **_kwargs,
+    ) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
-        rollout_step = rollout_step if mode == "training" else self.validation_rollout
         shift = self._step_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 

@@ -12,7 +12,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -99,8 +99,8 @@ def _make_imputer_settings() -> tuple[InputImputer, IndexCollection]:
     return imputer, data_indices
 
 
-def _make_model() -> AnemoiDiffusionTendModelEncProcDec:
-    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+def _make_model() -> AnemoiTransportTendModelEncProcDec:
+    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
     return model
 
@@ -169,7 +169,7 @@ def test_add_tendency_to_state_uses_expected_indices() -> None:
 
 def test_tendency_roundtrip_skips_imputation() -> None:
     imputer, data_indices = _make_imputer_settings()
-    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": data_indices}
     indices = data_indices
 
@@ -238,7 +238,7 @@ def test_apply_imputer_inverse_reinserts_nans() -> None:
     out = torch.ones((1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)
     expected = imputer.inverse_transform(out, in_place=False)
 
-    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     result = model._apply_imputer_inverse(post_processors, "data", out)
 
     assert torch.allclose(result, expected, equal_nan=True)
@@ -321,7 +321,7 @@ def test_before_sampling_keeps_reference_time_dimension() -> None:
 
 
 def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
-    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.n_step_output = 2
 
     # Two different reference timesteps; training-style behavior should always use the last one.
@@ -382,7 +382,7 @@ def test_after_sampling_reinserts_nans() -> None:
 
     post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
 
-    model = AnemoiDiffusionTendModelEncProcDec.__new__(AnemoiDiffusionTendModelEncProcDec)
+    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.n_step_output = 1
 
     def _identity_ref(x, *_args, **_kwargs):
