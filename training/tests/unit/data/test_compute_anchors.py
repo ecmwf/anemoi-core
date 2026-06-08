@@ -147,7 +147,7 @@ class TestNativeGridComputeAnchors:
 
 
 # ---------------------------------------------------------------------------
-# Tests: TrajectoryDataset (multi-sequence)
+# Tests: TrajectoryDataset (multi sequence)
 # ---------------------------------------------------------------------------
 
 
@@ -159,7 +159,7 @@ class TestTrajectoryComputeAnchors:
         reader = _make_trajectory_reader(num_sequences=3, steps_per_sequence=10)
         # window offsets [0..6] → window=7; stride=None=7 → one anchor per sequence
         anchors = reader.compute_anchors(list(range(7)))
-        # 3 sequences × 1 anchor each
+        # 3 sequences with 1 anchor each
         assert len(anchors) == 3
         np.testing.assert_array_equal(anchors[:, 0], [0, 1, 2])  # sequence ids
         assert np.all(anchors[:, 1] == 0)  # each at first valid position
