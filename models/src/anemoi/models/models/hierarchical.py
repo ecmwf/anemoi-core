@@ -380,7 +380,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         )
 
         if self.latent_skip:
-            x_latent = x_latent_proc + x_latent
+            x_latent_proc = x_latent_proc + x_latent
+        x_latent = x_latent_proc
 
         ## Upscale
         for i in range(self.num_hidden - 1, 0, -1):

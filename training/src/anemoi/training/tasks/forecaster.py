@@ -34,7 +34,7 @@ class RolloutConfig:
 
     def should_increase(self, current_epoch: int) -> bool:
         """Check if rollout should be increased at the end of the current epoch."""
-        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0
+        return self.epoch_increment > 0 and current_epoch % self.epoch_increment == 0 and self.step < self.maximum
 
     def increase(self) -> None:
         """Increase the rollout window by one step."""
@@ -49,10 +49,9 @@ class Forecaster(BaseTask):
     Builds input and output offsets from ``multistep_input``,
     ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
 
-    For rollout training the ``offset`` property extends the output
-    offsets up to ``rollout_max`` steps so the datamodule loads enough
-    time steps, while ``steps`` only iterates over the current
-    ``rollout`` value which grows via ``on_train_epoch_end``.
+    For rollout training, training offsets extend up to the current
+    ``rollout.step`` so the dataloader only loads the required time
+    steps. ``rollout.step`` grows via ``on_train_epoch_end``.
     """
 
     name: str = "forecaster"
@@ -114,9 +113,9 @@ class Forecaster(BaseTask):
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
         if mode == "training":
-            rollout_step = self.rollout.maximum
+            rollout_step = self.rollout.step
         elif mode == "validation":
-            rollout_step = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
+            rollout_step = self.rollout.step if self.validation_rollout is None else self.validation_rollout
         else:
             LOGGER.debug(
                 "Unknown mode '%s' for %s.get_offsets(); using offsets for the longest configured rollout.",
