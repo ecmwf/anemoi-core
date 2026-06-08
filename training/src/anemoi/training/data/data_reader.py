@@ -10,6 +10,7 @@
 import datetime
 import logging
 from functools import cached_property
+from typing import ClassVar
 
 import numpy as np
 import torch
@@ -96,7 +97,7 @@ class BaseAnemoiReader:
     #: Default sampling config used by :meth:`compute_anchors`.
     #: ``{"stride": 1}`` keeps every valid position;
     #: ``{"stride": None}`` uses stride = window size (non-overlapping).
-    default_sampling: dict = {"stride": 1}
+    default_sampling: ClassVar[dict] = {"stride": 1}
 
     def __init__(
         self,
