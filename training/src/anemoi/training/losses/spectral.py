@@ -96,26 +96,23 @@ class SpectralLoss(BaseLoss):
         transform
             Spectral transform type.
         nodes_slice
-            Optional ``(start, end)`` slice to select a subset of nodes before
-            the transform. ``end`` may be ``None`` to select to the last node.
+            Optional ``(start, end)`` node slice applied before the transform;
+            ``end=None`` runs to the last node.
         projection_config
-            Optional config for a sparse projection applied after the node
-            slice and before the spectral transform.  See
+            Optional sparse-projection config applied after the slice and before the
+            transform. See
             :meth:`~anemoi.models.layers.graph_provider.ProjectionGraphProvider.from_config`
-            for supported modes.
+            for the supported modes.
         graph_data
-            Full model graph; required when *projection_config* uses edge or
-            target-grid mode.
+            Model graph; required when *projection_config* uses edge or target-grid mode.
         data_node_name
-            Node type in *graph_data* holding data-grid coordinates.
+            Node type in *graph_data* holding the data-grid coordinates.
         ignore_nans
-            Spectral losses cannot handle missing values;
-            ignore_nans must be False.
+            Must be False; spectral losses cannot handle missing values.
         scalers
-            Kept for Hydra/config backwards compatibility. This module does not
-            consume this argument directly (scaling is handled by BaseLoss).
+            Accepted for config backwards-compatibility; scaling is handled by BaseLoss.
         kwargs
-            Additional arguments for the spectral transform.
+            Forwarded to the spectral transform.
         """
         assert not ignore_nans, "Spectral losses cannot handle missing values; ignore_nans must be False"
         BaseLoss.__init__(self, ignore_nans=ignore_nans)

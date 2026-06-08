@@ -657,33 +657,15 @@ class ProjectionGraphProvider(BaseGraphProvider):
         graph_data: Optional[HeteroData] = None,
         data_node_name: str = "data",
     ) -> Optional["ProjectionGraphProvider"]:
-        """Create a provider from a config mapping, or return ``None`` for empty config.
+        """Create a provider from a config mapping, choosing the mode from the keys present.
 
-        The construction mode is determined by which keys are present in *config*:
+        - ``matrix_path`` → file mode.
+        - ``edges_name`` → edge mode (needs *graph_data*).
+        - ``num_nearest_neighbours`` + ``grid``/``node_builder`` → target-grid mode,
+          building a KNN subgraph on the fly (needs *graph_data*).
 
-        - ``matrix_path`` → file mode (no *graph_data* needed).
-        - ``edges_name`` → edge mode (*graph_data* required).
-        - ``num_nearest_neighbours`` + ``grid``/``node_builder`` → target-grid
-          mode; a KNN subgraph is built on the fly (*graph_data* required).
-
-        Parameters
-        ----------
-        config:
-            ``None``, OmegaConf config, or plain mapping.
-        graph_data:
-            Full model graph; required for edge and target-grid modes.
-        data_node_name:
-            Node type in *graph_data* holding data-grid coordinates.
-
-        Returns
-        -------
-        ProjectionGraphProvider | None
-            ``None`` when *config* is empty or ``None``.
-
-        Raises
-        ------
-        ValueError
-            On ambiguous config or when *graph_data* is required but missing.
+        Returns ``None`` for an empty or ``None`` *config*, and raises ``ValueError`` on an
+        ambiguous config or when *graph_data* is required but missing.
         """
         # --- normalise to plain dict ---
         if config is None:

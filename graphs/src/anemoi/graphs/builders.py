@@ -94,29 +94,11 @@ def build_node_to_node_projection_subgraph(
 ) -> HeteroData:
     """Build a subgraph with KNN edges from source to target nodes.
 
-    If ``source_node_name == target_node_name``, builds self-loop edges.
-    If ``target_node_name`` is already in *graph_data*, its coordinates are
-    copied by reference. Otherwise target nodes are built from
-    ``config['node_builder']`` or ``config['grid']``.
-
-    Parameters
-    ----------
-    graph_data:
-        Main graph; source (and optionally target) node coordinates are read
-        from here.
-    source_node_name:
-        Node type for the source (and KNN query) side.
-    target_node_name:
-        Node type for the target side.
-    config:
-        Mapping with keys: ``num_nearest_neighbours`` (int), ``sigma`` (float),
-        and optionally ``node_builder`` or ``grid`` when the target nodes must
-        be created rather than copied from *graph_data*.
-
-    Returns
-    -------
-    HeteroData
-        Subgraph with source (and target) node coordinates and KNN edges.
+    If ``source_node_name == target_node_name``, builds self-loop edges. If
+    ``target_node_name`` is already in *graph_data*, its coordinates are copied from
+    there; otherwise the target nodes are built from ``config['node_builder']`` or
+    ``config['grid']``. *config* also carries the KNN parameters
+    ``num_nearest_neighbours`` (int) and ``sigma`` (float).
     """
     from anemoi.graphs.create import GraphCreator
 
