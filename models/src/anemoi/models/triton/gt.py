@@ -184,8 +184,7 @@ def _gt_bwd_dst_pass(
     K_ptr,
     V_ptr,
     E_ptr,
-    OUT_ptr,  # saved forward outputs o_i
-    M_ptr,  # saved m_i + ln l_i
+    M_ptr,  # saved m_i + ln l_i (logsumexp, fp32)
     ROW_ptr,  # [M] (edge -> src)
     COLPTR_ptr,  # [N_dst + 1]
     D_OUT_ptr,  # [N_dst * H * C]
@@ -212,53 +211,62 @@ def _gt_bwd_dst_pass(
 
     if num_edges == 0:
         # store D_j = <d_out, out> = 0 and dQ = 0
-        zeros = tl.zeros((H_pad,), dtype=out_dtype)
+        zeros = tl.zeros((H_pad,), dtype=tl.float32)
         tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
 
     d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    out = tl.load(OUT_ptr + dst_off, H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-
-    # D_j = <d_out, out> for one-pass computation of dQ
-    Dj = tl.sum(d_out * out, axis=-1)  # [H]
-
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    # m_j is logsumexp saved from forward: m_i + log(l_i)
+    m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
 
-    edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
-    e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    # for _ in tl.range(num_edges, warp_specialize=True):
+    # Pass 1: compute Dj = sum_i alpha_norm_i * <d_out, ve_i>
+    Dj = tl.zeros((H_pad,), dtype=tl.float32)
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_off
+    e_idx = neigh_start
+
     for _ in range(num_edges):
         e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-
         src = tl.load(ROW_ptr + e_idx)
         src_off = src * H * C + H_C_off
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-
-        ke = k + e
-        # score and alpha using saved M
-        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
-        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        alpha_ij = tl.exp(s_ij - m_j)
-
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        ke = k + e
         ve = v + e
-
+        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
+        alpha_norm = tl.exp(s_ij - m_j)  # normalised weight (m_j is logsumexp)
         dalpha = tl.sum(d_out * ve, axis=-1)
-        dS = alpha_ij * (dalpha - Dj)
-
-        dq += dS[:, None] * ke * qk_scale
-
-        # move to next edge
+        Dj += alpha_norm * dalpha
         edge_ptr += H * C
         e_idx += 1
 
-    # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
+    # Pass 2: compute dQ using Dj from pass 1.
+    dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    edge_ptr = E_ptr + neigh_start * H * C + H_C_off
+    e_idx = neigh_start
+
+    for _ in range(num_edges):
+        e = tl.load(edge_ptr, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        src = tl.load(ROW_ptr + e_idx)
+        src_off = src * H * C + H_C_off
+        k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        ke = k + e
+        ve = v + e
+        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
+        alpha_norm = tl.exp(s_ij - m_j)
+        dalpha = tl.sum(d_out * ve, axis=-1)
+        dS = alpha_norm * (dalpha - Dj)
+        dq += dS[:, None] * ke * qk_scale
+        edge_ptr += H * C
+        e_idx += 1
+
+    # store Dj as float32 to avoid precision loss before _gt_bwd_src_pass reads it
+    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
@@ -423,14 +431,14 @@ class GraphTransformerFunction(torch.autograd.Function):
 
         _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
 
-        # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
+        # Save tensors for backward (out not saved; Dj is recomputed in bwd_dst_pass)
+        ctx.save_for_backward(q, k, v, e, m, row, colptr, rowptr, edge_ids, edge_dst)
         return out
 
     @staticmethod
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+        q, k, v, e, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
 
         N_dst, H, C = q.shape
         N_src = k.shape[0]
@@ -440,10 +448,10 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
+        D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
-        # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
+        # Pass A: destination nodes (computes D and dQ); Dj recomputed in fp32 via M
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
