@@ -17,14 +17,12 @@ from abc import abstractmethod
 from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
-from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
-from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
@@ -58,6 +56,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.data.source_view import GriddedSourceView
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
     from anemoi.training.train.step_output import TrainingStepOutput
@@ -604,8 +603,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _compute_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: GriddedSourceView,
+        y: GriddedSourceView,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,

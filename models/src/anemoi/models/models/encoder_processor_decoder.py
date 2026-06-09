@@ -367,8 +367,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dataset_name=dataset_name,
             )
 
-            if data_coords.shape[0] == 0:
-                continue
+            if data_coords.numel() == 0:
+                LOGGER.debug(
+                    "No data points for dataset %s in the batch (data_coords.shape = %s), " + "will decode to a size-zero tensor ...", 
+                    dataset_name,
+                    list(data_coords.shape)
+                )
 
             # Compute decoder edges using updated latent representation
             decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
