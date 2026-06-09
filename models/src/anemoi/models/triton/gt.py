@@ -212,7 +212,7 @@ def _gt_bwd_dst_pass(
 
     if num_edges == 0:
         # store D_j = <d_out, out> = 0 and dQ = 0
-        zeros = tl.zeros((H_pad,), dtype=out_dtype)
+        zeros = tl.zeros((H_pad,), dtype=tl.float32)
         tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
@@ -258,7 +258,7 @@ def _gt_bwd_dst_pass(
         e_idx += 1
 
     # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
+    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
@@ -440,7 +440,7 @@ class GraphTransformerFunction(torch.autograd.Function):
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
+        D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
         # Pass A: destination nodes (computes D and dQ)
         _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
