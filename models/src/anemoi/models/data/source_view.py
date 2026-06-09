@@ -144,6 +144,11 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.device
 
+    @property
+    def ndim(self) -> int:
+        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
+        return self.data.ndim
+
     def flatten_data_2d(self) -> torch.Tensor:
         current_pattern = self.layout.pattern
         return einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
@@ -187,6 +192,12 @@ class GriddedSourceView(SourceView):
         new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
         new_statistics = {k: v[indices] for k, v in self.statistics.items()}
         return dataclass_replace(self, data=new_data, variables=new_variables, statistics=new_statistics)
+
+    def index_select(self, dim: int, index: torch.Tensor) -> "GriddedSourceView":
+        """Return a new view with the data tensor indexed along a given dimension."""
+        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
+        new_data = self.data.index_select(dim, index)
+        return dataclass_replace(self, data=new_data)
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSourceView":
         """Return a new view restricted to the given time indices.
