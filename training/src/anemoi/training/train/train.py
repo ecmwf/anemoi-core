@@ -39,7 +39,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.training.utils.dataset_cache import DatasetCache
+from anemoi.training.utils.dataset_cache import TCPDatasetCache
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -620,11 +620,14 @@ class AnemoiTrainer(ABC):
             )
             dataset_path = f"{self.config.system.input.dataset}"
             suffix = getattr(self.config.system.hardware, "hostname_suffix", None)
-            self.datamodule = DatasetCache(
+            local_only = getattr(self.config.system.hardware, "cache_local_only", False)
+            # self.datamodule = DatasetCache(
+            self.datamodule = TCPDatasetCache(
                 ds=self.datamodule,
                 cache_root=self.config.system.hardware.cache_dir,
                 dataset_path=dataset_path,
                 hostname_suffix=suffix,
+                local_only=local_only,
             )
 
         self.prepare_compilation()

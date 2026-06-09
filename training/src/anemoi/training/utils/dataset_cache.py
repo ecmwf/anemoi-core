@@ -14,14 +14,62 @@ from multiprocessing import Value
 from pathlib import Path
 
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.distributed as dist
 import zarr
 from zarr.convenience import PathNotFoundError
 
+from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.multidataset import MultiDataset
 
 LOGGER = logging.getLogger(__name__)
+
+
+class CachedMultiDataset(MultiDataset):
+    """``MultiDataset`` whose primary dataset is served from the distributed cache.
+
+    This is the seam that routes data reads through the cache. It overrides only
+    :meth:`get_sample`: for the *primary* dataset the per-date arrays are pulled
+    from the :class:`DatasetCache` (local SSD, remote SSD or filesystem), while
+    every other dataset is read normally.
+
+    An existing ``MultiDataset`` instance is upgraded in place by re-assigning its
+    ``__class__`` (see :meth:`DatasetCache.train_dataloader`). This keeps all the
+    instance state (open datasets, shard/comm-group info set by the strategy,
+    worker partitioning) and the inherited ``__iter__`` / ``per_worker_init`` /
+    ``set_comm_group_info`` logic, so the cache plugs in without monkeypatching
+    the underlying ``.data`` reader or re-implementing the iteration protocol.
+    """
+
+    # Set when an instance is upgraded; see DatasetCache.train_dataloader.
+    _cache: "DatasetCache"
+
+    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
+        start = index + self.data_relative_date_indices[0]
+        end = index + self.data_relative_date_indices[-1] + 1
+        if len(self.data_relative_date_indices) > 1:
+            timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
+        else:
+            timeincrement = 1  # single time step
+        time_indices = slice(start, end, timeincrement)
+
+        primary_name = self._cache.primary_dataset_name
+
+        x = {}
+        for name, dataset in self.datasets.items():
+            if self.shard_shapes is not None and self.shard_shapes[name] is not None:
+                shard_start, shard_end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+                grid_indices = slice(shard_start, shard_end)
+            else:
+                grid_indices = slice(None)
+
+            if name == primary_name:
+                x[name] = self._cache.get_primary_sample(time_indices, grid_indices)
+            else:
+                x[name] = dataset.get_sample(time_indices, grid_indices)
+
+        return x
 
 
 def _recv_exact(sock: socket.socket, nbytes: int) -> bytes | None:
@@ -133,7 +181,7 @@ class TCPCacheClient:
             self._sock = None
 
 
-class DatasetCache:
+class DatasetCache(pl.LightningDataModule):
     def __init__(
         self,
         ds: MultiDataset,
@@ -141,8 +189,12 @@ class DatasetCache:
         dataset_path: Path,
         hostname_suffix: str | None = None,
         log_cache_stats: bool | None = True,
+        local_only: bool = False,
     ) -> None:
+        # Set the wrapped datamodule first so __getattr__ delegation works safely
+        # during super().__init__().
         self.ds = ds
+        super().__init__()
         self.cache_root = Path(cache_root)
         self.dataset_path = dataset_path
 
@@ -152,6 +204,11 @@ class DatasetCache:
         self.primary_dataset_name = None
 
         self.is_initalised = False
+
+        # When True, remote cache hits are treated as misses: data is always read
+        # from the filesystem and written only to the local node SSD. Useful when
+        # inter-node bandwidth is scarce or there is only a single node.
+        self.local_only = local_only
 
         # optional suffix which will be appended to hostnames
         self.hostname_suffix = hostname_suffix
@@ -168,6 +225,35 @@ class DatasetCache:
         self._cached_ds_train = None
         self.dataset_names = self.ds.dataset_names
 
+        # Initialize cache-related attributes that will be set later in setup()
+        # This ensures they exist on the wrapper instance and don't trigger __getattr__
+        self.cache_registry = None
+        self.remote_zarrs = None
+        self.remote_tcp_clients = None
+
+        # Initialize setup-related attributes
+        self.global_rank = None
+        self.rank = None
+        self.local_rank = None
+        self.device = None
+        self.world_size = None
+        self.hostnames = None
+        self.proc_group = None
+        self._host_to_node_id = None
+        self.node_id = None
+        self.num_nodes = None
+        self._node_leader_rank = None
+        self.is_node_leader = None
+        self.filesystem = None
+        self.root_port = None
+        self.port = None
+
+        # Initialize _init_cache-related attributes
+        self.cache_path = None
+        self.cache = None
+        self.cache_full = None
+        self.remote_cache_roots = None
+
     @property
     def ds_train(self) -> MultiDataset:
         """Return the training dataset with cache wrapper applied."""
@@ -175,11 +261,41 @@ class DatasetCache:
             self._cached_ds_train = self.ds.ds_train
         return self._cached_ds_train
 
+    # --- pl.LightningDataModule hooks ---------------------------------------
+    # These methods are defined on pl.LightningDataModule, so __getattr__ is not
+    # triggered for them. Forward them explicitly to the wrapped datamodule.
+    def train_dataloader(self):  # noqa: ANN201
+        # Make sure the distributed cache is initialised (collective ops). This is
+        # called symmetrically on every rank, so it is a safe place to run setup if
+        # the on_train_start callback has not already done so.
+        if not self.is_initalised:
+            self.cache_setup()
+
+        # Upgrade the training MultiDataset in place so its primary-dataset reads are
+        # served from the cache. We mutate the existing instance (rather than building
+        # a new one) so the strategy's set_comm_group_info / sharding still applies to
+        # the dataset the DataLoader actually iterates.
+        ds_train = self.ds.ds_train
+        if not isinstance(ds_train, CachedMultiDataset):
+            ds_train.__class__ = CachedMultiDataset
+            ds_train._cache = self
+
+        return self.ds.train_dataloader()
+
+    def val_dataloader(self):  # noqa: ANN201
+        return self.ds.val_dataloader()
+
+    def test_dataloader(self):  # noqa: ANN201
+        return self.ds.test_dataloader()
+
     def __getattr__(self, name: str):
         """Called *only* if the attribute wasn't found on self.
 
         Delegate to the underlying dataset (self.ds).
         """
+        # Guard against recursion if ``ds`` itself is not set yet.
+        if name == "ds":
+            raise AttributeError(name)
         return getattr(self.ds, name)
 
     def _start_server(self) -> None:
@@ -192,9 +308,11 @@ class DatasetCache:
         msg = "_fetch_remote must be implemented by subclasses of DatasetCache"
         raise NotImplementedError(msg)
 
-    # split between init and setup to match distributed strategy from PL structure
+    # split between init and cache_setup to match distributed strategy from PL structure
     # (we need the process group to be initalised)
-    def setup(self) -> None:
+    # NOTE: named cache_setup (not setup) to avoid clashing with
+    # pl.LightningDataModule.setup(stage), which PyTorch Lightning calls during fit.
+    def cache_setup(self) -> None:
 
         # use default global proc group if proc_group is none
         # TODO(cathal): you should be able to use it if you only run on a single gpu
@@ -428,7 +546,6 @@ class DatasetCache:
                             self.cache_registry[date] = self.node_id
                         finally:
                             fcntl.flock(lock_file, fcntl.LOCK_UN)
-                            lock_path.unlink()  # remove lock file
                 else:
                     self.cache[date] = data
                     self.cache_registry[date] = self.node_id
@@ -442,7 +559,8 @@ class DatasetCache:
                     msg = f"Error adding date {date} to cache on rank {self.rank}: {e}"
                     raise OSError(msg) from e
 
-    def fetch(self, date: int, verbose: bool = False) -> np.ndarray:
+    # TODO(cathal): break into multiple methods
+    def fetch(self, date: int, verbose: bool = False) -> np.ndarray:  # noqa: C901
         """Reads cache registry, based on result fetches file from local SSD, remote SSD or filesystem."""
         if self.log_cache_stats:
             self.total_fetches.value += 1
@@ -451,7 +569,7 @@ class DatasetCache:
 
         if len(cache_hits) == 0:
             # Cache miss, go to filesystem and add to cache
-            data = self.ds_train.datasets[self.primary_dataset_name][date]
+            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
             self._add_to_cache(date, data)
 
             # Logging and stats update
@@ -485,36 +603,58 @@ class DatasetCache:
                     )
 
         else:
-            # cache hit on remote node SSD
-            remote_node_id = cache_hits[0]
-            data = self._fetch_remote(date, remote_node_id)
+            if self.local_only:
+                # Remote cache hits are disabled: treat as a miss and cache locally.
+                data = self.ds_train.datasets[self.primary_dataset_name].data[date]
+                self._add_to_cache(date, data)
 
-            # Logging and stats update
-            if self.log_cache_stats:
-                self.cache_hits_remote.value += 1
-                if verbose or (self.total_fetches.value % 10 == 0):
-                    LOGGER.info(
-                        "Rank %s: REMOTE CACHE HIT on date %s (total: hits_local=%s, hits_remote=%s, misses=%s)",
-                        self.rank,
-                        date,
-                        self.cache_hits_local.value,
-                        self.cache_hits_remote.value,
-                        self.cache_misses.value,
-                    )
+                if self.log_cache_stats:
+                    self.cache_misses.value += 1
+                    if verbose or (self.total_fetches.value % 10 == 0):
+                        LOGGER.info(
+                            "Rank %s: LOCAL-ONLY MISS (remote skipped) on date %s "
+                            "(total: hits_local=%s, hits_remote=%s, misses=%s)",
+                            self.rank,
+                            date,
+                            self.cache_hits_local.value,
+                            self.cache_hits_remote.value,
+                            self.cache_misses.value,
+                        )
+            else:
+                # cache hit on remote node SSD
+                remote_node_id = cache_hits[0]
+                data = self._fetch_remote(date, remote_node_id)
+
+                # Logging and stats update
+                if self.log_cache_stats:
+                    self.cache_hits_remote.value += 1
+                    if verbose or (self.total_fetches.value % 10 == 0):
+                        LOGGER.info(
+                            "Rank %s: REMOTE CACHE HIT on date %s (total: hits_local=%s, hits_remote=%s, misses=%s)",
+                            self.rank,
+                            date,
+                            self.cache_hits_local.value,
+                            self.cache_hits_remote.value,
+                            self.cache_misses.value,
+                        )
 
         return data
 
-    def __iter__(self) -> np.ndarray:
-        if not self.is_initalised:
-            self.setup()
+    def get_primary_sample(self, time_indices: slice, grid_shard_indices: slice) -> torch.Tensor:
+        """Return one training sample for the primary dataset, sourced from the cache.
 
-        dates = len(self)
-
-        for date in range(dates):
-            yield self.fetch(date)
-
-    def __getitem__(self, index: int) -> np.ndarray:
-        return self.fetch(index)
+        Mirrors ``BaseAnemoiReader.get_sample`` (the normal read path) but assembles
+        the requested dates from per-date cached arrays via :meth:`fetch` instead of
+        reading the underlying zarr directly. Used by :class:`CachedMultiDataset`.
+        """
+        dates = range(int(time_indices.start), int(time_indices.stop), int(time_indices.step or 1))
+        # Each fetch returns one date with shape (variables, ensemble, gridpoints).
+        stacked = np.stack([np.asarray(self.fetch(date)) for date in dates], axis=0)
+        # (dates, variables, ensemble, gridpoints) -> select grid shard
+        stacked = stacked[:, :, :, grid_shard_indices]
+        # match BaseAnemoiReader.get_sample layout: dates ensemble gridpoints variables
+        stacked = np.transpose(stacked, (0, 2, 3, 1))
+        return torch.from_numpy(np.ascontiguousarray(stacked))
 
     def __len__(self) -> int:
         # MultiDataset.valid_date_indices contains all valid time indices
@@ -578,7 +718,7 @@ class ZarrDatasetCache(DatasetCache):
                     self.rank,
                     e,
                 )
-                data = self.ds_train.datasets[self.primary_dataset_name][date]
+                data = self.ds_train.datasets[self.primary_dataset_name].data[date]
 
         # try to access the data from the remote zarr
         try:
@@ -591,7 +731,7 @@ class ZarrDatasetCache(DatasetCache):
                 self.rank,
                 e,
             )
-            data = self.ds_train.datasets[self.primary_dataset_name][date]
+            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
 
         return data
 
@@ -599,18 +739,20 @@ class ZarrDatasetCache(DatasetCache):
 class TCPDatasetCache(DatasetCache):
     """Should implement _start_server, _fetch_remote and optionally _shutdown_server."""
 
-    def _start_server(self, directory: Path, port: int) -> None:
+    def _start_server(self, directory: Path, port: int) -> None:  # noqa: ARG002
         """Start a TCP cache server on this node leader."""
-        self.tcp_server = TCPCacheServer(directory, port)
+        # Serve dates straight from this node's local zarr cache.
+        self.tcp_server = TCPCacheServer(self.cache, port)
         self.tcp_server.start()
         LOGGER.info("Serving cache via TCP on %s:%s", self._get_hostname(self._node_leader_rank[self.node_id]), port)
 
     def _shutdown_server(self) -> None:
-        try:
-            self.tcp_server.shutdown()
-            LOGGER.info("Rank %s: TCP server shut down successfully", self.rank)
-        except RuntimeError as e:
-            LOGGER.warning("Rank %s: Error shutting down server: %s", self.rank, e)
+        if hasattr(self, "tcp_server"):
+            try:
+                self.tcp_server.shutdown()
+                LOGGER.info("Rank %s: TCP server shut down successfully", self.rank)
+            except RuntimeError as e:
+                LOGGER.warning("Rank %s: Error shutting down server: %s", self.rank, e)
 
     def _get_remote_tcp_address(self, remote_node_id: int) -> tuple[str, int]:
         """Return (hostname, port) for the TCP cache server on *remote_node_id*."""
@@ -641,6 +783,6 @@ class TCPDatasetCache(DatasetCache):
                 self.rank,
                 e,
             )
-            data = self.ds_train.datasets[self.primary_dataset_name][date]
+            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
 
         return data
