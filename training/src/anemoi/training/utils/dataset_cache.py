@@ -1,7 +1,6 @@
 import errno
 import fcntl
 import http.server
-import io
 import logging
 import os
 import shutil
@@ -89,13 +88,61 @@ def _recv_exact(sock: socket.socket, nbytes: int) -> bytes | None:
     return result
 
 
+def _recv_into(sock: socket.socket, buffer: bytearray) -> None:
+    """Receive exactly ``len(buffer)`` bytes straight into *buffer* (zero-copy)."""
+    view = memoryview(buffer)
+    got = 0
+    total = len(buffer)
+    while got < total:
+        n = sock.recv_into(view[got:])
+        if n == 0:
+            msg = "Socket connection closed while receiving data"
+            raise ConnectionError(msg)
+        got += n
+
+
+def _send_array(conn: socket.socket, arr: np.ndarray) -> None:
+    """Send a numpy array as a compact header + raw, zero-copy payload.
+
+    Wire format:
+      4 bytes  : header length        (uint32, big-endian)
+      8 bytes  : payload byte count    (uint64, big-endian)
+      H bytes  : header == struct(!HB) dtype_len, ndim | dtype_str | shape(!Nq)
+      N bytes  : raw C-contiguous array bytes
+    """
+    arr = np.ascontiguousarray(arr)
+    dtype_bytes = arr.dtype.str.encode("ascii")
+    shape = arr.shape
+    header = struct.pack("!HB", len(dtype_bytes), len(shape)) + dtype_bytes + struct.pack(f"!{len(shape)}Q", *shape)
+    conn.sendall(struct.pack("!IQ", len(header), arr.nbytes))
+    conn.sendall(header)
+    conn.sendall(memoryview(arr).cast("B"))
+
+
+def _recv_array(sock: socket.socket) -> np.ndarray:
+    """Receive an array sent by :func:`_send_array` into a single preallocated buffer."""
+    meta = _recv_exact(sock, 12)  # 4 (header len) + 8 (payload nbytes)
+    if meta is None:
+        msg = "Socket connection closed while receiving array metadata"
+        raise ConnectionError(msg)
+    header_len, nbytes = struct.unpack("!IQ", meta)
+    header = _recv_exact(sock, header_len)
+    dtype_len, ndim = struct.unpack("!HB", header[:3])
+    off = 3
+    dtype = np.dtype(header[off : off + dtype_len].decode("ascii"))
+    off += dtype_len
+    shape = struct.unpack(f"!{ndim}Q", header[off : off + 8 * ndim])
+    buf = bytearray(nbytes)
+    _recv_into(sock, buf)
+    return np.frombuffer(buf, dtype=dtype).reshape(shape)
+
+
 class TCPCacheServer:
     """TCP server that serves numpy arrays from the local zarr cache.
 
     Protocol (persistent connection, many requests per connection):
       Request:  4 bytes  : date index (uint32, big-endian)
-      Response: 8 bytes  : payload length (uint64, big-endian)
-                N bytes  : uncompressed .npy data (``np.save`` format)
+      Response: array encoded by :func:`_send_array` (compact header + raw bytes)
     """
 
     def __init__(self, cache: MultiDataset, port: int, host: str = ""):
@@ -128,10 +175,7 @@ class TCPCacheServer:
                     break
                 date = struct.unpack("!I", hdr)[0]
                 arr = np.asarray(self.cache[date])
-                buf = io.BytesIO()
-                np.save(buf, arr)
-                payload = buf.getvalue()
-                conn.sendall(struct.pack("!Q", len(payload)) + payload)
+                _send_array(conn, arr)
         except (ConnectionResetError, BrokenPipeError, OSError):
             pass
         finally:
@@ -164,10 +208,7 @@ class TCPCacheClient:
             self._connect()
         try:
             self._sock.sendall(struct.pack("!I", date))
-            hdr = _recv_exact(self._sock, 8)
-            length = struct.unpack("!Q", hdr)[0]
-            payload = _recv_exact(self._sock, length)
-            return np.load(io.BytesIO(payload))
+            return _recv_array(self._sock)
         except (ConnectionResetError, BrokenPipeError, ConnectionError) as e:
             msg = f"Connection to cache server at {self.host}:{self.port} lost, retrying"
             raise ConnectionError(msg) from e
@@ -624,6 +665,12 @@ class DatasetCache(pl.LightningDataModule):
                 # cache hit on remote node SSD
                 remote_node_id = cache_hits[0]
                 data = self._fetch_remote(date, remote_node_id)
+
+                # Write-through: store the fetched array on the local SSD. The
+                # per-node date assignment reshuffles every epoch, so without this
+                # the same date would be re-fetched over the network on the next
+                # epoch instead of becoming a (fast) local hit. Bounded by cache_full.
+                self._add_to_cache(date, data)
 
                 # Logging and stats update
                 if self.log_cache_stats:
