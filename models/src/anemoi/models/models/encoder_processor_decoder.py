@@ -203,9 +203,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
             pred.data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
-        # apply all bounding modules sequentially
-        for bounding_module in self.boundings[dataset_name]:
-            pred = bounding_module(pred)
+        pred = self.boundings[dataset_name](pred)
 
         return pred
 
@@ -404,12 +402,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x_out,
                 x_skip_dict.get(dataset_name, None),
                 target[dataset_name],
-                dtype=x_out.dtype, 
+                dtype=x_out.dtype,
                 dataset_name=dataset_name,
             )
 
-        pred = target.with_data(x_out_dict)
-        return pred
+        # Create Batch object
+        out_data = {}
+        for dataset_name in target.keys():
+            #assert torch.allclose(target[dataset_name].coordinates, batch[dataset_name].coordinates), "Target and input coordinates must match."
+            assert target[dataset_name].variables == batch[dataset_name].variables, "Target and input variables must match."
+            out_data[dataset_name] = x_out_dict[dataset_name].data
+
+        return target.with_data(out_data)
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
