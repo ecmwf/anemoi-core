@@ -257,6 +257,6 @@ def build_boundings(boundings_config: list[Any] | None, dataset_names: list[str]
 
     boundings = nn.ModuleDict({})
     for dataset_name in dataset_names:
-        boundings[dataset_name] = nn.ModuleList([instantiate(cfg) for cfg in boundings_config])
+        boundings[dataset_name] = nn.Sequential(*[instantiate(cfg) for cfg in boundings_config])
 
     return boundings
