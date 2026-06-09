@@ -203,7 +203,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
             pred.data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
-        return self.boundings[dataset_name](pred)
+        # apply all bounding modules sequentially
+        for bounding_module in self.boundings[dataset_name]:
+            pred = bounding_module(pred)
+
+        return pred
 
     def _assert_valid_sharding(
         self,
