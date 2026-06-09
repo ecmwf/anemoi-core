@@ -409,8 +409,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Create Batch object
         out_data = {}
         for dataset_name in target.keys():
-            #assert torch.allclose(target[dataset_name].coordinates, batch[dataset_name].coordinates), "Target and input coordinates must match."
-            assert target[dataset_name].variables == batch[dataset_name].variables, "Target and input variables must match."
+            do_coords_match = (target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates)
+            assert do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match), "Target and input coordinates must match."
+            assert target[dataset_name].variables == x_out_dict[dataset_name].variables, "Target and input variables must match."
             out_data[dataset_name] = x_out_dict[dataset_name].data
 
         return target.with_data(out_data)
