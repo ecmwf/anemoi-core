@@ -96,26 +96,23 @@ class SpectralLoss(BaseLoss):
         transform
             Spectral transform type.
         nodes_slice
-            Optional ``(start, end)`` slice to select a subset of nodes before
-            the transform. ``end`` may be ``None`` to select to the last node.
+            Optional ``(start, end)`` node slice applied before the transform;
+            ``end=None`` runs to the last node.
         projection_config
-            Optional config for a sparse projection applied after the node
-            slice and before the spectral transform.  See
+            Optional sparse-projection config applied after the slice and before the
+            transform. See
             :meth:`~anemoi.models.layers.graph_provider.ProjectionGraphProvider.from_config`
-            for supported modes.
+            for the supported modes.
         graph_data
-            Full model graph; required when *projection_config* uses edge or
-            target-grid mode.
+            Model graph; required when *projection_config* uses edge or target-grid mode.
         data_node_name
-            Node type in *graph_data* holding data-grid coordinates.
+            Node type in *graph_data* holding the data-grid coordinates.
         ignore_nans
-            Spectral losses cannot handle missing values;
-            ignore_nans must be False.
+            Must be False; spectral losses cannot handle missing values.
         scalers
-            Kept for Hydra/config backwards compatibility. This module does not
-            consume this argument directly (scaling is handled by BaseLoss).
+            Accepted for config backwards-compatibility; scaling is handled by BaseLoss.
         kwargs
-            Additional arguments for the spectral transform.
+            Forwarded to the spectral transform.
         """
         assert not ignore_nans, "Spectral losses cannot handle missing values; ignore_nans must be False"
         BaseLoss.__init__(self, ignore_nans=ignore_nans)
@@ -145,12 +142,12 @@ class SpectralLoss(BaseLoss):
             self.transform = DCT2D(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
-            # optional args: truncation
+            # optional args: truncation, use_graphed_rfft
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
             # expected additional args: nlat
-            # optional args: truncation
+            # optional args: truncation, use_graphed_rfft
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         else:
@@ -163,19 +160,21 @@ class SpectralLoss(BaseLoss):
         index[TensorDim.GRID] = self.nodes_slice
         return x[tuple(index)]
 
-    def _prepare_spatial(self, x: torch.Tensor) -> torch.Tensor:
+    def _select_and_project(self, x: torch.Tensor) -> torch.Tensor:
         x = self._apply_nodes_slice(x)
         if self.projection_provider is not None:
-            x = self.projector.apply_with_provider(x, self.projection_provider)
+            x = self.projector.project(x, self.projection_provider)
         return x
 
+    def _to_spectral(self, x: torch.Tensor) -> torch.Tensor:
+        """Select the node subset and optionally project to the target grid, then transform to the spectral domain."""
+        return self.transform.forward(self._select_and_project(x))
+
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
-        """Transform to spectral domain and flatten spectral dimensions."""
-        x = self._prepare_spatial(x)
-        x_spec = self.transform.forward(x)
-        # flatten only transformed spatial/spectral dims into one "mode" axis
-        spatial_start_dim = x.ndim - 2
-        return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
+        """Transform to spectral domain and flatten the transformed dims into one "mode" axis."""
+        x_spec = self._to_spectral(x)
+        # the transform splits the single grid dim into two spectral dims; flatten them back to one
+        return x_spec.flatten(start_dim=x_spec.ndim - 3, end_dim=-2)
 
 
 class SpectralAMSELoss(SpectralLoss):
@@ -247,8 +246,8 @@ class SpectralAMSELoss(SpectralLoss):
         with torch.amp.autocast(device_type=pred.device.type, enabled=False):
             # transform to spectral domain: [B, T, E, grid, vars] -> [B, T, E, L, M, vars]
             # don't flatten to modes here since we need to calculate PSD and coherence per-L
-            pred_spec = self.transform.forward(pred)
-            target_spec = self.transform.forward(target)
+            pred_spec = self._to_spectral(pred)
+            target_spec = self._to_spectral(target)
 
             # per-L PSD: [B, T, E, L, vars]
             psd_pred = self.transform.power_spectral_density(pred_spec)

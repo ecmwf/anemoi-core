@@ -2,57 +2,27 @@ import torch
 
 
 class SparseProjector(torch.nn.Module):
-    """Applies sparse projection matrix to input tensors.
+    """Applies a sparse projection matrix to input tensors.
 
-    Stateless projector that receives matrix as input to forward().
+    Stateless: the matrix is passed to :meth:`forward`, not stored.
     """
 
     def __init__(self, autocast: bool = False) -> None:
-        """Initialize SparseProjector.
-
-        Parameters
-        ----------
-        autocast : bool
-            Use automatic mixed precision
-        """
         super().__init__()
         self.autocast = autocast
 
     def forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
-        """Apply sparse projection.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor
-        projection_matrix : torch.Tensor
-            Sparse projection matrix (assumed to be on correct device)
-
-        Returns
-        -------
-        torch.Tensor
-            Projected tensor
-        """
+        """Project ``x`` through ``projection_matrix`` (assumed to be on the right device)."""
         out = []
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             for i in range(x.shape[0]):
                 out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
         return torch.stack(out)
 
-    def apply_with_provider(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
-        """Apply projection via *provider*, handling arbitrary leading dimensions.
+    def project(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
+        """Project ``batch`` of shape ``[..., nodes, vars]`` through the *provider*'s matrix.
 
-        Parameters
-        ----------
-        batch:
-            Input tensor of shape ``[..., nodes, vars]``.
-        provider:
-            Object with a ``get_edges(device=...)`` method returning the sparse matrix.
-
-        Returns
-        -------
-        torch.Tensor
-            Projected tensor of shape ``[..., dst_nodes, vars]``.
+        Handles arbitrary leading dimensions; the *provider* supplies the matrix via ``get_edges(device=...)``.
         """
         input_shape = batch.shape
         batch = batch.reshape(-1, *input_shape[-2:])

@@ -88,6 +88,8 @@ def _make_pl_module(
     }
 
     pl_module.grid_shard_slice = {"data": None}
+    # no grid sharding: return tensors unchanged with a None slice, as the real method does.
+    pl_module._prepare_tensors_for_loss.side_effect = lambda y_pred, y, **_: (y_pred, y, None)
     pl_module.model_comm_group = None
     pl_module.logger_enabled = True
     pl_module.data_indices = MagicMock()
