@@ -4,11 +4,15 @@ defaults:
 - diagnostics: evaluation
 - system: example
 - graph: multi_scale
-- model: graphtransformer_diffusion
+- model: graphtransformer_transport_tendency_edm
 - task: forecaster
-- training: diffusion
+- training: edm_diffusion
 - _self_
 
 
 # set to true to switch on config validation
 config_validation: True
+
+training:
+  transport:
+    prediction_mode: tendency
