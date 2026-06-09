@@ -7,3 +7,9 @@ datasets:
     # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
     scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
     ignore_nans: False
+
+    # # disable variables compatibility check for target-vs-prediction
+    # # if the metadata in your dataset is incorrect
+    # check_variables_compatibility:
+    #   ignore_units: True # bool, or list of variable names to ignore units for
+    #   ignore_periods: False # bool, or list of variable names to ignore periods for
