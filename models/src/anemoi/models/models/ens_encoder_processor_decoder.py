@@ -148,9 +148,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
         x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
-        for bounding in self.boundings[dataset_name]:
-            # bounding performed in the order specified in the config file
-            x_out = bounding(x_out)
+        x_out = self.boundings[dataset_name](x_out)
+
         return x_out
 
     def forward(
