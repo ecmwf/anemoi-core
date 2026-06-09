@@ -470,8 +470,8 @@ class SpectralLossSchema(BaseLossSchema):
 
     transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
-    nodes_slice: tuple[int, int | None] | None = None
-    """Optional ``(start, end)`` slice to select a subset of nodes before the transform."""
+    subgrid: tuple[int, int | None] | str | None = None
+    """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
 

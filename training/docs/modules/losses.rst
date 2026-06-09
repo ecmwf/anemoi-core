@@ -241,12 +241,13 @@ Supported transforms include:
   native grid of ERA5 such as N320.
 * ``OctahedralSHT``: Spherical harmonic transform (SHT) on the octahedral reduced Gaussian grid.
 
-.. note::
+.. notes::
 
-   SHT-based transforms expect a flattened reduced-grid ordering:
+   1. SHT-based transforms expect a flattened reduced-grid ordering:
    ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
    shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
 
+<<<<<<< Updated upstream
 .. note::
 
    ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
@@ -254,11 +255,16 @@ Supported transforms include:
    executed on GPUs. Therefore an optimised version using graphs is provided, which can be switched on by setting
    ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
    significant speedups, but may not be supported on all devices and can have higher memory usage.
+=======
+   2. Before the transform is applied the grid can be subset to a subgrid by setting the optional ``subgrid`` argument.
+   This can be a slice represented by a tuple, e.g. ``(0, 100)``, to select the first 100 gridpoints, or the string ``output_mask``
+   that will restrict to grid to the region specified by the ``output_mask`` of LAM models.
+>>>>>>> Stashed changes
 
 Spectral projections
 --------------------
 
-Before the spectral transform is applied, an optional sparse projection can remap
+Before the spectral transform is applied, but after the grid has been subset, an optional sparse projection can remap
 the input field from its native (possibly unstructured) grid to the regular 2D grid
 expected by the transform. This is configured via the ``projection_config`` key and
 works with *any* spectral loss class (``SpectralCRPSLoss``, ``SpectralL2Loss``,

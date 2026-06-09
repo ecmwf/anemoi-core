@@ -81,7 +81,7 @@ class SpectralLoss(BaseLoss):
             "dct2d",
         ] = "fft2d",
         *,
-        nodes_slice: slice = slice(None),
+        subgrid: slice = slice(None),
         projection_config: object | None = None,
         graph_data: HeteroData | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
@@ -95,9 +95,8 @@ class SpectralLoss(BaseLoss):
         ----------
         transform
             Spectral transform type.
-        nodes_slice
-            Optional ``(start, end)`` node slice applied before the transform;
-            ``end=None`` runs to the last node.
+        subgrid
+            Optional slice to subset the grid before the transform.
         projection_config
             Optional sparse-projection config applied after the slice and before the
             transform. See
@@ -125,7 +124,7 @@ class SpectralLoss(BaseLoss):
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
 
-        self.nodes_slice = nodes_slice
+        self.subgrid = subgrid
         self.projection_provider = ProjectionGraphProvider.from_config(
             projection_config,
             graph_data=graph_data,
@@ -154,14 +153,14 @@ class SpectralLoss(BaseLoss):
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
 
-    def _apply_nodes_slice(self, x: torch.Tensor) -> torch.Tensor:
+    def _subset_grid(self, x: torch.Tensor) -> torch.Tensor:
         # Slice the grid dim as a view, avoiding an explicit index-tensor allocation.
         index = [slice(None)] * x.ndim
-        index[TensorDim.GRID] = self.nodes_slice
+        index[TensorDim.GRID] = self.subgrid
         return x[tuple(index)]
 
     def _select_and_project(self, x: torch.Tensor) -> torch.Tensor:
-        x = self._apply_nodes_slice(x)
+        x = self._subset_grid(x)
         if self.projection_provider is not None:
             x = self.projector.project(x, self.projection_provider)
         return x
