@@ -237,8 +237,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         )
         self.rho = config.model.model.diffusion.rho
         
-        rank_zero_info("[DEBUG] : unconditional diffusion ")
-
    
     def forward(self, x: torch.Tensor, y_noised: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
 
@@ -283,19 +281,11 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
             )
 
         # Add noise
-        eps = torch.randn_like(y)
+
         y_noised = self._noise_target(y, sigma)
 
-            # y_noised = y + sigma * eps
-
         y_pred = self(x, y_noised, sigma)
-            # Use checkpoint for compute_loss_metrics
-        # if validation_mode:
-        #     sigma2 = sigma * 2.0
-        #     y_pred_2 = self(x, y_noised, sigma2)
-
-        #     diff = (y_pred - y_pred_2).abs().mean().item()
-            # print("[TEST sigma] mean |y_pred - y_pred_2| =", diff,sigma)
+           
         loss, metrics_next = checkpoint(
                 self.compute_loss_metrics,
                 y_pred,
@@ -306,8 +296,6 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
                 use_reentrant=False,
             )
         
-        # print('DEBUG TEST POUR la prédiction shape et sigma', x.shape,y_pred.shape, sigma, y_pred.max())
-        # print(x)  
         yield loss, metrics_next, y_pred
         
     def _noise_target(self, x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
@@ -323,6 +311,7 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
         device: torch.device,
     ) -> tuple[torch.Tensor]:
 
+        # noise scheduler used during training
         if self.training_approach == "probabilistic_high_noise":
             rnd_uniform = torch.rand(shape, device=device)
             sigma = (
@@ -330,6 +319,7 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
                 + rnd_uniform * (sigma_min ** (1.0 / rho) - sigma_max ** (1.0 / rho))
             ) ** rho
 
+        # noise scheduler used during finetuning
         elif self.training_approach == "probabilistic_low_noise":
             log_sigma = torch.normal(
                 mean=self.lognormal_mean,
@@ -338,15 +328,9 @@ class GraphUnconditionalDiffusionForecaster(GraphDiffusionForecaster):
                 device=device,
             )
             sigma = torch.exp(log_sigma)
-        elif self.training_approach == "deterministic":
-            sigma = torch.full(
-                shape,
-                fill_value=5000.0,
-                device=device,
-            )
 
         weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
-        # rank_zero_info(f"sigmas : {sigma}")
+
         return sigma, weight
     
     

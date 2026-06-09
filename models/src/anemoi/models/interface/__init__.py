@@ -145,16 +145,6 @@ class AnemoiModelInterface(torch.nn.Module):
             "model_comm_group": model_comm_group,
         }
         
-        kwargs = {
-            "params_inference" : {
-            'sigma_max': 1000.0, 
-            'sigma_min': 0.02, 
-            'rho': 7, 
-            'num_steps': 100, 
-            'num_steps_sdedit': 25, 
-            'SDEdit': True
-        }
-        }
         # Add tendency processors if they exist
         if hasattr(self, "pre_processors_tendencies"):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies

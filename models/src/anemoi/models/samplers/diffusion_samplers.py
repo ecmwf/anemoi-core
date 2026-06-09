@@ -210,11 +210,9 @@ class EDMHeunSampler(DiffusionSampler):
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_shapes: Optional[list] = None,
-        loss_fn=None,
-        y_clean=None,
         **kwargs,
     ) -> torch.Tensor:
-        print("x dans edm sampler", x, "de shape ", x.shape, "mean : ", x.mean, "std : ", x.std)
+
         # Override instance defaults with any kwargs
         S_churn = kwargs.get("S_churn", self.S_churn)
         S_min = kwargs.get("S_min", self.S_min)
@@ -225,18 +223,16 @@ class EDMHeunSampler(DiffusionSampler):
         batch_size, ensemble_size = x.shape[0], x.shape[2]
 
         num_steps = len(sigmas) - 1
-        print("num steps :", num_steps)
+        print("num_steps :", num_steps)
         # Heun sampling loop
         for i in range(num_steps):
-            
-            print(f'step {i}')
+            print("step :", i)
             sigma_i = sigmas[i]
             sigma_next = sigmas[i + 1]
 
             apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
-            # print("apply_churn", apply_churn)
+
             if apply_churn:
-                print("apply churn")
                 gamma = min(S_churn / num_steps, torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1)
                 sigma_effective = sigma_i + gamma * sigma_i
                 epsilon = torch.randn_like(y) * S_noise
@@ -244,8 +240,6 @@ class EDMHeunSampler(DiffusionSampler):
             else:
                 sigma_effective = sigma_i
                 
-            print("sigma effective view", sigma_effective.view(1, 1, 1, 1).expand(y.shape[0], y.shape[1], 1, 1).to(x.dtype))
-
             D1 = denoising_fn(
                 x,
                 y.to(dtype=x.dtype),
@@ -253,32 +247,11 @@ class EDMHeunSampler(DiffusionSampler):
                 model_comm_group,
                 grid_shard_shapes,
             ).to(dtype)
-            #############################""
-            # target = np.load("/home/users/u102751/code/anemoi/anemoi-env/overfit_samples copy.npy")[-1,...]
-            # target=torch.from_numpy(target).to(device = x.device).to(dtype = x.dtype)
-            # print("target shape ", target.shape)
-            # target = target.unsqueeze(0)
-            # indices = torch.tensor([0,1,2,4], device= target.device)
-            # target = torch.index_select(target, dim=-1, index=indices)
-            # print('target sjaê ', target.shape)
-            # indices = torch.tensor([0,1,3,7]).to(target.device)
-            # mean = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/mean.npy")).to(target.device).to(target.dtype)[:78]
-            # stdev = torch.from_numpy(np.load("/project/home/p200177/DE_371/avritj/stdev.npy")).to(target.device).to(target.dtype)[:78]
-            # mean_4vars = torch.index_select(mean,dim=0, index=indices)
-            # stdev_4vars = torch.index_select(stdev, dim=0, index=indices)
-
-            # target = (target - mean_4vars) / stdev_4vars
-            # print("target shape", target.shape)
-
-            # plot_step("D1.png", D1,[0,1,2,3],["10u", "10v", "2t", "tp"], sigma_i)
-
-            # loss = loss_fn(D1,target)
-            # print("loss dans sampler : ", loss)
-            ####################################""
+          
             d = (y - D1) / (sigma_effective + eps_prec)
-            print(f"sigma next : {sigma_next} et sigma effective {sigma_effective} ")
+
             y_next = y + (sigma_next - sigma_effective) * d
-            # print(" eps prec adns heun sampler ", eps_prec)
+
             if sigma_next > eps_prec:
                 D2 = denoising_fn(
                     x,
@@ -291,7 +264,7 @@ class EDMHeunSampler(DiffusionSampler):
                 y = y + (sigma_next - sigma_effective) * (d + d_prime) / 2
             else:
                 y = y_next
-        print("y denoised complet : ", y)
+
         return y
 
 
@@ -371,56 +344,3 @@ DIFFUSION_SAMPLERS = {
     "heun": EDMHeunSampler,
     "dpmpp_2m": DPMpp2MSampler,
 }
-
-def plot_step(path, y_denoise, idx_var, vars, sigma) -> None:
-    """Write a step of the state.
-
-    Parameters
-    ----------
-    state : State
-        The state dictionary.
-    """
-    import earthkit.data as ekd
-    import earthkit.plots as ekp
-
-    print("plotting step ...")
-    
-    latitudes = np.load("/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/latitudes.npy")
-    longitudes = np.load("/project/home/p200177/DE_371/avritj/experiments_anemoi/inference/longitudes.npy")
-    
-    plotting_fields = []
-
-    for i in range(len(vars)):
-        idx = idx_var[i]
-        variable = vars[i]
-        plotting_fields.append(
-            ekd.ArrayField(
-                y_denoise[0,0,:,idx].detach().cpu().numpy(),
-                {
-                    "param": variable,
-                    "shortName": variable,
-                    "variable_name": variable,
-                    "latitudes": latitudes,
-                    "longitudes": longitudes,
-                },
-            )
-        )
-    fig = ekp.quickplot(
-        ekd.FieldList.from_fields(plotting_fields), mode="subplots", domain=None
-    )
-
-    title = f"sigma = {sigma: .2f}"
-
-    fig.title(title)
-    fname =path
-    # mpl_fig = getattr(fig, "figure", None)
-    
-    # mpl_fig = getattr(fig, "figure", None)
-    # if mpl_fig is None:
-    #     mpl_fig = getattr(fig, "_fig", None)
-
-    # if mpl_fig is not None:
-    #     mpl_fig.suptitle(title, fontsize=14)
-        
-    fig.save(fname)
-    del fig
