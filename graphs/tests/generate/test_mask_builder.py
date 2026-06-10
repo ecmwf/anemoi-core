@@ -14,8 +14,8 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.generate.masks import TORCH_CLUSTER_AVAILABLE
 from anemoi.graphs.generate.masks import AreaMaskBuilder
+from anemoi.graphs.utils import TORCH_CLUSTER_AVAILABLE
 
 
 def test_init():

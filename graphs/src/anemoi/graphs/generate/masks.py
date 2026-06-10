@@ -9,7 +9,6 @@
 
 
 import logging
-from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -19,11 +18,10 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.utils import TORCH_CLUSTER_AVAILABLE
 from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
-
-TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
 
 class _TorchClusterAreaMaskBackend:
