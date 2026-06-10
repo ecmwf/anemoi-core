@@ -696,10 +696,6 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
                 if _piecewise_key in kwargs:
                     noise_scheduler_params[_piecewise_key] = kwargs[_piecewise_key]
 
-            # TODO: remove after confirming piecewise sampler config is wired correctly
-            LOGGER.info("[predict_step] noise_scheduler_params = %s", noise_scheduler_params)
-            LOGGER.info("[predict_step] sampler_params = %s", sampler_params)
-
             out = self.sample(
                 x_in_interp_to_hres,
                 x_in_hres,
