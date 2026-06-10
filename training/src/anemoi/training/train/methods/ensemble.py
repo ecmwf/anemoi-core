@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -150,24 +151,6 @@ class EnsembleTraining(BaseTrainingModule):
 
         return x
 
-    def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Collapse ensemble dimension.
-
-        Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
-        dimension.
-        """
-        y: dict[str, torch.Tensor] = {}
-        for dataset_name, target in batch.items():
-            msg = (
-                "Expected singleton ensemble dimension in target for "
-                f"{dataset_name}, got shape {tuple(target.shape)}."
-            )
-            assert target.ndim == 5 and target.shape[2] == 1, msg
-            y[dataset_name] = target[:, :, 0, :, :]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-
-        return y
-
     def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
@@ -179,6 +162,7 @@ class EnsembleTraining(BaseTrainingModule):
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=TensorDim.ENSEMBLE_DIM,
@@ -186,10 +170,17 @@ class EnsembleTraining(BaseTrainingModule):
             mgroup=self.ens_comm_subgroup,
         )
 
-        loss = self._compute_loss(
+        y_pred_ens_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred_ens,
             y,
-            grid_shard_slice=self.grid_shard_slice[dataset_name],
+            validation_mode=validation_mode,
+            dataset_name=dataset_name,
+        )
+
+        loss = self._compute_loss(
+            y_pred_ens_full,
+            y_full,
+            grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
@@ -199,11 +190,11 @@ class EnsembleTraining(BaseTrainingModule):
         metrics_next = {}
         if validation_mode:
             metrics_next = self._compute_metrics(
-                y_pred_ens,
-                y,
+                y_pred_ens_full,
+                y_full,
                 rollout_step=rollout_step,
                 dataset_name=dataset_name,
-                grid_shard_slice=self.grid_shard_slice[dataset_name],
+                grid_shard_slice=grid_shard_slice,
                 pred_layout=pred_layout,
                 target_layout=target_layout,
             )
@@ -232,7 +223,7 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict, list]:
+    ) -> TrainingStepOutput:
         """Training / validation step."""
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -245,8 +236,7 @@ class EnsembleTraining(BaseTrainingModule):
         for task_step_kwargs in task_steps:
             y_pred = self(x, **task_step_kwargs)
 
-            y_full = self.task.get_targets(batch, **task_step_kwargs)
-            y = self._collapse_ens_dim(y_full)
+            y = self.task.get_targets(batch, **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -275,4 +265,4 @@ class EnsembleTraining(BaseTrainingModule):
             y_preds.append(y_preds_next)
 
         loss *= 1.0 / len(task_steps)
-        return loss, metrics, y_preds
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)

@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: multi
+  - training_loss: single
   - optimization: default
   - weight_averaging: null
 
@@ -35,7 +36,8 @@ gradient_clip:
 # =====================================================================
 
 # select model
-training_method: anemoi.training.train.methods.SingleTraining
+method:
+  _target_: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:
@@ -56,7 +58,6 @@ max_steps: 150000
 
 
 submodules_to_freeze: []
-
 # Dataset-specific loss and metrics configuration
 training_loss:
   datasets:

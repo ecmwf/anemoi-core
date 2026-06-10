@@ -390,10 +390,14 @@ properties of the forecast and is configured for each dataset separately.
 
 For ensemble training, the following loss functions are available:
 
--  **Kernel CRPS**: Continuous Ranked Probability Score using kernel
-   density estimation
--  **AlmostFairKernelCRPS**: A variant of Kernel CRPS which accounts for
-   the number of ensemble members used.
+-  **CRPS**: Kernel Continuous Ranked Probability Score for ensemble
+   predictions. ``alpha=0`` gives standard CRPS, ``alpha=1`` gives fair
+   CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
+   The default ``alpha: 0.95`` combines 5% standard CRPS with 95% fair
+   CRPS. The ``naive`` backend uses a simple loop over unordered
+   ensemble-member pairs and avoids materializing the full pairwise tensor.
+   The ``stable`` backend materializes pairwise tensors and uses the
+   numerically stable all-pairs formulation.
 
 .. _loss-function-scaling:
 

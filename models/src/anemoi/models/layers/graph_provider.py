@@ -25,6 +25,7 @@ from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
 
@@ -131,6 +132,10 @@ class StaticGraphProvider(BaseGraphProvider):
     edge indices, and trainable parameters.
     """
 
+    # info on trainable layout versioning for migration:
+    _TRAINABLE_LAYOUT_VERSION = 1
+    _TRAINABLE_LAYOUT_VERSION_KEY = "trainable_layout_version"
+
     def __init__(
         self,
         graph: HeteroData,
@@ -159,12 +164,21 @@ class StaticGraphProvider(BaseGraphProvider):
         assert graph, "StaticGraphProvider needs a valid graph to register edges."
         assert edge_attributes is not None, "Edge attributes must be provided"
 
+        # sort all edge indices by dst at this stage to avoid expensive reordering operations later:
+        edge_index, perm = sort_edge_index_by_dst(graph.edge_index, max_value=dst_size)
         edge_attr_tensor = torch.cat([graph[attr] for attr in edge_attributes], axis=1)
+        edge_attr_tensor = edge_attr_tensor.index_select(0, perm)
 
+        self.register_buffer("perm", perm, persistent=False)
         self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
-        self.register_buffer("edge_index_base", graph.edge_index, persistent=False)
+        self.register_buffer("edge_index_base", edge_index, persistent=False)
         self.register_buffer(
             "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=False
+        )
+        self.register_buffer(
+            self._TRAINABLE_LAYOUT_VERSION_KEY,
+            torch.tensor(self._TRAINABLE_LAYOUT_VERSION, dtype=torch.int64),
+            persistent=True,
         )
 
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=edge_attr_tensor.shape[0])
@@ -211,9 +225,14 @@ class StaticGraphProvider(BaseGraphProvider):
 
         if shard_edges:
             src_size, dst_size = self.edge_inc[:, 0].tolist()
-            return shard_edges_1hop(
-                edge_attr, edge_index, src_size * batch_size, dst_size * batch_size, model_comm_group
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
+                edge_attr,
+                edge_index,
+                src_size * batch_size,
+                dst_size * batch_size,
+                model_comm_group,
             )
+            return edge_attr, edge_index, edge_shard_sizes
 
         return edge_attr, edge_index, None
 
@@ -364,9 +383,14 @@ class DynamicGraphProvider(BaseGraphProvider):
         """Implementation of get_edges, separated for checkpointing."""
         # Build graph from coordinates
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
+        edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
+        edge_attr = edge_attr.index_select(0, perm)
 
         if shard_edges:
-            return shard_edges_1hop(edge_attr, edge_index, src_coords.shape[0], dst_coords.shape[0], model_comm_group)
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
+                edge_attr, edge_index, src_coords.shape[0], dst_coords.shape[0], model_comm_group
+            )
+            return edge_attr, edge_index, edge_shard_sizes
 
         return edge_attr, edge_index, None
 
@@ -401,7 +425,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         Returns
         -------
         tuple[Tensor, Adj, Optional[ShardSizes]]
-            Edge attributes, edge index, and optional edge_shard_sizes
+            Edge attributes, edge index, and optional edge_shard_sizes.
 
         Raises
         ------

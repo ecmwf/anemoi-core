@@ -10,17 +10,11 @@
 import numpy as np
 import pytest
 import torch
-import torch.nn as nn
 from hypothesis import given
-from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-from anemoi.models.layers.activations import GEGLU
-from anemoi.models.layers.activations import GLU
-from anemoi.models.layers.activations import ReGLU
 from anemoi.models.layers.activations import Sine
-from anemoi.models.layers.activations import SwiGLU
 
 
 @st.composite
@@ -37,76 +31,6 @@ def tensor_strategy(draw, min_dims=3, max_dims=5, min_size=1, max_size=10):
         )
     )
     return torch.tensor(array, dtype=torch.float32)
-
-
-class TestGLU:
-
-    GLUS = [GLU, SwiGLU, ReGLU, GEGLU]
-
-    common_strategy = given(x=tensor_strategy(), activation=st.sampled_from(GLUS), bias=st.booleans())
-
-    @common_strategy
-    def test_glu_property_shape_preservation(self, activation, x, bias):
-        dim = x.shape[-1]
-        glu = activation(dim=dim, bias=bias)
-        output = glu(x)
-        assert output.shape == x.shape
-
-    @common_strategy
-    def test_glu_nan_free(self, activation, x, bias):
-        dim = x.shape[-1]
-        glu = activation(dim=dim, bias=bias)
-        output = glu(x)
-        assert not torch.isnan(output).any()
-
-    @common_strategy
-    def test_glu_init(self, activation, x, bias):
-        dim = x.shape[-1]
-        glu = activation(dim=dim, bias=bias)
-
-        assert isinstance(glu.variation, nn.Module)
-        assert isinstance(glu.projection, nn.Linear)
-
-    @common_strategy
-    @settings(max_examples=10, deadline=None)
-    def test_glu_backward_pass(self, activation, x, bias):
-        dim = x.shape[-1]
-        glu = activation(dim=dim, bias=bias)
-        output = glu(x)
-        output.sum().backward()
-
-        assert x.grad is None
-        assert not torch.isnan(glu.projection.weight.grad).any()
-        if bias:
-            assert not torch.isnan(glu.projection.bias.grad).any()
-
-    @given(
-        x=tensor_strategy(min_dims=3, max_dims=3),
-        variation=st.sampled_from([nn.ReLU(), nn.Tanh(), nn.LeakyReLU()]),
-        bias=st.booleans(),
-    )
-    def test_glu_custom_activations_property(self, x, variation, bias):
-        dim = x.shape[-1]
-        glu = GLU(dim=dim, variation=variation, bias=bias)
-        output = glu(x)
-        assert output.shape == x.shape
-        assert not torch.isnan(output).any()
-
-    def test_glu_computation(self):
-        # Fixed test with deterministic output
-        dim = 2
-        x = torch.ones(1, 1, dim)
-
-        glu = GLU(dim=dim, bias=True)
-
-        # Set weights and biases manually
-        with torch.no_grad():
-            glu.projection.weight.fill_(0.3777)
-            glu.projection.bias.fill_(0.1)
-
-        output = glu(x)
-        expected = torch.sigmoid(torch.tensor(1.1)) * 0.8
-        assert torch.isclose(output[0, 0, 0], expected, atol=1e-4)
 
 
 class TestSine:
