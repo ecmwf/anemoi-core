@@ -102,6 +102,29 @@ def test_crps_rejects_invalid_backend() -> None:
         CRPS(backend="unknown")  # type: ignore[arg-type]
 
 
+def test_crps_with_singleton_target_ensemble_dim() -> None:
+    pred = torch.zeros(2, 1, 4, 3, 2)
+    target = torch.zeros(2, 1, 1, 3, 2)
+
+    out = CRPS()(pred, target, squash=False)
+
+    torch.testing.assert_close(out, torch.zeros(2))
+
+
+def test_crps_mask_nans_preserves_ensemble_sizes() -> None:
+    pred = torch.ones(1, 1, 3, 2, 1)
+    target = torch.ones(1, 1, 2, 2, 1)
+    pred[:, :, 1, 0, 0] = torch.nan
+    target[:, :, 0, 1, 0] = torch.nan
+
+    masked_pred, masked_target = CRPS(ignore_nans=True).mask_nans(pred, target)
+
+    assert masked_pred.shape == pred.shape
+    assert masked_target.shape == target.shape
+    assert torch.isfinite(masked_pred).all()
+    assert torch.isfinite(masked_target).all()
+
+
 @pytest.fixture
 def functionalloss() -> type[FunctionalLoss]:
     class ReturnDifference(FunctionalLoss):
@@ -534,25 +557,6 @@ def test_spectral_crps_fft_and_dct() -> None:
         )
 
         _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
-
-
-def test_spectral_crps_with_target_without_ensemble_dim() -> None:
-    """CRPS should handle target tensors shaped [B,T,G,V] (no ensemble dim)."""
-    bs, ens, nvars = 2, 4, 2
-    x_dim, y_dim = 8, 6
-    grid = x_dim * y_dim
-
-    pred = torch.randn(bs, 1, ens, grid, nvars)
-    target = torch.randn(bs, 1, grid, nvars)
-
-    loss = _make_loss("anemoi.training.losses.spectral.SpectralCRPSLoss", transform="fft2d", x_dim=x_dim, y_dim=y_dim)
-
-    out = loss(pred, target, squash=False)
-    assert out.shape == (nvars,), "squash=False should return per-variable CRPS"
-
-    out_total = loss(pred, target, squash=True)
-    assert out_total.numel() == 1, "squash=True should return scalar CRPS"
-    assert torch.isfinite(out_total).all(), "Expected finite scalar loss with ignore_nans=True"
 
 
 def test_spectral_crps_octahedral_irregular_grid_ignore_nans() -> None:

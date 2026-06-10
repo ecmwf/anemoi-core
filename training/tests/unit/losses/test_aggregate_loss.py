@@ -180,7 +180,7 @@ def test_reduction_aggregation_reduces_time_dim(agg_op: str) -> None:
 def test_crps_returns_scalar_tensor(agg_op: str) -> None:
     """TimeAggregateLossWrapper with CRPS should return a scalar for each agg type."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper([agg_op], _make_crps_loss())
     result = wrapper(pred, target)
     assert isinstance(result, torch.Tensor)
@@ -190,7 +190,7 @@ def test_crps_returns_scalar_tensor(agg_op: str) -> None:
 def test_crps_multiple_agg_ops_return_scalar() -> None:
     """Multiple aggregation types should accumulate into a single scalar."""
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     wrapper = TimeAggregateLossWrapper(["mean", "diff"], _make_crps_loss())
     result = wrapper(pred, target)
     assert result.numel() == 1
@@ -200,7 +200,7 @@ def test_crps_loss_accumulates_across_agg_ops() -> None:
     """Combined CRPS wrapper loss equals average of individual wrapper losses."""
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
     loss_mean = TimeAggregateLossWrapper(["mean"], inner)(pred, target)
     loss_diff = TimeAggregateLossWrapper(["diff"], inner)(pred, target)
@@ -214,7 +214,7 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
     """CRPS wrapper with time-reduction passes keepdim=True aggregated tensors to inner loss."""
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
 
     if agg_op == "min":
         pred_agg = torch.amin(pred, dim=1, keepdim=True)
@@ -235,7 +235,7 @@ def test_crps_reduction_reduces_time_dim(agg_op: str) -> None:
 def test_crps_wrapper_forwards_explicit_squash_mode() -> None:
     inner = _make_crps_loss()
     pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
-    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target = torch.rand(BS, TIME, ENS, LATLON, NVAR)
     pred_mean = torch.mean(pred, dim=1, keepdim=True)
     target_mean = torch.mean(target, dim=1, keepdim=True)
 

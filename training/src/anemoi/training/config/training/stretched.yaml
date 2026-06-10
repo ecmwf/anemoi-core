@@ -44,7 +44,8 @@ gradient_clip:
 # Optimizer settings
 
 # select model
-training_method: anemoi.training.train.methods.SingleTraining
+method:
+  _target_: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:

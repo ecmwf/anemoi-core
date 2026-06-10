@@ -87,25 +87,30 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         statistics: dict,
         data_indices: dict,
-        statistics_tendencies: dict = None,
-    ):
+        statistics_tendencies: dict | None = None,
+    ) -> tuple[
+        Processors,
+        Processors,
+        Processors | StepwiseProcessors | None,
+        Processors | StepwiseProcessors | None,
+    ]:
         """Build processors for a single dataset.
 
         Parameters
         ----------
         processors_configs : dict
-            Configuration for the processors
+            Configuration for the processors.
         statistics : dict
-            Statistics for the dataset
+            Statistics for the dataset.
         data_indices : dict
-            Data indices for the dataset
+            Data indices for the dataset.
         statistics_tendencies : dict, optional
-            Tendencies statistics for the dataset
+            Tendencies statistics for the dataset.
 
         Returns
         -------
         tuple
-            (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies)
+            (pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies).
         """
         pre_processors, post_processors = self._build_processor_pair(
             processors_configs,
@@ -184,7 +189,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.post_processors_tendencies[dataset_name] = post_tend
 
         # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing diffusion as kwarg
+        # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
         model_instantiate_config = {
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
@@ -217,9 +222,11 @@ class AnemoiModelInterface(torch.nn.Module):
         batch : dict[str, torch.Tensor]
             Input batched data.
         model_comm_group : Optional[ProcessGroup], optional
-            model communication group, specifies which GPUs work together
+            Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
             Whether to gather the output, by default True.
+        **kwargs
+            Additional prediction keyword arguments.
 
         Returns
         -------
