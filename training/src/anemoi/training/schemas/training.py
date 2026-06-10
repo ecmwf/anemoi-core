@@ -273,6 +273,12 @@ class CheckVariablesCompatibilitySchema(BaseModel):
     ignore_periods: bool | list[str] = False
     """Ignore accumulation-period mismatches.  ``True`` skips all period checks; a list of
     variable names skips only those variables."""
+    ignore_time_processing: bool | list[str] = False
+    """Ignore time-processing type mismatches.  ``True`` skips all time-processing checks;
+    a list of variable names skips only those variables."""
+    ignore_type_of_level: bool | list[str] = False
+    """Ignore mismatches in pressure level status.  ``True`` skips all type-of-level checks;
+    a list of variable names skips only those variables."""
 
 
 class BaseLossSchema(BaseModel):
