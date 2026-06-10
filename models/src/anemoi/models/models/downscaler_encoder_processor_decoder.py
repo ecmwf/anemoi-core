@@ -680,6 +680,26 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
             x_in_interp_to_hres = before_sampling_data[0]
             x_in_hres = before_sampling_data[1]
 
+            # Forward piecewise-specific kwargs into noise_scheduler_params so callers
+            # can pass them as individual keyword arguments rather than a nested dict.
+            noise_scheduler_params = dict(noise_scheduler_params or {})
+            for _piecewise_key in (
+                "schedule_type",
+                "sigma_transition",
+                "high_schedule_type",
+                "low_schedule_type",
+                "num_steps_high",
+                "num_steps_low",
+                "rho_high",
+                "rho_low",
+            ):
+                if _piecewise_key in kwargs:
+                    noise_scheduler_params[_piecewise_key] = kwargs[_piecewise_key]
+
+            # TODO: remove after confirming piecewise sampler config is wired correctly
+            LOGGER.info("[predict_step] noise_scheduler_params = %s", noise_scheduler_params)
+            LOGGER.info("[predict_step] sampler_params = %s", sampler_params)
+
             out = self.sample(
                 x_in_interp_to_hres,
                 x_in_hres,
