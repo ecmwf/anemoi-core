@@ -52,20 +52,14 @@ class CachedMultiDataset(MultiDataset):
             timeincrement = 1  # single time step
         time_indices = slice(start, end, timeincrement)
 
-        primary_name = self._cache.primary_dataset_name
-
         x = {}
-        for name, dataset in self.datasets.items():
+        for name in self.datasets:
             if self.shard_shapes is not None and self.shard_shapes[name] is not None:
-                shard_start, shard_end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
-                grid_indices = slice(shard_start, shard_end)
+                start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+                grid_indices = slice(start, end)
             else:
                 grid_indices = slice(None)
-
-            if name == primary_name:
-                x[name] = self._cache.get_primary_sample(time_indices, grid_indices)
-            else:
-                x[name] = dataset.get_sample(time_indices, grid_indices)
+            x[name] = self._cache.get_primary_sample(name, time_indices, grid_indices)
 
         return x
 
@@ -258,7 +252,7 @@ class DatasetCache(pl.LightningDataModule):
 
         # Initialize cache-related attributes that will be set later in setup()
         # This ensures they exist on the wrapper instance and don't trigger __getattr__
-        self.cache_registry = None
+        self.cache_registry = {}
         self.remote_zarrs = None
         self.remote_tcp_clients = None
 
@@ -281,7 +275,7 @@ class DatasetCache(pl.LightningDataModule):
 
         # Initialize _init_cache-related attributes
         self.cache_path = None
-        self.cache = None
+        self.cache = {}
         self.cache_full = None
         self.remote_cache_roots = None
 
@@ -394,13 +388,6 @@ class DatasetCache(pl.LightningDataModule):
         # For MultiDataset, cache the first dataset by default
         # Use self.ds_train which uses our cached property
         self.dataset_names = list(self.ds_train.datasets.keys())
-        self.primary_dataset_name = self.dataset_names[0]
-        LOGGER.info(
-            "Rank %s: DatasetCache: Found datasets %s, using '%s' for zarr metadata",
-            self.rank,
-            self.dataset_names,
-            self.primary_dataset_name,
-        )
 
         # creates space under self.cache_dir
         self.filesystem = f"{self.dataset_path}"  # TODO(cathal): read from zarr metadata
@@ -408,8 +395,8 @@ class DatasetCache(pl.LightningDataModule):
         # once the dataset is loaded, this will become an array of len(dates)
         # where the value corresponds to which node's cache a file is in
         # -1 => filesystem
-        self.cache_registry = None
-        self._init_cache()
+        self.cache_registry = {}
+        self._init_cache(self.dataset_names)
 
         # One server per node (HTTP for zarr backend, TCP for tcp backend),
         # run by the node leader only.
@@ -427,50 +414,51 @@ class DatasetCache(pl.LightningDataModule):
         self.remote_zarrs = [None] * self.num_nodes
         self.remote_tcp_clients = [None] * self.num_nodes
 
-    def _init_cache(self, delete_existing_cache: bool = True) -> None:
+    def _init_cache(self, datasets: list[str], delete_existing_cache: bool = True) -> None:
+        for dataset_name in datasets:
 
-        if self.cache_root is None:
-            LOGGER.info("Cache root not given, defaulting to $TMPDIR")
-            self.cache_root = Path(os.getenv("TMPDIR"))
+            if self.cache_root is None:
+                LOGGER.info("Cache root not given, defaulting to $TMPDIR")
+                self.cache_root = Path(os.getenv("TMPDIR"))
 
-        # create space under cache_root for cache, single shared dir per node
-        assert self.cache_root.exists()
-        self.cache_path = Path(f"{self.cache_root}/cache")
+            # create space under cache_root for cache, single shared dir per node
+            assert self.cache_root.exists()
+            self.cache_path = Path(f"{self.cache_root}/{dataset_name}_cache")
 
-        # Only the node leader creates/cleans the directory; others wait.
-        if self.is_node_leader:
-            if self.cache_path.exists() and delete_existing_cache:
-                LOGGER.info(
-                    "Rank %s: Existing cache found under %s. Deleting because delete_existing_cache=%s",
-                    self.rank,
-                    self.cache_path,
-                    delete_existing_cache,
-                )
-                shutil.rmtree(self.cache_path)
-            self.cache_path.mkdir(exist_ok=True)
+            # Only the node leader creates/cleans the directory; others wait.
+            if self.is_node_leader:
+                if self.cache_path.exists() and delete_existing_cache:
+                    LOGGER.info(
+                        "Rank %s: Existing cache found under %s. Deleting because delete_existing_cache=%s",
+                        self.rank,
+                        self.cache_path,
+                        delete_existing_cache,
+                    )
+                    shutil.rmtree(self.cache_path)
+                self.cache_path.mkdir(exist_ok=True)
 
-            # copy zarr metadata from filesystem
-            # This is needed so we can load chunks from the cache like we would from the remote zarr
-            # BUT we will have a lot of gaps in the local copy,
-            # so we will have a seperate list self.cache_registry of which elements are present or not
-            # TODO(cathal): replace with zarr.empty_like()
-            shutil.copy2(f"{self.filesystem}/data/.zarray", self.cache_path)
-            shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
-        # Barrier so non-leaders don't use the dir before it exists
-        dist.barrier(self.proc_group)
+                # copy zarr metadata from filesystem
+                # This is needed so we can load chunks from the cache like we would from the remote zarr
+                # BUT we will have a lot of gaps in the local copy,
+                # so we will have a seperate list self.cache_registry of which elements are present or not
+                # TODO(cathal): replace with zarr.empty_like()
+                shutil.copy2(f"{self.filesystem}/data/.zarray", self.cache_path)
+                shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
+            # Barrier so non-leaders don't use the dir before it exists
+            dist.barrier(self.proc_group)
 
-        self.cache = zarr.open(self.cache_path, mode="a")  # append mode so all ranks can read+write
-        self.cache_full = False  # prevents subsequent writing when cache is full
+            self.cache[dataset_name] = zarr.open(self.cache_path, mode="a")  # append mode so all ranks can read+write
+            self.cache_full = False  # prevents subsequent writing when cache is full
 
-        dates = len(self) + 2  # build in some buffer to avoid out of bounds errors,
-        # will be cleaned up in the future with a more robust solution than using integers for cache registry
+            dates = len(self) + 2  # build in some buffer to avoid out of bounds errors,
+            # will be cleaned up in the future with a more robust solution than using integers for cache registry
 
-        if self.cache_registry is None:
-            # Keep cache_registry on CPU with shared memory for DataLoader worker access
-            # Values are node_ids (not ranks); -1 => not cached anywhere
-            self.cache_registry = torch.zeros(dates, dtype=torch.int32, device="cpu").share_memory_()
-            self.cache_registry[:] = -1
-            LOGGER.info("Rank %s: Created cache registry on CPU with shared memory for %s dates", self.rank, dates)
+            if dataset_name not in self.cache_registry:
+                # Keep cache_registry on CPU with shared memory for DataLoader worker access
+                # Values are node_ids (not ranks); -1 => not cached anywhere
+                self.cache_registry[dataset_name] = torch.zeros(dates, dtype=torch.int32, device="cpu").share_memory_()
+                self.cache_registry[dataset_name][:] = -1
+                LOGGER.info("Rank %s: Created cache registry on CPU with shared memory for %s dates", self.rank, dates)
 
         self.remote_cache_roots = self._get_all_cache_roots()
 
@@ -537,30 +525,37 @@ class DatasetCache(pl.LightningDataModule):
 
         Should be called after an epoch.
         """
-        all_gather_buffer = [torch.zeros_like(self.cache_registry, device="cpu") for _ in range(self.world_size)]
+        for dataset_name in self.cache_registry:
+            all_gather_buffer = [
+                torch.zeros_like(self.cache_registry[dataset_name], device="cpu") for _ in range(self.world_size)
+            ]
 
-        LOGGER.info("Rank %s: Starting all gather (local cache registry: %s)", self.rank, self.cache_registry)
-        dist.all_gather(all_gather_buffer, self.cache_registry, group=self.proc_group)
+            LOGGER.info(
+                "Rank %s: Starting all gather (local cache registry: %s)",
+                self.rank,
+                self.cache_registry[dataset_name],
+            )
+            dist.all_gather(all_gather_buffer, self.cache_registry[dataset_name], group=self.proc_group)
 
-        self.cache_registry.copy_(
-            self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.node_id),
-        )
-        num_cached = (self.cache_registry != -1).sum().item()
-        LOGGER.info(
-            "Rank %s: Global cache registry updated. Cache now aware of %s cached items across all nodes",
-            self.rank,
-            num_cached,
-        )
+            self.cache_registry[dataset_name].copy_(
+                self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry[dataset_name], self.node_id),
+            )
+            num_cached = (self.cache_registry[dataset_name] != -1).sum().item()
+            LOGGER.info(
+                "Rank %s: Global cache registry updated. Cache now aware of %s cached items across all nodes",
+                self.rank,
+                num_cached,
+            )
 
-    def check_cache(self, date: int) -> list[int]:
+    def check_cache(self, dataset_name: str, date: int) -> list[int]:
         """Checks either local or global registry. returns list of node_ids containing file in their SSD."""
         # cache_registry stores node_ids, not ranks
-        cached_node = self.cache_registry[date].item()
+        cached_node = self.cache_registry[dataset_name][date].item()
         if cached_node == -1:
             return []
         return [cached_node]
 
-    def _add_to_cache(self, date: int, data: np.ndarray, locking: bool = True) -> None:
+    def _add_to_cache(self, dataset_name: str, date: int, data: np.ndarray, locking: bool = True) -> None:
         if not self.cache_full:
             try:
 
@@ -573,13 +568,13 @@ class DatasetCache(pl.LightningDataModule):
 
                         # add data to the shared node cache
                         try:
-                            self.cache[date] = data
-                            self.cache_registry[date] = self.node_id
+                            self.cache[dataset_name][date] = data
+                            self.cache_registry[dataset_name][date] = self.node_id
                         finally:
                             fcntl.flock(lock_file, fcntl.LOCK_UN)
                 else:
-                    self.cache[date] = data
-                    self.cache_registry[date] = self.node_id
+                    self.cache[dataset_name][date] = data
+                    self.cache_registry[dataset_name][date] = self.node_id
 
             # TODO(cathal): calculate and manage space rather then relying on catching an error
             except OSError as e:
@@ -590,15 +585,15 @@ class DatasetCache(pl.LightningDataModule):
                     msg = f"Error adding date {date} to cache on rank {self.rank}: {e}"
                     raise OSError(msg) from e
 
-    def fetch(self, date: int) -> np.ndarray:
+    def fetch(self, dataset_name: str, date: int) -> np.ndarray:
         """Reads cache registry, based on result fetches file from local SSD, remote SSD or filesystem."""
-        cache_hits = self.check_cache(date)
+        cache_hits = self.check_cache(dataset_name, date)
 
         # Prefer local cache hits, but if the local node doesn't have the file,
         # read from a remote node's cache instead of going to the filesystem directly
         if self.node_id in cache_hits:
             # Cache hit on local node SSD, read from shared zarr cache
-            data = self.cache[date]
+            data = self.cache[dataset_name][date]
 
         # Cache hit on remote node SSD, fetch over network
         elif len(cache_hits) > 0 and not self.local_only:
@@ -611,12 +606,12 @@ class DatasetCache(pl.LightningDataModule):
                 len(cache_hits) == 0 or self.local_only
             ), "If local_only is True, there should be no cache hits on remote nodes"
             # Cache miss, go to filesystem and add to cache
-            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
-            self._add_to_cache(date, data)
+            data = self.ds_train.datasets[dataset_name].data[date]
+            self._add_to_cache(dataset_name, date, data)
 
         return data
 
-    def get_primary_sample(self, time_indices: slice, grid_shard_indices: slice) -> torch.Tensor:
+    def get_primary_sample(self, dataset_name: str, time_indices: slice, grid_shard_indices: slice) -> torch.Tensor:
         """Return one training sample for the primary dataset, sourced from the cache.
 
         Mirrors ``BaseAnemoiReader.get_sample`` (the normal read path) but assembles
@@ -625,7 +620,7 @@ class DatasetCache(pl.LightningDataModule):
         """
         dates = range(int(time_indices.start), int(time_indices.stop), int(time_indices.step or 1))
         # Each fetch returns one date with shape (variables, ensemble, gridpoints).
-        stacked = np.stack([np.asarray(self.fetch(date)) for date in dates], axis=0)
+        stacked = np.stack([np.asarray(self.fetch(dataset_name, date)) for date in dates], axis=0)
         # (dates, variables, ensemble, gridpoints) -> select grid shard
         stacked = stacked[:, :, :, grid_shard_indices]
         # match BaseAnemoiReader.get_sample layout: dates ensemble gridpoints variables
@@ -678,7 +673,7 @@ class ZarrDatasetCache(DatasetCache):
         )
         return f"http://{remote_host}:{port}/{remote_cache_path}"
 
-    def _fetch_remote(self, date: int, remote_node_id: int) -> np.ndarray:
+    def _fetch_remote(self, dataset_name: str, date: int, remote_node_id: int) -> np.ndarray:
 
         # Open remote zarr interface if not already done
         if self.remote_zarrs[remote_node_id] is None:
@@ -694,7 +689,7 @@ class ZarrDatasetCache(DatasetCache):
                     self.rank,
                     e,
                 )
-                data = self.ds_train.datasets[self.primary_dataset_name].data[date]
+                data = self.ds_train.datasets[dataset_name].data[date]
 
         # try to access the data from the remote zarr
         try:
@@ -707,7 +702,7 @@ class ZarrDatasetCache(DatasetCache):
                 self.rank,
                 e,
             )
-            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
+            data = self.ds_train.datasets[dataset_name].data[date]
 
         return data
 
@@ -718,7 +713,7 @@ class TCPDatasetCache(DatasetCache):
     def _start_server(self, directory: Path, port: int) -> None:  # noqa: ARG002
         """Start a TCP cache server on this node leader."""
         # Serve dates straight from this node's local zarr cache.
-        self.tcp_server = TCPCacheServer(self.cache, port)
+        self.tcp_server = TCPCacheServer(self.cache_root, port)
         self.tcp_server.start()
         LOGGER.info("Serving cache via TCP on %s:%s", self._get_hostname(self._node_leader_rank[self.node_id]), port)
 
@@ -737,7 +732,7 @@ class TCPDatasetCache(DatasetCache):
         port = self.root_port + remote_node_id
         return remote_host, port
 
-    def _fetch_remote(self, date: int, remote_node_id: int) -> np.ndarray:
+    def _fetch_remote(self, dataset_name: str, date: int, remote_node_id: int) -> np.ndarray:
         if self.remote_tcp_clients[remote_node_id] is None:
             host, port = self._get_remote_tcp_address(remote_node_id)
             self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
@@ -750,7 +745,7 @@ class TCPDatasetCache(DatasetCache):
             )
         # try to access the data from the remote server
         try:
-            data = self.remote_tcp_clients[remote_node_id].fetch(date)
+            data = self.remote_tcp_clients[remote_node_id].fetch(dataset_name, date)
         except (KeyError, PathNotFoundError) as e:
             LOGGER.info(
                 "Error fetching remote date %s from node %s to %s. full error: %s. falling back to filesystem.",
@@ -759,6 +754,6 @@ class TCPDatasetCache(DatasetCache):
                 self.rank,
                 e,
             )
-            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
+            data = self.ds_train.datasets[dataset_name].data[date]
 
         return data
