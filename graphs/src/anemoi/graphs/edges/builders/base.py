@@ -17,6 +17,7 @@ from importlib.util import find_spec
 import numpy as np
 import torch
 from hydra.utils import instantiate
+from torch_geometric import __version__ as PYG_VERSION
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -35,6 +36,17 @@ You can install it using:
     TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
     pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
 """
+
+if PYG_VERSION >= "2.8":
+    TORCH_CLUSTER_AVAILABLE = find_spec("pyg_lib") is not None
+    TORCH_CLUSTER_INSTRUCTIONS = r"""The 'pyg-lib' library is not installed.
+    Installing 'pyg-lib' can significantly improve performance for graph creation.
+    You can install it using:
+        TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
+        pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
+    *NOTE* `torch-cluster` has been deprecated in favor of `pyg-lib` in PyG 2.8,
+        so if you are using PyG 2.8 or later, please install `pyg-lib` instead of `torch-cluster`.
+    """
 
 
 class BaseEdgeBuilder(ABC):
