@@ -37,10 +37,7 @@ class FreezingModifierStage(ModelModifier):
         strict: bool = False,
         validate_gradients: bool = True,
     ) -> None:
-        if isinstance(submodules_to_freeze, list | tuple):
-            self.submodules_to_freeze = list(submodules_to_freeze)
-        else:
-            self.submodules_to_freeze = list(submodules_to_freeze)
+        self.submodules_to_freeze = list(submodules_to_freeze)
 
         self.strict = strict
         self.validate_gradients = validate_gradients
@@ -91,14 +88,14 @@ class FreezingModifierStage(ModelModifier):
         if self.validate_gradients:
             self._validate_gradient_flow(model)
 
-        context.metadata["modifiers_applied"] = [
+        context.metadata.setdefault("modifiers_applied", []).append(
             {
                 "type": "freezing",
                 "submodules": self.submodules_to_freeze,
                 "frozen_modules": frozen_modules,
                 "total_frozen_params": total_frozen,
             },
-        ]
+        )
 
         return context
 

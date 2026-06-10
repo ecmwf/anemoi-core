@@ -96,6 +96,20 @@ async def test_freezing_gradient_validation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_freezing_metadata_accumulates_across_modifiers() -> None:
+    model = SimpleModel()
+    context = CheckpointContext(model=model)
+
+    context = await FreezingModifierStage(submodules_to_freeze=["encoder"]).process(context)
+    context = await FreezingModifierStage(submodules_to_freeze=["decoder"]).process(context)
+
+    applied = context.metadata["modifiers_applied"]
+    assert len(applied) == 2
+    assert applied[0]["submodules"] == ["encoder"]
+    assert applied[1]["submodules"] == ["decoder"]
+
+
+@pytest.mark.asyncio
 async def test_freezing_metadata_includes_param_counts() -> None:
     model = SimpleModel()
     adapter = FreezingModifierStage(submodules_to_freeze=["encoder"])
