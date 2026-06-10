@@ -329,7 +329,11 @@ class AnemoiTrainer(ABC):
         from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
         ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
-        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
+        compat_cfg = self.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
 
     @cached_property
     def model(self) -> pl.LightningModule:
