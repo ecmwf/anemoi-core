@@ -56,7 +56,7 @@ def check_variables_metadata_compatibility(
         a ``"variables_metadata"`` key.
     **options : object
         Additional keyword arguments forwarded to ``Variable.check_compatibility``
-        (e.g. ``ignore_units``, ``ignore_periods``).
+        (e.g. ``ignore_units``, ``ignore_period``).
 
     Raises
     ------
@@ -118,7 +118,7 @@ def check_loss_variable_units_compatibility(
         Per-variable metadata dict keyed by variable name.
     **options : object
         Additional keyword arguments forwarded to ``Variable.compatible``
-        (e.g. ``ignore_units``, ``ignore_periods``).
+        (e.g. ``ignore_units``, ``ignore_period``).
     """
     if variables_metadata is None:
         LOG.warning(
@@ -151,7 +151,10 @@ def check_loss_variable_units_compatibility(
             continue
 
         pred_variable = Variable.from_dict(pred_var, variables_metadata[pred_var])
-        target_variable = Variable.from_dict(target_var, variables_metadata[target_var])
+        # Build the target variable under the predicted variable's name so that
+        # Variable.compatible()'s name assertion passes (we are comparing metadata
+        # properties, not variable identity).
+        target_variable = Variable.from_dict(pred_var, variables_metadata[target_var])
 
         compatible, reason = pred_variable.compatible(target_variable, return_reason=True, **options)
         if not compatible:

@@ -270,7 +270,7 @@ class CheckVariablesCompatibilitySchema(BaseModel):
     ignore_units: bool | list[str] = False
     """Ignore unit mismatches.  ``True`` skips all unit checks; a list of variable names
     skips only those variables."""
-    ignore_periods: bool | list[str] = False
+    ignore_period: bool | list[str] = False
     """Ignore accumulation-period mismatches.  ``True`` skips all period checks; a list of
     variable names skips only those variables."""
     ignore_time_processing: bool | list[str] = False

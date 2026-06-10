@@ -12,4 +12,4 @@ datasets:
     # # if the metadata in your dataset is incorrect
     # check_variables_compatibility:
     #   ignore_units: True # bool, or list of variable names to ignore units for
-    #   ignore_periods: False # bool, or list of variable names to ignore periods for
+    #   ignore_period: False # bool, or list of variable names to ignore periods for
