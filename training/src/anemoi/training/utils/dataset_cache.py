@@ -9,7 +9,6 @@ import socketserver
 import struct
 import threading
 from functools import partial
-from multiprocessing import Value
 from pathlib import Path
 
 import numpy as np
@@ -229,7 +228,6 @@ class DatasetCache(pl.LightningDataModule):
         cache_root: Path,
         dataset_path: Path,
         hostname_suffix: str | None = None,
-        log_cache_stats: bool | None = True,
         local_only: bool = False,
     ) -> None:
         # Set the wrapped datamodule first so __getattr__ delegation works safely
@@ -253,14 +251,6 @@ class DatasetCache(pl.LightningDataModule):
 
         # optional suffix which will be appended to hostnames
         self.hostname_suffix = hostname_suffix
-
-        self.log_cache_stats = log_cache_stats
-        if self.log_cache_stats:
-            # Cache statistics - use shared memory for cross-process visibility
-            self.cache_hits_local = Value("i", 0)  # 'i' = signed int
-            self.cache_hits_remote = Value("i", 0)
-            self.cache_misses = Value("i", 0)
-            self.total_fetches = Value("i", 0)
 
         # Store the wrapped dataset to prevent it from being recreated
         self._cached_ds_train = None
@@ -600,90 +590,29 @@ class DatasetCache(pl.LightningDataModule):
                     msg = f"Error adding date {date} to cache on rank {self.rank}: {e}"
                     raise OSError(msg) from e
 
-    # TODO(cathal): break into multiple methods
-    def fetch(self, date: int, verbose: bool = False) -> np.ndarray:  # noqa: C901
+    def fetch(self, date: int) -> np.ndarray:
         """Reads cache registry, based on result fetches file from local SSD, remote SSD or filesystem."""
-        if self.log_cache_stats:
-            self.total_fetches.value += 1
-
         cache_hits = self.check_cache(date)
 
-        if len(cache_hits) == 0:
-            # Cache miss, go to filesystem and add to cache
-            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
-            self._add_to_cache(date, data)
-
-            # Logging and stats update
-            if self.log_cache_stats:
-                self.cache_misses.value += 1
-                if verbose or (self.total_fetches.value % 10 == 0):
-                    LOGGER.info(
-                        "Rank %s: CACHE MISS on date %s (total: hits_local=%s, hits_remote=%s, misses=%s)",
-                        self.rank,
-                        date,
-                        self.cache_hits_local.value,
-                        self.cache_hits_remote.value,
-                        self.cache_misses.value,
-                    )
-
-        elif self.node_id in cache_hits:
+        # Prefer local cache hits, but if the local node doesn't have the file,
+        # read from a remote node's cache instead of going to the filesystem directly
+        if self.node_id in cache_hits:
             # Cache hit on local node SSD, read from shared zarr cache
             data = self.cache[date]
 
-            # Logging and stats update
-            if self.log_cache_stats:
-                self.cache_hits_local.value += 1
-                if verbose or (self.total_fetches.value % 10 == 0):
-                    LOGGER.info(
-                        "Rank %s: LOCAL CACHE HIT on date %s (total: hits_local=%s, hits_remote=%s, misses=%s)",
-                        self.rank,
-                        date,
-                        self.cache_hits_local.value,
-                        self.cache_hits_remote.value,
-                        self.cache_misses.value,
-                    )
+        # Cache hit on remote node SSD, fetch over network
+        elif len(cache_hits) > 0 and not self.local_only:
+            remote_node_id = cache_hits[0]
+            data = self._fetch_remote(date, remote_node_id)
 
+        # No cache hits, fetch from filesystem and add to cache
         else:
-            if self.local_only:
-                # Remote cache hits are disabled: treat as a miss and cache locally.
-                data = self.ds_train.datasets[self.primary_dataset_name].data[date]
-                self._add_to_cache(date, data)
-
-                if self.log_cache_stats:
-                    self.cache_misses.value += 1
-                    if verbose or (self.total_fetches.value % 10 == 0):
-                        LOGGER.info(
-                            "Rank %s: LOCAL-ONLY MISS (remote skipped) on date %s "
-                            "(total: hits_local=%s, hits_remote=%s, misses=%s)",
-                            self.rank,
-                            date,
-                            self.cache_hits_local.value,
-                            self.cache_hits_remote.value,
-                            self.cache_misses.value,
-                        )
-            else:
-                # cache hit on remote node SSD
-                remote_node_id = cache_hits[0]
-                data = self._fetch_remote(date, remote_node_id)
-
-                # Write-through: store the fetched array on the local SSD. The
-                # per-node date assignment reshuffles every epoch, so without this
-                # the same date would be re-fetched over the network on the next
-                # epoch instead of becoming a (fast) local hit. Bounded by cache_full.
-                self._add_to_cache(date, data)
-
-                # Logging and stats update
-                if self.log_cache_stats:
-                    self.cache_hits_remote.value += 1
-                    if verbose or (self.total_fetches.value % 10 == 0):
-                        LOGGER.info(
-                            "Rank %s: REMOTE CACHE HIT on date %s (total: hits_local=%s, hits_remote=%s, misses=%s)",
-                            self.rank,
-                            date,
-                            self.cache_hits_local.value,
-                            self.cache_hits_remote.value,
-                            self.cache_misses.value,
-                        )
+            assert (
+                len(cache_hits) == 0 or self.local_only
+            ), "If local_only is True, there should be no cache hits on remote nodes"
+            # Cache miss, go to filesystem and add to cache
+            data = self.ds_train.datasets[self.primary_dataset_name].data[date]
+            self._add_to_cache(date, data)
 
         return data
 
