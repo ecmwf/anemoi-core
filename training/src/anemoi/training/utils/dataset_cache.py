@@ -18,7 +18,6 @@ import torch.distributed as dist
 import zarr
 from zarr.convenience import PathNotFoundError
 
-from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.multidataset import MultiDataset
 
 LOGGER = logging.getLogger(__name__)
@@ -54,12 +53,7 @@ class CachedMultiDataset(MultiDataset):
 
         x = {}
         for name in self.datasets:
-            if self.shard_shapes is not None and self.shard_shapes[name] is not None:
-                start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-            x[name] = self._cache.get_primary_sample(name, time_indices, grid_indices)
+            x[name] = self._cache.get_primary_sample(name, time_indices)
 
         return x
 
@@ -229,6 +223,7 @@ class DatasetCache(pl.LightningDataModule):
         self.ds = ds
         super().__init__()
         self.cache_root = Path(cache_root)
+        assert self.cache_root.exists(), f"Cache root {self.cache_root} does not exist"
         self.dataset_path = dataset_path
 
         # For multi-dataset scenarios, we cache the first dataset by default
@@ -611,18 +606,17 @@ class DatasetCache(pl.LightningDataModule):
 
         return data
 
-    def get_primary_sample(self, dataset_name: str, time_indices: slice, grid_shard_indices: slice) -> torch.Tensor:
+    def get_primary_sample(self, dataset_name: str, time_indices: slice) -> torch.Tensor:
         """Return one training sample for the primary dataset, sourced from the cache.
 
         Mirrors ``BaseAnemoiReader.get_sample`` (the normal read path) but assembles
         the requested dates from per-date cached arrays via :meth:`fetch` instead of
         reading the underlying zarr directly. Used by :class:`CachedMultiDataset`.
+        Each fetched array is already grid-sharded by the underlying reader.
         """
         dates = range(int(time_indices.start), int(time_indices.stop), int(time_indices.step or 1))
-        # Each fetch returns one date with shape (variables, ensemble, gridpoints).
+        # Each fetch returns one date with shape (variables, ensemble, gridpoints) already sharded.
         stacked = np.stack([np.asarray(self.fetch(dataset_name, date)) for date in dates], axis=0)
-        # (dates, variables, ensemble, gridpoints) -> select grid shard
-        stacked = stacked[:, :, :, grid_shard_indices]
         # match BaseAnemoiReader.get_sample layout: dates ensemble gridpoints variables
         stacked = np.transpose(stacked, (0, 2, 3, 1))
         return torch.from_numpy(np.ascontiguousarray(stacked))
