@@ -107,9 +107,7 @@ def test_knn_edge_count(edge_builder_cls, graph_with_nodes: HeteroData):
 def test_cutoff_pyg_vs_sklearn(edge_builder_cls, cutoff_factor, graph_with_nodes: HeteroData):
     """CutOff edges from pyg and sklearn must be identical sets."""
     # max_num_neighbours set high to avoid backend-specific truncation differences
-    builder = edge_builder_cls(
-        "test_nodes", "test_nodes", cutoff_factor=cutoff_factor, max_num_neighbours=512
-    )
+    builder = edge_builder_cls("test_nodes", "test_nodes", cutoff_factor=cutoff_factor, max_num_neighbours=512)
     source_nodes, target_nodes = builder.prepare_node_data(graph_with_nodes)
     src_coords, tgt_coords = builder.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
@@ -141,21 +139,16 @@ def test_cutoff_full_pipeline_agrees(edge_builder_cls, graph_with_nodes: HeteroD
     # --- pyg path ---
     _base_module.TORCH_CLUSTER_AVAILABLE = True
     _utils_module.TORCH_CLUSTER_AVAILABLE = True
-    pyg_edge_index = builder.compute_edge_index(
-         source_nodes, target_nodes
-    )
+    pyg_edge_index = builder.compute_edge_index(source_nodes, target_nodes)
 
     # --- sklearn path ---
     _base_module.TORCH_CLUSTER_AVAILABLE = False
     _utils_module.TORCH_CLUSTER_AVAILABLE = False
-    sklearn_edge_index = builder.compute_edge_index(
-         source_nodes, target_nodes
-    )
+    sklearn_edge_index = builder.compute_edge_index(source_nodes, target_nodes)
 
     pyg_set = _edge_set_from_index(pyg_edge_index)
     sklearn_set = _edge_set_from_index(sklearn_edge_index)
 
     assert pyg_set == sklearn_set, (
-        f"{edge_builder_cls.__name__} full pipeline: "
-        f"symmetric diff = {pyg_set.symmetric_difference(sklearn_set)}"
+        f"{edge_builder_cls.__name__} full pipeline: " f"symmetric diff = {pyg_set.symmetric_difference(sklearn_set)}"
     )

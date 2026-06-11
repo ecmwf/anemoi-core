@@ -69,8 +69,7 @@ def test_backends_agree_on_reference_coords(margin_radius_km, graph_with_nodes: 
     assert kd_mask.dtype == torch.bool
     assert tc_mask.shape == kd_mask.shape
     assert torch.equal(tc_mask, kd_mask), (
-        f"margin={margin_radius_km} km: "
-        f"TC={tc_mask.tolist()}, KD={kd_mask.tolist()}"
+        f"margin={margin_radius_km} km: " f"TC={tc_mask.tolist()}, KD={kd_mask.tolist()}"
     )
 
 
@@ -131,8 +130,7 @@ def test_backends_agree_partial_overlap(margin_radius_km):
     assert tc_mask.dtype == torch.bool
     assert tc_mask.shape == kd_mask.shape
     assert torch.equal(tc_mask, kd_mask), (
-        f"margin={margin_radius_km} km: "
-        f"TC={tc_mask.tolist()}, KD={kd_mask.tolist()}"
+        f"margin={margin_radius_km} km: " f"TC={tc_mask.tolist()}, KD={kd_mask.tolist()}"
     )
 
 
@@ -166,6 +164,4 @@ def test_area_mask_builder_full_pipeline_agrees(graph_with_nodes: HeteroData):
     builder_kd.fit(graph_with_nodes)
     mask_kd = builder_kd.get_mask(query_coords)
 
-    assert torch.equal(mask_tc, mask_kd), (
-        f"AreaMaskBuilder full pipeline: TC={mask_tc.tolist()}, KD={mask_kd.tolist()}"
-    )
+    assert torch.equal(mask_tc, mask_kd), f"AreaMaskBuilder full pipeline: TC={mask_tc.tolist()}, KD={mask_kd.tolist()}"
