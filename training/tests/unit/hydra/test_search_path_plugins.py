@@ -62,6 +62,7 @@ def test_config_path_wins_and_home_env_paths_removed(monkeypatch: pytest.MonkeyP
     assert "anemoi-env-searchpath-plugin" not in providers
     # CWD is appended AFTER the primary path, so --config-path keeps top priority.
     assert "anemoi-cwd-searchpath-plugin" in providers, "CWD was not appended to the search path"
+    assert providers.count("anemoi-cwd-searchpath-plugin") == 1
     assert providers.index("main") < providers.index("anemoi-cwd-searchpath-plugin")
     # Packaged configs remain the lowest-priority fallback.
     assert providers[-1] == "anemoi-package-searchpath-plugin"
