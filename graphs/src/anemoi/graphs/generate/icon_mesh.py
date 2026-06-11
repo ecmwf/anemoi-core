@@ -126,7 +126,8 @@ class ICONMultiMesh:
     def multi_mesh_edges(self) -> np.ndarray:
         """Returns the multi-mesh edges as an arrays of vertex indices."""
         # concatenate edge-vertex lists (= edges of the multi-level mesh):
-        return np.concatenate([edges for edges in self.edge_vertices], axis=0)
+        edges = np.concatenate([edges for edges in self.edge_vertices], axis=0)
+        return np.concatenate([edges, np.fliplr(edges)])
 
     def _read_vertices_data(self):
         LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.grid_filename}'")
