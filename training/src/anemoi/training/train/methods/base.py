@@ -1175,11 +1175,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for k, v in per_dataset_config.items():
                 if isinstance(v, dict):
                     per_dataset_resolve(v, dataset_name)
-                elif k == "subgrid":
-                    if v == "output_mask":
-                        per_dataset_config[k] = self.output_mask[dataset_name].as_slice()
-                    else:
-                        per_dataset_config[k] = slice(*(v or (0, None)))
+                elif (k, v) == ("subgrid", "output_mask"):
+                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
 
         for dataset_name, dataset_config in config.items():
             if dataset_config is not None:
