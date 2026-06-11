@@ -23,7 +23,7 @@ _TRAINABLE_KEY = "trainable.trainable"
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
+        "anemoi-models": "0.16.0",
     },
 )
 # <-- END DO NOT CHANGE
