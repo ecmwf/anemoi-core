@@ -148,28 +148,28 @@ class BaseLoss(nn.Module, ABC):
 
     def mask_nans(
         self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        pred: "SourceView",
+        target: "SourceView",
+    ) -> tuple["SourceView", "SourceView"]:
         """Return the fraction of ignored nan-values in the target and masked  prediction and target tensors.
 
         Parameters
         ----------
-        pred : torch.Tensor,
+        pred : SourceView,
             Prediction tensor
-        target : torch.Tensor,
+        target : SourceView,
             Target tensor
 
         Returns
         -------
-        torch.Tensor, torch.Tensor]
+        SourceView, SourceView
             * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``
             * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
         """
         if self.ignore_nans:
-            nan_mask = torch.isnan(target + pred)
-            target = target.masked_fill(nan_mask, 0.0)
-            pred = pred.masked_fill(nan_mask, 0.0)
+            nan_mask = target.map_data(lambda t: t.isnan())
+            target = target.map_data(lambda t: t.masked_fill(nan_mask, 0.0))
+            pred = pred.map_data(lambda p: p.masked_fill(nan_mask, 0.0))
 
             return pred, target
 
@@ -178,8 +178,8 @@ class BaseLoss(nn.Module, ABC):
     def reduce(
         self,
         out: torch.Tensor,
+        layout: "TensorLayout",
         squash: bool = True,
-        tensor_layout: "TensorLayout" = None,
         squash_mode: Squash_mode = "avg",
         group: ProcessGroup | None = None,
     ) -> torch.Tensor:
@@ -213,28 +213,11 @@ class BaseLoss(nn.Module, ABC):
         ValueError
             If squash_mode is not one of ['avg', 'sum']
         """
-        if isinstance(out, list):
-            # We have a sparse (obs) batch, so `out` is a list of tensors (one for each sample in the batch).
-            # The tensors can have different shapes (obs counts) and cannot be stacked
-            # so we reduce each independently and average => batch mean.
-            per_sample = [
-                self.reduce(
-                    o,
-                    squash=squash,
-                    tensor_layout=tensor_layout,
-                    squash_mode=squash_mode,
-                    group=None,
-                )
-                for o in out
-            ]
-            stacked = torch.stack(per_sample) if len(per_sample) > 1 else per_sample[0].unsqueeze(0)
-            reduced = stacked.mean()
-            return reduced if group is None else reduce_tensor(reduced, group)
         if squash:
             if squash_mode == "avg":
-                out = torch.mean(out, dim=tensor_layout.grid, keepdim=True)
+                out = torch.mean(out, dim=layout.variables, keepdim=True)
             elif squash_mode == "sum":
-                out = torch.sum(out, dim=tensor_layout.variable, keepdim=True)
+                out = torch.sum(out, dim=layout.variables, keepdim=True)
             else:
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
@@ -242,18 +225,15 @@ class BaseLoss(nn.Module, ABC):
         # here the grid and time dimension are summed because
         # 1. the normalisation over grid points is handled in the node weighting
         # 2. the normalization over output steps is handled by the time_step scaler
-        dims = [tensor_layout.time, tensor_layout.grid]
+        dims = [layout.time, layout.grid]
         space_time_summed = torch.sum(
             out,
             dim=tuple([f for f in dims if f is not None]),
             keepdim=True,
         )
 
-        dims = [tensor_layout.batch, tensor_layout.time, tensor_layout.ensemble]
-        out = torch.mean(
-            space_time_summed,
-            dim=tuple([f for f in dims if f is not None]),
-        ).squeeze()
+        dims = [layout.batch, layout.time, layout.ensemble]
+        out = torch.mean(space_time_summed, dim=tuple([f for f in dims if f is not None])).squeeze()
 
         return out if group is None else reduce_tensor(out, group)
 
@@ -433,18 +413,21 @@ class FunctionalLoss(BaseLoss):
             Weighted loss
         """
         is_sharded = grid_shard_slice is not None
-        if isinstance(pred.data, list):
-            out = []
-            for p, t in zip(pred.data, target.data):
-                pdata, tdata = self.mask_nans(p, t)
-                out.append(self.calculate_difference(pdata, tdata))
-            # out = [self.calculate_difference(p, t) for p, t in zip(pred.data, target.data)]
-        else:
-            pdata, tdata = self.mask_nans(pred.data, target.data)
-            out = self.calculate_difference(pdata, tdata)
+        pred, target = self.mask_nans(pred, target)
+        out = pred.map_pairwise(self.calculate_difference, target)
 
         # out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
-        return self.reduce(
-            out, squash, tensor_layout=pred.layout, group=group if is_sharded else None, squash_mode=squash_mode
+        loss = out.apply_to_data(
+            self.reduce,
+            layout=out.layout,
+            squash=squash,
+            group=group if is_sharded else None,
+            squash_mode=squash_mode,
         )
+
+        if isinstance(loss, list):
+            # aggregate over batch
+            loss = torch.mean(*loss)
+
+        return loss

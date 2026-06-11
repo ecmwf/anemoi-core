@@ -367,6 +367,7 @@ class LossVariableMapper(BaseLossWrapper):
 
         if squash:
             return self.loss(pred_filtered, target_filtered, squash=squash, **loss_kwargs)
+
         len_model_output = pred.shape[-1]
         loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
         loss_per_variable = self.loss(

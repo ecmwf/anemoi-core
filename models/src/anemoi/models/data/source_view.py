@@ -181,6 +181,18 @@ class GriddedSourceView(SourceView):
         """Apply a function to the data tensor, returning a new view with the same metadata."""
         new_data = func(self.data, **kwargs)
         return dataclass_replace(self, data=new_data)
+    
+    def map_pairwise(self, func: Callable, other: "GriddedSourceView", **kwargs) -> "GriddedSourceView":
+        assert isinstance(other, GriddedSourceView), f"Other view must be a GriddedSourceView; got {type(other).__name__}."
+        assert self.layout == other.layout, f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
+        #assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
+        assert torch.all(self.coordinates == other.coordinates), f"Both views must have the same coordinates; got {self.coordinates} and {other.coordinates}."
+        new_data = func(self.data, other.data, **kwargs)
+        return dataclass_replace(self, data=new_data)
+
+    def apply_to_data(self, func: Callable, **kwargs) -> torch.Tensor:
+        """Apply a function to the data tensor, returning the result."""
+        return func(self.data, **kwargs)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSourceView":
         """Return a new view restricted to the given variable indices.
@@ -281,10 +293,23 @@ class TabularSourceView(SourceView):
         """Return a deep copy of this view (clones each data tensor)."""
         return dataclass_replace(self, data=[t.clone() for t in self.data])
 
-    def map_data(self, func: Callable, **kwargs) -> "TabularSourceView":
+    def map_data(self, func: Callable, *args, **kwargs) -> "TabularSourceView":
         """Apply a function to the data tensor, returning a new view with the same metadata."""
-        new_data = [func(t, **kwargs) for t in self.data]
+        new_data = [func(t, *args, **kwargs) for t in self.data]
         return dataclass_replace(self, data=new_data)
+
+    def map_pairwise(self, func: Callable, other: "TabularSourceView", **kwargs) -> "TabularSourceView":
+        """Apply a function to pairs of data tensors from this view and another view, returning a new view with the same metadata."""
+        assert isinstance(other, TabularSourceView), f"Other view must be a TabularSourceView; got {type(other).__name__}."
+        assert len(self.data) == len(other.data), f"Both views must have the same number of data tensors; got {len(self.data)} and {len(other.data)}."
+        assert self.layout == other.layout, f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
+        #assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
+        new_data = [func(t1, t2, **kwargs) for t1, t2 in zip(self.data, other.data)]
+        return dataclass_replace(self, data=new_data)
+
+    def apply_to_data(self, func: Callable, **kwargs) -> list[torch.Tensor]:
+        """Apply a function to the data tensor, returning a list of results."""
+        return [func(t, **kwargs) for t in self.data]
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":
         """Return a new view restricted to the given variable indices.
