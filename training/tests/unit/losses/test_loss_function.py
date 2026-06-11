@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
+from types import SimpleNamespace
+
 import einops
 import hydra
 import pytest
@@ -28,6 +31,7 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
@@ -35,9 +39,17 @@ spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, Log
 losses += spectral_losses
 
 
-def _make_loss(target: str, **kwargs) -> BaseLoss:
+def _resolve_subgrid(cfg: dict, output_mask: SimpleNamespace | None = None) -> None:
+    mock_method = SimpleNamespace(output_mask={"data": output_mask})
+    multi_cfg = {"data": cfg}
+    BaseTrainingModule._resolve_subgrid(mock_method, multi_cfg)
+    return multi_cfg["data"]
+
+
+def _make_loss(target: str, output_mask: SimpleNamespace | None = None, **kwargs) -> BaseLoss:
     cfg = {"_target_": target, "scalers": []}
     cfg.update(kwargs)
+    cfg = _resolve_subgrid(cfg, output_mask)
     return get_loss_function(DictConfig(cfg))
 
 
@@ -639,7 +651,14 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
     assert result.numel() == 1
 
 
-def test_spectral_loss_subgrid_actually_applied() -> None:
+@pytest.mark.parametrize(
+    "subgrid",
+    [
+        (0, 8),
+        "output_mask",
+    ],
+)
+def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
     """Subgrid must be applied: input has 2x the expected nodes, slice selects half.
 
     If subgrid is skipped FFT2D fails to reshape the oversized spatial dimension.
@@ -647,13 +666,16 @@ def test_spectral_loss_subgrid_actually_applied() -> None:
     x_dim, y_dim = 4, 2  # FFT2D expects 8 nodes
     n_total = 16  # input has 16 nodes; slice=(0, 8) should reduce to 8
     bs, nvars = 1, 2
+    loss_cfg = {
+        "transform": "fft2d",
+        "x_dim": x_dim,
+        "y_dim": y_dim,
+        "subgrid": subgrid,
+    }
 
-    loss = SpectralL2Loss(
-        transform="fft2d",
-        x_dim=x_dim,
-        y_dim=y_dim,
-        subgrid=(0, 8),
-    )
+    output_mask = SimpleNamespace(as_tuple=lambda: (0, 8))
+
+    loss = _make_loss("anemoi.training.losses.spectral.SpectralL2Loss", output_mask=output_mask, **loss_cfg)
 
     pred = torch.randn(bs, 1, 1, n_total, nvars)
     target = torch.randn(bs, 1, 1, n_total, nvars)
