@@ -293,7 +293,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Latent skip connection
         if self.latent_skip:
-            x_latent = x_latent_proc + x_latent
+            x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
         x_out_dict = {}
@@ -314,7 +314,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_out = self.decoder[dataset_name](
-                (x_latent, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
