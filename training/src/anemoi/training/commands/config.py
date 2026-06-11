@@ -48,14 +48,6 @@ class ConfigGenerator(Command):
         generate.add_argument("--output", "-o", default=Path.cwd(), help="Output directory")
         generate.add_argument("--overwrite", "-f", action="store_true")
 
-        help_msg = "Generate the Anemoi training configs in home."
-        anemoi_training_home = subparsers.add_parser(
-            "training-home",
-            help=help_msg,
-            description=help_msg,
-        )
-        anemoi_training_home.add_argument("--overwrite", "-f", action="store_true")
-
         help_msg = "Validate the Anemoi training configs."
         validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
 
@@ -88,12 +80,6 @@ class ConfigGenerator(Command):
                 "Generating configs, please wait.",
             )
             self.traverse_config(args.output)
-            return
-
-        if args.subcommand == "training-home":
-            anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-            LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
-            self.traverse_config(anemoi_home)
             return
 
         if args.subcommand == "validate":
