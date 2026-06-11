@@ -23,6 +23,7 @@ from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 from anemoi.training.checkpoint.formats import convert_lightning_to_pytorch
 from anemoi.training.checkpoint.formats import detect_checkpoint_format
+from anemoi.training.checkpoint.formats import detect_format_from_data
 from anemoi.training.checkpoint.formats import extract_state_dict
 from anemoi.training.checkpoint.formats import is_format_available
 from anemoi.training.checkpoint.formats import load_checkpoint
@@ -113,6 +114,35 @@ class TestFormatDetection:
 
         # Should detect as lightning based on content
         assert detect_checkpoint_format(checkpoint_path) == "lightning"
+
+
+class TestFormatFromData:
+    """Test detect_format_from_data with already-loaded checkpoint data."""
+
+    @pytest.mark.unit
+    def test_detect_lightning_from_data(self, lightning_checkpoint: dict) -> None:
+        """Test detection of Lightning format from data keys."""
+        assert detect_format_from_data(lightning_checkpoint) == "lightning"
+
+    @pytest.mark.unit
+    def test_detect_pytorch_from_data(self, pytorch_checkpoint: dict) -> None:
+        """Test detection of PyTorch format from data keys."""
+        assert detect_format_from_data(pytorch_checkpoint) == "pytorch"
+
+    @pytest.mark.unit
+    def test_detect_state_dict_from_data(self, sample_state_dict: dict) -> None:
+        """Test detection of raw state dict from data."""
+        assert detect_format_from_data(sample_state_dict) == "state_dict"
+
+    @pytest.mark.unit
+    def test_detect_non_dict_returns_pytorch(self) -> None:
+        """Test that non-dict input returns pytorch."""
+        assert detect_format_from_data("not a dict") == "pytorch"
+
+    @pytest.mark.unit
+    def test_detect_empty_dict_returns_pytorch(self) -> None:
+        """Test that empty dict returns pytorch (no matching keys)."""
+        assert detect_format_from_data({}) == "pytorch"
 
 
 class TestFormatLoading:
