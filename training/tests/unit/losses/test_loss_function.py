@@ -12,7 +12,6 @@ import hydra
 import pytest
 import torch
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from pytest_mock import MockerFixture
 
 from anemoi.training.losses import CRPS
@@ -526,8 +525,8 @@ def test_sht_amse_loss() -> None:
         )
 
 
-def test_sht_amse_loss_applies_subgrid() -> None:
-    # SpectralAMSELoss.forward has its own transform path; subgrid must still be applied there.
+def test_sht_amse_loss_applies_nodes_slice() -> None:
+    # SpectralAMSELoss.forward has its own transform path; nodes_slice must still be applied there.
     nlat = 8
     nvars = 3
     expected_points = _octahedral_expected_points(nlat)
@@ -536,7 +535,7 @@ def test_sht_amse_loss_applies_subgrid() -> None:
         "anemoi.training.losses.spectral.SpectralAMSELoss",
         transform="octahedral_sht",
         nlat=nlat,
-        subgrid=slice(0, expected_points),
+        nodes_slice=(0, expected_points),
     )
     # twice the expected nodes; without the slice the SHT receives the wrong node count and raises.
     pred = torch.zeros((2, 1, 1, 2 * expected_points, nvars))
@@ -640,20 +639,20 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
     assert result.numel() == 1
 
 
-def test_spectral_loss_subgrid_actually_applied() -> None:
-    """Subgrid must be applied: input has 2x the expected nodes, subgrid selects half.
+def test_spectral_loss_nodes_slice_actually_applied() -> None:
+    """nodes_slice must be applied: input has 2x the expected nodes, slice selects half.
 
-    If subgrid is skipped FFT2D fails to reshape the oversized spatial dimension.
+    If nodes_slice is skipped FFT2D fails to reshape the oversized spatial dimension.
     """
     x_dim, y_dim = 4, 2  # FFT2D expects 8 nodes
-    n_total = 16  # input has 16 nodes; subgrid=slice(0, 8) should reduce to 8
+    n_total = 16  # input has 16 nodes; slice=(0, 8) should reduce to 8
     bs, nvars = 1, 2
 
     loss = SpectralL2Loss(
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
-        subgrid=slice(0, 8),
+        nodes_slice=(0, 8),
     )
 
     pred = torch.randn(bs, 1, 1, n_total, nvars)
@@ -684,16 +683,16 @@ def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture
         loss(pred, target)
 
 
-def test_spectral_loss_subgrid_out_of_bounds_raises() -> None:
-    """Subgrid that requests more nodes than available should raise."""
+def test_spectral_loss_nodes_slice_out_of_bounds_raises() -> None:
+    """nodes_slice that requests more nodes than available should raise."""
     x_dim, y_dim = 4, 2  # expects 8 nodes
-    n_total = 6  # fewer nodes than subgrid requests
+    n_total = 6  # fewer nodes than slice end requests
 
     loss = SpectralL2Loss(
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
-        subgrid=slice(0, 8),  # requests 8 nodes but only 6 exist
+        nodes_slice=(0, 8),  # requests 8 nodes but only 6 exist
     )
     pred = torch.randn(1, 1, 1, n_total, 2)
     target = torch.randn(1, 1, 1, n_total, 2)
@@ -716,7 +715,7 @@ def test_spectral_loss_ambiguous_projection_config_raises() -> None:
         )
 
 
-def test_spectral_crps_projection_applies_subgrid_before_projection(mocker: MockerFixture) -> None:
+def test_spectral_crps_projection_applies_nodes_slice_before_projection(mocker: MockerFixture) -> None:
     from scipy.sparse import eye
 
     bs, ens, nvars = 2, 5, 3
@@ -730,17 +729,16 @@ def test_spectral_crps_projection_applies_subgrid_before_projection(mocker: Mock
     mocker.patch("scipy.sparse.load_npz", return_value=eye(projected_grid, format="csr"))
 
     loss = get_loss_function(
-        OmegaConf.create(
+        DictConfig(
             {
                 "_target_": "anemoi.training.losses.spectral.SpectralCRPSLoss",
                 "transform": "fft2d",
                 "x_dim": x_dim,
                 "y_dim": y_dim,
-                "subgrid": slice(0, projected_grid),
+                "nodes_slice": (0, projected_grid),
                 "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
                 "scalers": [],
             },
-            flags={"allow_objects": True},
         ),
     )
 
