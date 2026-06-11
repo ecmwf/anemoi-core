@@ -102,6 +102,11 @@ class SourceView(ABC):
         """Unflatten a 2D data tensor back to the original grid shape."""
         pass
 
+    @abstractmethod
+    def map_data(self, func: Callable, **kwargs) -> "SourceView":
+        """Apply a function to the data tensor, returning a new view with the same metadata."""
+        pass
+
     def _time_axis_size(self) -> int:
         """Return the logical number of time steps in this view."""
         if self.layout.time_in_grid:

@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.data.source_view import GriddedSourceView
+    from anemoi.models.data.source_view import SourceView
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
     from anemoi.training.train.step_output import TrainingStepOutput
@@ -409,7 +409,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             },
         )
 
-    def forward(self, x: Batch | dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
+    def forward(self, x: Batch | dict[str, torch.Tensor], **kwargs) -> Batch:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
@@ -557,25 +557,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _prepare_tensors_for_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         dataset_name: str,
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor, slice | None]:
+    ) -> tuple[SourceView, SourceView, slice | None]:
         """Prepare tensors for loss computation, handling sharding if necessary.
 
         Parameters
         ----------
-        y_pred : torch.Tensor
+        y_pred : SourceView
             Predicted values
-        y : torch.Tensor
+        y : SourceView
             Target values
         validation_mode : bool
             Whether in validation mode
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor, slice | None]
+        tuple[SourceView, SourceView, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
         # Handle multi-dataset case for grid shard slice and sizes
@@ -603,8 +603,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _compute_loss(
         self,
-        y_pred: GriddedSourceView,
-        y: GriddedSourceView,
+        y_pred: SourceView,
+        y: SourceView,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -615,9 +615,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : torch.Tensor
+        y_pred : SourceView
             Predicted values
-        y : torch.Tensor
+        y : SourceView
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
@@ -651,8 +651,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _compute_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -664,9 +664,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : torch.Tensor
+        y_pred : SourceView
             Predicted values
-        y : torch.Tensor
+        y : SourceView
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
@@ -690,19 +690,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         validation_mode: bool = False,
         dataset_name: str | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
         ----------
-        y_pred : torch.Tensor
+        y_pred : SourceView
             Predicted values
-        y : torch.Tensor
+        y : SourceView
             Target values
         step : int, optional
             Current step
@@ -713,7 +713,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
         # Prepare tensors for loss/metrics computation
@@ -747,18 +747,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def compute_loss_metrics(
         self,
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: Batch,
+        y: Batch,
         validation_mode: bool = False,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, SourceView]]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
         ----------
-        y_pred : dict[str, torch.Tensor]
+        y_pred : Batch
             Predicted values
-        y : dict[str, torch.Tensor]
+        y : Batch
             Target values
         step : int, optional
             Current step
@@ -769,7 +769,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, torch.Tensor]]
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, SourceView]]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
         assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
@@ -937,8 +937,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def calculate_val_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
@@ -950,9 +950,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred: torch.Tensor
+        y_pred: SourceView
             Predicted ensemble
-        y: torch.Tensor
+        y: SourceView
             Ground truth (target).
         step: int, optional
             Step number

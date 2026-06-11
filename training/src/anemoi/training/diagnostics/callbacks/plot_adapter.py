@@ -23,6 +23,8 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Any
 
+from anemoi.models.data.source_view import SourceView
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -38,6 +40,17 @@ class BasePlotAdapter(ABC):
     @property
     def is_ensemble(self) -> bool:
         return False
+
+    @staticmethod
+    def select_time(data: Any, time_indices: Any) -> Any:
+        """Select timesteps along the logical time axis.
+
+        Accepts either a SourceView or a plain array/tensor 
+        whose leading axis is the time axis.
+        """
+        if isinstance(data, SourceView):
+            return data.select_time(time_indices).data
+        return data[time_indices, ...]
 
     def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
@@ -74,7 +87,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
 
-        input_data = data[input_time_indices, ...]
+        input_data = self.select_time(data, input_time_indices)
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
@@ -82,7 +95,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
             rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
-            output_data = data[output_time_indices, ...]
+            output_data = self.select_time(data, output_time_indices)
 
             for out_step in range(self._task.num_output_timesteps):
                 y_true = output_data[out_step, ...].squeeze()

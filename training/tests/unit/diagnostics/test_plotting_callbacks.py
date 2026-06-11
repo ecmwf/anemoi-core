@@ -18,6 +18,9 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.batch import STATIC_COORDS_META_KEY
+from anemoi.models.data.batch import Batch
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
 from anemoi.training.diagnostics.callbacks.plot import PlotEnsSample
 from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
@@ -267,6 +270,25 @@ def _step_output(
     )
 
 
+def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> Batch:
+    """Wrap a ``(batch, time, ensemble, grid, vars)`` tensor in a gridded :class:`Batch`.
+
+    Carries per-grid-point coordinates (radians) so plotting callbacks can read
+    lat/lon directly from the per-dataset :class:`SourceView`.
+    """
+    grid = tensor.shape[3]
+    num_vars = tensor.shape[4]
+    coordinates = torch.zeros(grid, 2)
+    return Batch(
+        data={dataset_name: tensor},
+        coordinates={dataset_name: coordinates},
+        metadata={STATIC_COORDS_META_KEY: frozenset({dataset_name})},
+        layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={dataset_name: [f"v{i}" for i in range(num_vars)]},
+        statistics={dataset_name: {}},
+    )
+
+
 # ---- BasePlotAdditionalMetrics.process: input/output shapes ----
 
 
@@ -290,7 +312,7 @@ def test_process_forecaster_output_shapes():
         validation_rollout=output_times,
         nlatlon=nlatlon,
     )
-    batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, n_time, n_ens, nlatlon, nvar))
     # each pred[dataset] shape is (bs, n_step_output, ens, latlon, nvar)
     outputs = _step_output(
         [
@@ -299,9 +321,8 @@ def test_process_forecaster_output_shapes():
         ],
     )
     callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
 
-    data, output_tensor = callback.process(pl_module, "data", outputs, batch)
+    _, data, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
     # data: one sample from input_tensor (4 time steps); shape (time_steps, n_ens, nlatlon, nvar)
     assert data.shape == (1 + total_targets + 1, n_ens, nlatlon, nvar), data.shape
@@ -357,7 +378,7 @@ def test_process_time_interpolator_output_shapes():
     total_targets = pl_module.task.num_output_timesteps  # no n_step_output factor for temporal downscaler
     n_time = 1 + total_targets + 1  # 4 time steps in the batch
 
-    batch = {"data": torch.randn(batch_size, n_time, n_ens, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, n_time, n_ens, nlatlon, nvar))
     outputs = _step_output(
         [
             {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
@@ -365,9 +386,8 @@ def test_process_time_interpolator_output_shapes():
         ],
     )
     callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
 
-    data, output_tensor = callback.process(pl_module, "data", outputs, batch)
+    _, data, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
     assert data.shape == (1 + total_targets + 1, n_ens, nlatlon, nvar), data.shape
     assert output_tensor.shape == (pl_module.task.num_output_timesteps, 1, n_ens, nlatlon, nvar), output_tensor.shape
@@ -386,7 +406,7 @@ def test_process_temporal_downscaler_multi_out_squeeze():
     pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
 
     sample_idx = 10
-    batch = {"data": torch.randn(batch_size, sample_idx, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, sample_idx, 1, nlatlon, nvar))
     # Simulate multi-out: each output (1, 1, 1, nlatlon, nvar) so cat gives (2, 1, 1, nlatlon, nvar);
     # after squeeze(0) we get (2, 1, nlatlon, nvar)
     outputs = _step_output(
@@ -396,9 +416,8 @@ def test_process_temporal_downscaler_multi_out_squeeze():
         ],
     )
     callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
 
-    _, output_tensor = callback.process(pl_module, "data", outputs, batch)
+    _, _, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
     # output_tensor: (num_output_timesteps, 1, n_ens, nlatlon, nvar) - 5D
     assert output_tensor.ndim == 5, output_tensor.shape

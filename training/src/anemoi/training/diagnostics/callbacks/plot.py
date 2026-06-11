@@ -10,6 +10,7 @@
 
 import asyncio
 import copy
+import dataclasses
 import logging
 import threading
 import traceback
@@ -33,6 +34,8 @@ from pydantic import BaseModel as PydanticBaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
+from anemoi.models.data import Batch
+from anemoi.models.data import SourceView
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.plots import argsort_variablename_variablelevel
@@ -49,6 +52,56 @@ from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _allgather_dataset_tensor(
+    pl_module: pl.LightningModule,
+    tensor: torch.Tensor,
+    dataset_name: str,
+) -> torch.Tensor:
+    """All-gather a grid-sharded tensor for one dataset."""
+    shard_shapes = getattr(pl_module, "grid_shard_sizes", {}).get(dataset_name)
+    if shard_shapes is None:
+        return tensor
+    grid_size = int(sum(shard_shapes))
+    return pl_module.allgather_batch(tensor, grid_size, shard_shapes)
+
+
+def _allgather_prediction(
+    pl_module: pl.LightningModule,
+    prediction: SourceView | torch.Tensor,
+    dataset_name: str,
+) -> SourceView | torch.Tensor:
+    """All-gather a per-dataset prediction, accepting either a SourceView or a raw tensor."""
+    if isinstance(prediction, SourceView):
+        return prediction.map_data(lambda d: _allgather_dataset_tensor(pl_module, d, dataset_name))
+    return _allgather_dataset_tensor(pl_module, prediction, dataset_name)
+
+
+def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
+    """Return whether ``dataset_name`` uses a sparse / tabular (``time_in_grid``) layout.
+
+    The gridded sample / spectrum / histogram plots assume a single lat/lon grid
+    shared by the input, target and prediction panels. That does not hold for
+    scattered observation datasets — each timestep has a different set of points
+    and coordinates — so those datasets are skipped by the gridded plot callbacks.
+
+    Parameters
+    ----------
+    batch : Batch | dict
+        The (gathered) validation batch.
+    dataset_name : str
+        Name of the dataset to inspect.
+
+    Returns
+    -------
+    bool
+        ``True`` for sparse/observation datasets, ``False`` otherwise.
+    """
+    if isinstance(batch, Batch):
+        layout = batch.layouts.get(dataset_name)
+        return bool(layout is not None and layout.time_in_grid)
+    return False
 
 
 class PlottingSettings(PydanticBaseModel):
@@ -194,7 +247,6 @@ class BasePlotCallback(Callback, ABC):
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
 
         self.post_processors = None
-        self.latlons = None
 
         init_plot_settings()
 
@@ -365,33 +417,38 @@ class BasePerBatchPlotCallback(BasePlotCallback):
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
 
-            # gather tensors if necessary
-            batch = {
-                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
-                for dataset_name, dataset_tensor in batch.items()
-            }
+            # Gather grid-sharded tensors while preserving the Batch envelope
+            # (layouts / statistics / coordinates) so downstream view-based access
+            # (Batch.__getitem__ / task.get_targets) keeps working.
+            if isinstance(batch, Batch):
+                gathered_data = {
+                    dataset_name: _allgather_dataset_tensor(pl_module, payload, dataset_name)
+                    for dataset_name, payload in batch.data.items()
+                }
+                batch = batch.with_data(gathered_data)
+            else:
+                batch = {
+                    dataset_name: _allgather_dataset_tensor(pl_module, dataset_tensor, dataset_name)
+                    for dataset_name, dataset_tensor in batch.items()
+                }
             preds = output.predictions
             if not isinstance(preds, list):
 
                 raise TypeError(preds)
             gathered_predictions = [
                 {
-                    dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                    dataset_name: _allgather_prediction(pl_module, dataset_pred, dataset_name)
                     for dataset_name, dataset_pred in pred.items()
                 }
                 for pred in preds
             ]
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
-            # but internal ones would be on the cpu), The lines below allow to address this problem
+            # but internal ones would be on the cpu), The lines below allow to address this problem.
+            # The refactored preprocessors are stateless (no per-instance ``nan_locations`` buffer to gather),
+            # so only the device move is required here.
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
             for dataset_name in self.post_processors:
-                for post_processor in self.post_processors[dataset_name].processors.values():
-                    if hasattr(post_processor, "nan_locations"):
-                        post_processor.nan_locations = pl_module.allgather_batch(
-                            post_processor.nan_locations,
-                            dataset_name,
-                        )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
             plot_kwargs = self._plot_kwargs_from_output(pl_module, output)
@@ -738,9 +795,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         logger = trainer.logger
         _ = batch_idx
 
-        if self.latlons is None:
-            self.latlons = {}
-
         for dataset_name in dataset_names:
 
             data_indices = pl_module.data_indices[dataset_name]
@@ -765,14 +819,9 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs.predictions[i][dataset_name]
-                # Pass full batch as Batch, index after
-                from anemoi.models.data import Batch
+                # Pass the full target batch; index the per-dataset SourceView afterwards.
                 batch_obj = batch if isinstance(batch, Batch) else Batch(data=batch)
-                y_true_batch = pl_module.task.get_targets(
-                    batch=batch_obj,
-                    data_indices=pl_module.data_indices,
-                    **task_kwargs,
-                )
+                y_true_batch, _ = pl_module.task.get_targets(batch_obj, **task_kwargs)
                 y_true = y_true_batch[dataset_name]
                 loss = reduce_to_last_dim(
                     self.loss[dataset_name](
@@ -815,18 +864,19 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             self.loss = copy.deepcopy(pl_module.loss)
 
-            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            for dataset in self.loss:
-                for leaf_loss in self.loss[dataset].iter_leaf_losses():
-                    if (
-                        hasattr(leaf_loss, "scaler")
-                        and hasattr(leaf_loss.scaler, "nan_mask_weights")
-                        and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                    ):
-                        leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
-                            leaf_loss.scaler.nan_mask_weights,
-                            dataset,
-                        )
+            # # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+            # for dataset in self.loss:
+            #     for leaf_loss in self.loss[dataset].iter_leaf_losses():
+            #         if (
+            #             hasattr(leaf_loss, "scaler")
+            #             and hasattr(leaf_loss.scaler, "nan_mask_weights")
+            #             and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+            #         ):
+            #             leaf_loss.scaler.nan_mask_weights = _allgather_dataset_tensor(
+            #                 pl_module,
+            #                 leaf_loss.scaler.nan_mask_weights,
+            #                 dataset,
+            #             )
 
             super().on_validation_batch_end(
                 trainer,
@@ -878,9 +928,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         pl_module: pl.LightningModule,
         dataset_name: str,
         outputs: TrainingStepOutput,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         members: int | list[int] | None = 0,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
         Parameters
@@ -892,7 +942,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs : TrainingStepOutput
             The outputs from the model. The predictions must be a list of dicts
             (one per outer step).
-        batch : dict[str, torch.Tensor]
+        batch : Batch
             The batch of data.
         members : int | list[int] | None, optional
             Ensemble members to select. Only used when the plot adapter is ensemble-aware.
@@ -900,27 +950,32 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         Returns
         -------
-        tuple[np.ndarray, np.ndarray]
-            The data and output tensors for plotting.
+        tuple[np.ndarray, np.ndarray, np.ndarray]
+            The lat/lon coordinates, the (post-processed) data tensor and the
+            output tensor for plotting.
         """
-        if self.latlons is None:
-            self.latlons = {}
-
-        if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
-
         assert isinstance(
             outputs.predictions,
             list,
         ), "outputs.predictions must be a list of per-step dicts."
 
-        # prepare input and output tensors for plotting one dataset specified by dataset_name
+        view = batch[dataset_name]
+
+        # lat/lon coordinates come from the SourceView (radians -> degrees).
+        if isinstance(view.coordinates, torch.Tensor):
+            latlons = np.rad2deg(view.coordinates.detach().cpu().numpy())
+        else:
+            assert isinstance(view.coordinates, list) and len(view.coordinates) > self.sample_idx, (
+                f"Expected view.coordinates to be a list of tensors when plotting per-sample"
+                + f" with length greater than {self.sample_idx}."
+            )
+            latlons = np.rad2deg(view.coordinates[self.sample_idx].detach().cpu().numpy())
+
+        # Restrict to the output variables and post-process via the SourceView API.
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
+        input_view = view.select(variables=feature_indices).map_data(lambda t: t.detach().cpu())
+        data = self.post_processors[dataset_name](input_view, in_place=False).data[self.sample_idx]
 
-        input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
-
-        data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
         output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
 
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(
@@ -930,22 +985,34 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
         data = data.numpy()
 
-        return data, output_tensor
+        return latlons, data, output_tensor
 
     def process_output_tensor(
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
-        outputs: list[dict[str, torch.Tensor]],
+        outputs: list[dict[str, SourceView]],
         members: int | list[int] | None = 0,
     ) -> np.ndarray:
-        """Post-process and mask per-step output tensors for plotting."""
+        """Post-process and mask per-step output SourceViews for plotting."""
+        post_processor = self.post_processors[dataset_name]
+        output_indices_full = pl_module.data_indices[dataset_name].data.output.full
+
+        def _post_process(prediction: SourceView) -> torch.Tensor:
+            assert isinstance(prediction, SourceView), f"Expected a prediction of type SourceView, got {type(prediction)}."
+            aligned = self._align_output_metadata(prediction, output_indices_full)
+            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).data
+            # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
+            # list of per-sample tensors. Select the requested sample, keeping a leading
+            # size-1 axis so per-step outputs can be concatenated along dim 0.
+            if isinstance(processed, list):
+                return processed[self.sample_idx].unsqueeze(0)
+            return processed[self.sample_idx : self.sample_idx + 1]
+
         output_tensor = torch.cat(
             tuple(
                 pl_module.plot_adapter.select_members(
-                    self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                        self.sample_idx : self.sample_idx + 1
-                    ],
+                    _post_process(x[dataset_name]),
                     members,
                 )
                 for x in outputs
@@ -956,6 +1023,79 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         return (
             pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
         )
+
+    @staticmethod
+    def _align_output_metadata(view: SourceView, output_indices_full: Any) -> SourceView:
+        """Re-slice a prediction view's metadata to its (model-output) variables."""
+        data0 = view.data[0] if isinstance(view.data, list) else view.data
+        var_width = data0.shape[view.layout.variables]
+        if len(view.variables) == var_width:
+            return view
+        if isinstance(output_indices_full, slice):
+            output_indices = list(range(len(view.variables)))[output_indices_full]
+        else:
+            output_indices = [int(i) for i in output_indices_full]
+        sub_variables = [view.variables[i] for i in output_indices]
+        sub_statistics = {key: value[output_indices] for key, value in view.statistics.items()}
+        return dataclasses.replace(view, variables=sub_variables, statistics=sub_statistics)
+
+    def _sparse_sample(
+        self,
+        pl_module: pl.LightningModule,
+        dataset_name: str,
+        outputs: TrainingStepOutput,
+        batch: Batch,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Build the plotting fields and coordinates for a sparse/observation dataset.
+
+        Scattered observations have *different* locations at input and output times, so
+        the gridded plot-adapter time-slicing is invalid. Instead, extract the fields
+        directly from the per-dataset :class:`SourceView` using its layout-aware
+        ``select_time`` API: the input panel from the analysis-time observations and the
+        target panel from the output-time observations (each at their own coordinates).
+        The prediction is read from ``outputs.predictions`` (already at the target/output
+        observation locations).
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+            ``(input_latlons, output_latlons, x, y_true, y_pred)``.
+        """
+        view = batch[dataset_name]
+        feature_indices = pl_module.data_indices[dataset_name].data.output.full
+        task = pl_module.task
+
+        # Analysis-time input step (last input index) and the first validation output step.
+        input_indices = list(task.get_batch_input_indices())
+        step_kwargs = next(iter(task.steps("validation")))
+        output_indices = task.get_batch_output_indices(**step_kwargs)
+
+        def _field_and_coords(sub_view: SourceView) -> tuple[np.ndarray, np.ndarray]:
+            sub_view = self.post_processors[dataset_name](
+                sub_view.map_data(lambda t: t.detach().cpu()),
+                in_place=False,
+            )
+            field = sub_view.data[self.sample_idx]  # (grid, vars) for sparse obs
+            coords = sub_view.coordinates[self.sample_idx]
+            return field.numpy(), np.rad2deg(coords.detach().cpu().numpy())
+
+        # Input panel: observations at the analysis (last input) timestep.
+        input_view = view.select_time(input_indices[-1]).select(variables=feature_indices)
+        x, input_latlons = _field_and_coords(input_view)
+
+        # Target panel: observations at the output timesteps.
+        target_view = view.select_time(output_indices).select(variables=feature_indices)
+        y_true, output_latlons = _field_and_coords(target_view)
+
+        # Prediction (already at the output/target observation locations).
+        prediction = self._align_output_metadata(outputs.predictions[0][dataset_name], feature_indices)
+        prediction = self.post_processors[dataset_name](
+            prediction.map_data(lambda t: t.detach().cpu()),
+            in_place=False,
+        )
+        y_pred = prediction.data[self.sample_idx].numpy()
+
+        return input_latlons, output_latlons, x, y_true, y_pred
 
 
 class PlotSample(BasePlotAdditionalMetrics):
@@ -1048,7 +1188,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             return {}
 
         auxiliary_output = {
-            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+            dataset_name: _allgather_dataset_tensor(pl_module, dataset_tensor, dataset_name)
             for dataset_name, dataset_tensor in auxiliary_output.items()
         }
         return {"auxiliary_output": auxiliary_output}
@@ -1080,7 +1220,30 @@ class PlotSample(BasePlotAdditionalMetrics):
                 for name in self.parameters
             }
 
-            data, output_tensor = self.process(
+            local_rank = pl_module.local_rank
+
+            if _is_sparse_dataset(batch, dataset_name):
+                input_latlons, output_latlons, x, y_true, y_pred = self._sparse_sample(
+                    pl_module,
+                    dataset_name,
+                    outputs,
+                    batch,
+                )
+                fig = self._make_figure(
+                    plot_parameters_dict,
+                    input_latlons,
+                    x,
+                    y_true,
+                    y_pred,
+                    auxiliary=None,
+                    sparse=True,
+                    output_latlons=output_latlons,
+                )
+                tag, exp_log_tag = self._figure_tags(dataset_name, "obs", batch_idx, local_rank)
+                self._output_figure(logger, fig, epoch=epoch, tag=tag, exp_log_tag=exp_log_tag)
+                continue
+
+            data_latlons, data, output_tensor = self.process(
                 pl_module,
                 dataset_name,
                 outputs,
@@ -1098,12 +1261,10 @@ class PlotSample(BasePlotAdditionalMetrics):
                 )
             )
 
-            local_rank = pl_module.local_rank
-
             if auxiliary_tensor is not None:
                 latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
                     pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
+                    data_latlons,
                     data,
                     output_tensor,
                     auxiliary_tensor,
@@ -1112,7 +1273,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 # Apply spatial mask
                 latlons, data, output_tensor = self.focus_mask.apply(
                     pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
+                    data_latlons,
                     data,
                     output_tensor,
                 )
@@ -1162,8 +1323,14 @@ class PlotSample(BasePlotAdditionalMetrics):
         y_true: np.ndarray,
         y_pred: np.ndarray,
         auxiliary: np.ndarray | None = None,
+        sparse: bool = False,
+        output_latlons: np.ndarray | None = None,
     ) -> Figure:
-        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
+        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet.
+
+        For sparse/observation datasets, sparse=True selects the reduced
+        observation panel layout and output_latlons provides the target obs coordinates.
+        """
         return plot_predicted_multilevel_flat_sample(
             plot_parameters_dict,
             self.per_sample,
@@ -1179,6 +1346,8 @@ class PlotSample(BasePlotAdditionalMetrics):
             prediction_label=self.prediction_label,
             auxiliary=auxiliary,
             auxiliary_label=self.auxiliary_label,
+            sparse=sparse,
+            output_latlons=output_latlons,
         )
 
 
@@ -1329,12 +1498,19 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
 
         local_rank = pl_module.local_rank
         for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            if _is_sparse_dataset(batch, dataset_name):
+                LOGGER.warning(
+                    "%s: skipping dataset %r: spectra plots are not yet supported for sparse observations.",
+                    type(self).__name__,
+                    dataset_name,
+                )
+                continue
+            data_latlons, data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
+                data_latlons,
                 data,
                 output_tensor,
             )
@@ -1445,8 +1621,15 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for dataset_name in dataset_names:
+            if _is_sparse_dataset(batch, dataset_name):
+                LOGGER.warning(
+                    "%s: skipping dataset %r: gridded histogram plots are not supported for sparse observations.",
+                    type(self).__name__,
+                    dataset_name,
+                )
+                continue
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            data_latlons, data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
 
             # Build dictionary of indices and parameters to be plotted
             input_data = pl_module.data_indices[dataset_name].data.input.todict()
@@ -1455,7 +1638,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             # Apply spatial mask
             _, data, output_tensor = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
+                data_latlons,
                 data,
                 output_tensor,
             )

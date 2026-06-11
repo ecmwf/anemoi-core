@@ -10,12 +10,16 @@
 
 import functools
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data_indices.collection import IndexCollection
+
+if TYPE_CHECKING:
+    from anemoi.models.data.source_view import SourceView
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode
@@ -297,8 +301,8 @@ class LossVariableMapper(BaseLossWrapper):
 
     def forward(
         self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
+        pred: "SourceView",
+        target: "SourceView",
         squash: bool = True,
         *,
         scaler_indices: tuple[Any, ...] | None = None,
@@ -361,14 +365,14 @@ class LossVariableMapper(BaseLossWrapper):
 
         if empty_metric_selection:
             if squash:
-                return torch.zeros((), dtype=pred.dtype, device=pred.device, requires_grad=False)
-            len_model_output = pred.shape[-1]
-            return torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
+                return torch.zeros((), dtype=torch.float32, device=pred.device, requires_grad=False)
+            len_model_output = len(pred.variables)
+            return torch.zeros(len_model_output, dtype=torch.float32, device=pred.device, requires_grad=False)
 
         if squash:
             return self.loss(pred_filtered, target_filtered, squash=squash, **loss_kwargs)
-        len_model_output = pred.shape[-1]
-        loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
+        len_model_output = len(pred.variables)
+        loss = torch.zeros(len_model_output, dtype=torch.float32, device=pred.device, requires_grad=False)
         loss_per_variable = self.loss(
             pred_filtered,
             target_filtered,
