@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Parity tests: torch-cluster (pyg) vs scikit-learn (sklearn) edge builders.
+"""Parity tests: torch-cluster / pyg-lib (pyg) vs scikit-learn (sklearn) edge builders.
 
 These tests verify that the two code paths produce identical edge sets.
 They are skipped automatically when torch-cluster / pyg-lib is not installed.
@@ -22,10 +22,10 @@ from anemoi.graphs.edges.builders.cutoff import CutOffEdges
 from anemoi.graphs.edges.builders.cutoff import ReversedCutOffEdges
 from anemoi.graphs.edges.builders.knn import KNNEdges
 from anemoi.graphs.edges.builders.knn import ReversedKNNEdges
-from anemoi.graphs.utils import TORCH_CLUSTER_AVAILABLE
+from anemoi.graphs.utils import PYG_AVAILABLE
 
 pytestmark = pytest.mark.skipif(
-    not TORCH_CLUSTER_AVAILABLE,
+    not PYG_AVAILABLE,
     reason="torch-cluster / pyg-lib not installed; skipping parity tests",
 )
 
@@ -128,7 +128,7 @@ def test_cutoff_pyg_vs_sklearn(edge_builder_cls, cutoff_factor, graph_with_nodes
 def test_cutoff_full_pipeline_agrees(edge_builder_cls, graph_with_nodes: HeteroData):
     """Full compute_edge_index with pyg backend and via sklearn conversion produce same edges.
 
-    Patches the TORCH_CLUSTER_AVAILABLE flag to force both paths on the same graph.
+    Patches the PYG_AVAILABLE flag to force both paths on the same graph.
     """
     import anemoi.graphs.edges.builders.base as _base_module
     import anemoi.graphs.utils as _utils_module
@@ -137,13 +137,13 @@ def test_cutoff_full_pipeline_agrees(edge_builder_cls, graph_with_nodes: HeteroD
     source_nodes, target_nodes = builder.prepare_node_data(graph_with_nodes)
 
     # --- pyg path ---
-    _base_module.TORCH_CLUSTER_AVAILABLE = True
-    _utils_module.TORCH_CLUSTER_AVAILABLE = True
+    _base_module.PYG_AVAILABLE = True
+    _utils_module.PYG_AVAILABLE = True
     pyg_edge_index = builder.compute_edge_index(source_nodes, target_nodes)
 
     # --- sklearn path ---
-    _base_module.TORCH_CLUSTER_AVAILABLE = False
-    _utils_module.TORCH_CLUSTER_AVAILABLE = False
+    _base_module.PYG_AVAILABLE = False
+    _utils_module.PYG_AVAILABLE = False
     sklearn_edge_index = builder.compute_edge_index(source_nodes, target_nodes)
 
     pyg_set = _edge_set_from_index(pyg_edge_index)

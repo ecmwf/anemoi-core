@@ -20,8 +20,8 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-from anemoi.graphs.utils import TORCH_CLUSTER_AVAILABLE
-from anemoi.graphs.utils import TORCH_CLUSTER_INSTRUCTIONS
+from anemoi.graphs.utils import PYG_AVAILABLE
+from anemoi.graphs.utils import PYG_INSTRUCTIONS
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.utils.config import DotDict
@@ -169,11 +169,11 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         """
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
-        if TORCH_CLUSTER_AVAILABLE:
+        if PYG_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
             edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:
-            LOGGER.warning(TORCH_CLUSTER_INSTRUCTIONS)
+            LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
             adj_matrix = self.undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
             edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
