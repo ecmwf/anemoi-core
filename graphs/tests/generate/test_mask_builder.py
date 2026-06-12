@@ -15,7 +15,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.masks import AreaMaskBuilder
-from anemoi.graphs.utils import TORCH_CLUSTER_AVAILABLE
+from anemoi.graphs.utils import PYG_AVAILABLE
 
 
 def test_init():
@@ -62,7 +62,7 @@ def test_fit(graph_with_nodes: HeteroData, mask: str):
     mask_builder.fit(graph_with_nodes)
 
     assert getattr(mask_builder._backend, "_ref_vectors") is not None
-    if TORCH_CLUSTER_AVAILABLE:
+    if PYG_AVAILABLE:
         assert mask_builder._backend._ref_vectors.shape[1] == 3
         assert isinstance(mask_builder._backend._ref_vectors, torch.Tensor)
     else:
