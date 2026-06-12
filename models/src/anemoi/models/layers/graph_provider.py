@@ -132,6 +132,11 @@ class StaticGraphProvider(BaseGraphProvider):
     edge indices, and trainable parameters.
     """
 
+    # LEGACY_PICKLE_COMPAT: instances unpickled from pre-sort (multi-ds) inference
+    # checkpoints carry edge buffers in original (unsorted) order, while the
+    # attention path builds CSC with assume_sorted=True. Lazily sort on first use.
+    _edges_sorted_by_dst = False
+
     def __init__(
         self,
         graph: HeteroData,
@@ -173,6 +178,24 @@ class StaticGraphProvider(BaseGraphProvider):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=edge_attr_tensor.shape[0])
 
         self._edge_dim = edge_attr_tensor.shape[1] + trainable_size
+        self._edges_sorted_by_dst = True
+
+    def _ensure_sorted_by_dst(self) -> None:
+        """LEGACY_PICKLE_COMPAT: sort edge buffers of pre-sort pickled instances."""
+        if self._edges_sorted_by_dst:
+            return
+        dst_size = int(self.edge_inc[1, 0])
+        edge_index, perm = sort_edge_index_by_dst(self.edge_index_base, max_value=dst_size)
+        self.edge_index_base = edge_index
+        self.edge_attr = self.edge_attr[perm]
+        if getattr(self.trainable, "trainable", None) is not None:
+            with torch.no_grad():
+                self.trainable.trainable.copy_(self.trainable.trainable[perm])
+        self._edges_sorted_by_dst = True
+        LOGGER.info(
+            "StaticGraphProvider unpickled from a pre-sort checkpoint: sorted %d edges by dst on first use",
+            edge_index.shape[1],
+        )
 
     @property
     def edge_dim(self) -> int:
@@ -209,6 +232,7 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges."""
+        self._ensure_sorted_by_dst()
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
 
