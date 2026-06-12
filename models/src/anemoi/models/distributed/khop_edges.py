@@ -107,7 +107,10 @@ def sort_edges_1hop_sharding(
 
         return torch.cat(edge_attr_list, dim=0), torch.cat(edge_index_list, dim=1), edge_shard_sizes
 
-    return edge_attr, edge_index, []
+    # EDGES_SIZE1_FALLBACK: no comm group means one trivial shard holding all edges.
+    # Returning [] here made edges_are_sharded() truthy while ensure_sharded()
+    # indexed into an empty list (IndexError in single-rank inference).
+    return edge_attr, edge_index, [edge_attr.shape[0]]
 
 
 def shard_edges_1hop(
