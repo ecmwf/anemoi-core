@@ -364,6 +364,42 @@ def _halo_exchange(
     if comm_size == 1:
         return x
 
+    # DIAG: log x and send_indices shapes on first call per process
+    if not getattr(_halo_exchange, "_diag_logged", False):
+        try:
+            my_rank = dist.get_rank(group=group)
+            idx_summary = []
+            for r, idx in enumerate(send_indices):
+                if idx.numel() == 0:
+                    idx_summary.append(f"r{r}:empty")
+                else:
+                    idx_summary.append(
+                        f"r{r}:n={int(idx.numel())},min={int(idx.min().item())},max={int(idx.max().item())}"
+                    )
+            print(
+                f"[HALO-DIAG] rank={my_rank} world={comm_size} x.shape={tuple(x.shape)} "
+                f"x.device={x.device} send_indices=[{', '.join(idx_summary)}] "
+                f"recv_counts={tuple(recv_counts)}",
+                flush=True,
+            )
+        except Exception as _e:
+            print(f"[HALO-DIAG] failed to log: {_e}", flush=True)
+        _halo_exchange._diag_logged = True
+
+    # validate before gather to convert async cuda assert into a useful Python error
+    x_n = x.shape[0]
+    for r, idx in enumerate(send_indices):
+        if idx.numel() == 0:
+            continue
+        mn = int(idx.min().item())
+        mx = int(idx.max().item())
+        if mn < 0 or mx >= x_n:
+            my_rank = dist.get_rank(group=group)
+            raise RuntimeError(
+                f"[HALO-DIAG] OOB send_indices on rank {my_rank} for peer {r}: "
+                f"x.shape[0]={x_n}, idx.min={mn}, idx.max={mx}, idx.n={int(idx.numel())}"
+            )
+
     send_list = [x[idx].contiguous() for idx in send_indices]
     recv_list = [torch.empty((count, *x.shape[1:]), dtype=x.dtype, device=x.device) for count in recv_counts]
 

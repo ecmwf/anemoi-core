@@ -174,6 +174,14 @@ class AnemoiTrainer(ABC):
         else:
             graph_filename = None
 
+        if graph_filename is not None:
+            LOGGER.warning(
+                "Per-dataset graph file %s does not exist - building a NEW graph from the in-tree "
+                "graph config recipe and saving it there. Its topology (e.g. hidden mesh resolution) "
+                "may differ from the graph named by system.input.graph.",
+                graph_filename,
+            )
+
         # Create new graph
         from anemoi.graphs.create import GraphCreator
 

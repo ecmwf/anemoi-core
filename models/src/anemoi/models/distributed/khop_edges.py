@@ -655,6 +655,36 @@ def build_halo_info(
     dst_start, dst_end = get_partition_range(partition.dst_splits, my_rank)
     num_local_nodes = dst_end - dst_start
 
+    # DIAG: print per-rank state to diagnose sharding/get_rank mismatch
+    if not getattr(build_halo_info, "_diag_logged", False):
+        try:
+            ei = local_edge_index
+            src_min = int(ei[0].min().item()) if ei.shape[1] > 0 else -1
+            src_max = int(ei[0].max().item()) if ei.shape[1] > 0 else -1
+            dst_min = int(ei[1].min().item()) if ei.shape[1] > 0 else -1
+            dst_max = int(ei[1].max().item()) if ei.shape[1] > 0 else -1
+            # crude content fingerprint (first 8 dst values + last 8 dst values)
+            n = ei.shape[1]
+            if n > 0:
+                head = ei[1, :min(8, n)].tolist()
+                tail = ei[1, max(0, n-8):].tolist()
+            else:
+                head, tail = [], []
+            print(
+                f"[BUILD-HALO] my_rank={my_rank} num_parts={num_parts} "
+                f"dst_start={dst_start} dst_end={dst_end} num_local_nodes={num_local_nodes} "
+                f"partition.dst_splits={list(partition.dst_splits)} "
+                f"partition.edge_splits={list(partition.edge_splits)} "
+                f"edge_shard_sizes_arg={list(edge_shard_sizes) if edge_shard_sizes is not None else None} "
+                f"local_edge_index.shape={tuple(ei.shape)} "
+                f"src_range=[{src_min},{src_max}] dst_range=[{dst_min},{dst_max}] "
+                f"dst_head={head} dst_tail={tail}",
+                flush=True,
+            )
+        except Exception as _e:
+            print(f"[BUILD-HALO] failed to log: {_e}", flush=True)
+        build_halo_info._diag_logged = True
+
     # identify halo src nodes (outside this rank's partition range)
     # i.e. (halo_src, dst) edges where dst is local but src is not
     src_global = local_edge_index[0]

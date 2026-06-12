@@ -182,11 +182,18 @@ class BaseGraphModel(nn.Module):
         self,
         batch_size: int,
         ensemble_size: int,
-        in_out_sharded: bool,
+        in_out_sharded,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> None:
+        # SHARDING_ASSERT_FIX: dict-aware
+        # The caller (diffusiondownscaler etc.) passes a per-dataset dict; the parent's
+        # bool semantics only apply when ANY dataset is actually sharded.
+        if isinstance(in_out_sharded, dict):
+            in_out_sharded_any = any(in_out_sharded.values())
+        else:
+            in_out_sharded_any = bool(in_out_sharded)
         assert not (
-            in_out_sharded and model_comm_group is None
+            in_out_sharded_any and model_comm_group is None
         ), "If input is sharded, model_comm_group must be provided."
 
         if model_comm_group is not None:
