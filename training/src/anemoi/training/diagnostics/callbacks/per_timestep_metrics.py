@@ -10,15 +10,12 @@
 """Callback to log per-timestep validation metrics for temporal downscaling tasks."""
 
 import logging
-from contextlib import nullcontext
 
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import Callback
 
-from anemoi.training.losses.base import BaseLoss
 from anemoi.training.utils.enums import TensorDim
-from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,9 +23,14 @@ LOGGER = logging.getLogger(__name__)
 class PerTimestepMetrics(Callback):
     """Log validation metrics broken down by output timestep.
 
-    For tasks where the model predicts multiple
-    output timesteps at once, this callback slices predictions and targets
-    along the time dimension and logs per-timestep validation metrics.
+    For tasks where the model predicts multiple output timesteps at once,
+    this callback slices predictions and targets along the time dimension
+    and logs per-timestep validation metrics.
+
+    It reuses the predictions already computed by the validation step (via
+    ``outputs``) and delegates metric computation to
+    ``calculate_val_metrics``, ensuring it stays in sync with the main
+    validation logic.
 
     Parameters
     ----------
@@ -43,107 +45,76 @@ class PerTimestepMetrics(Callback):
 
     def on_validation_batch_end(
         self,
-        trainer: pl.Trainer,
+        trainer: pl.Trainer,  # noqa: ARG002
         pl_module: pl.LightningModule,
-        outputs: list,  # noqa: ARG002
+        outputs: tuple,
         batch: dict[str, torch.Tensor],
         batch_idx: int,
     ) -> None:
         if batch_idx % self.every_n_batches != 0:
             return
 
-        precision_mapping = {
-            "16-mixed": torch.float16,
-            "bf16-mixed": torch.bfloat16,
-        }
-        prec = trainer.precision
-        dtype = precision_mapping.get(prec)
+        # validation_step returns (val_loss, metrics, y_preds)
+        # y_preds is a list of {dataset_name: tensor}, one entry per task step
+        if not outputs or len(outputs) < 3:
+            return
 
-        context = (
-            torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype)
-            if dtype is not None
-            else nullcontext()
-        )
-
-        with context, torch.no_grad():
-            self._eval_per_timestep(pl_module, batch)
-
-    def _eval_per_timestep(self, pl_module: pl.LightningModule, batch: dict[str, torch.Tensor]) -> None:
-        """Run model and compute metrics per timestep."""
-        # Get inputs and targets via the task
-        x = pl_module.task.get_inputs(batch, data_indices=pl_module.data_indices)
-        x = pl_module._expand_ens_dim(x) if hasattr(pl_module, "_expand_ens_dim") else x
-
-        # Run model forward
-        y_pred = pl_module(x)
-
-        # Get targets
-        y = pl_module.task.get_targets(batch)
+        y_preds_list = outputs[2]
+        if not y_preds_list:
+            return
 
         batch_size = next(iter(batch.values())).shape[0]
 
-        # For each dataset, compute per-timestep metrics
-        for dataset_name in y_pred:
-            pred = y_pred[dataset_name]  # (bs, time, ens, grid, var)
-            target = y[dataset_name]  # (bs, time, ens, grid, var)
+        with torch.no_grad():
+            self._eval_per_timestep(pl_module, y_preds_list, batch, batch_size)
 
-            n_timesteps = target.shape[TensorDim.TIME]
+    def _eval_per_timestep(
+        self,
+        pl_module: pl.LightningModule,
+        y_preds_list: list[dict[str, torch.Tensor]],
+        batch: dict[str, torch.Tensor],
+        batch_size: int,
+    ) -> None:
+        """Compute metrics per timestep using validation outputs."""
+        # Get targets from batch (cheap — just indexing)
+        y_targets = pl_module.task.get_targets(batch)
+        if hasattr(pl_module, "_collapse_ens_dim"):
+            y_targets = pl_module._collapse_ens_dim(y_targets)
 
-            # Gather ensemble members across the ensemble comm group
-            if hasattr(pl_module, "ens_comm_subgroup") and pl_module.ens_comm_subgroup is not None:
-                from anemoi.models.distributed.graph import gather_tensor
+        # Use the first (and typically only) task step's predictions
+        y_preds = y_preds_list[0]
 
-                pred = gather_tensor(
-                    pred.clone(),
-                    dim=TensorDim.ENSEMBLE_DIM,
-                    sizes=[pred.size(TensorDim.ENSEMBLE_DIM)] * pl_module.ens_comm_subgroup_size,
-                    mgroup=pl_module.ens_comm_subgroup,
-                )
-
-            # Post-process for metrics (in physical space)
-            post_processor = pl_module.model.post_processors[dataset_name]
-            metrics_dict = pl_module.metrics[dataset_name]
-            val_metric_ranges = pl_module.val_metric_ranges[dataset_name]
+        for dataset_name, y_pred in y_preds.items():
+            y = y_targets[dataset_name]
+            n_timesteps = y.shape[TensorDim.TIME]
             grid_shard_slice = pl_module.grid_shard_slice.get(dataset_name)
 
             for t in range(n_timesteps):
-                # Slice single timestep: remove time dim
-                pred_t = pred[:, t : t + 1, :, :, :]  # keep time dim for post-processor
-                target_t = target[:, t : t + 1, :, :, :]
+                # Slice single timestep, keeping the time dimension
+                pred_t = y_pred[:, t : t + 1]
+                target_t = y[:, t : t + 1]
 
-                pred_t_post = post_processor(pred_t, in_place=False)
-                target_t_post = post_processor(target_t, in_place=False)
+                # Delegate to calculate_val_metrics which handles:
+                # - post-processing
+                # - metric loop and metric ranges
+                # - metric kwargs (scaler_indices, shard info, layouts)
+                metrics = pl_module.calculate_val_metrics(
+                    pred_t,
+                    target_t,
+                    grid_shard_slice=grid_shard_slice,
+                    dataset_name=dataset_name,
+                )
 
-                for metric_name, metric in metrics_dict.items():
-                    if not isinstance(metric, BaseLoss):
-                        continue
+                for metric_name, value in metrics.items():
+                    step_name = f"val_{metric_name}/t_{t + 1}"
 
-                    for mkey, indices in val_metric_ranges.items():
-                        step_name = f"val_{metric_name}_metric/{dataset_name}/{mkey}/t_{t + 1}"
-
-                        metric_kwargs = {
-                            "scaler_indices": (..., indices),
-                            "without_scalers": [TensorDim.TIME],
-                            "grid_shard_slice": grid_shard_slice,
-                            "group": pl_module.model_comm_group,
-                            "pred_layout": IndexSpace.MODEL_OUTPUT,
-                            "target_layout": IndexSpace.DATA_FULL,
-                        }
-                        if getattr(metric, "needs_shard_layout_info", False):
-                            metric_kwargs.update(
-                                grid_dim=pl_module.grid_dim,
-                                grid_shard_sizes=pl_module.grid_shard_sizes[dataset_name],
-                            )
-
-                        value = metric(pred_t_post, target_t_post, **metric_kwargs)
-
-                        pl_module.log(
-                            step_name,
-                            value,
-                            on_epoch=True,
-                            on_step=False,
-                            prog_bar=False,
-                            logger=pl_module.logger_enabled,
-                            batch_size=batch_size,
-                            sync_dist=True,
-                        )
+                    pl_module.log(
+                        step_name,
+                        value,
+                        on_epoch=True,
+                        on_step=False,
+                        prog_bar=False,
+                        logger=pl_module.logger_enabled,
+                        batch_size=batch_size,
+                        sync_dist=True,
+                    )
