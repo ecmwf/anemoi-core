@@ -167,9 +167,11 @@ class SpectralAMSELoss(SpectralLoss):
     - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
-    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
-      implementations of ``power_spectral_density()`` and
-      ``cross_spectral_density()`` compatible with the AMSE formulation.
+    - ``fft2d`` / ``dct2d``: the ``(ky, kx)`` spectral plane is binned into integer
+      radial-wavenumber bands :math:`L = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`, and the
+      sum is taken over each band. :math:`L` is then the radial wavenumber; the per-band
+      terms have a slightly different physical meaning than under the SHT but the
+      formulation is unchanged. Patch-wise FFT2D (``patch_size`` set) is not supported.
     """
 
     def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
@@ -181,6 +183,10 @@ class SpectralAMSELoss(SpectralLoss):
         assert hasattr(self.transform, "cross_spectral_density") and callable(
             self.transform.cross_spectral_density,
         ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
+        # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
+        assert (
+            getattr(self.transform, "patch_size", None) is None
+        ), "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
         self.eps = eps
 
     def forward(

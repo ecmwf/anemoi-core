@@ -509,19 +509,65 @@ def test_sht_amse_loss() -> None:
     target = torch.zeros_like(pred)
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
 
-    # fail for transform without PSD method (e.g. FFT2D)
+    # patch-wise FFT2D breaks the per-L contract and must be rejected at construction
     with pytest.raises(hydra.errors.InstantiationException):
         _ = get_loss_function(
             DictConfig(
                 {
                     "_target_": "anemoi.training.losses.spectral.SpectralAMSELoss",
                     "transform": "fft2d",
-                    "x_dim": 710,
-                    "y_dim": 640,
+                    "x_dim": 8,
+                    "y_dim": 6,
+                    "patch_size": [3, 4],
                     "scalers": [],
                 },
             ),
         )
+
+
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_amse_2d_transforms(transform: str) -> None:
+    """AMSE works with the 2D transforms via radial-wavenumber binning."""
+    nvars = 3
+    x_dim, y_dim = 8, 6
+    points = x_dim * y_dim
+
+    loss = _make_loss(
+        "anemoi.training.losses.spectral.SpectralAMSELoss",
+        transform=transform,
+        x_dim=x_dim,
+        y_dim=y_dim,
+    )
+
+    # shapes (squash False -> per-variable, squash True -> scalar)
+    pred = torch.zeros((2, 1, 1, points, nvars))
+    target = torch.zeros_like(pred)
+    _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+    # AMSE(x, x) == 0 and AMSE >= 0, increasing with discrepancy (fp64 to avoid the
+    # loss's known fp32 sqrt/square eps-rounding, which is transform-agnostic)
+    torch.manual_seed(0)
+    pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    other = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    assert abs(loss(pred, pred, squash=True).item()) < 1e-6
+    vals = [loss(pred, pred + a * other, squash=True).item() for a in (0.0, 0.5, 1.0, 2.0)]
+    assert vals[0] >= -1e-9
+    assert vals == sorted(vals)  # non-decreasing in discrepancy
+
+    # the per-band power spectral density partitions total power (Parseval)
+    spec = loss.transform.forward(pred)
+    psd = loss.transform.power_spectral_density(spec)
+    total = torch.real(spec * torch.conj(spec)).flatten(-3, -2).sum(dim=-2)
+    assert psd.shape == (2, 1, 1, loss.transform.n_radial_bands, nvars)
+    torch.testing.assert_close(psd.sum(dim=-2), total)
+    # self cross-spectrum equals the PSD
+    torch.testing.assert_close(loss.transform.cross_spectral_density(spec, spec), psd)
+
+    # gradients flow back to the prediction
+    pred = pred.clone().requires_grad_(True)
+    loss(pred, target.double(), squash=True).backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
 
 
 def test_octahedral_sht_loss() -> None:

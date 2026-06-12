@@ -46,7 +46,58 @@ class SpectralTransform(torch.nn.Module):
         """
 
 
-class FFT2D(SpectralTransform):
+class RadialSpectralDensity:
+    """Mixin providing per-radial-band power and cross spectra for 2D spectra.
+
+    The 2D transforms (:class:`FFT2D`, :class:`DCT2D`) produce a ``(ky, kx)`` spectral
+    plane rather than the spherical harmonics' ``(L, M)`` layout. This mixin bins that
+    plane into integer radial-wavenumber bands ``L = round(sqrt(ky^2 + kx^2))`` and sums
+    within each band, so the result plays the role of the SHT's per-degree spectra and
+    :class:`~anemoi.training.losses.spectral.SpectralAMSELoss` can consume it unchanged.
+
+    Subclasses set ``_radial_wavenumber_kind`` to select the frequency convention and
+    call :meth:`_init_radial_bands` from their ``__init__`` (after ``x_dim``/``y_dim`` and
+    ``torch.nn.Module.__init__`` are set up).
+    """
+
+    # "fft": signed FFT wavenumbers (|k| in 0..N//2); "index": cosine indices 0..N-1.
+    _radial_wavenumber_kind: str = "fft"
+
+    def _init_radial_bands(self) -> None:
+        if self._radial_wavenumber_kind == "fft":
+            ky = (torch.fft.fftfreq(self.y_dim) * self.y_dim).abs()
+            kx = (torch.fft.fftfreq(self.x_dim) * self.x_dim).abs()
+        elif self._radial_wavenumber_kind == "index":
+            ky = torch.arange(self.y_dim, dtype=torch.float32)
+            kx = torch.arange(self.x_dim, dtype=torch.float32)
+        else:
+            raise ValueError(f"Unknown radial wavenumber kind: {self._radial_wavenumber_kind}")
+
+        ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing="ij")
+        band = torch.sqrt(ky_grid**2 + kx_grid**2).round().long()
+        self.n_radial_bands = int(band.max().item()) + 1
+        # flattened (ky*kx,) bucket id per spectral coefficient; not a learnable/saved state
+        self.register_buffer("radial_band_index", band.reshape(-1), persistent=False)
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-band power spectral density: sum of ``|coeff|^2`` within each band."""
+        # torch.real(c * conj(c)) == |c|^2 for complex (FFT) and c^2 for real (DCT) coeffs.
+        return self._sum_over_radial_bands(torch.real(spectral_coeffs * torch.conj(spectral_coeffs)))
+
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-band cross-spectral density: sum of ``Re[a conj(b)]`` within each band."""
+        return self._sum_over_radial_bands(torch.real(spectral_coeffs_a * torch.conj(spectral_coeffs_b)))
+
+    def _sum_over_radial_bands(self, per_mode: torch.Tensor) -> torch.Tensor:
+        """Collapse the two spectral dims ``[..., ky, kx, v] -> [..., L, v]``."""
+        *lead, ky, kx, v = per_mode.shape
+        flat = per_mode.reshape(*lead, ky * kx, v)
+        out = per_mode.new_zeros(*lead, self.n_radial_bands, v)
+        out.index_add_(-2, self.radial_band_index, flat)
+        return out
+
+
+class FFT2D(RadialSpectralDensity, SpectralTransform):
     """2D Fast Fourier Transform (FFT) implementation."""
 
     def __init__(
@@ -127,6 +178,8 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
+        self._init_radial_bands()
+
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
@@ -184,13 +237,17 @@ class FFT2D(SpectralTransform):
         return fft
 
 
-class DCT2D(SpectralTransform):
+class DCT2D(RadialSpectralDensity, SpectralTransform):
     """2D Discrete Cosine Transform."""
+
+    # DCT coefficients are real and indexed by non-negative cosine frequencies 0..N-1.
+    _radial_wavenumber_kind = "index"
 
     def __init__(self, x_dim: int, y_dim: int, **kwargs) -> None:
         super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
+        self._init_radial_bands()
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         try:
