@@ -376,7 +376,6 @@ class TrajectoryDataset(BaseAnemoiReader):
         """Return the step frequency (spacing between consecutive forecast steps)."""
         return self.data.step_frequency
 
-
     def statistics_tendencies(
         self,
         timestep: int | str | datetime.timedelta | None = None,  # noqa: ARG002
