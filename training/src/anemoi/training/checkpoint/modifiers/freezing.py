@@ -18,11 +18,16 @@ LOGGER = logging.getLogger(__name__)
 class FreezingModifierStage(ModelModifier):
     """Freezes specified submodules. Native PipelineStage — full feature port.
 
+    Submodules are addressed by their full path within the model: an exact
+    child name or a dot-separated path (e.g., "processor.0",
+    "encoder.layers.2"). A bare name does not match nested submodules —
+    the same path semantics as the legacy
+    ``anemoi.training.utils.checkpoint.freeze_submodule_by_name`` (#1159).
+
     Parameters
     ----------
     submodules_to_freeze : list[str]
-        Names of submodules to freeze. Supports dot notation
-        (e.g., "processor.0", "encoder.layers.2").
+        Full paths of the submodules to freeze, relative to the model.
     strict : bool, default False
         If True, raise an error when a specified module is not found.
         If False, log a warning and continue.
@@ -75,15 +80,15 @@ class FreezingModifierStage(ModelModifier):
 
         for module_name in self.submodules_to_freeze:
             frozen_count = self._freeze_submodule_by_name(model, module_name)
-            if frozen_count > 0:
-                LOGGER.info("Froze %d parameters in '%s'", frozen_count, module_name)
-                frozen_modules.append({"name": module_name, "frozen_params": frozen_count})
-                total_frozen += frozen_count
-            else:
-                msg = f"Module '{module_name}' not found or has no parameters to freeze"
+            if frozen_count is None:
+                msg = f"Module '{module_name}' not found"
                 if self.strict:
                     raise ValueError(msg)
-                LOGGER.warning(msg)
+                LOGGER.warning("%s. SKIPPING freezing.", msg)
+                continue
+            LOGGER.info("Froze %d parameters in '%s'", frozen_count, module_name)
+            frozen_modules.append({"name": module_name, "frozen_params": frozen_count})
+            total_frozen += frozen_count
 
         if self.validate_gradients:
             self._validate_gradient_flow(model)
@@ -99,58 +104,39 @@ class FreezingModifierStage(ModelModifier):
 
         return context
 
-    def _freeze_submodule_by_name(self, module: torch.nn.Module, target_name: str) -> int:  # noqa: C901
-        """Freeze parameters of a submodule by name using optimized lookup.
+    def _freeze_submodule_by_name(self, module: torch.nn.Module, target_name: str) -> int | None:
+        """Freeze the parameters of the submodule at ``target_name``.
 
-        Uses PyTorch's get_submodule() for O(1) direct access, falling back
-        to recursive search for partial matches.
+        ``target_name`` is resolved with :meth:`torch.nn.Module.get_submodule`,
+        i.e. as a full path relative to ``module``. There is no name-match
+        search at arbitrary depth — a bare name only resolves a direct child,
+        matching the legacy ``freeze_submodule_by_name`` semantics (#1159).
 
         Parameters
         ----------
         module : torch.nn.Module
-            The parent module to search within.
+            The parent module to resolve the path within.
         target_name : str
-            The name of the submodule to freeze. Supports dot notation
-            (e.g., "processor.0", "encoder.attention").
+            Full path of the submodule to freeze (e.g., "processor.0",
+            "encoder.attention").
 
         Returns
         -------
-        int
-            Number of parameters that were frozen.
+        int | None
+            Number of parameters newly frozen, or ``None`` when no submodule
+            exists at ``target_name``. A found submodule whose parameters are
+            already frozen yields ``0``, not ``None``.
         """
-        frozen_count = 0
-
-        # O(1) direct access via get_submodule
         try:
             target_module = module.get_submodule(target_name)
-            for param in target_module.parameters():
-                if param.requires_grad:
-                    param.requires_grad = False
-                    frozen_count += 1
         except AttributeError:
-            pass
-        else:
-            return frozen_count
+            return None
 
-        # Fallback: recursive search for partial matches
-        if "." in target_name:
-            parent_name, child_name = target_name.split(".", 1)
-            for name, child in module.named_children():
-                if name == parent_name:
-                    frozen_count += self._freeze_submodule_by_name(child, child_name)
-        else:
-            for name, child in module.named_children():
-                if name == target_name:
-                    for param in child.parameters():
-                        if param.requires_grad:
-                            param.requires_grad = False
-                            frozen_count += 1
-                    return frozen_count
-
-            # Not found in direct children, search recursively
-            for _, child in module.named_children():
-                frozen_count += self._freeze_submodule_by_name(child, target_name)
-
+        frozen_count = 0
+        for param in target_module.parameters():
+            if param.requires_grad:
+                param.requires_grad = False
+                frozen_count += 1
         return frozen_count
 
     def _validate_gradient_flow(self, model: torch.nn.Module) -> None:
@@ -191,15 +177,19 @@ class FreezingModifierStage(ModelModifier):
                 model.train()
             model.zero_grad()
 
-    def _check_module_gradients(self, module: torch.nn.Module, target_name: str) -> None:  # noqa: C901
+    def _check_module_gradients(self, module: torch.nn.Module, target_name: str) -> None:
         """Check that a specific module's parameters have no gradients.
+
+        Resolves ``target_name`` exactly as ``_freeze_submodule_by_name``
+        does; a path that does not resolve was never frozen, so there is
+        nothing to check.
 
         Parameters
         ----------
         module : torch.nn.Module
-            The parent module to search within.
+            The parent module to resolve the path within.
         target_name : str
-            The name of the submodule to check.
+            Full path of the submodule to check.
 
         Raises
         ------
@@ -208,28 +198,10 @@ class FreezingModifierStage(ModelModifier):
         """
         try:
             target_module = module.get_submodule(target_name)
-            for param_name, param in target_module.named_parameters():
-                if not param.requires_grad and param.grad is not None:
-                    msg = f"Frozen parameter '{target_name}.{param_name}' unexpectedly has gradients."
-                    raise RuntimeError(msg)
         except AttributeError:
-            pass
-        else:
             return
 
-        if "." in target_name:
-            parent_name, child_name = target_name.split(".", 1)
-            for name, child in module.named_children():
-                if name == parent_name:
-                    self._check_module_gradients(child, child_name)
-        else:
-            for name, child in module.named_children():
-                if name == target_name:
-                    for param_name, param in child.named_parameters():
-                        if not param.requires_grad and param.grad is not None:
-                            msg = f"Frozen parameter '{target_name}.{param_name}' unexpectedly has gradients."
-                            raise RuntimeError(msg)
-                    return
-
-            for _, child in module.named_children():
-                self._check_module_gradients(child, target_name)
+        for param_name, param in target_module.named_parameters():
+            if not param.requires_grad and param.grad is not None:
+                msg = f"Frozen parameter '{target_name}.{param_name}' unexpectedly has gradients."
+                raise RuntimeError(msg)

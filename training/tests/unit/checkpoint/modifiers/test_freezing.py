@@ -4,6 +4,7 @@ import torch.nn as nn
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.modifiers.freezing import FreezingModifierStage
+from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 
 
 class SimpleModel(nn.Module):
@@ -18,6 +19,15 @@ class NestedModel(nn.Module):
         super().__init__()
         self.processor = nn.ModuleList([nn.Linear(10, 10), nn.Linear(10, 10)])
         self.head = nn.Linear(10, 3)
+
+
+class TwoBranchModel(nn.Module):
+    """Two branches each containing a child named ``data``."""
+
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.ModuleDict({"data": nn.Linear(4, 4)})
+        self.decoder = nn.ModuleDict({"data": nn.Linear(4, 4)})
 
 
 def test_freezing_adapter_extends_pipeline_stage() -> None:
@@ -81,6 +91,61 @@ async def test_freezing_dot_notation_submodule() -> None:
     assert result.model.processor[0].weight.requires_grad is False
     assert result.model.processor[1].weight.requires_grad is True  # Untouched
     assert result.model.head.weight.requires_grad is True  # Untouched
+
+
+@pytest.mark.asyncio
+async def test_freezing_bare_name_does_not_match_nested() -> None:
+    """A bare name resolves only a direct child, never nested submodules.
+
+    Same path semantics as ``freeze_submodule_by_name`` after #1159.
+    """
+    model = TwoBranchModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=["data"], strict=False)
+    result = await adapter.process(CheckpointContext(model=model))
+
+    assert result.model.encoder["data"].weight.requires_grad is True
+    assert result.model.decoder["data"].weight.requires_grad is True
+
+
+@pytest.mark.asyncio
+async def test_freezing_bare_name_nested_strict_raises() -> None:
+    model = TwoBranchModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=["data"], strict=True)
+
+    with pytest.raises(ValueError, match="not found"):
+        await adapter.process(CheckpointContext(model=model))
+
+
+@pytest.mark.asyncio
+async def test_freezing_already_frozen_module_is_not_missing() -> None:
+    """A found module whose parameters are already frozen is not an error."""
+    model = SimpleModel()
+    for param in model.encoder.parameters():
+        param.requires_grad = False
+
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder"], strict=True)
+    result = await adapter.process(CheckpointContext(model=model))
+
+    applied = result.metadata["modifiers_applied"][0]
+    assert applied["frozen_modules"] == [{"name": "encoder", "frozen_params": 0}]
+
+
+@pytest.mark.asyncio
+async def test_freezing_stage_matches_legacy_helper() -> None:
+    """Stage and legacy helper produce identical requires_grad maps (#1159)."""
+    targets = ["encoder.data", "missing.path"]
+
+    legacy_model = TwoBranchModel()
+    for name in targets:
+        freeze_submodule_by_name(legacy_model, name)
+
+    stage_model = TwoBranchModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=targets, strict=False)
+    await adapter.process(CheckpointContext(model=stage_model))
+
+    legacy_map = {name: param.requires_grad for name, param in legacy_model.named_parameters()}
+    stage_map = {name: param.requires_grad for name, param in stage_model.named_parameters()}
+    assert stage_map == legacy_map
 
 
 @pytest.mark.asyncio
