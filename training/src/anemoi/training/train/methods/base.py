@@ -226,6 +226,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        self._resolve_subgrid(loss_configs)
+
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
@@ -1167,3 +1169,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
+
+    def _resolve_subgrid(self, config: dict) -> None:
+        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
+            for k, v in per_dataset_config.items():
+                if isinstance(v, dict):
+                    per_dataset_resolve(v, dataset_name)
+                elif (k, v) == ("subgrid", "output_mask"):
+                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
+
+        for dataset_name, dataset_config in config.items():
+            if dataset_config is not None:
+                per_dataset_resolve(dataset_config, dataset_name)

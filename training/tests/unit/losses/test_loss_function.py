@@ -7,6 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
+from types import SimpleNamespace
+
 import einops
 import hydra
 import pytest
@@ -28,6 +31,7 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
@@ -35,9 +39,17 @@ spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, Log
 losses += spectral_losses
 
 
-def _make_loss(target: str, **kwargs) -> BaseLoss:
+def _resolve_subgrid(cfg: dict, output_mask: SimpleNamespace | None = None) -> None:
+    mock_method = SimpleNamespace(output_mask={"data": output_mask})
+    multi_cfg = {"data": cfg}
+    BaseTrainingModule._resolve_subgrid(mock_method, multi_cfg)
+    return multi_cfg["data"]
+
+
+def _make_loss(target: str, output_mask: SimpleNamespace | None = None, **kwargs) -> BaseLoss:
     cfg = {"_target_": target, "scalers": []}
     cfg.update(kwargs)
+    cfg = _resolve_subgrid(cfg, output_mask)
     return get_loss_function(DictConfig(cfg))
 
 
@@ -525,8 +537,8 @@ def test_sht_amse_loss() -> None:
         )
 
 
-def test_sht_amse_loss_applies_nodes_slice() -> None:
-    # SpectralAMSELoss.forward has its own transform path; nodes_slice must still be applied there.
+def test_sht_amse_loss_applies_subgrid() -> None:
+    # SpectralAMSELoss.forward has its own transform path; subgrid must still be applied there.
     nlat = 8
     nvars = 3
     expected_points = _octahedral_expected_points(nlat)
@@ -535,7 +547,7 @@ def test_sht_amse_loss_applies_nodes_slice() -> None:
         "anemoi.training.losses.spectral.SpectralAMSELoss",
         transform="octahedral_sht",
         nlat=nlat,
-        nodes_slice=(0, expected_points),
+        subgrid=(0, expected_points),
     )
     # twice the expected nodes; without the slice the SHT receives the wrong node count and raises.
     pred = torch.zeros((2, 1, 1, 2 * expected_points, nvars))
@@ -639,21 +651,31 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
     assert result.numel() == 1
 
 
-def test_spectral_loss_nodes_slice_actually_applied() -> None:
-    """nodes_slice must be applied: input has 2x the expected nodes, slice selects half.
+@pytest.mark.parametrize(
+    "subgrid",
+    [
+        (0, 8),
+        "output_mask",
+    ],
+)
+def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
+    """Subgrid must be applied: input has 2x the expected nodes, slice selects half.
 
-    If nodes_slice is skipped FFT2D fails to reshape the oversized spatial dimension.
+    If subgrid is skipped FFT2D fails to reshape the oversized spatial dimension.
     """
     x_dim, y_dim = 4, 2  # FFT2D expects 8 nodes
     n_total = 16  # input has 16 nodes; slice=(0, 8) should reduce to 8
     bs, nvars = 1, 2
+    loss_cfg = {
+        "transform": "fft2d",
+        "x_dim": x_dim,
+        "y_dim": y_dim,
+        "subgrid": subgrid,
+    }
 
-    loss = SpectralL2Loss(
-        transform="fft2d",
-        x_dim=x_dim,
-        y_dim=y_dim,
-        nodes_slice=(0, 8),
-    )
+    output_mask = SimpleNamespace(as_tuple=lambda: (0, 8))
+
+    loss = _make_loss("anemoi.training.losses.spectral.SpectralL2Loss", output_mask=output_mask, **loss_cfg)
 
     pred = torch.randn(bs, 1, 1, n_total, nvars)
     target = torch.randn(bs, 1, 1, n_total, nvars)
@@ -683,8 +705,8 @@ def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture
         loss(pred, target)
 
 
-def test_spectral_loss_nodes_slice_out_of_bounds_raises() -> None:
-    """nodes_slice that requests more nodes than available should raise."""
+def test_spectral_loss_subgrid_out_of_bounds_raises() -> None:
+    """Subgrid that requests more nodes than available should raise."""
     x_dim, y_dim = 4, 2  # expects 8 nodes
     n_total = 6  # fewer nodes than slice end requests
 
@@ -692,7 +714,7 @@ def test_spectral_loss_nodes_slice_out_of_bounds_raises() -> None:
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
-        nodes_slice=(0, 8),  # requests 8 nodes but only 6 exist
+        subgrid=(0, 8),  # requests 8 nodes but only 6 exist
     )
     pred = torch.randn(1, 1, 1, n_total, 2)
     target = torch.randn(1, 1, 1, n_total, 2)
@@ -715,7 +737,7 @@ def test_spectral_loss_ambiguous_projection_config_raises() -> None:
         )
 
 
-def test_spectral_crps_projection_applies_nodes_slice_before_projection(mocker: MockerFixture) -> None:
+def test_spectral_crps_projection_applies_subgrid_before_projection(mocker: MockerFixture) -> None:
     from scipy.sparse import eye
 
     bs, ens, nvars = 2, 5, 3
@@ -735,7 +757,7 @@ def test_spectral_crps_projection_applies_nodes_slice_before_projection(mocker: 
                 "transform": "fft2d",
                 "x_dim": x_dim,
                 "y_dim": y_dim,
-                "nodes_slice": (0, projected_grid),
+                "subgrid": (0, projected_grid),
                 "projection_config": {"matrix_path": "/path/to/projection_matrix.npz"},
                 "scalers": [],
             },
