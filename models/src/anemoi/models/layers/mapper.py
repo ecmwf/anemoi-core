@@ -129,6 +129,9 @@ class BaseMapper(nn.Module, ABC):
 class GraphTransformerBaseMapper(BaseMapper, ABC):
     """Graph Transformer Base Mapper from hidden -> data or data -> hidden."""
 
+    # LEGACY_PICKLE_COMPAT: defaults for instances unpickled from pre-halo checkpoints.
+    shard_strategy = "heads"
+
     def __init__(
         self,
         *,

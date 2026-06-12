@@ -381,6 +381,11 @@ class GNNProcessor(BaseProcessor):
 class GraphTransformerProcessor(BaseProcessor):
     """Processor."""
 
+    # LEGACY_PICKLE_COMPAT: inference checkpoints pickle module instances; instances
+    # created by pre-halo (multi-ds) code have no shard_strategy in __dict__, so this
+    # class default makes them run the heads path - the semantics they were built with.
+    shard_strategy = "heads"
+
     def __init__(
         self,
         *,

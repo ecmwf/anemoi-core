@@ -850,6 +850,11 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
     """Graph Transformer Block for node embeddings."""
 
+    # LEGACY_PICKLE_COMPAT: defaults for instances unpickled from pre-halo checkpoints.
+    shard_strategy = "heads"
+    _cached_halo_info = None
+    _cached_partition = None
+
     def __init__(
         self,
         *,
