@@ -43,6 +43,17 @@ jobs:
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
             export MLFLOW_ALLOW_FILE_STORE=true # temporary workaround until issue #1054 is solved
+            export TORCH_COMPILE_DISABLE=1   # torch 2.12 honours this; older: TORCHDYNAMO_DISABLE=1
+            export TORCHDYNAMO_DISABLE=1
+            # Checkpoint debug (you already added set_checkpoint_debug_enabled(True))
+            export TORCH_CHECKPOINT_DEBUG=1
+
+            # Dynamo / recompile diagnostics — this is the key one
+            export TORCH_LOGS="recompiles,graph_breaks,dynamic,guards"
+            # or very verbose:
+            export TORCH_LOGS="+dynamo"
+            export TORCHDYNAMO_VERBOSE=1
+            export TORCH_COMPILE_DYNAMIC=0
             python3 -m pytest -v training/tests/integration --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
             python3 -m pytest -v models/tests/integration --slow
             deactivate
