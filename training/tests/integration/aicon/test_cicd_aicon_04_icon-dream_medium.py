@@ -12,7 +12,6 @@
 # This script is not part of a productive ML workflow, but is
 # used for CI/CD!
 import os
-import pathlib
 from functools import reduce
 from operator import getitem
 
@@ -25,7 +24,6 @@ from hydra import initialize
 from omegaconf import DictConfig
 from typeguard import typechecked
 
-import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
@@ -33,7 +31,6 @@ from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
-os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
 mpl.use("agg")
 
 
