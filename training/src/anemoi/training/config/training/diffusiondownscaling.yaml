@@ -100,7 +100,7 @@ max_steps: 1000000
 lr:
   warmup: 1000
   rate: 10e-4            # ported from your config
-  iterations: 100000
+  iterations: ${training.max_steps} # follow max_steps like every other training config (was hardcoded 100000, silently truncating LR schedules)
   min: 0
 
 submodules_to_freeze: []
