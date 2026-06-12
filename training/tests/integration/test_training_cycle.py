@@ -56,7 +56,7 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_dynamo() -> None:
-    """Reset torch compile state before each test.
+    """Reset torch compile state before and after each test.
 
     This prevents 'recomputed metadata doesn't match checkpointed value' errors observed with torch 2.12.
     """
