@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+from functools import partial
 from typing import Optional
 from typing import Union
 
@@ -43,6 +44,7 @@ class MultiHeadSelfAttention(nn.Module):
 
     allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+    - flex attention, see https://pytorch.org/docs/stable/nn.attention.flex_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
@@ -154,6 +156,7 @@ class MultiHeadSelfAttention(nn.Module):
 
     def set_attention_function(self):
         attn_funcs = {
+            "flex_attention": FlexAttentionWrapper,
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
         }
@@ -357,6 +360,101 @@ class SDPAAttentionWrapper(nn.Module):
         )
 
         return out
+
+
+class FlexAttentionWrapper(nn.Module):
+    """Wrapper for PyTorch flex attention."""
+
+    def __init__(self, **kwargs):
+        super().__init__()
+
+        try:
+            from torch.nn.attention.flex_attention import create_block_mask
+            from torch.nn.attention.flex_attention import flex_attention
+        except ImportError as e:
+            raise ImportError(
+                "Flex attention is not available in this PyTorch installation. "
+                "Please upgrade PyTorch or select a different attention backend."
+            ) from e
+
+        self.attention = flex_attention
+        self.create_block_mask = create_block_mask
+        self.block_mask = None
+        self._block_mask_key = None
+        self._compile = True
+        self._use_flash4_backend = False
+
+        if not kwargs.get("use_triton_backend", False):
+
+            # Try import flash attention v4
+            # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
+            # One reason to use flex attention with the flash attewntion v4 backend, ratehr then using flash attention v4 directly, is
+            # flex attentions support for custom block masks.
+            # if flash attention is not available then the trion backend will be used for flex attention
+            try:
+                from flash_attn.cute import flash_attn_func  # noqa: F401
+
+                LOGGER.info("Using flash attention v4 backend for flex attention.")
+                self._use_flash4_backend = True
+            except ImportError as e:
+                e_v4 = e
+                LOGGER.debug(f"Flash attention v4 not available: {e_v4}")
+        LOGGER.info("Using flex_attention.")
+
+        self._kernel_options = {"BACKEND": "FLASH"} if self._use_flash4_backend else {}
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal=False,
+        window_size=None,
+        dropout_p=0.0,
+        softcap=None,
+        alibi_slopes=None,
+    ):
+        if softcap is not None and softcap > 0:
+            raise NotImplementedError(
+                "Softcap is not supported by PyTorch flex attention. Please switch to flash attention or disable softcap."
+            )
+        if alibi_slopes is not None:
+            raise NotImplementedError(
+                "Alibi slopes are not supported by PyTorch flex attention. Please switch to flash attention or disable alibi slopes."
+            )
+
+        if dropout_p > 0.0:
+            raise NotImplementedError(
+                "Dropout is not supported by PyTorch flex attention. Please switch to flash attention or disable dropout."
+            )
+
+        if causal:
+            raise NotImplementedError("Causal masking is not supported yet.")
+
+        # for some reason this triggers for 4 heads and 64 embed dim
+        # assert query.shape[3]//query.shape[1] >= 16, "Flex attention requires that embedding dimension per head is at least 16. Please increase attn_channels or decrease num_heads to use flex attention."
+
+        def sliding_window_mask(b, h, q_idx, kv_idx):
+            return torch.abs(q_idx - kv_idx) <= window_size
+
+        block_mask = None
+        if window_size is not None:
+            mask_mod = sliding_window_mask
+            N_CTX = query.shape[2]
+            mask_shape = (1, 1, N_CTX, N_CTX)
+            block_mask_kwargs = {}
+            compiled_block_mask = torch.compile(
+                self.create_block_mask
+            )  # REQUIRED, otherwise entire seq_len^2 array will be materialised
+            block_mask = compiled_block_mask(mask_mod, *mask_shape, query.device, **block_mask_kwargs)
+
+        if self._compile:
+            flex_flash = torch.compile(
+                partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
+            )
+
+        return flex_flash(query, key, value)
 
 
 class FlashAttentionWrapper(nn.Module):
