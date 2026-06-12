@@ -346,8 +346,9 @@ def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    import torch._C._dynamo.eval_frame
-    torch._C._dynamo.eval_frame._set_lru_cache(False) # prevent checkpoint 'recomputed metadata does not match' error
+    # Prevent 'recomputed metadata doesn't match checkpointed value' error
+    # observed with torch 2.12
+    os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
     cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
