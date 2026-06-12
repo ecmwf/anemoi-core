@@ -74,6 +74,7 @@ processor:
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  shard_strategy: "edges" # "edges" = halo exchange (accelerated); "heads" = legacy multi-ds sharding
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper

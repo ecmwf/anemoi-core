@@ -48,6 +48,7 @@ processor:
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
+  shard_strategy: "edges" # "edges" = halo exchange (accelerated); "heads" = legacy multi-ds sharding
   edge_pre_mlp: False
   layer_kernels:
     LayerNorm:
