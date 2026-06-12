@@ -937,7 +937,22 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         # "inner" chunking for memory reductions in inference, controlled via env variable:
         num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
-        if self.shard_strategy == "edges":
+        # EDGES_SIZE1_FALLBACK: the halo path requires a real model comm group of size > 1
+        # (build_graph_partition/halo_exchange are meaningless on a single rank and crash on
+        # model_comm_group=None, e.g. single-rank inference). Fall back to the heads path,
+        # which is a no-op communication-wise in that regime.
+        use_halo = (
+            self.shard_strategy == "edges" and model_comm_group is not None and model_comm_group.size() > 1
+        )
+        if self.shard_strategy == "edges" and not use_halo and not getattr(self, "_warned_halo_fallback", False):
+            LOGGER.info(
+                "shard_strategy 'edges' requested but model_comm_group is absent or size 1; "
+                "falling back to 'heads' path for %s",
+                self.__class__.__name__,
+            )
+            self._warned_halo_fallback = True
+
+        if use_halo:
             # --- halo exchange path ----
             # build and cache HaloInfo on first forward pass
             if self._cached_halo_info is None:
