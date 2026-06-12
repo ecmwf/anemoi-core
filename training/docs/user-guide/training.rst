@@ -590,8 +590,12 @@ The ``FreezingModifierStage`` supports:
 -  Strict mode to raise errors on missing modules
 -  Gradient validation to verify frozen parameters
 
+Submodules are addressed by their full path within the model: an exact
+child name or a dot-separated path. A bare name does not match nested
+submodules.
+
 Example
-=======
+========
 
 Parameter freezing with multiple layers:
 
@@ -604,6 +608,38 @@ Parameter freezing with multiple layers:
               submodules_to_freeze: ["encoder", "processor.0"]
               strict: false
               validate_gradients: true
+
+Legacy key
+==========
+
+Model freezing is a technique where specific parts (submodules) of a
+model are excluded from training. This is useful when certain parts of
+the model have been sufficiently trained or should remain unchanged for
+the current task.
+
+To specify which submodules to freeze, use the
+``config.training.submodules_to_freeze`` field in the configuration. List
+the names of submodules to be frozen. During model initialization, these
+submodules will have their parameters frozen, ensuring they are not
+updated during training.
+
+For example, if you have a pre-trained model on a 'global' dataset and
+want to train a new decoder with the previous model's parameters frozen,
+you would specify the following configuration to freeze the trainable
+parameters of the processor, as well as those of the 'global' encoder and
+decoder.
+
+.. code:: yaml
+
+   training:
+      # start the training from a checkpoint of a previous run
+      fork_run_id: ...
+      load_weights_only: True
+
+      submodules_to_freeze:
+         - encoder.global
+         - processor
+         - decoder.global
 
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to
