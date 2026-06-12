@@ -187,6 +187,7 @@ def get_loss_function(
     target_cls = get_class(loss_config["_target_"])
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
+    loss_config.pop("check_variables_compatibility", None)
 
     graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
     target = loss_config.get("_target_")

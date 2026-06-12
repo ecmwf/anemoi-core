@@ -17,6 +17,7 @@ from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.combined import CombinedLoss
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.variables_metadata import check_loss_variable_units_compatibility
 
 if TYPE_CHECKING:
     import numpy as np
@@ -85,3 +86,34 @@ def print_variable_scaling(loss: BaseLoss, data_indices: IndexCollection) -> dic
     LOGGER.debug(log_text)
 
     return scaling_values
+
+
+def check_loss_tree_variable_units(
+    loss: object,
+    variables_metadata: dict[str, dict] | None,
+    **options: object,
+) -> None:
+    """Walk a loss tree and check unit compatibility for any variable-mapped losses.
+
+    Recurses into composite losses (e.g. ``CombinedLoss``) to find all
+    ``LossVariableMapper`` instances and validate their predicted/target pairs.
+
+    Parameters
+    ----------
+    loss : object
+        The loss (or composite loss) to inspect.
+    variables_metadata : dict[str, dict] | None
+        Per-variable metadata dict keyed by variable name.
+    **options : object
+        Additional keyword arguments forwarded to ``Variable.compatible``
+        (e.g. ``ignore_units``, ``ignore_period``).
+    """
+    predicted_variables = getattr(loss, "predicted_variables", None)
+    target_variables = getattr(loss, "target_variables", None)
+
+    if predicted_variables is not None and target_variables is not None:
+        check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata, **options)
+
+    # Recurse into composite losses (e.g. CombinedLoss.losses)
+    for sub_loss in getattr(loss, "losses", []):
+        check_loss_tree_variable_units(sub_loss, variables_metadata, **options)
