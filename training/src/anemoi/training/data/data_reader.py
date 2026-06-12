@@ -376,10 +376,6 @@ class TrajectoryDataset(BaseAnemoiReader):
         """Return the step frequency (spacing between consecutive forecast steps)."""
         return self.data.step_frequency
 
-    @property
-    def metadata(self) -> dict:
-        """Return trajectory-compatible dataset metadata."""
-        return self.data.dataset_metadata()
 
     def statistics_tendencies(
         self,
