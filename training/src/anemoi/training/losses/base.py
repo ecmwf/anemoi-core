@@ -178,15 +178,20 @@ class BaseLoss(nn.Module, ABC):
     ) -> torch.Tensor:
         """Reduce the out of the loss.
 
-        If `squash` is True, the last dimension is averaged.
+        If `squash` is True, the variable dimension is reduced (averaged or summed).
 
-        Irrespective of `squash`, the output is reduced over the
-        batch, ensemble and grid dimensions.
+        The spatial dimension is then reduced: for gridded fields the grid (and time)
+        dimensions are *summed* (grid normalisation is handled by node weighting, time by
+        the time-step scaler), while for sparse observations (``layout.time_in_grid``) the
+        grid dimension is *averaged*, since there is no node weighting and the number of
+        observations varies per sample. The batch and ensemble dimensions are averaged.
 
         Parameters
         ----------
         out : torch.Tensor
             Difference tensor, of shape TensorDim
+        layout : TensorLayout
+            Layout describing the logical axes of out.
         squash : bool, optional
             Whether to squash the variable dimension, by default True
         squash_mode : {"avg", "sum"} , optional
@@ -215,18 +220,24 @@ class BaseLoss(nn.Module, ABC):
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
 
-        # here the grid and time dimension are summed because
-        # 1. the normalisation over grid points is handled in the node weighting
-        # 2. the normalization over output steps is handled by the time_step scaler
-        dims = [layout.time, layout.grid]
-        space_time_summed = torch.sum(
-            out,
-            dim=tuple([f for f in dims if f is not None]),
-            keepdim=True,
-        )
+        if layout.time_in_grid:
+            # Sparse observations: we average over the spatial dimension. Unlike
+            # gridded fields there is no node weighting that normalises over grid points,
+            # and the number of observations varies per sample, so we do a mean-reduce.
+            space_time_reduced = torch.mean(out, dim=layout.grid, keepdim=True)
+        else:
+            # Gridded fields: the grid and time dimensions are summed because
+            # 1. the normalisation over grid points is handled in the node weighting
+            # 2. the normalization over output steps is handled by the time_step scaler
+            dims = [layout.time, layout.grid]
+            space_time_reduced = torch.sum(
+                out,
+                dim=tuple([f for f in dims if f is not None]),
+                keepdim=True,
+            )
 
         dims = [layout.batch, layout.time, layout.ensemble]
-        out = torch.mean(space_time_summed, dim=tuple([f for f in dims if f is not None])).squeeze()
+        out = torch.mean(space_time_reduced, dim=tuple([f for f in dims if f is not None])).squeeze()
 
         return out if group is None else reduce_tensor(out, group)
 

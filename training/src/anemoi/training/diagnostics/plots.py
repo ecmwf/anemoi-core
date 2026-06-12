@@ -749,9 +749,14 @@ def _compute_main_norm(
     arrays = [input_, pred] if truth is None else [input_, truth, pred]
     combined = np.concatenate(arrays)
 
+    # handle zero-sized arrays (no valid obs for this variable / sample)
+    finite = combined[np.isfinite(combined)]
+    if finite.size == 0:
+        return Normalize()
+
     return Normalize(
-        vmin=np.nanmin(combined),
-        vmax=np.nanmax(combined),
+        vmin=finite.min(),
+        vmax=finite.max(),
     )
 
 
@@ -1158,6 +1163,24 @@ def single_plot(
     """
     if cmap is None:
         cmap = "viridis"
+
+    # omit non-finite values (NaN targets / forecast errors) from the plot
+    # drop the corresponding coordinates so the arrays stay aligned.
+    data = np.asarray(data)
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    finite = np.isfinite(data)
+    if not finite.all():
+        data = data[finite]
+        lon = lon[finite]
+        lat = lat[finite]
+    if data.size == 0:
+        # nothing left to plot - blank the panel
+        if title is not None:
+            ax.set_title(title)
+        ax.axis("off")
+        return
+
     if not datashader:
         psc = ax.scatter(
             lon,

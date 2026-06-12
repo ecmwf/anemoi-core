@@ -1239,7 +1239,10 @@ class PlotSample(BasePlotAdditionalMetrics):
                     sparse=True,
                     output_latlons=output_latlons,
                 )
-                tag, exp_log_tag = self._figure_tags(dataset_name, "obs", batch_idx, local_rank)
+                # match the gridded filename pattern
+                step_kwargs = next(iter(pl_module.task.steps("validation")))
+                tag_suffix = f"rstep{step_kwargs.get('rollout_step', 0):02d}_out00"
+                tag, exp_log_tag = self._figure_tags(dataset_name, tag_suffix, batch_idx, local_rank)
                 self._output_figure(logger, fig, epoch=epoch, tag=tag, exp_log_tag=exp_log_tag)
                 continue
 
