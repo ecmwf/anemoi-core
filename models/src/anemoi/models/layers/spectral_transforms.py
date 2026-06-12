@@ -37,6 +37,8 @@ class SpectralTransform(torch.nn.Module):
         data : torch.Tensor
             Input data in the spatial domain of expected shape
             `[batch, ensemble, points, variables]`.
+        **kwargs : Any
+            Transform-specific keyword arguments.
 
         Returns
         -------
@@ -231,6 +233,7 @@ class RegularSHT(SHT):
         self,
         nlat: int,
         truncation: int | None = None,
+        use_cuda_ring_fft: bool | None = None,
         **kwargs,
     ) -> None:
         """SHT on a regular lon-lat grid.
@@ -241,13 +244,17 @@ class RegularSHT(SHT):
             Number of latitudes in the regular grid.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_cuda_ring_fft : bool | None
+            Whether to use the CUDA ring FFT extension for supported reduced grids.
         """
         super().__init__()
         self.nlat = nlat
         self.nlon = 2 * self.nlat
         self.lons_per_lat = [self.nlon] * self.nlat
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -267,6 +274,7 @@ class ReducedSHT(SHT):
         self,
         grid: str,
         truncation: int | None = None,
+        use_cuda_ring_fft: bool | None = None,
         use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
@@ -278,9 +286,13 @@ class ReducedSHT(SHT):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_cuda_ring_fft : bool | None
+            Whether to use the CUDA ring FFT extension for supported reduced grids. If ``None``, the
+            ``ANEMOI_USE_CUDA_RING_FFT`` environment variable is read and defaults to ``True``.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+            Whether to use a graphed implementation of the rFFT on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, use the CUDA ring FFT backend when
+            available or the PyTorch fallback.
         """
         super().__init__()
 
@@ -311,6 +323,7 @@ class ReducedSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
             use_graphed_rfft=use_graphed_rfft,
         )
 
@@ -331,6 +344,7 @@ class OctahedralSHT(SHT):
         self,
         nlat: int,
         truncation: int | None = None,
+        use_cuda_ring_fft: bool | None = None,
         use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
@@ -343,8 +357,13 @@ class OctahedralSHT(SHT):
             on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_cuda_ring_fft : bool | None
+            Whether to use the CUDA ring FFT extension for supported reduced grids. If ``None``, the
+            ``ANEMOI_USE_CUDA_RING_FFT`` environment variable is read and defaults to ``True``.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+            Whether to use a graphed implementation of the rFFT on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, use the CUDA ring FFT backend when
+            available or the PyTorch fallback.
         """
         super().__init__()
         self.nlat = nlat
@@ -353,6 +372,7 @@ class OctahedralSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
             use_graphed_rfft=use_graphed_rfft,
         )
 
@@ -388,15 +408,27 @@ class InverseRegularSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    use_cuda_ring_fft : bool | None
+        Whether to use the CUDA ring FFT extension for supported reduced grids.
+    **kwargs : Any
+        Extra keyword arguments.
     """
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_cuda_ring_fft: bool | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__()
         self.nlat = nlat
         self.nlon = 2 * nlat
         self.lons_per_lat = [self.nlon] * self.nlat
         self._isht = InverseSphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -412,9 +444,19 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    use_cuda_ring_fft : bool | None
+        Whether to use the CUDA ring FFT extension for supported reduced grids.
+    **kwargs : Any
+        Extra keyword arguments.
     """
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_cuda_ring_fft: bool | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
@@ -422,6 +464,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_cuda_ring_fft=use_cuda_ring_fft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:

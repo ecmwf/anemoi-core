@@ -114,12 +114,12 @@ class SpectralLoss(BaseLoss):
             self.transform = DCT2D(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
-            # optional args: truncation, use_graphed_rfft
+            # optional args: truncation, use_cuda_ring_fft, use_graphed_rfft
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
             # expected additional args: nlat
-            # optional args: truncation, use_graphed_rfft
+            # optional args: truncation, use_cuda_ring_fft, use_graphed_rfft
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         else:
