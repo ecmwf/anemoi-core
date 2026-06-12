@@ -54,6 +54,19 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
 
 
+@pytest.fixture(autouse=True)
+def _reset_dynamo() -> None:
+    """Reset torch compile state before each test.
+
+    This prevents 'recomputed metadata doesn't match checkpointed value' errors observed with torch 2.12.
+    """
+    import torch._dynamo
+
+    torch._dynamo.reset()
+    yield
+    torch._dynamo.reset()
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_global(
@@ -346,13 +359,6 @@ def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    # Prevent 'recomputed metadata doesn't match checkpointed value' error
-    # observed with torch 2.12
-    import torch._dynamo
-
-    torch._dynamo.config.automatic_dynamic_shapes = False
-    torch._dynamo.config.assume_static_by_default = True
-
     cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
