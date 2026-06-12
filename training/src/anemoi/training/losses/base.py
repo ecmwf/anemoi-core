@@ -126,13 +126,6 @@ class BaseLoss(nn.Module, ABC):
         if len(self.scaler) == 0:
             return x[subset_indices]
 
-        if TensorDim.GRID not in self.scaler:
-            error_msg = (
-                "Scaler tensor must be at least applied to the GRID dimension. "
-                "Please add a scaler here, use `UniformWeights` for simple uniform scaling.",
-            )
-            raise RuntimeError(error_msg)
-
         scale_tensor = self.scaler
         if without_scalers is not None and len(without_scalers) > 0:
             if isinstance(without_scalers[0], str):
@@ -416,7 +409,7 @@ class FunctionalLoss(BaseLoss):
         pred, target = self.mask_nans(pred, target)
         out = pred.map_pairwise(self.calculate_difference, target)
 
-        # out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
 
         loss = out.apply_to_data(
             self.reduce,

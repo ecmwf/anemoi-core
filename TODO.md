@@ -15,6 +15,11 @@ branch: feat/richer-batch
 - date_index ???
 - implement `.clone()`
 
+
+### Scalers
+- Scalers over time dimension not implemented for `layout.time_in_grid = True` (TabularDatasets)
+
+
 ### Batch
 - Does it make sense to have the `Batch` or can we have a `dict[str, SourceView]`?
 - [ ] Add more information like `ds.metadata` (as variable_metadata ??), `ds.statistics`, ...

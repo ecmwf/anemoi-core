@@ -17,6 +17,7 @@ from typing import Self
 import torch
 from torch import nn
 
+from anemoi.models.data import TensorLayout
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +57,20 @@ def grad_scaler(
         (channels * channel_weights) / torch.sum(channel_weights, dim=-1, keepdim=True) * grad_in[0]
     )  # rescaled gradient
     return new_grad_in, grad_in[1]
+
+
+def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
+    """Reshapes a scaler tensor to align with specific logical axes of a target layout
+    for broadcasting.
+    """
+    target_ndim = layout.ndim
+    new_shape = [1] * target_ndim
+
+    for i, dim_name in enumerate(dims):
+        physical_dim = layout.axis(dim_name, ndim=target_ndim)
+        new_shape[physical_dim] = scaler.shape[i]
+
+    return scaler.view(new_shape)
 
 
 TENSOR_SPEC = tuple[int | tuple[int, ...], torch.Tensor]
@@ -513,35 +528,9 @@ class ScaleTensor(nn.Module):
 
         return ScaleTensor(**subset_scalers)
 
-    def resolve(self, ndim: int) -> Self:
-        """Resolve relative indexes in scalers by associating against ndim.
-
-        i.e. if a scaler was given as effecting dimension -1,
-        and `ndim` was provided as 4, the scaler will be fixed
-        to effect dimension 3.
-
-        Parameters
-        ----------
-        ndim : int
-            Number of dimensions to resolve relative indexing against
-
-        Returns
-        -------
-        ScaleTensor
-            ScaleTensor with all relative indexes resolved
-        """
-        resolved_scalers: dict[str, TENSOR_SPEC] = {}
-
-        for name, (dims, scaler) in self.tensors.items():
-            if any(d < 0 for d in dims):
-                dims = [d if d >= 0 else ndim + d for d in dims]
-            resolved_scalers[name] = (dims, scaler)
-
-        return ScaleTensor(**resolved_scalers)
-
     def scale_iteratively(
         self,
-        x: torch.Tensor,
+        x: "SourceView",
         subset_indices: tuple[int, ...] | None = None,
         *,
         grid_shard_slice: slice | None = None,
@@ -560,32 +549,24 @@ class ScaleTensor(nn.Module):
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset = x[subset_indices] if subset_indices is not None else x
-        out = x_subset.clone()
-        ndim = x.ndim
-        tensors = self.resolve(ndim).tensors
 
-        for dims, scaler in tensors.values():
+        x_subset = x[subset_indices] if subset_indices is not None and subset_indices != (..., ) else x
+        out = x_subset.clone()
+
+        for dims, scaler in self.tensors.values():
             if TensorDim.GRID in dims and grid_shard_slice is not None:
-                grid_index = dims.index(TensorDim.GRID)
+                grid_index = out.layout.grid
                 if scaler.shape[grid_index] >= grid_shard_slice.stop:
                     slices = [slice(None)] * len(dims)
                     slices[grid_index] = grid_shard_slice
                     scaler = scaler[tuple(slices)]
 
-            missing_dims = [d for d in range(ndim) if d not in dims]
-            reshape = [1] * len(missing_dims)
-            reshape.extend(scaler.shape)
+            reshaped_scaler = reshape_scaler(dims, scaler, x.layout)
 
-            reshaped_scaler = scaler.reshape(reshape)
-            reshaped_scaler = torch.moveaxis(reshaped_scaler, list(range(ndim)), (*missing_dims, *dims))
-
-            reshaped_scaler = reshaped_scaler.expand_as(x)
-
-            if subset_indices is not None:
+            if subset_indices is not None and subset_indices != (..., ):
                 reshaped_scaler = reshaped_scaler[subset_indices]
 
-            out = out * reshaped_scaler
+            out = out.map_data(lambda data: data * reshaped_scaler)
 
         return out
 
@@ -643,9 +624,7 @@ class ScaleTensor(nn.Module):
         """
         complete_scaler = None
 
-        tensors = self.resolve(ndim).tensors
-
-        for dims, scaler in tensors.values():
+        for dims, scaler in self.tensors.values():
             missing_dims = [d for d in range(ndim) if d not in dims]
             reshape = [1] * len(missing_dims)
             reshape.extend(scaler.shape)
