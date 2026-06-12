@@ -133,20 +133,34 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             edge_dim=self.processor_graph_provider.edge_dim,
         )
 
-        # Gated fusion blocks to combine encoder latents sequentially (Perceiver-style flow).
-        # The first dataset's latent is the initial latent; each subsequent encoder
-        # has its own fusion block. Optional encoders can be skipped — gate learns no-op.
-        # One block per encoder (~1.3M params each for D=512).
-        self.latent_fusion = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names[1:]:
-            self.latent_fusion[dataset_name] = GatedLatentFusion(
-                hidden_dim=self.num_channels,
-            )
+        # Latent fusion strategy: "gated" (default) or "sum".
+        # Config key: model.latent_fusion
+        self.latent_fusion_method = str(model_config.model.get("latent_fusion", "sum")).lower()
+        assert self.latent_fusion_method in {"gated", "sum"}, (
+            "model.latent_fusion must be one of {'gated', 'sum'}, got "
+            f"'{self.latent_fusion_method}'"
+        )
+        LOGGER.info(f"Using latent fusion method: {self.latent_fusion_method.upper()}")
+        if self.latent_fusion_method == "gated":
+            # Gated fusion blocks to combine encoder latents sequentially (Perceiver-style flow).
+            # The first dataset's latent is the initial latent; each subsequent encoder
+            # has its own fusion block. Optional encoders can be skipped — gate learns no-op.
+            # One block per encoder (~1.3M params each for D=512).
+            self.latent_fusion = torch.nn.ModuleDict()
+            for dataset_name in self.dataset_names[1:]:
+                self.latent_fusion[dataset_name] = GatedLatentFusion(
+                    hidden_dim=self.num_channels,
+                )
 
-        # Encoder/decoder dropout: during training, randomly drop non-primary encoders
-        # (and their corresponding decoders) so the model learns to function without them.
-        # This forces the primary encoder to carry sufficient information on its own.
-        self.encoder_dropout_p = model_config.model.get("encoder_dropout", 0.5)
+        # Principal dataset is defined in config as model.principal_dataset.
+        # Dropout probabilities are handled in anemoi-training and only a list of
+        # dropped dataset names is passed into forward.
+        self.principal_dataset_name = model_config.model.get("principal_dataset", self.dataset_names[0])
+        assert self.principal_dataset_name in self.dataset_names, (
+            "Configured principal dataset given in config file '%s' not in dataset_names=%s."
+            % (self.principal_dataset_name, self.dataset_names)
+        )
+
 
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
@@ -263,6 +277,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        dropped_dataset_names: list[str] | set[str] | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass of the model.
@@ -284,16 +299,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         dataset_names = list(x.keys())
 
-        # During training, randomly mark non-primary encoders as dropped.
-        # Dropped encoders still run (to keep static_graph=True for DDP) but
-        # their contribution is multiplied by 0 → zero gradients, zero loss.
-        if self.training and self.encoder_dropout_p > 0:
-            dropped_names = {
-                name for name in dataset_names
-                if name != self.dataset_names[0] and random.random() < self.encoder_dropout_p
-            }
-        else:
-            dropped_names = set()
+        # Dataset dropout selection must be passed in from the training step
+        primary_dataset = self.principal_dataset_name
+
+        if dropped_dataset_names is None and dropped_dataset_names is not None:
+            dropped_dataset_names = dropped_dataset_names
+        dropped_dataset_names = set() if dropped_dataset_names is None else set(dropped_dataset_names)
+        dropped_dataset_names.discard(primary_dataset)
+        LOGGER.info(f"predict_step dropped_dataset_names: {dropped_dataset_names}")
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
@@ -351,21 +364,28 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
-            if dataset_name in dropped_names:
-                x_latent = x_latent * 0  # zero out but keep in graph
+            keep_scale = 0.0 if dataset_name in dropped_dataset_names else 1.0
+            x_latent = x_latent * keep_scale
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
         # Fuse encoder latents sequentially: first encoder is the base latent,
         # subsequent encoders are folded in via gated fusion blocks (no attention).
-        # Dropped encoders contribute zero latent — fusion block still runs (static graph)
+        # Dropped datasets contribute zero latent — fusion block still runs (static graph)
         # but learns no-op. Order randomized during training to prevent order dependence.
-        x_latent = dataset_latents[self.dataset_names[0]]
-        remaining = [name for name in self.dataset_names[1:] if name in dataset_latents]
+        x_latent = dataset_latents[primary_dataset]
+        remaining = [name for name in self.dataset_names if name != primary_dataset and name in dataset_latents]
         if self.training:
             random.shuffle(remaining)
-        for dataset_name in remaining:
-            x_latent = self.latent_fusion[dataset_name](x_latent, dataset_latents[dataset_name])
+        else:
+            if dropped_dataset_names:
+                LOGGER.info(f"Evaluation with dropped datasets: {dropped_dataset_names}")
+        if self.latent_fusion_method == "sum":
+            # x_latent = sum(dataset_latents[name] for name in remaining)
+            x_latent = sum(dataset_latents.values())
+        else:
+            for dataset_name in remaining:
+                x_latent = self.latent_fusion[dataset_name](x_latent, dataset_latents[dataset_name])
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
@@ -416,11 +436,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
             )
 
-            if dataset_name in dropped_names:
+            if dataset_name in dropped_dataset_names:
                 # Replace output with NaN — NaN-aware loss will ignore this dataset.
                 # Multiply by 0 and add NaN to keep decoder params in the graph.
                 x_out = x_out * 0 + float("nan")
-                # TODO: use the loss that can handle NaNs
 
             x_out_dict[dataset_name] = x_out
 

@@ -167,12 +167,17 @@ class BaseLoss(nn.Module, ABC):
             * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
         """
         if self.ignore_nans:
-            nan_mask = torch.isnan(target)
+            nan_mask = torch.isnan(target+pred)
             target = target.masked_fill(nan_mask, 0.0)
             pred = pred.masked_fill(nan_mask, 0.0)
 
             return pred, target
 
+        if torch.isnan(pred).any() or torch.isnan(target).any():
+            LOGGER.info(
+                "NaN values found in prediction or target tensors, but `ignore_nans` is False. "
+                "These NaNs will propagate through the loss calculation and may cause the loss to be NaN.",
+            )
         return pred, target
 
     def reduce(

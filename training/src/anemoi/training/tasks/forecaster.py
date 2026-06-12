@@ -192,9 +192,16 @@ class Forecaster(BaseTask):
         data_indices: dict[str, IndexCollection] | None = None,
         output_mask: dict[str, object] | None = None,
         grid_shard_slice: dict[str, slice | None] | None = None,
+        dropped_datasets: list[str] | None = None,
     ) -> dict[str, torch.Tensor]:
         """Advance the input state for the next rollout step."""
         for dataset_name in x:
+            if dataset_name in (dropped_datasets or []):
+                # replace NaNs in forecasts with zeroes to avoid propagation of NaNs from dropped datasets
+                y_pred[dataset_name] = torch.zeros_like(y_pred[dataset_name])
+                nan_mask = torch.isnan(y_pred[dataset_name])
+                y_pred[dataset_name] = y_pred[dataset_name].masked_fill(nan_mask, 0.0)
+                
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
                 y_pred[dataset_name],

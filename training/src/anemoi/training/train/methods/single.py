@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import random
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -23,6 +24,27 @@ LOGGER = logging.getLogger(__name__)
 
 class SingleTraining(BaseTrainingModule):
     """Base class for deterministic prediction tasks."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.primary_dataset = getattr(self.model.model, "principal_dataset_name", self.dataset_names[0])
+        if self.primary_dataset not in self.dataset_names:
+            self.primary_dataset = self.dataset_names[0]
+
+        dropout_cfg = self.config.training.get("dataset_dropout_p", 0.0)
+        print("self.config.training.get(\"dataset_dropout_p\", 0.0)", dropout_cfg)
+        self.dropout_by_dataset = {name: 0.0 for name in self.dataset_names if name != self.primary_dataset}
+        print("self.dropout_by_dataset:", self.dropout_by_dataset)
+        if isinstance(dropout_cfg, (int, float)):
+            dropout_value = float(dropout_cfg)
+            for name in self.dropout_by_dataset:
+                self.dropout_by_dataset[name] = dropout_value
+                print(f"Dataset dropout probability for dataset '{name}': {dropout_value}")
+        else:
+            for name in self.dropout_by_dataset:
+                self.dropout_by_dataset[name] = float(dropout_cfg.get(name, 0.0))
+                print(f"Dataset dropout probability for dataset '{name}': {self.dropout_by_dataset[name]}")
 
     def _step(
         self,
@@ -37,8 +59,27 @@ class SingleTraining(BaseTrainingModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
+
+        # Define dataset dropout once per batch-step and reuse for all rollout
+        # iterations so the same datasets are used within this sequence.
+        dropped_datasets = None
+        if not validation_mode:
+            if len(self.dropout_by_dataset) > 0:
+                dropped_datasets = [
+                    name
+                    for name, dropout_p in self.dropout_by_dataset.items()
+                    if random.random() < dropout_p
+                ]
+            # print(f"Dropped datasets for this batch: {dropped_datasets}")
         for task_kwargs in task_steps:
-            y_pred = self(x)
+            # if x has nan
+            for name, tensor in x.items():
+                assert not torch.isnan(tensor).any(), f"NaN values found in input for dataset {name}."
+            
+            y_pred = self(
+                x,
+                dropped_dataset_names=dropped_datasets,
+            )
 
             y = self.task.get_targets(batch, **task_kwargs)
 
@@ -62,6 +103,7 @@ class SingleTraining(BaseTrainingModule):
                 data_indices=self.data_indices,
                 output_mask=self.output_mask,
                 grid_shard_slice=self.grid_shard_slice,
+                dropped_datasets=dropped_datasets,
             )
 
             loss = loss + loss_next
