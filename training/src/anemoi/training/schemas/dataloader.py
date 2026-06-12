@@ -100,10 +100,18 @@ class TrajectorySamplingSchema(PydanticBaseModel):
 
 
 class TrajectorySchema(PydanticBaseModel):
-    """Trajectory (forecast) reader configuration."""
+    """Trajectory (forecast) reader configuration.
+
+    For 5-D trajectory zarr datasets, set ``sampling``.
+    For legacy 4-D datasets with model-run boundary enforcement, set ``start`` and ``length``.
+    """
 
     sampling: TrajectorySamplingSchema | None = Field(default=None)
     "Anchor sampling config. stride=None → non-overlapping; stride=1 → all; stride=N → step N."
+    start: str | datetime.datetime | None = Field(default=None)
+    "Start datetime of the first model run (legacy 4-D model-run boundary enforcement)."
+    length: int | None = Field(default=None)
+    "Number of dataset timesteps per model run (legacy 4-D model-run boundary enforcement)."
 
 
 class TrajectoryDatasetSchema(NativeDatasetSchema):
