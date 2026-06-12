@@ -35,6 +35,7 @@ datasets:
           std:
           min-max:
           max:
+          - "z"
           none:
           - "cos_latitude"
           - "cos_longitude"
@@ -44,6 +45,8 @@ datasets:
           - "cos_local_time"
           - "sin_julian_day"
           - "sin_local_time"
+          - "insolation"
+          - "lsm"
 
   out_hres:
     forcing:
