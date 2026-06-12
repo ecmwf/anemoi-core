@@ -12,6 +12,8 @@ from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
+from .spectral import LinearSpectralDimensionScaler
+from .spectral import SpectralDimensionScaler
 from .time_step import LeadTimeDecayScaler
 from .time_step import TimeStepScaler
 from .time_step import UniformTimeStepScaler
@@ -29,6 +31,7 @@ __all__ = [
     "GeneralVariableLossScaler",
     "GraphNodeAttributeScaler",
     "LeadTimeDecayScaler",
+    "LinearSpectralDimensionScaler",
     "LinearVariableLevelScaler",
     "NaNMaskScaler",
     "NoTendencyScaler",
@@ -36,6 +39,7 @@ __all__ = [
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
+    "SpectralDimensionScaler",
     "StdevTendencyScaler",
     "TensorDim",
     "TimeStepScaler",
