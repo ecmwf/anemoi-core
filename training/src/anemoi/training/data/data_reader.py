@@ -379,7 +379,7 @@ class NativeGridDataset(BaseAnemoiReader):
         sampling: dict | None = None,
     ) -> np.ndarray:
         """Return valid anchors, filtering out any that cross model-run boundaries."""
-        if self._trajectory_ids is None:
+        if getattr(self, "_trajectory_ids", None) is None:
             return super().compute_anchors(relative_indices, sampling)
 
         sampling = sampling or self.default_sampling
