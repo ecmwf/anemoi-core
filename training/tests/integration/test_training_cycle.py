@@ -348,7 +348,11 @@ def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple
 def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
     # Prevent 'recomputed metadata doesn't match checkpointed value' error
     # observed with torch 2.12
-    os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
+    import torch._dynamo
+
+    torch._dynamo.config.automatic_dynamic_shapes = False
+    torch._dynamo.config.assume_static_by_default = True
+
     cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
