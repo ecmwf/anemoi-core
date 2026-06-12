@@ -345,9 +345,7 @@ class NativeGridDataset(BaseAnemoiReader):
             self.default_sampling = sampling
         self._trajectory_ids: np.ndarray | None = None
         if model_run_info is not None:
-            self._trajectory_ids = self._compute_trajectory_ids(
-                model_run_info["start"], int(model_run_info["length"])
-            )
+            self._trajectory_ids = self._compute_trajectory_ids(model_run_info["start"], int(model_run_info["length"]))
 
     def _compute_trajectory_ids(
         self,
