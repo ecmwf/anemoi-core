@@ -221,32 +221,52 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
 
         target = y[..., target_indices.data.output.full].clone()
 
-        # Prognostic channels: compute residual in model-output space from raw data-space tensors.
-        if len(prognostic_out) > 0:
-            if x_interp.shape[-1] != len(prognostic_out):
+        # DP_RESIDUAL_FIX: exclude direct_prediction from residual computation
+        # The residual is computed only on vars that exist in BOTH source (in_lres) and target prognostic
+        # AND are not direct_prediction. Direct_prediction vars are overwritten with raw y below.
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None and len(dp_model_idx) > 0:
+            dp_model_set = {int(i) for i in dp_model_idx.tolist()}
+            dp_data_set = {int(i) for i in dp_data_idx.tolist()}
+            residual_prognostic_out = torch.tensor(
+                [int(i) for i in prognostic_out.tolist() if int(i) not in dp_model_set],
+                device=prognostic_out.device,
+                dtype=prognostic_out.dtype,
+            )
+            residual_prognostic_data = torch.tensor(
+                [int(i) for i in prognostic_data.tolist() if int(i) not in dp_data_set],
+                device=prognostic_data.device,
+                dtype=prognostic_data.dtype,
+            )
+        else:
+            residual_prognostic_out = prognostic_out
+            residual_prognostic_data = prognostic_data
+
+        # Prognostic channels (residual subset): compute residual in model-output space from raw data-space tensors.
+        if len(residual_prognostic_out) > 0:
+            if x_interp.shape[-1] != len(residual_prognostic_out):
                 raise ValueError(
-                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(prognostic_out)} "
-                    f"for {target_dataset} prognostic output channels"
+                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(residual_prognostic_out)} "
+                    f"for {target_dataset} residual-prognostic output channels (after excluding direct_prediction)"
                 )
-            target[..., prognostic_out] = y[..., prognostic_data] - x_interp
+            target[..., residual_prognostic_out] = y[..., residual_prognostic_data] - x_interp
 
             if pre_processors_tendencies is not None:
-                target[..., prognostic_out] = pre_processors_tendencies(
-                    target[..., prognostic_out],
+                target[..., residual_prognostic_out] = pre_processors_tendencies(
+                    target[..., residual_prognostic_out],
                     in_place=False,
-                    data_index=prognostic_data,
+                    data_index=residual_prognostic_data,
                     skip_imputation=skip_imputation,
                 )
             else:
-                target[..., prognostic_out] = pre_processors_state(
-                    target[..., prognostic_out],
+                target[..., residual_prognostic_out] = pre_processors_state(
+                    target[..., residual_prognostic_out],
                     in_place=False,
-                    data_index=prognostic_data,
+                    data_index=residual_prognostic_data,
                     skip_imputation=skip_imputation,
                 )
 
         # Direct-prediction overwrite: prognostic vars that should use raw y with state normalization.
-        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
         if dp_model_idx is not None:
             target[..., dp_model_idx] = pre_processors_state(
                 y[..., dp_data_idx],
@@ -1124,14 +1144,28 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 skip_imputation=skip_imputation,
             )
 
-        # Prognostic channels: add denormalized x_interp
-        if len(prognostic_out) > 0:
+        # DP_RESIDUAL_FIX_INV: exclude direct_prediction from interp add-back
+        # x_interp / channel_indices only contains the residual subset (vars in BOTH source and target).
+        # Add x_interp only to the residual-prognostic indices; direct_prediction indices are
+        # overwritten with state-denormalized raw model output below.
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None and len(dp_model_idx) > 0:
+            dp_model_set = {int(i) for i in dp_model_idx.tolist()}
+            residual_prognostic_out = torch.tensor(
+                [int(i) for i in prognostic_out.tolist() if int(i) not in dp_model_set],
+                device=prognostic_out.device,
+                dtype=prognostic_out.dtype,
+            )
+        else:
+            residual_prognostic_out = prognostic_out
+
+        # Prognostic (residual subset): add denormalized x_interp.
+        if len(residual_prognostic_out) > 0:
             x_source_denorm = post_processors_state[source_dataset](state_inp, in_place=False)
             channel_indices = self.get_matching_channel_indices(target_dataset).to(x_source_denorm.device)
-            state_outp[..., prognostic_out] += x_source_denorm[..., channel_indices]
+            state_outp[..., residual_prognostic_out] += x_source_denorm[..., channel_indices]
 
         # Direct-prediction overwrite: state-denormalized raw prediction, no x_interp
-        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
         if dp_model_idx is not None:
             state_outp[..., dp_model_idx] = post_processors_state[target_dataset](
                 model_output[..., dp_model_idx],
