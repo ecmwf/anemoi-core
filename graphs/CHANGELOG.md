@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.4...graphs-0.9.5) (2026-06-12)
+
+
+### Bug Fixes
+
+* Remove version limit ([#1178](https://github.com/ecmwf/anemoi-core/issues/1178)) ([821b1f0](https://github.com/ecmwf/anemoi-core/commit/821b1f0ee73d1fb4310d3f8a679001697e2331f0))
+* Support pyg-lib for fast graph building when using pyg &gt;= 2.8 ([#1179](https://github.com/ecmwf/anemoi-core/issues/1179)) ([c147200](https://github.com/ecmwf/anemoi-core/commit/c147200dec04cacbb413998b95ef8641f3a023c2))
+
 ## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.3...graphs-0.9.4) (2026-05-14)
 
 

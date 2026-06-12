@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.15.0](https://github.com/ecmwf/anemoi-core/compare/training-0.14.0...training-0.15.0) (2026-06-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** parameter freezing ([#1159](https://github.com/ecmwf/anemoi-core/issues/1159))
+
+### Bug Fixes
+
+* Fix integration tests with torch &gt;= 2.11 ([#1187](https://github.com/ecmwf/anemoi-core/issues/1187)) ([f23c096](https://github.com/ecmwf/anemoi-core/commit/f23c096ec9091c0ec6f84c52404e84fbca8b99a4))
+* Remove version limit ([#1178](https://github.com/ecmwf/anemoi-core/issues/1178)) ([821b1f0](https://github.com/ecmwf/anemoi-core/commit/821b1f0ee73d1fb4310d3f8a679001697e2331f0))
+* Replace matplotlib.get_cmap ([#1186](https://github.com/ecmwf/anemoi-core/issues/1186)) ([8b7f835](https://github.com/ecmwf/anemoi-core/commit/8b7f835c9df5a4df6e713cb3b64519bb5c81584d))
+* **training:** Allow mlflow filesystem tracking backend in tests ([#1180](https://github.com/ecmwf/anemoi-core/issues/1180)) ([de91091](https://github.com/ecmwf/anemoi-core/commit/de91091063c3b1ba51f78e4cc70a4c4e74133319))
+* **training:** Load model on CPU to avoid GPU OOMs ([#1145](https://github.com/ecmwf/anemoi-core/issues/1145)) ([a1036ff](https://github.com/ecmwf/anemoi-core/commit/a1036ff6e9f242394d8fc67f0be12b342144ba41))
+* **training:** Parameter freezing ([#1159](https://github.com/ecmwf/anemoi-core/issues/1159)) ([4135153](https://github.com/ecmwf/anemoi-core/commit/4135153b6dea3cc8626652c6c3724cbfeff6531f))
+
 ## [0.14.0](https://github.com/ecmwf/anemoi-core/compare/training-0.13.0...training-0.14.0) (2026-06-08)
 
 
