@@ -72,9 +72,13 @@ class WeightAveragingSchema(GenericSchema):
 
     Example:
         weight_averaging:
-          _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+          _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
           decay: 0.999
           update_starting_at_step: 1000
+
+    The stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes also instantiate
+    but pair parameters/buffers positionally; that is unsafe with anemoi imputers and
+    updating loss scalers (a warning will be logged).
     """
 
 

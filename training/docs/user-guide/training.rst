@@ -650,8 +650,25 @@ default selection of PyTorch.
 ******************
 
 Weight averaging is a technique to improve model generalization by
-averaging model weights during training. Anemoi Training supports weight
-averaging methods through PyTorch Lightning callbacks:
+averaging model weights during training. Anemoi Training provides its own
+weight-averaging callbacks that wrap PyTorch Lightning's
+``WeightAveraging`` infrastructure with pair parameters and buffers
+*by name* rather than positionally.
+
+Using the stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes
+directly will crash or silently mis-pair tensors when used with:
+
+-  **Imputers** (e.g. ``ConstantImputer``), which register scratch
+   buffers whose shapes change on the first forward pass.
+-  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
+   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+   shuffling the buffer order in the live model relative to the averaged
+   model's snapshot.
+
+A warning will be logged if the stock PyTorch Lightning weight-averaging
+callbacks are used, recommending the anemoi variants instead.
+
+The supported methods are:
 
 -  **Exponential Moving Average (EMA)**: Maintains an exponential moving
       average of model weights, which can lead to smoother convergence
@@ -660,13 +677,12 @@ averaging methods through PyTorch Lightning callbacks:
       .. code:: yaml
 
          weight_averaging:
-            _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
             decay: 0.999
+            update_every_n_steps: 1
+            update_starting_at_step: null
+            update_starting_at_epoch: null
 
-      The ``decay`` parameter (typically between 0.99 and 0.9999)
-      controls the smoothing factor. Higher values give more weight to
-      historical weights, resulting in a more stable average. By
-      default, the decay is set to 0.999.
 
 -  **Stochastic Weight Averaging (SWA)**: Averages weights from multiple
       points along the training trajectory, typically resulting in wider
@@ -675,14 +691,11 @@ averaging methods through PyTorch Lightning callbacks:
       .. code:: yaml
 
          weight_averaging:
-            _target_: pytorch_lightning.callbacks.StochasticWeightAveraging
-            swa_lrs: 1.e-4
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.SWAWeightAveraging
+            update_every_n_steps: 1
+            update_starting_at_step: null
+            update_starting_at_epoch: null
 
-      The ``swa_lrs`` parameter specifies the learning rate to use
-      during the SWA phase. By default, the learning rate is set to
-      1e-4. Additional parameters can be configured as described in the
-      [PyTorch Lightning
-      documentation](https://lightning.ai/docs/pytorch/latest/api/lightning.pytorch.callbacks.StochasticWeightAveraging.html#lightning.pytorch.callbacks.StochasticWeightAveraging)
 
 By default, weight averaging is disabled. To explicitly disable it or to
 override a parent configuration, set ``weight_averaging`` to null.
