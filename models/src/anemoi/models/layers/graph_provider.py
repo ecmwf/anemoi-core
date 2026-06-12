@@ -74,6 +74,27 @@ def create_graph_provider(
         return NoOpGraphProvider()
 
 
+def normalize_projection_edges_name(
+    edges_name: str | tuple[str, str, str] | list[str] | None,
+) -> tuple[str, str, str]:
+    if edges_name is None:
+        raise ValueError("edges_name must be provided")
+    if isinstance(edges_name, (tuple, list)):
+        if len(edges_name) == 3:
+            return (edges_name[0], edges_name[1], edges_name[2])
+        if len(edges_name) == 2:
+            return (edges_name[0], "to", edges_name[1])
+        raise ValueError(f"edges_name tuple must have 2 or 3 elements, got {len(edges_name)}")
+    if isinstance(edges_name, str):
+        parts = edges_name.split("/")
+        if len(parts) == 3:
+            return tuple(parts)
+        if len(parts) == 2:
+            return (parts[0], "to", parts[1])
+        raise ValueError(f"edges_name string must have 2 or 3 slash-separated parts, got {len(parts)}")
+    raise ValueError(f"edges_name must be str, tuple, list, or None, got {type(edges_name)}")
+
+
 class BaseGraphProvider(nn.Module, ABC):
     """Base class for graph edge providers.
 
@@ -628,3 +649,79 @@ class ProjectionGraphProvider(BaseGraphProvider):
             # sparse tensors can't be registered as buffers with ddp, so move on demand
             self.projection_matrix = self.projection_matrix.to(device)
         return self.projection_matrix
+
+    @classmethod
+    def from_config(
+        cls,
+        config: object,
+        graph_data: Optional[HeteroData] = None,
+        data_node_name: str = "data",
+    ) -> Optional["ProjectionGraphProvider"]:
+        """Create a provider from a config mapping, choosing the mode from the keys present.
+
+        - ``matrix_path`` → file mode.
+        - ``edges_name`` → edge mode (needs *graph_data*).
+        - ``num_nearest_neighbours`` + ``grid``/``node_builder`` → target-grid mode,
+          building a KNN subgraph on the fly (needs *graph_data*).
+
+        Returns ``None`` for an empty or ``None`` *config*, and raises ``ValueError`` on an
+        ambiguous config or when *graph_data* is required but missing.
+        """
+        # --- normalise to plain dict ---
+        if config is None:
+            return None
+        try:
+            from omegaconf import OmegaConf
+
+            if OmegaConf.is_config(config):
+                config = OmegaConf.to_container(config, resolve=True)
+        except ImportError:
+            pass
+        if not isinstance(config, dict):
+            config = dict(config)
+        if not config:
+            return None
+
+        has_matrix = "matrix_path" in config and config["matrix_path"] is not None
+        has_edges = "edges_name" in config and config["edges_name"] is not None
+
+        if has_matrix and has_edges:
+            raise ValueError("projection config must specify at most one of 'matrix_path' or 'edges_name', not both")
+
+        if has_matrix:
+            return cls(
+                file_path=config["matrix_path"],
+                row_normalize=bool(config.get("row_normalize", False)),
+            )
+
+        if has_edges:
+            if graph_data is None:
+                raise ValueError("graph_data is required for projection mode 'edges'")
+            return cls(
+                graph=graph_data,
+                edges_name=normalize_projection_edges_name(config["edges_name"]),
+                edge_weight_attribute=config.get("edge_weight_attribute"),
+                src_node_weight_attribute=config.get("src_node_weight_attribute"),
+                row_normalize=bool(config.get("row_normalize", False)),
+            )
+
+        # target-grid mode: require its signal key here for a clear error, not a deep KeyError.
+        if config.get("num_nearest_neighbours") is None:
+            raise ValueError(
+                "projection config must specify 'matrix_path', 'edges_name', or target-grid "
+                "keys ('num_nearest_neighbours' with 'grid' or 'node_builder')"
+            )
+        if graph_data is None:
+            raise ValueError("graph_data is required for projection mode 'target_grid'")
+
+        from anemoi.graphs.builders import build_node_to_node_projection_subgraph
+
+        target_node_name = config.get("target_node_name", "target_grid")
+        subgraph = build_node_to_node_projection_subgraph(graph_data, data_node_name, target_node_name, config)
+        return cls(
+            graph=subgraph,
+            edges_name=(data_node_name, "to", target_node_name),
+            edge_weight_attribute=config.get("edge_weight_attribute"),
+            src_node_weight_attribute=config.get("src_node_weight_attribute"),
+            row_normalize=bool(config.get("row_normalize", False)),
+        )

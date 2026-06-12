@@ -255,6 +255,97 @@ Supported transforms include:
    ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
    significant speedups, but may not be supported on all devices and can have higher memory usage.
 
+.. note::
+
+   Before the transform is applied the grid can be subset to a subgrid by setting the optional ``subgrid`` argument.
+   This can be a slice represented by a tuple, e.g. ``(0, 100)``, to select the first 100 gridpoints, or the string ``output_mask``
+   that will restrict to grid to the region specified by the ``output_mask`` of LAM models.
+
+
+Spectral projections
+--------------------
+
+Before the spectral transform is applied, but after the grid has been subset, an optional sparse projection can remap
+the input field from its native (possibly unstructured) grid to the regular 2D grid
+expected by the transform. This is configured via the ``projection_config`` key and
+works with *any* spectral loss class (``SpectralCRPSLoss``, ``SpectralL2Loss``,
+``LogSpectralDistance``, ``FourierCorrelationLoss``, …).
+
+Two modes are available:
+
+- **From file** (``matrix_path``): load a precomputed sparse projection matrix from
+  an ``.npz`` file. This is the most efficient option when the same projection is
+  reused across many training runs.
+- **From graph**: derive the projection at training startup from the model graph.
+  The target grid can come from an existing edge set (``edges_name``) or be built
+  from scratch using any ``anemoi.graphs`` node builder (``node_builder`` +
+  ``num_nearest_neighbours`` + ``sigma``).
+
+Example: spectral CRPS with a precomputed projection matrix
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The typical setup for a limited-area model whose native grid is unstructured: the
+projection matrix (generated offline) maps grid points to the ``[y_dim, x_dim]``
+regular array expected by FFT2D.
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+         projection_config:
+           matrix_path: /path/to/projection.npz
+         # nodes_slice: [0, 32768] # stretched-grid case, need to select y*x points first
+
+Example: spectral L2 loss with a graph-derived projection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The projection can also be built at training startup directly from the model graph.
+Use ``edges_name`` to reuse an existing edge set, or ``node_builder`` to define the
+target grid from scratch (here a regular lat/lon grid) and let Anemoi compute
+Gaussian-weighted nearest-neighbour weights.
+
+.. code-block:: yaml
+
+   # Option A: reuse an existing graph edge set
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralL2Loss  # any spectral loss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+         projection_config:
+           edges_name: data/to/target_grid  # "src/rel/dst" or [src, rel, dst]
+
+.. code-block:: yaml
+
+   # Option B: build the target grid on the fly with a node builder
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralL2Loss  # any spectral loss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+         projection_config:
+           node_builder:
+             _target_: anemoi.graphs.nodes.LatLonNodes
+             # latitudes/longitudes define the regular target grid, e.g.:
+             #   import numpy as np
+             #   lats = np.repeat(np.linspace(90, -90, y_dim), x_dim)
+             #   lons = np.tile(np.linspace(0, 360, x_dim, endpoint=False), y_dim)
+             latitudes: [...]   # y_dim * x_dim values
+             longitudes: [...]  # y_dim * x_dim values
+             name: projection_target
+           num_nearest_neighbours: 4
+           sigma: 0.5
+           row_normalize: false
+
 Spectral kernel CRPS
 --------------------
 
