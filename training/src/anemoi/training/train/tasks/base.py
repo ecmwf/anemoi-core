@@ -1026,9 +1026,31 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_end(self) -> None:
         pass
 
+    def on_train_epoch_start(self) -> None:
+        self._set_schedule_free_optimizer_mode("train")
+
+    def on_validation_epoch_start(self) -> None:
+        self._set_schedule_free_optimizer_mode("eval")
+
+    def on_validation_epoch_end(self) -> None:
+        self._set_schedule_free_optimizer_mode("train")
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        del checkpoint
+        self._set_schedule_free_optimizer_mode("eval")
+
+    def _set_schedule_free_optimizer_mode(self, mode: str) -> None:
+        trainer = getattr(self, "trainer", None)
+        optimizers = getattr(trainer, "optimizers", []) if trainer is not None else []
+        for optimizer in optimizers:
+            if not self._optimizer_uses_external_scheduler(optimizer):
+                getattr(optimizer, mode)()
+
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[dict[str, Any]]]:
         """Create optimizer and LR scheduler based on Hydra config."""
         optimizer = self._create_optimizer_from_config(self.config.training.optimizer)
+        if not self._optimizer_uses_external_scheduler(optimizer):
+            return [optimizer], []
         scheduler = self._create_scheduler(optimizer)
         return [optimizer], [scheduler]
 
@@ -1040,7 +1062,14 @@ class BaseGraphModule(pl.LightningModule, ABC):
         if hasattr(opt_cfg, "model_dump"):
             opt_cfg = opt_cfg.model_dump(by_alias=True)
 
+        if "lr" in opt_cfg:
+            return instantiate(opt_cfg, params=params)
+
         return instantiate(opt_cfg, params=params, lr=self.lr)
+
+    def _optimizer_uses_external_scheduler(self, optimizer: torch.optim.Optimizer) -> bool:
+        """Return False for optimizers with their own schedule/averaging semantics."""
+        return optimizer.__class__.__module__.split(".", maxsplit=1)[0] != "schedulefree"
 
     def _create_scheduler(self, optimizer: torch.optim.Optimizer) -> dict[str, Any]:
         """Helper to create the cosine LR scheduler."""
