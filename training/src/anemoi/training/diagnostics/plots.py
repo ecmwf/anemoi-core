@@ -10,11 +10,11 @@
 
 import logging
 
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
+from matplotlib import colormaps as mpl_colormaps
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
@@ -542,8 +542,8 @@ def _resolve_variable_colormaps(
     tuple[Colormap, Colormap]
         (cmap, error_cmap)
     """
-    cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+    cmap = colormaps.default.get_cmap() if colormaps.get("default") else mpl_colormaps.get_cmap("viridis")
+    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else mpl_colormaps.get_cmap("bwr")
     for key in colormaps:
         if key not in ["default", "error"] and variable_name in colormaps[key].variables:
             cmap = colormaps[key].get_cmap()
