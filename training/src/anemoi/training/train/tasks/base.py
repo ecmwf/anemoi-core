@@ -1029,6 +1029,12 @@ class BaseGraphModule(pl.LightningModule, ABC):
     def on_train_epoch_start(self) -> None:
         self._set_schedule_free_optimizer_mode("train")
 
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
+        # Schedule-free optimizers must be in train mode for every step(); a prior
+        # on_save_checkpoint/on_validation eval-switch must not leak into training.
+        del batch, batch_idx
+        self._set_schedule_free_optimizer_mode("train")
+
     def on_validation_epoch_start(self) -> None:
         self._set_schedule_free_optimizer_mode("eval")
 
