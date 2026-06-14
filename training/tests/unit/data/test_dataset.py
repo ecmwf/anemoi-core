@@ -45,7 +45,6 @@ class TestNativeGridDataset:
         dataset = NativeGridDataset(dataset=dataset_path, start=start, end=end)
 
         assert dataset.data is not None
-        assert not dataset.has_trajectories
         assert dataset.dates is not None
         assert dataset.variables is not None
         assert dataset.frequency is not None
@@ -68,7 +67,6 @@ class TestNativeGridDataset:
         dataset = NativeGridDataset(dataset=dataset_cfg)
 
         assert dataset.data is not None
-        assert not dataset.has_trajectories
         assert dataset.dates is not None
         assert dataset.variables is not None
         assert dataset.frequency is not None
@@ -130,7 +128,7 @@ class TestNativeGridDataset:
         dataset = NativeGridDataset(dataset=dataset_path)
 
         # Get a sample
-        sample = dataset.get_sample(time_indices=slice(0, 3), grid_shard_indices=slice(0, 50))
+        sample = dataset.get_sample(sequence=0, positions=slice(0, 3), grid_shard_indices=slice(0, 50))
 
         assert isinstance(sample, torch.Tensor)
         assert sample.ndim == 4  # dates, ensemble, gridpoints, variables
@@ -143,7 +141,7 @@ class TestNativeGridDataset:
         dataset = NativeGridDataset(dataset=dataset_path)
 
         grid_indices = np.array([0, 10, 20, 30])
-        sample = dataset.get_sample(time_indices=slice(0, 3), grid_shard_indices=grid_indices)
+        sample = dataset.get_sample(sequence=0, positions=slice(0, 3), grid_shard_indices=grid_indices)
 
         assert isinstance(sample, torch.Tensor)
         assert sample.ndim == 4
@@ -187,7 +185,6 @@ def test_create_dataset_accepts_nested_dataset_dictionary(dataset_path: str) -> 
     dataset = create_dataset(dataset_reader_cfg)
 
     assert dataset.data is not None
-    assert not dataset.has_trajectories
 
 
 @skip_if_offline
@@ -272,7 +269,6 @@ def test_create_dataset_supports_join_pattern(dataset_path: str) -> None:
     dataset = create_dataset(dataset_reader_cfg)
 
     assert dataset.data is not None
-    assert not dataset.has_trajectories
     assert len(dataset.dates) > 0
 
 

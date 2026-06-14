@@ -9,8 +9,8 @@
 
 import datetime
 import logging
-from abc import abstractmethod
 from functools import cached_property
+from typing import ClassVar
 
 import numpy as np
 import torch
@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -72,12 +73,32 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
         msg = "Missing required 'dataset_config' in dataset reader configuration."
         raise ValueError(msg)
 
+    allowed_keys = {"start", "end", "trajectory"}
+    unknown_keys = set(normalized) - allowed_keys
+    if unknown_keys:
+        unknown = ", ".join(sorted(unknown_keys))
+        allowed = ", ".join(sorted({"dataset_config", *allowed_keys}))
+        msg = f"Unknown dataset reader option(s) [{unknown}]. Allowed top-level keys: {allowed}."
+        raise ValueError(msg)
+
     normalized["dataset_config"] = base_dataset_config
     return normalized
 
 
 class BaseAnemoiReader:
-    """Anemoi data reader for native grid datasets."""
+    """Anemoi data reader for native grid datasets.
+
+    A sample is addressed by a 2-D anchor ``(sequence, position)``.
+    Relative time offsets are applied *within* a single sequence, so a
+    sample can never span two sequences.  Analysis datasets expose a single
+    sequence (the whole time series); forecast datasets expose one sequence
+    per initialisation (base date), with the forecast step as the position.
+    """
+
+    #: Default sampling config used by :meth:`compute_anchors`.
+    #: ``{"stride": 1}`` keeps every valid position;
+    #: ``{"stride": None}`` uses stride = window size (non-overlapping).
+    default_sampling: ClassVar[dict] = {"stride": 1}
 
     def __init__(
         self,
@@ -92,6 +113,89 @@ class BaseAnemoiReader:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
         self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+
+    # ------------------------------------------------------------------
+    # Sequence / position geometry
+    # ------------------------------------------------------------------
+
+    @property
+    def num_sequences(self) -> int:
+        """Number of independent sequences in the dataset."""
+        return 1
+
+    def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
+        """Return the number of positions in ``sequence``."""
+        return len(self.data.dates)
+
+    @property
+    def missing_sequences(self) -> set[int]:
+        """Return sequences that are entirely missing and must not be sampled."""
+        return set()
+
+    def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
+        """Return positions within ``sequence`` that are missing."""
+        return set(self.missing)
+
+    def compute_anchors(
+        self,
+        relative_indices: list[int] | np.ndarray,
+        sampling: dict | None = None,
+    ) -> np.ndarray:
+        """Return the valid ``(sequence, position)`` anchors for a relative window.
+
+        Parameters
+        ----------
+        relative_indices : list[int] | np.ndarray
+            Relative offsets (in positions) requested around each anchor.
+        sampling : dict | None
+            Sampling configuration with key ``"stride"``.
+            ``{"stride": None}`` uses stride = window size (non-overlapping);
+            ``{"stride": 1}`` keeps every valid position;
+            ``{"stride": 6}`` steps anchors by 6.
+            Defaults to :attr:`default_sampling`.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape ``(n_anchors, 2)`` with ``(sequence, position)`` rows.
+        """
+        sampling = sampling or self.default_sampling
+
+        rel = np.asarray(list(relative_indices), dtype=np.int64)
+        window = int(rel.max()) - int(rel.min()) + 1
+
+        # Resolve stride from sampling dict; None → window size (non-overlapping)
+        raw_stride = sampling.get("stride") if isinstance(sampling, dict) else None
+        stride = window if raw_stride is None else int(raw_stride)
+        if stride < 1:
+            msg = f"trajectory_sampling.stride must be >= 1, got {stride}."
+            raise ValueError(msg)
+
+        anchors: list[np.ndarray] = []
+        for sequence in range(self.num_sequences):
+            if sequence in self.missing_sequences:
+                continue
+
+            positions = get_usable_indices(
+                self.missing_positions(sequence),
+                self.sequence_length(sequence),
+                rel,
+            )
+
+            if stride > 1 and positions.size:
+                positions = positions[(positions - positions[0]) % stride == 0]
+
+            if positions.size:
+                seq_col = np.full(positions.size, sequence, dtype=np.int64)
+                anchors.append(np.stack([seq_col, positions], axis=1))
+
+        if not anchors:
+            return np.empty((0, 2), dtype=np.int64)
+        return np.concatenate(anchors, axis=0)
+
+    # ------------------------------------------------------------------
+    # Dataset properties
+    # ------------------------------------------------------------------
 
     @property
     def dates(self) -> np.ndarray:
@@ -150,7 +254,7 @@ class BaseAnemoiReader:
 
     @property
     def name_to_index(self) -> dict[str, int]:
-        """Return dataset statistics."""
+        """Return dataset name-to-index mapping."""
         return self.data.name_to_index
 
     @property
@@ -173,27 +277,28 @@ class BaseAnemoiReader:
         """Return boundary mask, defined as the complement of the cutout mask."""
         return ~self.cutout_mask
 
-    @property
-    @abstractmethod
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
+    # ------------------------------------------------------------------
+    # Sample loading
+    # ------------------------------------------------------------------
 
     def get_sample(
         self,
-        time_indices: TimeIndices,
+        sequence: int,
+        positions: TimeIndices,
         grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
-        """Get a sample from the dataset."""
-        if isinstance(grid_shard_indices, slice):
-            # Load only shards into CPU memory
-            x = self.data[time_indices, :, :, grid_shard_indices]
+        """Get a sample from the dataset.
 
+        For analysis datasets there is a single sequence, so ``sequence`` is
+        ignored and ``positions`` index the time axis directly.
+        """
+        del sequence  # analysis datasets have a single sequence
+        if isinstance(grid_shard_indices, slice):
+            x = self.data[positions, :, :, grid_shard_indices]
         else:
-            # Load full grid in CPU memory, select grid_shard after
-            # Note that anemoi-datasets currently doesn't support slicing + indexing
-            # in the same operation.
-            x = self.data[time_indices, :, :, :]
-            x = x[..., grid_shard_indices]  # select the grid shard
+            x = self.data[positions, :, :, :]
+            if grid_shard_indices is not None:
+                x = x[..., grid_shard_indices]
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
@@ -214,61 +319,219 @@ class BaseAnemoiReader:
 
 
 class NativeGridDataset(BaseAnemoiReader):
-    """Native grid dataset."""
+    """Native grid (analysis) dataset.
 
-    @property
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
-        return False
+    A single sequence covering the whole time series; relative offsets index
+    the time axis directly.  This is the default analysis behaviour.
 
-
-class TrajectoryDataset(BaseAnemoiReader):
-    """Trajectory dataset."""
+    Optionally accepts ``model_run_info`` (a dict with ``start`` and ``length``
+    keys) to prevent samples from crossing model-run boundaries.  This
+    replicates the legacy ``TrajectoryDataset`` behaviour for 4-D forecast
+    datasets where each model run covers a fixed number of timesteps.
+    """
 
     def __init__(
         self,
-        trajectory_start: datetime.datetime,
-        trajectory_length: int,
         dataset: str | dict | None = None,
         dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-    ):
+        model_run_info: dict | None = None,
+        sampling: dict | None = None,
+    ) -> None:
+        """Initialize NativeGridDataset."""
         super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
-        self.trajectory_start = trajectory_start
-        self.trajectory_length = trajectory_length
+        if sampling is not None:
+            self.default_sampling = sampling
+        self._trajectory_ids: np.ndarray | None = None
+        if model_run_info is not None:
+            self._trajectory_ids = self._compute_trajectory_ids(model_run_info["start"], int(model_run_info["length"]))
 
-    @property
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
-        return True
+    def _compute_trajectory_ids(
+        self,
+        trajectory_start: datetime.datetime | str,
+        trajectory_length: int,
+    ) -> np.ndarray:
+        """Assign each date an integer model-run ID.
 
-    @property
-    def trajectory_ids(self) -> list[str]:
-        trajectory_length_seconds = self.trajectory_length * frequency_to_seconds(self.frequency)
-        return (self.dates - np.datetime64(self.trajectory_start, "s")) // np.timedelta64(
+        Dates before ``trajectory_start`` receive a negative ID (they are kept
+        as usable anchors but a sample window straddling the boundary will be
+        excluded by :func:`get_usable_indices`).
+
+        Parameters
+        ----------
+        trajectory_start : datetime.datetime | str
+            Start datetime of the first model run.
+        trajectory_length : int
+            Number of dataset timesteps per model run.
+        """
+        trajectory_length_seconds = trajectory_length * frequency_to_seconds(self.frequency)
+        return (self.dates - np.datetime64(trajectory_start, "s")) // np.timedelta64(
             trajectory_length_seconds,
             "s",
         )
 
+    def compute_anchors(
+        self,
+        relative_indices: list[int] | np.ndarray,
+        sampling: dict | None = None,
+    ) -> np.ndarray:
+        """Return valid anchors, filtering out any that cross model-run boundaries."""
+        if getattr(self, "_trajectory_ids", None) is None:
+            return super().compute_anchors(relative_indices, sampling)
+
+        sampling = sampling or self.default_sampling
+        rel = np.asarray(list(relative_indices), dtype=np.int64)
+        window = int(rel.max()) - int(rel.min()) + 1
+        raw_stride = sampling.get("stride") if isinstance(sampling, dict) else None
+        stride = window if raw_stride is None else int(raw_stride)
+        if stride < 1:
+            msg = f"trajectory_sampling.stride must be >= 1, got {stride}."
+            raise ValueError(msg)
+
+        positions = get_usable_indices(
+            self.missing_positions(0),
+            self.sequence_length(0),
+            rel,
+            trajectory_ids=self._trajectory_ids,
+        )
+
+        if stride > 1 and positions.size:
+            positions = positions[(positions - positions[0]) % stride == 0]
+
+        if not positions.size:
+            return np.empty((0, 2), dtype=np.int64)
+        seq_col = np.zeros(positions.size, dtype=np.int64)
+        return np.stack([seq_col, positions], axis=1)
+
+
+class TrajectoryDataset(BaseAnemoiReader):
+    """Trajectory dataset with an explicit lead-step axis.
+
+    Wraps a 5-D ``trajectories``-layout dataset opened through
+    :func:`anemoi.datasets.open_dataset` (on-disk shape
+    ``(base_dates, variables, ensembles, steps, cells)``).  Each base date
+    (forecast initialisation) is exposed as an independent sequence and the
+    forecast step is the within-sequence position, so a training sample is
+    always contained within a single forecast and never crosses initialisation
+    boundaries.
+
+    Step subsetting (``steps``, ``step_start``, ``step_end``,
+    ``step_frequency``) and base-date subsetting (``start``/``end`` on the
+    valid-time envelope, or ``base_start``/``base_end``) are handled by
+    ``open_dataset`` via the dataset configuration.
+    """
+
+    def __init__(
+        self,
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
+        start: datetime.datetime | int | None = None,
+        end: datetime.datetime | int | None = None,
+        sampling: dict | None = None,
+    ) -> None:
+        source = dataset_config if dataset_config is not None else dataset
+        if source is None:
+            msg = "Either dataset or dataset_config must be provided."
+            raise ValueError(msg)
+        # Trajectory datasets use base_start/base_end to filter by initialisation date;
+        # passing start/end would trigger access to .dates which doesn't exist on them.
+        open_kwargs: dict = {}
+        if start is not None:
+            open_kwargs["base_start"] = start
+        if end is not None:
+            open_kwargs["base_end"] = end
+        self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
+        self.default_sampling = sampling if sampling is not None else {"stride": None}
+
+    @property
+    def num_sequences(self) -> int:
+        """Number of forecast initialisations (base dates)."""
+        return self.data.shape[0]
+
+    def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
+        """Return the number of forecast steps per initialisation."""
+        return self.data.shape[-2]
+
+    @property
+    def missing_sequences(self) -> set[int]:
+        """Return the base-date indices that are missing."""
+        return set(self.data.missing)
+
+    def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
+        """Forecast datasets do not track per-step missing values."""
+        return set()
+
+    @property
+    def frequency(self) -> datetime.timedelta:
+        """Return the step frequency (spacing between consecutive forecast steps)."""
+        return self.data.step_frequency
+
+    def statistics_tendencies(
+        self,
+        timestep: int | str | datetime.timedelta | None = None,  # noqa: ARG002
+    ) -> dict | None:
+        """Tendency statistics are not defined for forecast datasets."""
+        return None
+
+    def get_sample(
+        self,
+        sequence: int,
+        positions: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        """Load forecast steps ``positions`` of initialisation ``sequence``."""
+        if isinstance(positions, slice):
+            positions = list(range(*positions.indices(self.sequence_length(sequence))))
+        else:
+            positions = np.asarray(positions).tolist()
+
+        # data[sequence] -> (variables, ensembles, steps, cells)
+        x = self.data[sequence]
+        x = x[:, :, positions, :]
+        if grid_shard_indices is not None:
+            x = x[..., grid_shard_indices]
+
+        x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
+        return torch.from_numpy(x)
+
     def tree(self, prefix: str = "") -> Tree:
-        tree = super().tree(prefix)
-        tree.add(f"Trajectory start: {self.trajectory_start}")
-        tree.add(f"Trajectory length: {self.trajectory_length} steps")
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Step frequency: {self.frequency}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Num initialisations: {self.num_sequences}")
+        tree.add(f"Steps per initialisation: {self.sequence_length()}")
+        tree.add(f"Sampling: {self.default_sampling}")
         return tree
 
 
 def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
-    """Factory function to create dataset based on dataset configuration."""
+    """Factory function to create a data reader based on the dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
-    trajectory_config = dataset_config.pop("trajectory", {})
-    if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
-        LOGGER.info("Creating TrajectoryDataset...")
-        return TrajectoryDataset(
-            **dataset_config,
-            trajectory_start=trajectory_config["start"],
-            trajectory_length=trajectory_config["length"],
-        )
+    trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
+
+    if trajectory_config is not None:
+        sampling = trajectory_config.get("sampling") if isinstance(trajectory_config, dict) else None
+        if sampling is not None:
+            # 5D trajectory zarr dataset (new behaviour)
+            LOGGER.info("Creating TrajectoryDataset...")
+            return TrajectoryDataset(**dataset_config, sampling=_as_dict(sampling))
+
+        # Legacy 4D dataset with model-run boundary enforcement: trajectory has start/length fields
+        model_run_info = None
+        if isinstance(trajectory_config, dict) and trajectory_config.get("start") is not None:
+            model_run_info = {
+                "start": trajectory_config["start"],
+                "length": trajectory_config["length"],
+            }
+            sampling = _as_dict(trajectory_config.get("sampling"))
+            LOGGER.info("Creating NativeGridDataset with model_run_info (run-boundary enforcement)...")
+        else:
+            sampling = None
+            LOGGER.info("Creating NativeGridDataset...")
+        return NativeGridDataset(**dataset_config, model_run_info=model_run_info, sampling=sampling)
 
     LOGGER.info("Creating NativeGridDataset...")
     return NativeGridDataset(**dataset_config)

@@ -1,0 +1,106 @@
+prefetch_factor: 2
+pin_memory: True
+
+# ============
+# read_group_size:
+#   Form subgroups of model comm groups that read data together.
+#   Each reader in the group only reads 1/read_group_size of the data
+#   which is then all-gathered between the group.
+#   This can reduce CPU memory usage as well as increase dataloader throughput.
+#   The number of GPUs per model must be divisible by read_group_size.
+#   To disable, set to 1.
+# ============
+read_group_size: ${system.hardware.num_gpus_per_model}
+
+num_workers:
+  training: 8
+  validation: 8
+  test: 8
+batch_size:
+  training: 2
+  validation: 4
+  test: 4
+
+# ============
+# Default effective batch_size for training is 16
+# For the o96 resolution, default per-gpu batch_size is 2 (8 gpus required)
+# The global lr is calculated as:
+# global_lr = local_lr * num_gpus_per_node * num_nodes / gpus_per_model
+# Assuming a constant effective batch_size, any change in the per_gpu batch_size
+# should come with a rescaling of the local_lr to keep a constant global_lr
+# ============
+
+# runs only N training batches [N = integer | null]
+# if null then we run through all the batches
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+
+# ============
+# Forecast (trajectory) dataloader
+#
+# Reads a 5-D ``trajectories``-layout dataset (shape
+# (base_dates, variables, ensembles, steps, cells)) through open_dataset.
+# Each base date (forecast initialisation) is an independent sequence and the
+# forecast step is the within-sequence position, so a sample never crosses an
+# initialisation boundary.
+#
+# - The ``trajectory`` block selects the TrajectoryDataset reader. ``sampling``
+#   controls how anchor positions are drawn within each forecast via ``stride``:
+#     * stride: null  : stride = window size (samples never share a step)
+#     * stride: 1     : every valid step position
+#     * stride: N     : fixed stride of N steps (overlapping when N < window)
+# - start/end filter base dates on the valid-time envelope (base + step range).
+# - Step subsetting (steps / step_start / step_end / step_frequency) can be
+#   added inside dataset_config and is forwarded to open_dataset.
+# ============
+
+# Pointer to dataset
+dataset: ${system.input.dataset}
+
+# Sampling for trajectory windows within each forecast.
+# stride: null  → window size stride (non-overlapping, default)
+# stride: 1     → every valid position
+# stride: N     → fixed stride of N steps
+trajectory_sampling:
+  stride: null  # null = window size (non-overlapping)
+
+training:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
+      start: null
+      end: 2020
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
+
+validation:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
+      start: 2021
+      end: 2021
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
+
+test:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
+      start: 2022
+      end: null
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
