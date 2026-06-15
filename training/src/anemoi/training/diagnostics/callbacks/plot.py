@@ -74,7 +74,7 @@ def _allgather_prediction(
 ) -> SourceView | torch.Tensor:
     """All-gather a per-dataset prediction, accepting either a SourceView or a raw tensor."""
     if isinstance(prediction, SourceView):
-        return prediction.map_data(lambda d: _allgather_dataset_tensor(pl_module, d, dataset_name))
+        return prediction.apply_func(lambda d, **_: _allgather_dataset_tensor(pl_module, d, dataset_name))
     return _allgather_dataset_tensor(pl_module, prediction, dataset_name)
 
 
@@ -973,7 +973,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         # Restrict to the output variables and post-process via the SourceView API.
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
-        input_view = view.select(variables=feature_indices).map_data(lambda t: t.detach().cpu())
+        input_view = view.select(variables=feature_indices).apply_func(lambda t, **_: t.detach().cpu())
         data = self.post_processors[dataset_name](input_view, in_place=False).data[self.sample_idx]
 
         output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
@@ -999,9 +999,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         output_indices_full = pl_module.data_indices[dataset_name].data.output.full
 
         def _post_process(prediction: SourceView) -> torch.Tensor:
-            assert isinstance(prediction, SourceView), f"Expected a prediction of type SourceView, got {type(prediction)}."
+            assert isinstance(
+                prediction, SourceView
+            ), f"Expected a prediction of type SourceView, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
-            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).data
+            processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
             # list of per-sample tensors. Select the requested sample, keeping a leading
             # size-1 axis so per-step outputs can be concatenated along dim 0.
@@ -1072,7 +1074,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         def _field_and_coords(sub_view: SourceView) -> tuple[np.ndarray, np.ndarray]:
             sub_view = self.post_processors[dataset_name](
-                sub_view.map_data(lambda t: t.detach().cpu()),
+                sub_view.apply_func(lambda t, **_: t.detach().cpu()),
                 in_place=False,
             )
             field = sub_view.data[self.sample_idx]  # (grid, vars) for sparse obs
@@ -1090,7 +1092,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         # Prediction (already at the output/target observation locations).
         prediction = self._align_output_metadata(outputs.predictions[0][dataset_name], feature_indices)
         prediction = self.post_processors[dataset_name](
-            prediction.map_data(lambda t: t.detach().cpu()),
+            prediction.apply_func(lambda t, **_: t.detach().cpu()),
             in_place=False,
         )
         y_pred = prediction.data[self.sample_idx].numpy()

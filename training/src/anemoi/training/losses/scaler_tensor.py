@@ -531,7 +531,7 @@ class ScaleTensor(nn.Module):
 
     def scale_iteratively(
         self,
-        x: "SourceView",
+        x: torch.Tensor,
         subset_indices: tuple[int, ...] | None = None,
         layout: TensorLayout | None = None,
         *,
@@ -545,6 +545,9 @@ class ScaleTensor(nn.Module):
             Input tensor to scale
         subset_indices : tuple[int, ...] | None, optional
             Indices to subset the input tensor, by default None
+        layout : TensorLayout | None, optional
+            Layout describing the logical axes of ``x``, used to align scalers
+            for broadcasting, by default None
         grid_shard_slice : slice | None, optional
             Slice to apply to the grid dimension, by default None
         """
@@ -553,14 +556,14 @@ class ScaleTensor(nn.Module):
             raise TypeError(msg)
 
         if subset_indices is not None and subset_indices != (...,):
-            x_subset = x.map_data(lambda t: t[subset_indices])
+            x_subset = x[subset_indices]
         else:
             x_subset = x
         out = x_subset.clone()
 
         for dims, scaler in self.tensors.values():
             if TensorDim.GRID in dims and grid_shard_slice is not None:
-                grid_index = out.layout.grid
+                grid_index = layout.grid
                 if scaler.shape[grid_index] >= grid_shard_slice.stop:
                     slices = [slice(None)] * len(dims)
                     slices[grid_index] = grid_shard_slice
