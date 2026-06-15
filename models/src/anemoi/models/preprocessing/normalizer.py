@@ -16,8 +16,7 @@ import torch
 
 from anemoi.models.preprocessing._caching import cached_parameters
 from anemoi.models.preprocessing import BasePreprocessor
-from anemoi.models.data import SourceView
-
+import numpy as np
 LOGGER = logging.getLogger(__name__)
 
 
@@ -136,35 +135,33 @@ class InputNormalizer(BasePreprocessor):
                 "none",
             ], f"{method} is not a valid normalisation method for variable {name}."
 
-    def _normalise(self, data: torch.Tensor, norm_mul: torch.Tensor, norm_add: torch.Tensor) -> torch.Tensor:
-        return data.mul(norm_mul).add(norm_add)
-
-    def _denormalise(self, data: torch.Tensor, norm_mul: torch.Tensor, norm_add: torch.Tensor) -> torch.Tensor:
-        return data.sub(norm_add).div(norm_mul)
-
     def transform(
         self,
-        x: SourceView,
-        in_place: bool = True,
+        x: torch.Tensor,
+        statistics: Optional[dict[str, np.ndarray]] = None,
+        name_to_index: Optional[dict[str, int]] = None,
         data_index: Optional[torch.Tensor] = None,
         **_kwargs,
-    ) -> SourceView:
-        """Normalize a SourceView in the variables dimension.
+    ) -> torch.Tensor:
+        """Normalize a tensor in the variables dimension.
 
         Parameters
         ----------
-        x : SourceView
+        x : torch.Tensor
             Data to normalize.
-        in_place : bool, optional
-            Normalize in-place, by default True.
-        data_index : Optional[torch.Tensor], optional
-            Deprecated. Subset of variable indices to normalize.
+        statistics : dict[str, np.ndarray]
+            Statistics dictionary required for normalization.
+        name_to_index : dict[str, int]
+            Dictionary mapping variable names to their indices, required for normalization.
 
         Returns
         -------
-        SourceView
-            Normalized view.
+        torch.Tensor
+            Normalized tensor.
         """
+        assert statistics is not None, "Statistics must be provided for normalization."
+        assert name_to_index is not None, "name_to_index must be provided for normalization."
+
         if data_index is not None:
             warnings.warn(
                 "The 'data_index' parameter is deprecated and will be removed in a future release. "
@@ -173,38 +170,39 @@ class InputNormalizer(BasePreprocessor):
                 stacklevel=2,
             )
 
-        if not in_place:
-            x = x.clone()
+        norm_mul, norm_add = self.get_norm_parameters(statistics, name_to_index, device=x.device)
 
-        norm_mul, norm_add = self.get_norm_parameters(x.statistics, x.name_to_index, device=x.device)
-
-        x = x.map_data(self._normalise, norm_mul=norm_mul, norm_add=norm_add)
+        x = x.mul(norm_mul).add(norm_add)
 
         return x
 
     def inverse_transform(
         self,
-        x: SourceView,
-        in_place: bool = True,
+        x: torch.Tensor,
+        statistics: Optional[dict[str, np.ndarray]] = None,
+        name_to_index: Optional[dict[str, int]] = None,
         data_index: Optional[torch.Tensor] = None,
         **_kwargs,
-    ) -> SourceView:
-        """Denormalize a SourceView in the variables dimension.
+    ) -> torch.Tensor:
+        """Denormalize a tensor in the variables dimension.
 
         Parameters
         ----------
-        x : SourceView
+        x : torch.Tensor
             Data to denormalize.
-        in_place : bool, optional
-            Denormalize in-place, by default True.
-        data_index : Optional[torch.Tensor], optional
-            Deprecated. Subset of variable indices to denormalize.
+        statistics : dict[str, np.ndarray]
+            Statistics dictionary required for normalization.
+        name_to_index : dict[str, int]
+            Dictionary mapping variable names to their indices, required for normalization.
 
         Returns
         -------
-        SourceView
-            Denormalized view.
+        torch.Tensor
+            Denormalized tensor.
         """
+        assert statistics is not None, "Statistics must be provided for normalization."
+        assert name_to_index is not None, "name_to_index must be provided for normalization."
+
         if data_index is not None:
             warnings.warn(
                 "The 'data_index' parameter is deprecated and will be removed in a future release. "
@@ -213,11 +211,8 @@ class InputNormalizer(BasePreprocessor):
                 stacklevel=2,
             )
 
-        if not in_place:
-            x = x.clone()
+        norm_mul, norm_add = self.get_norm_parameters(statistics, name_to_index, device=x.device)
 
-        norm_mul, norm_add = self.get_norm_parameters(x.statistics, x.name_to_index, device=x.device)
-
-        x = x.map_data(self._denormalise, norm_mul=norm_mul, norm_add=norm_add)
+        x = x.sub(norm_add).div(norm_mul)
 
         return x

@@ -22,6 +22,7 @@ import torch
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data import TensorLayout
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
@@ -94,6 +95,7 @@ class BaseLoss(nn.Module, ABC):
         self,
         x: torch.Tensor,
         subset_indices: tuple[int, ...] | None = None,
+        layout: TensorLayout = None,
         *,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
@@ -106,6 +108,8 @@ class BaseLoss(nn.Module, ABC):
             Tensor to be scaled, shape (bs, ensemble, lat*lon, n_outputs)
         subset_indices: tuple[int,...], optional
             Indices to subset the calculated scaler and `x` tensor with, by default None.
+        layout: TensorLayout, optional
+            Layout describing the logical axes of x.
         without_scalers: list[str] | list[int] | None, optional
             list of scalers to exclude from scaling. Can be list of names or dimensions to exclude.
             By default None
@@ -136,33 +140,34 @@ class BaseLoss(nn.Module, ABC):
         return scale_tensor.scale_iteratively(
             x,
             subset_indices=subset_indices,
+            layout=layout,
             grid_shard_slice=grid_shard_slice,
         )
 
     def mask_nans(
         self,
-        pred: "SourceView",
-        target: "SourceView",
-    ) -> tuple["SourceView", "SourceView"]:
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the fraction of ignored nan-values in the target and masked  prediction and target tensors.
 
         Parameters
         ----------
-        pred : SourceView,
+        pred : torch.Tensor 
             Prediction tensor
-        target : SourceView,
+        target : torch.Tensor
             Target tensor
 
         Returns
         -------
-        SourceView, SourceView
+        torch.Tensor, torch.Tensor
             * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``
             * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``
         """
         if self.ignore_nans:
-            nan_mask = target.map_data(lambda t: t.isnan())
-            target = target.map_data(lambda t: t.masked_fill(nan_mask, 0.0))
-            pred = pred.map_data(lambda p: p.masked_fill(nan_mask, 0.0))
+            nan_mask = torch.isnan(target + pred)
+            target = target.masked_fill(nan_mask, 0.0)
+            pred = pred.masked_fill(nan_mask, 0.0)
 
             return pred, target
 
@@ -171,7 +176,7 @@ class BaseLoss(nn.Module, ABC):
     def reduce(
         self,
         out: torch.Tensor,
-        layout: "TensorLayout",
+        layout: TensorLayout,
         squash: bool = True,
         squash_mode: Squash_mode = "avg",
         group: ProcessGroup | None = None,
@@ -374,6 +379,41 @@ class FunctionalLoss(BaseLoss):
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate difference between prediction and target."""
 
+    def _forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        layout: TensorLayout,
+        squash: bool = True,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: Squash_mode = "avg",
+        **_kwargs,
+    ) -> torch.Tensor | list[torch.Tensor]:
+        is_sharded = grid_shard_slice is not None
+
+        pred, target = self.mask_nans(pred, target)
+
+        out = self.calculate_difference(pred, target)
+
+        out = self.scale(
+            out, 
+            scaler_indices,
+            layout=layout,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice
+        )
+
+        return self.reduce(
+            out,
+            layout=layout,
+            squash=squash,
+            group=group if is_sharded else None,
+            squash_mode=squash_mode,
+        )
+
     def forward(
         self,
         pred: "SourceView",
@@ -385,7 +425,7 @@ class FunctionalLoss(BaseLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "avg",
-        **_kwargs,
+        **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
 
@@ -416,22 +456,14 @@ class FunctionalLoss(BaseLoss):
         torch.Tensor
             Weighted loss
         """
-        is_sharded = grid_shard_slice is not None
-        pred, target = self.mask_nans(pred, target)
-        out = pred.map_pairwise(self.calculate_difference, target)
-
-        out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-
-        loss = out.apply_to_data(
-            self.reduce,
-            layout=out.layout,
+        return pred.apply_loss(
+            target,
+            self._forward,
             squash=squash,
-            group=group if is_sharded else None,
+            scaler_indices=scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+            group=group,
             squash_mode=squash_mode,
+            **kwargs,
         )
-
-        if isinstance(loss, list):
-            # aggregate over batch
-            loss = torch.mean(*loss)
-
-        return loss

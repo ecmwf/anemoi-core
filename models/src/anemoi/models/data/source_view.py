@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import dataclass
-from dataclasses import replace as dataclass_replace
+from dataclasses import replace
 from typing import Any
 from functools import cached_property
 import einops
@@ -60,6 +60,10 @@ class SourceView(ABC):
         """Mapping from variable name to index along the variables axis."""
         return {name: idx for idx, name in enumerate(self.variables)}
 
+    def clone(self, **kwargs) -> "SourceView":
+        """Return a deep copy of this view (clones the data tensor)."""
+        return replace(self, **kwargs)
+
     def select(self, **kwargs) -> "SourceView":
         """Return a new view restricted to the given indices along logical dimensions.
         
@@ -103,8 +107,13 @@ class SourceView(ABC):
         pass
 
     @abstractmethod
-    def map_data(self, func: Callable, **kwargs) -> "SourceView":
-        """Apply a function to the data tensor, returning a new view with the same metadata."""
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "SourceView":
+        """Apply a function to this view, returning a new view with the same metadata."""
+        pass
+
+    @abstractmethod
+    def apply_loss(self, other: "SourceView", loss_func: Callable, **kwargs) -> "SourceView":
+        """Apply a loss function to this view and another view, returning the result."""
         pass
 
     def _time_axis_size(self) -> int:
@@ -176,28 +185,32 @@ class GriddedSourceView(SourceView):
             ensemble=ensemble_size,
             time=num_out_times
         )
-        return dataclass_replace(self, data=new_data)
+        return self.clone(data=new_data)
 
-    def clone(self) -> "GriddedSourceView":
-        """Return a deep copy of this view (clones the data tensor)."""
-        return dataclass_replace(self, data=self.data.clone())
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSourceView":
+        """Apply a function to this view, returning a new view with the same metadata."""
+        new_data = func(
+            self.data if in_place else self.data.clone(),
+            statistics=self.statistics,
+            name_to_index=self.name_to_index,
+            **kwargs,
+        )
+        return self.clone(data=new_data)
 
-    def map_data(self, func: Callable, **kwargs) -> "GriddedSourceView":
-        """Apply a function to the data tensor, returning a new view with the same metadata."""
-        new_data = func(self.data, **kwargs)
-        return dataclass_replace(self, data=new_data)
-    
-    def map_pairwise(self, func: Callable, other: "GriddedSourceView", **kwargs) -> "GriddedSourceView":
+    def apply_loss(self, other: "GriddedSourceView", loss_func: Callable, **kwargs) -> torch.Tensor:
+        """Apply a loss function to this view and another view, returning the result."""
         assert isinstance(other, GriddedSourceView), f"Other view must be a GriddedSourceView; got {type(other).__name__}."
         assert self.layout == other.layout, f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
         #assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
         assert torch.all(self.coordinates == other.coordinates), f"Both views must have the same coordinates; got {self.coordinates} and {other.coordinates}."
-        new_data = func(self.data, other.data, **kwargs)
-        return dataclass_replace(self, data=new_data)
-
-    def apply_to_data(self, func: Callable, **kwargs) -> torch.Tensor:
-        """Apply a function to the data tensor, returning the result."""
-        return func(self.data, **kwargs)
+        return loss_func(
+            self.data,
+            other.data,
+            layout=self.layout,
+            statistics=self.statistics,
+            name_to_index=self.name_to_index,
+            **kwargs
+        )
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSourceView":
         """Return a new view restricted to the given variable indices.
@@ -208,13 +221,13 @@ class GriddedSourceView(SourceView):
         new_data = self._index_vars(self.data, indices)
         new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
         new_statistics = {k: v[indices] for k, v in self.statistics.items()}
-        return dataclass_replace(self, data=new_data, variables=new_variables, statistics=new_statistics)
+        return self.clone(data=new_data, variables=new_variables, statistics=new_statistics)
 
     def index_select(self, dim: int, index: torch.Tensor) -> "GriddedSourceView":
         """Return a new view with the data tensor indexed along a given dimension."""
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         new_data = self.data.index_select(dim, index)
-        return dataclass_replace(self, data=new_data)
+        return self.clone(data=new_data)
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSourceView":
         """Return a new view restricted to the given time indices.
@@ -249,7 +262,7 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), "Gridded view must wrap a single tensor."
         idx = torch.as_tensor(idx_list, dtype=torch.long, device=self.data.device)
         new_data = self.data.index_select(self.layout.time, idx)
-        return dataclass_replace(self, data=new_data)
+        return self.clone(data=new_data)
 
 
 class TabularSourceView(SourceView):
@@ -298,29 +311,44 @@ class TabularSourceView(SourceView):
         batch_sizes = [data.shape[self.layout.grid] for data in self.data]
         batch_starts = np.cumsum([0] + batch_sizes[:-1])
         new_data = [data_2d.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
-        return dataclass_replace(self, data=new_data)
+        return self.clone(data=new_data)
 
-    def clone(self) -> "TabularSourceView":
-        """Return a deep copy of this view (clones each data tensor)."""
-        return dataclass_replace(self, data=[t.clone() for t in self.data])
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSourceView":
+        """Apply a function to this view, returning a new view with the same metadata."""
+        new_data = [
+            func(
+                data if in_place else data.clone(),
+                statistics=self.statistics,
+                name_to_index=self.name_to_index,
+                **kwargs,
+            ) for data in self.data
+        ]
+        return self.clone(data=new_data)
 
-    def map_data(self, func: Callable, *args, **kwargs) -> "TabularSourceView":
-        """Apply a function to the data tensor, returning a new view with the same metadata."""
-        new_data = [func(t, *args, **kwargs) for t in self.data]
-        return dataclass_replace(self, data=new_data)
-
-    def map_pairwise(self, func: Callable, other: "TabularSourceView", **kwargs) -> "TabularSourceView":
-        """Apply a function to pairs of data tensors from this view and another view, returning a new view with the same metadata."""
+    def apply_loss(self, other: "TabularSourceView", loss_func: Callable, **kwargs) -> torch.Tensor:
+        """Apply a loss function to this view and another view, returning the result."""
         assert isinstance(other, TabularSourceView), f"Other view must be a TabularSourceView; got {type(other).__name__}."
-        assert len(self.data) == len(other.data), f"Both views must have the same number of data tensors; got {len(self.data)} and {len(other.data)}."
         assert self.layout == other.layout, f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
+        assert len(self.data) == len(other.data), f"Both views must have the same number of samples; got {len(self.data)} and {len(other.data)}."
         #assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
-        new_data = [func(t1, t2, **kwargs) for t1, t2 in zip(self.data, other.data)]
-        return dataclass_replace(self, data=new_data)
 
-    def apply_to_data(self, func: Callable, **kwargs) -> list[torch.Tensor]:
-        """Apply a function to the data tensor, returning a list of results."""
-        return [func(t, **kwargs) for t in self.data]
+        losses = []
+        for i, (pred, target) in enumerate(zip(self.data, other.data)):
+            assert pred.shape == target.shape, f"Sample {i} of both views must have the same shape; got {pred.shape} and {target.shape}."
+            assert torch.all(self.coordinates[i] == other.coordinates[i]), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."
+
+            losses.append(
+                loss_func(
+                    pred,
+                    target,
+                    layout=self.layout,
+                    statistics=self.statistics,
+                    name_to_index=self.name_to_index,
+                    **kwargs
+                )
+            )
+    
+        return torch.mean(*tuple(losses))
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":
         """Return a new view restricted to the given variable indices.
@@ -331,7 +359,7 @@ class TabularSourceView(SourceView):
         new_data = [self._index_vars(t, indices) for t in self.data]
         new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
         new_statistics = {k: v[indices] for k, v in self.statistics.items()}
-        return dataclass_replace(self, data=new_data, variables=new_variables, statistics=new_statistics)
+        return self.clone(data=new_data, variables=new_variables, statistics=new_statistics)
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSourceView":
         """Return a new view restricted to the given time indices.
@@ -398,8 +426,7 @@ class TabularSourceView(SourceView):
                 offset += length
             new_boundaries.append(tuple(compact))
 
-        return dataclass_replace(
-            self,
+        return self.clone(
             data=new_data,
             coordinates=new_coords if new_coords else self.coordinates,
             timedeltas=new_timedeltas if new_timedeltas else self.timedeltas,

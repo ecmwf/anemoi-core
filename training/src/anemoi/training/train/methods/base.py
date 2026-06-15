@@ -804,6 +804,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
 
         return total_loss, metrics_next, y_preds
+    
+    def preprocess_batch(self, batch: Batch) -> Batch:
+        """Preprocess the batch using the model's pre-processors."""
+        new_batch = batch
+        for dataset_name, pre_processors in self.model.pre_processors.items():
+            updated_view = pre_processors(batch[dataset_name])
+            # TODO: remove _update_source, maybe batch.clone()?? 
+            new_batch = new_batch._update_source(dataset_name, updated_view)
+        return new_batch
 
     def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -825,7 +834,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch = self._setup_batch_sharding(batch)
 
         # Batch normalization (the underlying ``batch.data`` dict should be mutated in-place)
-        batch = batch.apply(self.model.pre_processors)
+        batch = self.preprocess_batch(batch)
 
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.

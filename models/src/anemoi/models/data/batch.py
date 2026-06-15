@@ -353,27 +353,6 @@ class Batch:
             statistics=self.statistics,
         )
 
-    def apply(
-        self,
-        func: Mapping[str, Callable[..., SourceView]] | Callable[..., SourceView],
-        **kwargs: Any
-    ) -> "Batch":
-        """Return a new batch with one processor applied per dataset.
-
-        Each callable receives a :class:`SourceView` and must return a
-        :class:`SourceView`. The returned view is used to update the
-        full source (data, coordinates, timedeltas, metadata) via
-        :meth:`_update_source`.
-        """
-        batch = self
-        for name in self.dataset_names:
-            if name not in func:
-                msg = f"No function provided for dataset {name!r}."
-                raise KeyError(msg)
-            updated_view = func[name](batch[name], **kwargs)
-            batch = batch._update_source(name, updated_view)
-        return batch
-
     def _update_source(self, source_name: str, source_view: SourceView) -> "Batch":
         """Return a new batch with one dataset replaced from a ``SourceView``."""
         new_data = {**self.data, source_name: source_view.data}

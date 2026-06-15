@@ -12,9 +12,10 @@ import logging
 from abc import ABC, abstractmethod
 
 import torch
+from typing import Optional
+import numpy as np
 
 from anemoi.models.preprocessing import BasePreprocessor
-from anemoi.models.data import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,38 +39,45 @@ class BaseImputer(BasePreprocessor, ABC):
         super().__init__(config)
 
     @abstractmethod
-    def _get_replacements(self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]) -> dict[int, float]:
+    def get_imputing_replacements(
+        self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]
+    ) -> dict[int, float]:
         ...
 
     @abstractmethod
-    def _impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
+    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
         ...
 
-    def transform(self, x: SourceView, in_place: bool = True, **_kwargs) -> SourceView:
-        """Impute missing values in the input SourceView.
+    def transform(
+        self,
+        x: torch.Tensor,
+        statistics: Optional[dict[str, np.ndarray]] = None,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs
+    ) -> torch.Tensor:
+        """Impute missing values in the input tensor.
 
         Parameters
         ----------
-        x : SourceView
+        x : torch.Tensor
             Input data view (with NaNs).
-        in_place : bool, optional
-            Whether to modify the underlying tensors in-place, by default True.
+        statistics : dict[str, np.ndarray]
+            Statistics dictionary required for normalization.
+        name_to_index : dict[str, int]
+            Dictionary mapping variable names to their indices, required for normalization.
 
         Returns
         -------
-        SourceView
+        torch.Tensor
             View with NaNs replaced by configured values.
         """
-        if not in_place:
-            x = x.clone()
+        replacements = self.get_imputing_replacements(name_to_index, statistics)
 
-        replacements = self._get_replacements(x.name_to_index, x.statistics)
-
-        x = x.map_data(self._impute, replacements=replacements)
+        x = self.impute(x, replacements=replacements)
 
         return x
 
-    def inverse_transform(self, x: SourceView, in_place: bool = True, **_kwargs) -> SourceView:
+    def inverse_transform(self, x: torch.Tensor, **_kwargs) -> torch.Tensor:
         """No-op: loss masking is handled externally from the target dataset."""
         return x
 
@@ -89,7 +97,10 @@ class InputImputer(BaseImputer):
             - q
     """
 
-    def _get_replacements(self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]) -> dict[int, float]:
+    def get_imputing_replacements(self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]) -> dict[int, float]:
+        """Get the replacement values for imputation."""
+        assert name_to_index is not None, f"{self.__class__.__name__} require name_to_index for imputation."
+        assert statistics is not None, f"{self.__class__.__name__} require statistics for imputation."
         replacements: dict[int, float] = {}
         for name, idx in name_to_index.items():
             method = self.methods.get(name, self.default)
@@ -99,7 +110,7 @@ class InputImputer(BaseImputer):
             replacements[idx] = float(statistics[method][idx])
         return replacements
 
-    def _impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
+    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
         for idx, value in replacements.items():
             col = data[..., idx]
             data[..., idx] = torch.where(torch.isnan(col), value, col)
@@ -121,7 +132,8 @@ class ConstantImputer(BaseImputer):
             - q
     """
 
-    def _get_replacements(self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]) -> dict[int, float]:
+    def get_imputing_replacements(self, name_to_index: dict[str, int], **_kwargs) -> dict[int, float]:
+        assert name_to_index is not None, f"{self.__class__.__name__} require name_to_index for imputation."
         replacements: dict[int, float] = {}
         for name, idx in name_to_index.items():
             method = self.methods.get(name, self.default)
@@ -130,7 +142,7 @@ class ConstantImputer(BaseImputer):
             replacements[idx] = float(method)
         return replacements
 
-    def _impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
+    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
         for idx, value in replacements.items():
             col = data[..., idx]
             data[..., idx] = torch.where(torch.isnan(col), value, col)
@@ -148,8 +160,9 @@ class CopyImputer(BaseImputer):
             - variable_missing_2
     """
 
-    def _get_replacements(self, name_to_index: dict[str, int], **kwargs) -> dict[int, int]:
+    def get_imputing_replacements(self, name_to_index: dict[str, int], **_kwargs) -> dict[int, int]:
         """Return index → source_index mapping."""
+        assert name_to_index is not None, f"{self.__class__.__name__} require name_to_index for imputation."
         copy_sources: dict[int, int] = {}
         for name, idx in name_to_index.items():
             source_name = self.methods.get(name, self.default)
@@ -160,7 +173,7 @@ class CopyImputer(BaseImputer):
                 copy_sources[idx] = source_idx
         return copy_sources
 
-    def _impute(self, data: torch.Tensor, replacements: dict[int, int]) -> torch.Tensor:
+    def impute(self, data: torch.Tensor, replacements: dict[int, int]) -> torch.Tensor:
         for idx_dst, idx_src in replacements.items():
             if idx_dst is not None and idx_src is not None:
                 nan_mask = torch.isnan(data[..., idx_dst])

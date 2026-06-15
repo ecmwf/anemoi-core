@@ -532,6 +532,7 @@ class ScaleTensor(nn.Module):
         self,
         x: "SourceView",
         subset_indices: tuple[int, ...] | None = None,
+        layout: TensorLayout | None = None,
         *,
         grid_shard_slice: slice | None = None,
     ) -> None:
@@ -561,12 +562,12 @@ class ScaleTensor(nn.Module):
                     slices[grid_index] = grid_shard_slice
                     scaler = scaler[tuple(slices)]
 
-            reshaped_scaler = reshape_scaler(dims, scaler, x.layout)
+            reshaped_scaler = reshape_scaler(dims, scaler, layout)
 
             if subset_indices is not None and subset_indices != (..., ):
                 reshaped_scaler = reshaped_scaler[subset_indices]
 
-            out = out.map_data(lambda data: data * reshaped_scaler)
+            out *= reshaped_scaler
 
         return out
 

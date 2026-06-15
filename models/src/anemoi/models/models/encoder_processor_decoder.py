@@ -201,7 +201,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             assert (
                 x_skip.shape[1] == pred.data.shape[1]
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
-            pred.data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+            new_data = pred.data.clone()
+            new_data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+            pred = pred.clone(data=new_data)
 
         pred = self.boundings[dataset_name](pred)
 

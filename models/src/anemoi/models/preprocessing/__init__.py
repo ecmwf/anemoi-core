@@ -10,9 +10,9 @@
 import logging
 from typing import Optional
 
-import torch
-from torch import Tensor
+from abc import ABC, abstractmethod
 from torch import nn
+import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data import SourceView
@@ -20,7 +20,7 @@ from anemoi.models.data import SourceView
 LOGGER = logging.getLogger(__name__)
 
 
-class BasePreprocessor(nn.Module):
+class BasePreprocessor(nn.Module, ABC):
     """Base class for data pre- and post-processors."""
 
     def __init__(
@@ -110,6 +110,16 @@ class BasePreprocessor(nn.Module):
             for variable in variables
         }
 
+    @abstractmethod
+    def transform(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Transform the input tensor."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def inverse_transform(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Inverse transform the input tensor."""
+        raise NotImplementedError
+
     def forward(self, x: SourceView, in_place: bool = True, inverse: bool = False, **kwargs) -> SourceView:
         """Process the input tensor.
 
@@ -131,23 +141,11 @@ class BasePreprocessor(nn.Module):
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
+
         if inverse:
-            return self.inverse_transform(x, in_place=in_place, **kwargs)
-        return self.transform(x, in_place=in_place, **kwargs)
+            return x.apply_func(self.inverse_transform, in_place=in_place, **kwargs)
 
-    def transform(self, x: SourceView, in_place: bool = True, **kwargs) -> SourceView:
-        """Process the input tensor."""
-        if not in_place:
-            x = x.clone()
-
-        return x
-
-    def inverse_transform(self, x: SourceView, in_place: bool = True, **kwargs) -> SourceView:
-        """Inverse process the input tensor."""
-        if not in_place:
-            x = x.clone()
-
-        return x
+        return x.apply_func(self.transform, in_place=in_place, **kwargs)
 
 
 class Processors(nn.Module):
