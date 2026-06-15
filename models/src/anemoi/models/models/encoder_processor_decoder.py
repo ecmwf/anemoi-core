@@ -132,7 +132,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_skip = None
 
         node_features: "FlattenView" = x.flatten()  # flatten data to (nodes, features)
-        inputs = [node_features.data, latlons_to_sincos(node_features.coordinates.to(node_features.data.device))]
+        inputs = [node_features.data, latlons_to_sincos(node_features.coordinates)]
 
         if dataset_name in self.node_attributes:
             trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(
@@ -162,23 +162,23 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes == slice(None):
             grid_shard_sizes = None
 
-        input_coordinates = x.flatten().coordinates
+        flat_view = x.flatten()
 
         if self.use_encoder_data_output[dataset_name]:
             assert encoder_data_output is not None
             target_decoder_data = encoder_data_output
         else:
-            target_decoder_data = latlons_to_sincos(input_coordinates)
+            target_decoder_data = latlons_to_sincos(flat_view.coordinates)
 
             if dataset_name in self.node_attributes:
-                trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x.data.device)
+                trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(flat_view.device)
                 if grid_shard_sizes is not None:
                     trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
 
                 target_decoder_data = torch.cat([target_decoder_data, trainable_parameters], dim=-1)
 
-        assert input_coordinates.shape[0] == target_decoder_data.shape[0], "Coordinate and data sizes must match."
-        return input_coordinates, target_decoder_data, grid_shard_sizes
+        assert flat_view.coordinates.shape[0] == target_decoder_data.shape[0], "Coordinate and data sizes must match."
+        return flat_view.coordinates, target_decoder_data, grid_shard_sizes
 
     def _assemble_output(
         self,
@@ -193,7 +193,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # clone to make sure we return a copy, not a view
         # a view cannot be modified in-place by the residual add below without breaking autograd!
-        pred = target.unflatten_data_2d(x_out).clone()
+        pred = target.unflatten(x_out)
 
         if x_skip is not None:
             assert (
