@@ -16,11 +16,10 @@ import pytest
 import torch
 from pytest_mock import MockFixture
 
-from anemoi.models.data.batch import Batch
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
+from anemoi.models.data.batch import Batch
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.multidataset import MultiDataset
-
 
 # ---------------------------------------------------------------- Reader API
 

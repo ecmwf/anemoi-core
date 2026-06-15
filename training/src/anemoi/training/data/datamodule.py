@@ -9,15 +9,15 @@
 
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 from functools import cached_property
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
+from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.models.data import Batch
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices

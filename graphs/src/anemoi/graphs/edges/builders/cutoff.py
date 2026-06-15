@@ -175,7 +175,9 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         return super().prepare_node_data(graph)
 
     def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor,
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
     ) -> torch.Tensor:
         # recompute the radius from the current per-batch coords
         self.radius = self.get_cutoff_radius(target_coords)
@@ -227,11 +229,13 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
 
     def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
         LOGGER.info(
-            "Computing adjacency matrix using sklearn's NearestNeighbors with radius=%.4f and max_num_neighbours=%d", 
-            self.radius, 
-            self.max_num_neighbours
+            "Computing adjacency matrix using sklearn's NearestNeighbors with radius=%.4f and max_num_neighbours=%d",
+            self.radius,
+            self.max_num_neighbours,
         )
-        LOGGER.info("Source coords shape: %s, Target coords shape: %s", list(source_coords.shape), list(target_coords.shape))
+        LOGGER.info(
+            "Source coords shape: %s, Target coords shape: %s", list(source_coords.shape), list(target_coords.shape)
+        )
 
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
@@ -361,7 +365,9 @@ class ReversedCutOffEdges(CutOffEdges):
         return super().undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
 
     def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor,
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
     ) -> torch.Tensor:
         # Reference for the radius is the *source* nodes (matches ``get_cutoff_radius``).
         # Recompute every call — see ``CutOffEdges.compute_edge_index_from_coords``.

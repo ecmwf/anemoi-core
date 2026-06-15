@@ -13,8 +13,8 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.models.data.source_view import create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.views import create_source_view
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer

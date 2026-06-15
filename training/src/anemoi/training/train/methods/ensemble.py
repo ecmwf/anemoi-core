@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.data import Batch
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -143,7 +143,7 @@ class EnsembleTraining(BaseTrainingModule):
             self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
         return self._ensemble_plot_adapter
 
-    def _expand_ens_dim(self, batch: "Batch") -> "Batch":
+    def _expand_ens_dim(self, batch: Batch) -> Batch:
         """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
         new_data = {}
         for dataset_name, dataset_batch in batch.data.items():
@@ -202,7 +202,10 @@ class EnsembleTraining(BaseTrainingModule):
         return loss, metrics_next, y_pred_ens
 
     def forward(
-        self, x: Batch | dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs
+        self,
+        x: Batch | dict[str, torch.Tensor],
+        rollout_step: int | None = None,
+        **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Forward method.
 

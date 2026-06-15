@@ -11,13 +11,13 @@
 import logging
 from typing import Optional
 
-from anemoi.graphs.create import HeteroData
 import einops
 import torch
 from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.graphs.create import HeteroData
 from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -34,7 +34,6 @@ LOGGER = logging.getLogger(__name__)
 
 def latlons_to_sincos(latlon: torch.Tensor) -> torch.Tensor:
     return torch.cat([torch.sin(latlon), torch.cos(latlon)], dim=-1)
-
 
 
 class AnemoiModelEncProcDec(BaseGraphModel):
@@ -132,21 +131,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         else:
             x_skip = None
 
-        data = x.flatten_data_2d()
-        latlon_coords = x.flatten_coords_2d().to(data.device)
+        node_features: "FlattenView" = x.flatten()  # flatten data to (nodes, features)
+        inputs = [node_features.data, latlons_to_sincos(node_features.coordinates.to(node_features.data.device))]
 
-        inputs = [data, latlons_to_sincos(latlon_coords)]
-    
         if dataset_name in self.node_attributes:
-            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(data.device)
+            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(
+                node_features.data.device
+            )
             if grid_shard_sizes is not None:
                 trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
-            
+
             inputs.append(trainable_parameters)
 
         x_data_latent = torch.cat(inputs, dim=-1)
 
-        return latlon_coords, x_data_latent, x_skip, grid_shard_sizes
+        return node_features.coordinates, x_data_latent, x_skip, grid_shard_sizes
 
     def _assemble_target(
         self,
@@ -163,7 +162,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes == slice(None):
             grid_shard_sizes = None
 
-        input_coordinates = x.flatten_coords_2d()
+        input_coordinates = x.flatten().coordinates
 
         if self.use_encoder_data_output[dataset_name]:
             assert encoder_data_output is not None
@@ -175,7 +174,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x.data.device)
                 if grid_shard_sizes is not None:
                     trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
-                
+
                 target_decoder_data = torch.cat([target_decoder_data, trainable_parameters], dim=-1)
 
         assert input_coordinates.shape[0] == target_decoder_data.shape[0], "Coordinate and data sizes must match."
@@ -197,12 +196,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         pred = target.unflatten_data_2d(x_out).clone()
 
         if x_skip is not None:
-            assert x_skip.ndim == 5, f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
+            assert (
+                x_skip.ndim == 5
+            ), f"Residual must be (batch, time, ensemble, grid, variables), but got shape {x_skip.shape}"
             assert (
                 x_skip.shape[1] == pred.data.shape[1]
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({pred.data.shape[1]})."
             new_data = pred.data.clone()
-            new_data[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+            new_data[..., self._internal_output_idx[dataset_name]] += x_skip[
+                ..., self._internal_input_idx[dataset_name]
+            ]
             pred = pred.clone(data=new_data)
 
         pred = self.boundings[dataset_name](pred)
@@ -371,9 +374,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             if data_coords.numel() == 0:
                 LOGGER.debug(
-                    "No data points for dataset %s in the batch (data_coords.shape = %s), " + "will decode to a size-zero tensor ...", 
+                    "No data points for dataset %s in the batch (data_coords.shape = %s), "
+                    + "will decode to a size-zero tensor ...",
                     dataset_name,
-                    list(data_coords.shape)
+                    list(data_coords.shape),
                 )
 
             # Compute decoder edges using updated latent representation
@@ -415,9 +419,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Create Batch object
         out_data = {}
         for dataset_name in target.keys():
-            do_coords_match = (target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates)
-            assert do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match), "Target and input coordinates must match."
-            assert target[dataset_name].variables == x_out_dict[dataset_name].variables, "Target and input variables must match."
+            do_coords_match = target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
+            assert (
+                do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
+            ), "Target and input coordinates must match."
+            assert (
+                target[dataset_name].variables == x_out_dict[dataset_name].variables
+            ), "Target and input variables must match."
             out_data[dataset_name] = x_out_dict[dataset_name].data
 
         return target.with_data(out_data)

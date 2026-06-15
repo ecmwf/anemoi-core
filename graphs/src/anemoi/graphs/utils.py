@@ -63,9 +63,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
 
 
 def get_grid_reference_distance(
-    coords_rad: torch.Tensor,
-    mask: torch.Tensor | None = None, 
-    use_cartesian: bool = True
+    coords_rad: torch.Tensor, mask: torch.Tensor | None = None, use_cartesian: bool = True
 ) -> float:
     """Get the reference distance of the grid.
 

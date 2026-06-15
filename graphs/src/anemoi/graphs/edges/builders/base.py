@@ -59,7 +59,7 @@ class BaseEdgeBuilder(ABC):
         return self.source_name, "to", self.target_name
 
     @abstractmethod
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor: 
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         raise NotImplementedError
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
@@ -201,7 +201,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             Indices of source and target nodes connected by an edge.
         """
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
-        # 3d cartesian coordinates
+        # 3d cartesian coordinates
 
         if PYG_LIB_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_coords, target_coords)

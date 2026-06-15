@@ -28,7 +28,6 @@ from anemoi.utils.dates import frequency_to_seconds
 LOGGER = logging.getLogger(__name__)
 
 
-
 def _as_dict(value: str | dict | DictConfig) -> str | dict:
     """Convert DictConfig payloads to plain dicts."""
     return dict(value) if isinstance(value, DictConfig) else value
@@ -447,7 +446,7 @@ class ObservationDataReader(BaseAnemoiReader):
                 }
             }
             ``
-            with latitudes/longitudes in **radians** to match the gridded reader convention. 
+            with latitudes/longitudes in **radians** to match the gridded reader convention.
             ``timedeltas`` are kept separate from ``coordinates`` so the model layer can route
             them independently.
         """
@@ -484,6 +483,7 @@ class ObservationDataReader(BaseAnemoiReader):
 
 class TrajectoryDataset(GriddedDataReader):
     """Trajectory dataset."""
+
     def __init__(
         self,
         trajectory_start: datetime.datetime,

@@ -25,7 +25,9 @@ def _validate_coordinates(coordinates: np.ndarray, name: str) -> None:
         raise ValueError(msg)
 
 
-def coordinates_to_lat_lon(coordinates: np.ndarray | torch.Tensor, name: str = "coordinates") -> tuple[list[float], list[float]]:
+def coordinates_to_lat_lon(
+    coordinates: np.ndarray | torch.Tensor, name: str = "coordinates"
+) -> tuple[list[float], list[float]]:
     """Get latitude and longitude lists from coordinates in radians.
 
     Parameters

@@ -13,8 +13,8 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.models.data.source_view import create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.views import create_source_view
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 
 VARIABLES = ["x", "y", "z", "q", "other"]

@@ -966,8 +966,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             latlons = np.rad2deg(view.coordinates.detach().cpu().numpy())
         else:
             assert isinstance(view.coordinates, list) and len(view.coordinates) > self.sample_idx, (
-                f"Expected view.coordinates to be a list of tensors when plotting per-sample"
-                + f" with length greater than {self.sample_idx}."
+                "Expected view.coordinates to be a list of tensors when plotting per-sample"
+                f" with length greater than {self.sample_idx}."
             )
             latlons = np.rad2deg(view.coordinates[self.sample_idx].detach().cpu().numpy())
 

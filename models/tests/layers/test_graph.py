@@ -194,4 +194,3 @@ class TestNamedNodesAttributes:
                 b=batch_size,
             )
             assert torch.allclose(output, expected)
-

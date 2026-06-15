@@ -23,7 +23,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Any
 
-from anemoi.models.data.source_view import SourceView
+from anemoi.models.data.views import SourceView
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -45,7 +45,7 @@ class BasePlotAdapter(ABC):
     def select_time(data: Any, time_indices: Any) -> Any:
         """Select timesteps along the logical time axis.
 
-        Accepts either a SourceView or a plain array/tensor 
+        Accepts either a SourceView or a plain array/tensor
         whose leading axis is the time axis.
         """
         if isinstance(data, SourceView):

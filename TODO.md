@@ -33,5 +33,5 @@ branch: feat/richer-batch
 - [ ] Callbacks
 
 ### Naming
-- Alternatives to `Batch`. 
+- Alternatives to `Batch`.
 - Alternatives to `SourceView`. Alternatives to `flatten_data_2d()`, `flatten_coords_2d()`, ...
