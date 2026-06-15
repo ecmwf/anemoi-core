@@ -12,6 +12,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import Any
 from typing import Self
 
 import torch
@@ -149,11 +150,21 @@ class ScaleTensor(nn.Module):
     @property
     def tensors(self) -> dict[str, TENSOR_SPEC]:
         """Get the scalers as a dictionary of name to (dimension, tensor) pairs."""
-        tensors = {}
-        for name, (dimension, _) in self._tensors.items():
-            tensors[name] = (dimension, self._buffers[name])
+        return dict(self._tensors)
 
-        return tensors
+    def __getattr__(self, name: str) -> Any:
+        """Expose scalers as attributes stored in self._tensors."""
+        tensors = self.__dict__.get("_tensors")
+        if tensors is not None and name in tensors:
+            return tensors[name][1]
+        return super().__getattr__(name)
+
+    def _apply(self, fn: Callable, *args: Any, **kwargs: Any) -> Self:
+        """Applies fn to the scaler tensors as well as module buffers/params."""
+        module = super()._apply(fn, *args, **kwargs)
+        for name, (dimension, scaler) in module._tensors.items():
+            module._tensors[name] = (dimension, fn(scaler))
+        return module
 
     @property
     def specified_dimensions(self) -> dict[str, tuple[int]]:
@@ -269,8 +280,7 @@ class ScaleTensor(nn.Module):
             error_msg = f"Validating tensor {name!r} raised an error."
             raise ValueError(error_msg) from e
 
-        self._tensors[name] = (dimension, None)
-        self.register_buffer(name, scaler, persistent=False)
+        self._tensors[name] = (dimension, scaler)
 
         return self
 
@@ -294,7 +304,6 @@ class ScaleTensor(nn.Module):
         """
         for scaler_to_pop in self.subset(scaler_to_remove).tensors:
             self._tensors.pop(scaler_to_pop)
-            self._buffers.pop(scaler_to_pop, None)
         return self
 
     def freeze_state(self) -> "FrozenStateRecord":  # noqa: F821
@@ -350,18 +359,10 @@ class ScaleTensor(nn.Module):
 
         dimension = self._tensors[name][0]
 
-        original_scaler = self._tensors.pop(name)
-        original_scaler_buffer = self._buffers.get(name)
-
         if not override:
             self.validate_scaler(dimension, scaler)
 
-        try:
-            self.add_scaler(dimension, scaler, name=name)
-        except ValueError:
-            self._tensors[name] = original_scaler
-            self.register_buffer(name, original_scaler_buffer, persistent=False)
-            raise
+        self._tensors[name] = (dimension, scaler)
 
     def add(self, new_scalers: dict[str, TENSOR_SPEC] | list[TENSOR_SPEC] | None = None, **kwargs) -> None:
         """Add multiple scalers to the existing scalers.
@@ -550,7 +551,10 @@ class ScaleTensor(nn.Module):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
 
-        x_subset = x[subset_indices] if subset_indices is not None and subset_indices != (..., ) else x
+        if subset_indices is not None and subset_indices != (...,):
+            x_subset = x.map_data(lambda t: t[subset_indices])
+        else:
+            x_subset = x
         out = x_subset.clone()
 
         for dims, scaler in self.tensors.values():
@@ -563,7 +567,11 @@ class ScaleTensor(nn.Module):
 
             reshaped_scaler = reshape_scaler(dims, scaler, x.layout)
 
-            if subset_indices is not None and subset_indices != (..., ):
+            # subset_indices narrows the variable axis
+            # we only apply it to scalers that actually span that axis
+            # scalers broadcast over variables (size-1 last axis, e.g. node_weights or time_steps)
+            # already align with the subset and should not be reindexed
+            if subset_indices is not None and subset_indices != (...,) and reshaped_scaler.shape[-1] != 1:
                 reshaped_scaler = reshaped_scaler[subset_indices]
 
             out = out.map_data(lambda data: data * reshaped_scaler)

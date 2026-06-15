@@ -144,7 +144,7 @@ class BaseLoss(nn.Module, ABC):
         pred: "SourceView",
         target: "SourceView",
     ) -> tuple["SourceView", "SourceView"]:
-        """Return the fraction of ignored nan-values in the target and masked  prediction and target tensors.
+        """Return the fraction of ignored nan-values in the target and masked prediction and target tensors.
 
         Parameters
         ----------
@@ -161,8 +161,8 @@ class BaseLoss(nn.Module, ABC):
         """
         if self.ignore_nans:
             nan_mask = target.map_data(lambda t: t.isnan())
-            target = target.map_data(lambda t: t.masked_fill(nan_mask, 0.0))
-            pred = pred.map_data(lambda p: p.masked_fill(nan_mask, 0.0))
+            target = target.map_pairwise(lambda t, m: t.masked_fill(m, 0.0), nan_mask)
+            pred = pred.map_pairwise(lambda p, m: p.masked_fill(m, 0.0), nan_mask)
 
             return pred, target
 
