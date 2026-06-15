@@ -132,13 +132,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         else:
             x_skip = None
 
-        data = x.flatten_data_2d()
-        latlon_coords = x.flatten_coords_2d().to(data.device)
-
-        inputs = [data, latlons_to_sincos(latlon_coords)]
+        node_features: "FlattenView" = x.flatten() # flatten data to (nodes, features)
+        inputs = [node_features.data, latlons_to_sincos(node_features.coordinates.to(node_features.data.device))]
     
         if dataset_name in self.node_attributes:
-            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(data.device)
+            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(node_features.data.device)
             if grid_shard_sizes is not None:
                 trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
             
@@ -146,7 +144,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         x_data_latent = torch.cat(inputs, dim=-1)
 
-        return latlon_coords, x_data_latent, x_skip, grid_shard_sizes
+        return node_features.coordinates, x_data_latent, x_skip, grid_shard_sizes
 
     def _assemble_target(
         self,
@@ -163,7 +161,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes == slice(None):
             grid_shard_sizes = None
 
-        input_coordinates = x.flatten_coords_2d()
+        input_coordinates = x.flatten().coordinates
 
         if self.use_encoder_data_output[dataset_name]:
             assert encoder_data_output is not None

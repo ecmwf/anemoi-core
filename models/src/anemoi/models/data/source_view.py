@@ -35,6 +35,19 @@ def create_source_view(**kwargs) -> "SourceView":
 
 
 @dataclass(frozen=True, slots=True)
+class FlattenView:
+    """A flattened view of the data, coordinates and timedeltas for a single sample.
+
+    This is used as an intermediate representation when applying functions or
+    losses to the data, before unflattening back to a SourceView.
+    """
+
+    data: torch.Tensor
+    coordinates: torch.Tensor | None
+    device: torch.device | None
+
+
+@dataclass(frozen=True, slots=True)
 class SourceView(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
@@ -82,6 +95,11 @@ class SourceView(ABC):
         return source
 
     @abstractmethod
+    def flatten(self) -> FlattenView:
+        """Return a flattened view of the data, coordinates and timedeltas for a single sample."""
+        pass 
+
+    @abstractmethod
     def select_time(self, indices: slice | Sequence[int] | int) -> "SourceView":
         """Return a new view restricted to the given time indices."""
         pass
@@ -89,16 +107,6 @@ class SourceView(ABC):
     @abstractmethod
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "SourceView":
         """Return a new view restricted to the given variable indices."""
-        pass
-
-    @abstractmethod
-    def flatten_data_2d(self) -> torch.Tensor:
-        """Return a new view where the grid axes are flattened into one."""
-        pass
-
-    @abstractmethod
-    def flatten_coords_2d(self) -> torch.Tensor:
-        """Return a new view where the grid axes are flattened into one."""
         pass
 
     @abstractmethod
@@ -158,20 +166,24 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.device
 
+    def flatten(self) -> FlattenView:
+        current_pattern = self.layout.pattern
+        flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
+        device = self.data.device
+
+        batch_size = self.data.shape[self.layout.batch]
+        coordinates = einops.repeat(self.coordinates, "grid latlon -> (batch grid) latlon", batch=batch_size)
+
+        return FlattenView(
+            data=flattened_data,
+            coordinates=coordinates.to(device),
+            device=device,
+        )
+
     @property
     def ndim(self) -> int:
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.ndim
-
-    def flatten_data_2d(self) -> torch.Tensor:
-        current_pattern = self.layout.pattern
-        return einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
-
-    def flatten_coords_2d(self) -> torch.Tensor:
-        batch_size = self.data.shape[self.layout.batch]
-        if batch_size > 1:
-            return einops.repeat(self.coordinates, "grid latlon -> (batch grid) latlon", batch=batch_size)
-        return self.coordinates
 
     def unflatten_data_2d(self, data_2d: torch.Tensor) -> "GriddedSourceView":
         target_layout = self.layout.pattern
@@ -290,21 +302,22 @@ class TabularSourceView(SourceView):
         assert isinstance(self.data, list) and len(self.data) > 0, f"{self.__class__.__name__} data must be a non-empty list of tensors."
         return self.data[0].device
 
-    def flatten_data_2d(self) -> torch.Tensor:
-        assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
+    def flatten(self) -> FlattenView:
         if len(self.data) > 1:
             data = torch.cat(self.data, dim=0)
+            coordinates = torch.cat(self.coordinates, dim=0)
         elif len(self.data) == 1:
             data = self.data[0]
-        else:
-            raise ValueError(f"{self.__class__.__name__} has no data tensors to flatten.")
+            coordinates = self.coordinates[0]
 
-        return data
+        device = data.device
+        coordinates = coordinates.to(device)
 
-    def flatten_coords_2d(self) -> torch.Tensor:
-        assert isinstance(self.coordinates, list), f"{self.__class__.__name__} coordinates must be a list of tensors."
-        latlon_coords = torch.cat(self.coordinates, dim=0)
-        return latlon_coords
+        return FlattenView(
+            data=data,
+            coordinates=coordinates.to(device),
+            device=device,
+        )
 
     def unflatten_data_2d(self, data_2d: torch.Tensor) -> "TabularSourceView":
         assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
