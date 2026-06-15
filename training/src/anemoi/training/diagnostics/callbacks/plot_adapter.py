@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     import pytorch_lightning as pl
 
     from anemoi.training.tasks.base import BaseTask
+    from anemoi.training.train.step_output import TrainingStepOutput
 
 LOGGER = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class BasePlotAdapter(ABC):
         self,
         pl_module: pl.LightningModule,
         batch: dict[str, torch.Tensor],
-        output: tuple[torch.Tensor, list[dict[str, torch.Tensor]] | dict[str, torch.Tensor]],
+        output: TrainingStepOutput,
         batch_idx: int,
     ) -> PlotPayload:
         """Gather, denormalize, and cache batch data for plotting.
@@ -153,9 +154,8 @@ class BasePlotAdapter(ABC):
             The Lightning module (provides allgather_batch, model, etc.).
         batch : dict[str, torch.Tensor]
             Raw validation batch keyed by dataset name.
-        output : tuple
-            Raw model output: (loss_scales, preds).  ``preds`` must be a list
-            of per-step dicts.
+        output : TrainingStepOutput
+            Model output.  Predictions must be a list of per-step dicts.
         batch_idx : int
             Current validation batch index, used as cache key.
 
@@ -174,12 +174,12 @@ class BasePlotAdapter(ABC):
         }
 
         # 2. Gather prediction shards
-        preds = output[1]
+        preds = output.predictions
         if not isinstance(preds, list):
-            msg = f"output[1] must be a list of per-step dicts, got {type(preds).__name__}"
+            msg = f"predictions must be a list of per-step dicts, got {type(preds).__name__}"
             raise TypeError(msg)
         gathered_outputs: tuple[Any, list[dict[str, torch.Tensor]]] = (
-            output[0],
+            output.loss,
             [
                 {
                     dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
@@ -245,7 +245,8 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
-        for rollout_step in range(self._task.validation_rollout):
+        for validation_step_kwargs in self._task.steps("validation"):
+            rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
             output_data = data[output_time_indices, ...]
@@ -326,9 +327,14 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         Parameters
         ----------
         tensor : Any
-            Tensor with shape (..., members, grid, vars)
+            Tensor with shape (..., members, grid, vars).
         members : int | list[int] | None
             Members to select. None returns all members, int/list selects specific members.
+
+        Returns
+        -------
+        Any
+            Tensor with selected ensemble members.
         """
         if members is None:
             return tensor
@@ -337,8 +343,8 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         return tensor[:, :, members, ...]
 
     def prepare_loss_batch(self, batch: dict) -> dict:
-        """Squeeze ensemble dim to member 0 for loss plotting."""
-        return {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
+        """Return the batch for loss plotting."""
+        return batch
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         yield from self._inner.iter_plot_samples(data, output_tensor)

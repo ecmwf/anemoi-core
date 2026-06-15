@@ -47,6 +47,7 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -306,6 +307,31 @@ class AnemoiTrainer(ABC):
         if initialized_datasets:
             LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
+    def _validate_transfer_learning_units(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate variable unit compatibility between checkpoint and current dataset.
+
+        Compares the variables_metadata stored on the model (extracted from the checkpoint
+        during loading) with the current dataset's variables_metadata. For shared datasets,
+        the variables are assumed to match exactly.
+
+        Raises
+        ------
+        ValueError
+            If variables have incompatible units between checkpoint and dataset.
+
+        Warns
+        -----
+        If variables_metadata is missing from either the checkpoint or the current dataset,
+        a warning is logged and the check is skipped.
+        """
+        from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
+
+        ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
+
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
@@ -320,8 +346,9 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        training_method = get_class(self.config.training.training_method)
-        model = training_method(**kwargs)  # Task -> pl.LightningModule
+        training_method_cfg = self.config.training.method
+        training_method_cls = get_class(training_method_cfg._target_)
+        model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -334,16 +361,23 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = training_method.load_from_checkpoint(
+
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu,
+                # The model will be sent to GPU when trainer.fit() is called
+                model = training_method_cls.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",
                 )
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
             self._validate_transfer_learning_datasets(model)
+            # Validate variable units between checkpoint and current dataset
+            self._validate_transfer_learning_units(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights

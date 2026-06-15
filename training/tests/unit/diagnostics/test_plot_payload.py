@@ -25,7 +25,7 @@ def _identity_post_processor() -> MagicMock:
     """Return a mock post-processor that acts as identity."""
     mock = MagicMock()
 
-    def _call(x: torch.Tensor | np.ndarray, _in_place: bool = True) -> torch.Tensor | np.ndarray:
+    def _call(x: torch.Tensor | np.ndarray, in_place: bool = True) -> torch.Tensor | np.ndarray:  # noqa: ARG001
         return x.clone() if isinstance(x, torch.Tensor) else x
 
     mock.side_effect = _call

@@ -321,7 +321,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
 
     # Match the typical tensor layout used by Anemoi losses:
     pred = torch.randn(batch, 1, ensemble, points, variables, requires_grad=True)
-    target = torch.randn(batch, 1, 1, points, variables)  # allow broadcasting over ensemble if supported
+    target = torch.randn(batch, 1, 1, points, variables)
 
     # Node weights are commonly required by the weighted loss base class; keep them neutral.
     node_weights = torch.ones(points)
