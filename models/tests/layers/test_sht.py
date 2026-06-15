@@ -133,11 +133,13 @@ def test_idempotency_inverse_direct(sht_setup):
 
 
 @pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
-@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
     """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
     Reduced grids only.
     """
+    if sht_setup["grid_kind"] not in {"reduced", "octahedral"}:
+        pytest.skip("Test only applies to reduced and octahedral grids")
+
     dtype = sht_setup["dtype"]
     direct = sht_setup["direct"]
 
@@ -151,9 +153,11 @@ def test_multiple_direct_calls(sht_setup):
 
 
 @pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
-@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_direct_with_graphed_reduced_fft(sht_setup):
     """Check gradients still work for reduced-grid FFT with CUDA graphs on."""
+    if sht_setup["grid_kind"] not in {"reduced", "octahedral"}:
+        pytest.skip("Test only applies to reduced and octahedral grids")
+
     dtype = sht_setup["dtype"]
     direct = sht_setup["direct"]
 
