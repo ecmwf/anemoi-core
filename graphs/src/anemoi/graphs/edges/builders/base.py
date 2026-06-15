@@ -27,13 +27,13 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+PYG_LIB_AVAILABLE = find_spec("pyg_lib") is not None
 
-TORCH_CLUSTER_INSTRUCTIONS = r"""The 'torch-cluster' library is not installed.
-Installing 'torch-cluster' can significantly improve performance for graph creation.
+PYG_LIB_INSTRUCTIONS = r"""The 'pyg_lib' library is not installed.
+Installing 'pyg_lib' can significantly improve performance for graph creation.
 You can install it using:
     TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-    pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
+    pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
 """
 
 
@@ -162,7 +162,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     def _compute_adj_matrix_sklearn(self, source_coords: NodeStorage, target_coords: NodeStorage) -> np.ndarray: ...
 
     def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-        """Compute edge index using torch-cluster.
+        """Compute edge index using pyg-lib (if available) or sklearn.
 
         Parameters
         ----------
@@ -176,10 +176,10 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         torch.Tensor
             Edge index tensor of shape (2, num_edges).
         """
-        if TORCH_CLUSTER_AVAILABLE:
+        if PYG_LIB_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
         else:
-            LOGGER.warning(TORCH_CLUSTER_INSTRUCTIONS)
+            LOGGER.warning(PYG_LIB_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
             edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
 
@@ -203,11 +203,11 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
         # 3d cartesian coordinates
 
-        if TORCH_CLUSTER_AVAILABLE:
+        if PYG_LIB_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
             edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:
-            LOGGER.warning(TORCH_CLUSTER_INSTRUCTIONS)
+            LOGGER.warning(PYG_LIB_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
             adj_matrix = self.undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
             edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))

@@ -23,7 +23,7 @@ from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
 
-TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+PYG_LIB_AVAILABLE = find_spec("pyg_lib") is not None
 
 
 LOGGER = logging.getLogger(__name__)

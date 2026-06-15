@@ -23,11 +23,11 @@ from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
-TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+PYG_LIB_AVAILABLE = find_spec("pyg_lib") is not None
 
 
-class _TorchClusterAreaMaskBackend:
-    """Torch-cluster radius backend (CPU/GPU depending on distributed device)."""
+class _PygLibAreaMaskBackend:
+    """Pyg-lib radius backend (CPU/GPU depending on distributed device)."""
 
     def __init__(self, device: torch.device | str):
         LOGGER.debug("Initializing %s on device %s", self.__class__.__name__, device)
@@ -119,8 +119,8 @@ class AreaMaskBuilder:
     """Area mask builder using radius queries on unit-sphere chord distances.
 
     The public API is backend-agnostic. At runtime, a dedicated backend is selected:
-    - torch-cluster backend when available
-    - scipy cKDTree backend otherwise
+    - pyg-lib, if available
+    - scipy cKDTree, otherwise
 
     Methods
     -------
@@ -147,8 +147,8 @@ class AreaMaskBuilder:
         self.mask_attr_name = mask_attr_name
 
         self.device = get_distributed_device()
-        if TORCH_CLUSTER_AVAILABLE:
-            self._backend = _TorchClusterAreaMaskBackend(device=self.device)
+        if PYG_LIB_AVAILABLE:
+            self._backend = _PygLibAreaMaskBackend(device=self.device)
         else:
             self._backend = _KDTreeAreaMaskBackend()
 
