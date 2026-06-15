@@ -18,19 +18,19 @@ from typing import Union
 import einops
 import numpy as np
 import torch
+from hydra.utils import instantiate
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
-from hydra.utils import instantiate
 
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
 LOGGER = logging.getLogger(__name__)
 
@@ -347,12 +347,7 @@ class DynamicGraphProvider(BaseGraphProvider):
     (e.g., k-NN graphs, radius graphs, adaptive connectivity).
     """
 
-    def __init__(
-        self,
-        edge_builder_config: dict,
-        edge_attributes_configs: dict,
-        edge_dim: int
-    ) -> None:
+    def __init__(self, edge_builder_config: dict, edge_attributes_configs: dict, edge_dim: int) -> None:
         """Initialize DynamicGraphProvider.
 
         Parameters
@@ -369,7 +364,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
         self._edge_dim = edge_dim
         self.device = "cpu"
-    
+
     @property
     def edge_dim(self) -> int:
         """Return the edge dimension."""

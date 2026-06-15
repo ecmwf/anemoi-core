@@ -35,7 +35,7 @@ def create_source_view(**kwargs) -> "SourceView":
 
 
 @dataclass(frozen=True, slots=True)
-class FlattenView:
+class FlatView:
     """A flattened view of the data, coordinates and timedeltas for a single sample.
 
     This is used as an intermediate representation when applying functions or
@@ -95,7 +95,7 @@ class SourceView(ABC):
         return source
 
     @abstractmethod
-    def flatten(self) -> FlattenView:
+    def flatten(self) -> FlatView:
         """Return a flattened view of the data, coordinates and timedeltas for a single sample."""
         pass 
 
@@ -166,7 +166,7 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.device
 
-    def flatten(self) -> FlattenView:
+    def flatten(self) -> FlatView:
         current_pattern = self.layout.pattern
         flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
         device = self.data.device
@@ -174,7 +174,7 @@ class GriddedSourceView(SourceView):
         batch_size = self.data.shape[self.layout.batch]
         coordinates = einops.repeat(self.coordinates, "grid latlon -> (batch grid) latlon", batch=batch_size)
 
-        return FlattenView(
+        return FlatView(
             data=flattened_data,
             coordinates=coordinates.to(device),
             device=device,
@@ -302,7 +302,7 @@ class TabularSourceView(SourceView):
         assert isinstance(self.data, list) and len(self.data) > 0, f"{self.__class__.__name__} data must be a non-empty list of tensors."
         return self.data[0].device
 
-    def flatten(self) -> FlattenView:
+    def flatten(self) -> FlatView:
         if len(self.data) > 1:
             data = torch.cat(self.data, dim=0)
             coordinates = torch.cat(self.coordinates, dim=0)
@@ -311,9 +311,8 @@ class TabularSourceView(SourceView):
             coordinates = self.coordinates[0]
 
         device = data.device
-        coordinates = coordinates.to(device)
 
-        return FlattenView(
+        return FlatView(
             data=data,
             coordinates=coordinates.to(device),
             device=device,

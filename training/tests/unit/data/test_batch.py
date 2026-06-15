@@ -12,11 +12,11 @@ from __future__ import annotations
 import pytest
 import torch
 
+from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.batch import SourceView
-from anemoi.models.data import TensorLayout
 
 
 def _gridded_layout() -> TensorLayout:
@@ -335,7 +335,6 @@ def test_node_coords_returns_none_for_sparse_coordinates() -> None:
     )
 
     assert batch.node_coords("a") is None
-
 
 
 # ----------------------------------------------------- TensorLayout helpers

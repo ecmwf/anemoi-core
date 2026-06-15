@@ -21,19 +21,20 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.models.data.batch import Batch
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.data.batch import Batch
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
-from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.utils.config import COORDS_DIM
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -67,7 +68,7 @@ def split_graph_config(
             static_graph_config["nodes"][nodes_name] = nodes_config
         else:
             dynamic_graph_config["nodes"][nodes_name] = nodes_config
-    
+
     for edge_config in graph_config.edges:
         source_name = edge_config.source_name
         target_name = edge_config.target_name
@@ -76,7 +77,8 @@ def split_graph_config(
             dynamic_graph_config["edges"][(source_name, "to", target_name)] = {}
         else:
             dynamic_graph_config["edges"][(source_name, "to", target_name)] = {
-                "edge_builders": edge_config.edge_builders, "attributes": edge_config.attributes
+                "edge_builders": edge_config.edge_builders,
+                "attributes": edge_config.attributes,
             }
 
     return DotDict(static_graph_config), DotDict(dynamic_graph_config)
@@ -191,10 +193,18 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         if self.is_dataset_static[dataset_name]:
-            return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
-        
+            return (
+                self.n_step_input * self.num_input_channels[dataset_name]
+                + COORDS_DIM
+                + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+            )
+
         # time is already part of the grid dimension
-        return self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+        return (
+            self.num_input_channels[dataset_name]
+            + COORDS_DIM
+            + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+        )
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
@@ -232,7 +242,7 @@ class BaseGraphModel(nn.Module):
     def _calculate_output_dim(self, dataset_name: str) -> int:
         if self.is_dataset_static[dataset_name]:
             return self.n_step_output * self.num_output_channels[dataset_name]
-        
+
         # time is already part of the grid dimension
         return self.num_output_channels[dataset_name]
 
@@ -340,7 +350,7 @@ class BaseGraphModel(nn.Module):
         for dataset_name in self.dataset_names:
             if not self.is_dataset_static[dataset_name]:
                 LOGGER.info(f"Skipping residual connection for static dataset: {dataset_name}")
-                continue 
+                continue
 
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(

@@ -153,7 +153,7 @@ class BaseLoss(nn.Module, ABC):
 
         Parameters
         ----------
-        pred : torch.Tensor 
+        pred : torch.Tensor
             Prediction tensor
         target : torch.Tensor
             Target tensor
@@ -399,11 +399,11 @@ class FunctionalLoss(BaseLoss):
         out = self.calculate_difference(pred, target)
 
         out = self.scale(
-            out, 
+            out,
             scaler_indices,
             layout=layout,
             without_scalers=without_scalers,
-            grid_shard_slice=grid_shard_slice
+            grid_shard_slice=grid_shard_slice,
         )
 
         return self.reduce(

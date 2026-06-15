@@ -16,7 +16,6 @@ correctly consume a :class:`TensorLayout` for both gridded
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 import torch
 from omegaconf import DictConfig

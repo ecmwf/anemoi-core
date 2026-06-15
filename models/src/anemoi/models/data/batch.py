@@ -10,21 +10,20 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from collections.abc import Iterable
-from collections.abc import Mapping
-from collections.abc import Sequence
 from collections import defaultdict
+from collections.abc import Iterable
+from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
-import numpy as np
 
+import numpy as np
 import torch
 from torch.utils.data import default_collate
 
-from anemoi.models.data.source_view import SourceView, create_source_view
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data import SourceView
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import create_source_view
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +56,7 @@ def _pin_memory(value):
     if isinstance(value, list):
         return [_pin_memory(v) for v in value]
     return value
+
 
 def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
     """Broadcast a non-dict value to a dict with the same value for each key."""
@@ -148,7 +148,7 @@ class Batch:
     def device(self) -> torch.device:
         """Device the batch data lives on.
 
-        This is derived from the first dataset's data payload. 
+        This is derived from the first dataset's data payload.
         All data tensors are expected to share the same device
         after the call to :meth:`to`.
         """
@@ -205,7 +205,9 @@ class Batch:
             )
             raise ValueError(msg)
 
-        per_dataset_meta = self.metadata.get(dataset_name) if isinstance(self.metadata.get(dataset_name), dict) else None
+        per_dataset_meta = (
+            self.metadata.get(dataset_name) if isinstance(self.metadata.get(dataset_name), dict) else None
+        )
         boundaries = per_dataset_meta.get(BOUNDARIES_META_KEY) if per_dataset_meta else None
         return create_source_view(
             name=dataset_name,
@@ -262,8 +264,7 @@ class Batch:
             new_coordinates[name] = _to_device(value, device, non_blocking=non_blocking)
 
         new_timedeltas = {
-            name: _to_device(value, device, non_blocking=non_blocking)
-            for name, value in self.timedeltas.items()
+            name: _to_device(value, device, non_blocking=non_blocking) for name, value in self.timedeltas.items()
         }
 
         return Batch(
@@ -344,7 +345,8 @@ class Batch:
         return Batch(
             new_data,
             coordinates={name: self.coordinates[name] for name in new_data_keys},
-            metadata={STATIC_COORDS_META_KEY: metadata_static_coords} | {name: self.metadata[name] for name in new_data_keys if name in self.metadata},
+            metadata={STATIC_COORDS_META_KEY: metadata_static_coords}
+            | {name: self.metadata[name] for name in new_data_keys if name in self.metadata},
             grid_sizes={name: self.grid_sizes[name] for name in new_data_keys},
             timedeltas={name: self.timedeltas[name] for name in new_data_keys if name in self.timedeltas},
             grid_shard_indices={name: self.grid_shard_indices[name] for name in new_data_keys},
@@ -392,7 +394,7 @@ class Batch:
         """Return a new :class:`Batch` with per-dataset selection applied."""
         per_source_indices = defaultdict(dict)
         for dim, indices in kwargs.items():
-            # if indices is not a dict, broadcast the same indexing to every dataset.
+            # if indices is not a dict, broadcast the same indexing to every dataset.
             indices_dict = _broadcast_to_dict(indices, self.dataset_names)
             for source_name, idx in indices_dict.items():
                 per_source_indices[source_name][dim] = idx
@@ -466,14 +468,14 @@ class Batch:
             # ``ObservationDataReader._unpack_sample``). Gridded samples
             # never carry it, so this is a self-describing dispatch.
             is_sparse = BOUNDARIES_META_KEY in sample_meta
-            
+
             if "variables" in first_payload:
                 collated_variables[name] = first_payload["variables"]
-                # Assumed that all samples have the same variables
-            
+                # Assumed that all samples have the same variables
+
             if "statistics" in first_payload:
                 collated_statistics[name] = first_payload["statistics"]
-                # Assumed that all samples have the same variables and statistics
+                # Assumed that all samples have the same variables and statistics
 
             if is_sparse:
                 if name in static:
@@ -497,8 +499,7 @@ class Batch:
                 # metadata: each leaf becomes a list of length B (one per sample).
                 meta_keys = tuple(sample_meta.keys())
                 per_dataset_metadata[name] = {
-                    key: [sample[name].get("metadata", {}).get(key) for sample in samples]
-                    for key in meta_keys
+                    key: [sample[name].get("metadata", {}).get(key) for sample in samples] for key in meta_keys
                 }
                 continue
 
@@ -517,7 +518,7 @@ class Batch:
 
             if "timedeltas" in first_payload:
                 # Gridded datasets normally don't carry ``timedeltas``
-                # if they do, stack them along a new batch dimension 
+                # if they do, stack them along a new batch dimension
                 # just like the other tensors.
                 collated_timedeltas[name] = default_collate([sample[name]["timedeltas"] for sample in samples])
 

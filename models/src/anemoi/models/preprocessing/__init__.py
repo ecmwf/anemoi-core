@@ -8,14 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 from typing import Optional
 
-from abc import ABC, abstractmethod
-from torch import nn
 import torch
+from torch import nn
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data import SourceView
+from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 

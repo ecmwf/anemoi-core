@@ -22,8 +22,8 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.source_view import create_source_view
 from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.views import create_source_view
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.normalizer import InputNormalizer

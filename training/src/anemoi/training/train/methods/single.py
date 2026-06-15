@@ -27,7 +27,7 @@ class SingleTraining(BaseTrainingModule):
 
     def _step(
         self,
-        batch: "Batch",
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""

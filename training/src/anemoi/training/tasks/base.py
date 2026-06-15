@@ -147,9 +147,7 @@ class BaseTask(ABC):
         time_indices = normalize_time_indices(time_indices)
         LOGGER.debug("Normalized time indices: %s -- type %s", time_indices, type(time_indices))
 
-        var_indices = {
-            dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names
-        }
+        var_indices = {dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names}
         new_batch = batch.select(time=time_indices, variables=var_indices)
         for dataset_name, payload in new_batch.data.items():
             LOGGER.debug(
@@ -192,7 +190,9 @@ class BaseTask(ABC):
         empty_data = {}
         for dataset_name, payload in new_batch.data.items():
             layout = new_batch.layouts.get(dataset_name)
-            assert layout is not None, f"Layout is required for dataset '{dataset_name}' to determine variable axis for target slicing."
+            assert (
+                layout is not None
+            ), f"Layout is required for dataset '{dataset_name}' to determine variable axis for target slicing."
             if isinstance(payload, list):
                 empty_data[dataset_name] = [t.narrow(layout.variables, 0, 0) for t in payload]
             else:

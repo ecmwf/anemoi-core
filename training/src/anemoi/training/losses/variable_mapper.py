@@ -19,7 +19,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data_indices.collection import IndexCollection
 
 if TYPE_CHECKING:
-    from anemoi.models.data.source_view import SourceView
+    from anemoi.models.data.views import SourceView
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode

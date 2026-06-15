@@ -142,9 +142,7 @@ class NormalizedReluBounding(BaseBounding):
         return norm_min_val
 
     def bound(self, data: torch.Tensor, indices: torch.Tensor, norm_min_val: torch.Tensor, **_kwargs) -> torch.Tensor:
-        data[..., indices] = (
-            torch.nn.functional.relu(data[..., indices] - norm_min_val) + norm_min_val
-        )
+        data[..., indices] = torch.nn.functional.relu(data[..., indices] - norm_min_val) + norm_min_val
         return data
 
     def forward(self, x: "SourceView") -> "SourceView":
@@ -158,9 +156,7 @@ class NormalizedLeakyReluBounding(NormalizedReluBounding):
     """Bounding with a Leaky ReLU activation and customizable normalized thresholds."""
 
     def bound(self, data: torch.Tensor, indices: torch.Tensor, norm_min_val: torch.Tensor, **_kwargs) -> torch.Tensor:
-        data[..., indices] = (
-            torch.nn.functional.leaky_relu(data[..., indices] - norm_min_val) + norm_min_val
-        )
+        data[..., indices] = torch.nn.functional.leaky_relu(data[..., indices] - norm_min_val) + norm_min_val
         return data
 
 
@@ -187,6 +183,7 @@ class HardtanhBounding(BaseBounding):
             data[..., indices], min_val=self.min_val, max_val=self.max_val
         )
         return data
+
 
 class LeakyHardtanhBounding(HardtanhBounding):
     """Bounding with a Leaky HardTanh activation."""
@@ -217,7 +214,9 @@ class FractionBounding(BaseBounding):
         self.max_val = max_val
         self.total_var = total_var
 
-    def bound(self, data: torch.Tensor, indices: torch.Tensor, name_to_index: dict[str, int], **_kwargs) -> torch.Tensor:
+    def bound(
+        self, data: torch.Tensor, indices: torch.Tensor, name_to_index: dict[str, int], **_kwargs
+    ) -> torch.Tensor:
         total_index = torch.tensor([name_to_index[self.total_var]], dtype=torch.long)
         data[..., indices] = torch.nn.functional.hardtanh(
             data[..., indices], min_val=self.min_val, max_val=self.max_val
@@ -229,7 +228,9 @@ class FractionBounding(BaseBounding):
 class LeakyFractionBounding(FractionBounding):
     """Bounding with a Leaky HardTanh activation and a fraction of the total variable."""
 
-    def bound(self, data: torch.Tensor, indices: torch.Tensor, name_to_index: dict[str, int], **_kwargs) -> torch.Tensor:
+    def bound(
+        self, data: torch.Tensor, indices: torch.Tensor, name_to_index: dict[str, int], **_kwargs
+    ) -> torch.Tensor:
         total_index = torch.tensor([name_to_index[self.total_var]], dtype=torch.long)
         data[..., indices] = torch.nn.functional.leaky_hardtanh(
             data[..., indices], min_val=self.min_val, max_val=self.max_val

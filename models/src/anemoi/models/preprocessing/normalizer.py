@@ -12,11 +12,12 @@ import logging
 import warnings
 from typing import Optional
 
+import numpy as np
 import torch
 
-from anemoi.models.preprocessing._caching import cached_parameters
 from anemoi.models.preprocessing import BasePreprocessor
-import numpy as np
+from anemoi.models.preprocessing._caching import cached_parameters
+
 LOGGER = logging.getLogger(__name__)
 
 

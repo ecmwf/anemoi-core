@@ -13,9 +13,9 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask

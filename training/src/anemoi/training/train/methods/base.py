@@ -26,7 +26,7 @@ from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
@@ -44,7 +44,6 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.models.data import Batch
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
 _chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
@@ -57,8 +56,8 @@ if TYPE_CHECKING:
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.models.data.views import SourceView
     from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.models.data.source_view import SourceView
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
     from anemoi.training.train.step_output import TrainingStepOutput
@@ -185,8 +184,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.output_mask = {
             name: instantiate(
                 config.model.output_mask,
-                nodes=data_readers[name], #TODO(Mario): Fix.
-            ) for name in self.dataset_names
+                nodes=data_readers[name],  # TODO(Mario): Fix.
+            )
+            for name in self.dataset_names
         }
 
         # Handle supporting_arrays merge with all output masks
@@ -276,7 +276,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                #graph_data=graph_data,
+                # graph_data=graph_data,
                 data_node_name=data_node_name,
             )
 
@@ -284,7 +284,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                #graph_data=graph_data,
+                # graph_data=graph_data,
                 data_node_name=data_node_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
@@ -779,7 +779,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
             if dataset_name not in y_pred:
-                LOGGER.warning("Dataset %s is missing from predictions, skipping loss and metric computation for this dataset.", dataset_name)
+                LOGGER.warning(
+                    "Dataset %s is missing from predictions, skipping loss and metric computation for this dataset.",
+                    dataset_name,
+                )
                 continue
 
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
@@ -804,13 +807,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
 
         return total_loss, metrics_next, y_preds
-    
+
     def preprocess_batch(self, batch: Batch) -> Batch:
         """Preprocess the batch using the model's pre-processors."""
         new_batch = batch
         for dataset_name, pre_processors in self.model.pre_processors.items():
             updated_view = pre_processors(batch[dataset_name])
-            # TODO: remove _update_source, maybe batch.clone()?? 
+            # TODO: remove _update_source, maybe batch.clone()??
             new_batch = new_batch._update_source(dataset_name, updated_view)
         return new_batch
 
@@ -887,9 +890,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             else:
                 self.grid_shard_sizes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = batch.grid_shard_indices[dataset_name]
-                batch.data[dataset_name] = self.allgather_batch(
-                    batch.data[dataset_name], grid_size, shard_shapes
-                )
+                batch.data[dataset_name] = self.allgather_batch(batch.data[dataset_name], grid_size, shard_shapes)
         return batch
 
     def transfer_batch_to_device(
@@ -1040,7 +1041,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # the variables actually present in its tensor *before* the normalisation
         y_postprocessed = post_processor(self._align_view_to_layout(y, target_layout, dataset_name), in_place=False)
         y_pred_postprocessed = post_processor(
-            self._align_view_to_layout(y_pred, pred_layout, dataset_name), in_place=False
+            self._align_view_to_layout(y_pred, pred_layout, dataset_name),
+            in_place=False,
         )
 
         suffix = "" if step is None else f"/{step + 1}"

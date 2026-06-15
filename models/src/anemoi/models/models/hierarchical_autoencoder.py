@@ -458,7 +458,12 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             # Only pass data and forcing coordinates to the decoder
             dataset_coords = batch.node_coords(dataset_name)
             x_target_latent, shard_sizes_target = self._assemble_forcings(
-                x[dataset_name], batch_size, grid_shard_sizes, model_comm_group, dataset_name, coordinates=dataset_coords
+                x[dataset_name],
+                batch_size,
+                grid_shard_sizes,
+                model_comm_group,
+                dataset_name,
+                coordinates=dataset_coords,
             )
 
             # Compute decoder edges

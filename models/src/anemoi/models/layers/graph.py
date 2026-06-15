@@ -9,7 +9,6 @@
 
 
 from collections import defaultdict
-from types import NoneType
 
 import einops
 import torch
@@ -50,7 +49,7 @@ class NamedNodesAttributes(nn.Module):
     Attributes
     ----------
     num_nodes : dict[str, int]
-        Number of nodes for each group of nodes. None if the number of nodes is not fixed over time 
+        Number of nodes for each group of nodes. None if the number of nodes is not fixed over time
         (e.g. for tabular datasets).
     num_trainable_parameters : dict[str, int]
         Total dimension of node attributes (non-trainable + trainable) for each group of nodes. If the dataset is

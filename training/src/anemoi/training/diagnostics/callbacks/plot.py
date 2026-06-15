@@ -966,8 +966,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             latlons = np.rad2deg(view.coordinates.detach().cpu().numpy())
         else:
             assert isinstance(view.coordinates, list) and len(view.coordinates) > self.sample_idx, (
-                f"Expected view.coordinates to be a list of tensors when plotting per-sample"
-                + f" with length greater than {self.sample_idx}."
+                "Expected view.coordinates to be a list of tensors when plotting per-sample"
+                f" with length greater than {self.sample_idx}."
             )
             latlons = np.rad2deg(view.coordinates[self.sample_idx].detach().cpu().numpy())
 
@@ -999,7 +999,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         output_indices_full = pl_module.data_indices[dataset_name].data.output.full
 
         def _post_process(prediction: SourceView) -> torch.Tensor:
-            assert isinstance(prediction, SourceView), f"Expected a prediction of type SourceView, got {type(prediction)}."
+            assert isinstance(
+                prediction,
+                SourceView,
+            ), f"Expected a prediction of type SourceView, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
             processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).data
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a

@@ -9,11 +9,12 @@
 
 
 import logging
-from abc import ABC, abstractmethod
-
-import torch
+from abc import ABC
+from abc import abstractmethod
 from typing import Optional
+
 import numpy as np
+import torch
 
 from anemoi.models.preprocessing import BasePreprocessor
 
@@ -41,19 +42,17 @@ class BaseImputer(BasePreprocessor, ABC):
     @abstractmethod
     def get_imputing_replacements(
         self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]
-    ) -> dict[int, float]:
-        ...
+    ) -> dict[int, float]: ...
 
     @abstractmethod
-    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
-        ...
+    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor: ...
 
     def transform(
         self,
         x: torch.Tensor,
         statistics: Optional[dict[str, np.ndarray]] = None,
         name_to_index: Optional[dict[str, int]] = None,
-        **_kwargs
+        **_kwargs,
     ) -> torch.Tensor:
         """Impute missing values in the input tensor.
 
@@ -97,7 +96,9 @@ class InputImputer(BaseImputer):
             - q
     """
 
-    def get_imputing_replacements(self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]) -> dict[int, float]:
+    def get_imputing_replacements(
+        self, name_to_index: dict[str, int], statistics: dict[str, torch.Tensor]
+    ) -> dict[int, float]:
         """Get the replacement values for imputation."""
         assert name_to_index is not None, f"{self.__class__.__name__} require name_to_index for imputation."
         assert statistics is not None, f"{self.__class__.__name__} require statistics for imputation."
@@ -178,8 +179,8 @@ class CopyImputer(BaseImputer):
             if idx_dst is not None and idx_src is not None:
                 nan_mask = torch.isnan(data[..., idx_dst])
                 source_vals = data[..., idx_src]
-                assert not torch.isnan(source_vals[nan_mask]).any(), (
-                    f"NaNs found in source variable at locations where target variable needs imputation."
-                )
+                assert not torch.isnan(
+                    source_vals[nan_mask]
+                ).any(), "NaNs found in source variable at locations where target variable needs imputation."
                 data[..., idx_dst] = torch.where(nan_mask, source_vals, data[..., idx_dst])
         return data

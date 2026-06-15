@@ -72,6 +72,7 @@ def test_batch_collate_and_to() -> None:
     assert moved_batch.data[_DATASET_NAME][0].device.type == device.type
     assert moved_batch.data[_DATASET_NAME][1].device.type == device.type
 
+
 # ----------------------------------------------------------------- helpers
 
 

@@ -171,7 +171,12 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             dataset_coords = batch.node_coords(dataset_name)
             x_data_latent, shard_sizes_data = self._assemble_input(
-                x[dataset_name], batch_size, grid_shard_sizes, model_comm_group, dataset_name, coordinates=dataset_coords
+                x[dataset_name],
+                batch_size,
+                grid_shard_sizes,
+                model_comm_group,
+                dataset_name,
+                coordinates=dataset_coords,
             )
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
@@ -216,7 +221,12 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             # In autoencoder training this would cause the model to discard everything else and just keep the values they were before
             # Only pass data and forcing coordinates to the decoder
             x_target_latent, shard_sizes_target = self._assemble_forcings(
-                x[dataset_name], batch_size, grid_shard_sizes, model_comm_group, dataset_name, coordinates=dataset_coords
+                x[dataset_name],
+                batch_size,
+                grid_shard_sizes,
+                model_comm_group,
+                dataset_name,
+                coordinates=dataset_coords,
             )
 
             # Compute decoder edges using updated latent representation
@@ -224,9 +234,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 decoder_edge_attr,
                 decoder_edge_index,
                 dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            ) = self.decoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 src_coords=None,
                 dst_coords=dataset_coords,
