@@ -14,6 +14,7 @@ import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
+from dataclasses import replace as dataclass_replace
 from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
@@ -41,6 +42,7 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.models.data import Batch
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
@@ -60,7 +62,6 @@ if TYPE_CHECKING:
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
     from anemoi.training.train.step_output import TrainingStepOutput
-    from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -734,14 +735,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Compute metrics if in validation mode
         metrics_next = {}
-        if validation_mode: pass
-            #metrics_next = self._compute_metrics(
-            #    y_pred_full,
-            #    y_full,
-            #    grid_shard_slice=grid_shard_slice,
-            #    dataset_name=dataset_name,
-            #    **kwargs,
-            #)
+        if validation_mode:
+            metrics_next = self._compute_metrics(
+                y_pred_full,
+                y_full,
+                grid_shard_slice=grid_shard_slice,
+                dataset_name=dataset_name,
+                **kwargs,
+            )
 
         return loss, metrics_next, y_pred
 
@@ -935,6 +936,60 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             self.reader_groups[self.reader_group_id],
         )
 
+    def _align_view_to_layout(
+        self,
+        view: SourceView,
+        layout: IndexSpace | str | None,
+        dataset_name: str,
+    ) -> SourceView:
+        """Realign a view's variable metadata to the variables of a given index space.
+
+        A prediction view produced by the model inherits the full target metadata
+        (variables / name_to_index / statistics) even though its tensor only
+        holds the model-output (or data-output) subset of variables. Computing
+        per-variable normalisation parameters from the full metadata would then
+        produce tensors that do not broadcast against the (smaller) data tensor.
+
+        The alignment is driven entirely by the layout and the view's metadata, so it
+        works regardless both gridded fields and sparse obs.
+
+        When the metadata already matches the layout variable set
+        (e.g. a full data-space target), the view is returned unchanged.
+
+        Parameters
+        ----------
+        view : SourceView
+            View whose metadata may describe more variables than its tensor holds.
+        layout : IndexSpace | str | None
+            Index space the view's tensor lives in. None is treated as `IndexSpace.DATA_FULL`.
+        dataset_name : str
+            Dataset the view belongs to, used to look up the data indices.
+
+        Returns
+        -------
+        SourceView
+            View with metadata aligned to the layout variable set.
+        """
+        layout = IndexSpace.DATA_FULL if layout is None else IndexSpace(layout)
+        data_indices = self.data_indices[dataset_name]
+        if layout == IndexSpace.MODEL_OUTPUT:
+            names = list(data_indices.model.output.ordered_names)
+        elif layout == IndexSpace.DATA_OUTPUT:
+            names = list(data_indices.data.output.ordered_names)
+        else:
+            names = list(data_indices.data_full_ordered_names)
+
+        # The view's metadata already matches the layout's variable set.
+        if list(view.variables) == names:
+            return view
+
+        positions = [view.name_to_index[name] for name in names]
+        return dataclass_replace(
+            view,
+            variables=names,
+            statistics={key: value[positions] for key, value in view.statistics.items()},
+        )
+
     def calculate_val_metrics(
         self,
         y_pred: SourceView,
@@ -969,8 +1024,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         metrics_dict = self.metrics[dataset_name]
         val_metric_ranges = self.val_metric_ranges[dataset_name]
 
-        y_postprocessed = post_processor(y, in_place=False)
-        y_pred_postprocessed = post_processor(y_pred, in_place=False)
+        # y (target) and y_pred (model output) can live in different index
+        # spaces and therefore hold different numbers of variables along the
+        # variable axis.
+        # The metadata of the prediction view must be realigned to
+        # the variables actually present in its tensor *before* the normalisation
+        y_postprocessed = post_processor(self._align_view_to_layout(y, target_layout, dataset_name), in_place=False)
+        y_pred_postprocessed = post_processor(
+            self._align_view_to_layout(y_pred, pred_layout, dataset_name), in_place=False
+        )
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():

@@ -44,8 +44,10 @@ class InputNormalizer(BasePreprocessor):
         # Cache for norm parameters, keyed on (variable_set, device), 2 entries: transform & inverse_transform
         self._param_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
 
-    @cached_parameters(key_fn=lambda statistics, name_to_index, device: tuple(name_to_index.keys()))
-    def get_norm_parameters(self, statistics: dict, name_to_index: dict, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    @cached_parameters(key_fn=lambda statistics, name_to_index, device: (tuple(name_to_index.keys()), str(device)))
+    def get_norm_parameters(
+        self, statistics: dict, name_to_index: dict, device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute normalization parameters, cached per (variable_set, device).
 
         Parameters
@@ -60,7 +62,7 @@ class InputNormalizer(BasePreprocessor):
         Returns
         -------
         tuple[torch.Tensor, torch.Tensor]
-            ``(norm_mul, norm_add)`` tensors of shape ``(len(name_to_index),)``.
+            (norm_mul, norm_add) tensors of shape (len(name_to_index), ).
         """
         minimum = torch.tensor(statistics["minimum"], dtype=torch.float32, device=device)
         maximum = torch.tensor(statistics["maximum"], dtype=torch.float32, device=device)

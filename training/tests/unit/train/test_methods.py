@@ -22,8 +22,11 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.source_view import create_source_view
+from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantSettings
 from anemoi.models.transport import TransportSourceBuilder
@@ -593,6 +596,7 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
 def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     """calculate_val_metrics passes scaler_indices, grid_shard_slice, group to each metric."""
     module = MagicMock(spec=BaseTrainingModule)
+    module._align_view_to_layout = lambda view, *args, **kwargs: view
     metric = CaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
@@ -634,6 +638,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
 def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> None:
     """calculate_val_metrics adds shard layout when metric.needs_shard_layout_info."""
     module = MagicMock(spec=BaseTrainingModule)
+    module._align_view_to_layout = lambda view, *args, **kwargs: view
     metric = ShardingAwareCaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
@@ -669,6 +674,139 @@ def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> 
         "grid_dim": -2,
         "grid_shard_sizes": shard_sizes,
     }
+
+
+# ── BaseTrainingModule: _align_view_to_layout ──────────────────────────────────
+
+
+def _gridded_view(
+    data: torch.Tensor,
+    variables: list[str],
+    statistics: dict[str, torch.Tensor],
+):
+    """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSourceView."""
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    return create_source_view(
+        name="data",
+        data=data,
+        variables=list(variables),
+        statistics=statistics,
+        coordinates=None,
+        layout=layout,
+        is_static=True,
+    )
+
+
+def test_align_view_to_layout_matches_model_output_tensor() -> None:
+    """A prediction view inheriting full target metadata is realigned to its model-output tensor."""
+    name_to_index = {"x": 0, "y": 1, "z": 2, "f": 3}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["f"])}
+    full_stats = {
+        "mean": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+        "stdev": torch.tensor([0.5, 1.0, 2.0, 4.0]),
+        "minimum": torch.tensor([0.0, 0.0, 0.0, 0.0]),
+        "maximum": torch.tensor([10.0, 10.0, 10.0, 10.0]),
+    }
+    # The model output excludes the forcing variable "f": 3 channels but full (4-var) metadata.
+    pred_tensor = torch.randn(1, 1, 1, 2, 3)
+    y_pred = _gridded_view(pred_tensor, list(name_to_index), full_stats)
+
+    module = SimpleNamespace(data_indices=data_indices)
+    aligned = BaseTrainingModule._align_view_to_layout(module, y_pred, IndexSpace.MODEL_OUTPUT, "data")
+
+    expected_names = list(data_indices["data"].model.output.ordered_names)
+    assert list(aligned.variables) == expected_names
+    assert len(aligned.name_to_index) == pred_tensor.shape[-1]
+    expected_positions = [name_to_index[n] for n in expected_names]
+    for key, value in aligned.statistics.items():
+        assert len(value) == pred_tensor.shape[-1]
+        torch.testing.assert_close(value, full_stats[key][expected_positions])
+    # The data tensor itself is untouched.
+    assert aligned.data is pred_tensor
+
+
+def test_align_view_to_layout_is_noop_when_metadata_matches_tensor() -> None:
+    """A full data-space view (metadata equals the layout variable set) is returned unchanged."""
+    name_to_index = {"x": 0, "y": 1, "z": 2, "f": 3}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["f"])}
+    full_stats = {"stdev": torch.tensor([0.5, 1.0, 2.0, 4.0])}
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 4), list(name_to_index), full_stats)
+
+    module = SimpleNamespace(data_indices=data_indices)
+    aligned = BaseTrainingModule._align_view_to_layout(module, y, IndexSpace.DATA_FULL, "data")
+    assert aligned is y
+
+
+def test_align_view_to_layout_enables_postprocessing_of_model_output() -> None:
+    """Realigned model-output view can be denormalised without the ERROR.md shape mismatch."""
+    name_to_index = {"x": 0, "y": 1, "z": 2, "f": 3}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["f"])}
+    full_stats = {
+        "mean": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+        "stdev": torch.tensor([0.5, 1.0, 2.0, 4.0]),
+        "minimum": torch.tensor([0.0, 0.0, 0.0, 0.0]),
+        "maximum": torch.tensor([10.0, 10.0, 10.0, 10.0]),
+    }
+    pred_tensor = torch.zeros(1, 1, 1, 2, 3)
+    y_pred = _gridded_view(pred_tensor, list(name_to_index), full_stats)
+
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    module = SimpleNamespace(data_indices=data_indices)
+    aligned = BaseTrainingModule._align_view_to_layout(module, y_pred, IndexSpace.MODEL_OUTPUT, "data")
+
+    # Without the realignment this raises: tensor a (3) must match tensor b (4).
+    denormalised = normalizer(aligned, in_place=False, inverse=True)
+    assert denormalised.data.shape == pred_tensor.shape
+
+
+def _tabular_view(
+    data: list[torch.Tensor],
+    variables: list[str],
+    statistics: dict[str, torch.Tensor],
+):
+    """Wrap a list of ``(grid, variables)`` tensors in a TabularSourceView (sparse obs)."""
+    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    return create_source_view(
+        name="data",
+        data=data,
+        variables=list(variables),
+        statistics=statistics,
+        coordinates=None,
+        layout=layout,
+        is_static=False,
+        boundaries=None,
+    )
+
+
+def test_align_view_to_layout_handles_tabular_list_data() -> None:
+    """Sparse-obs views wrap a list of tensors; alignment must not introspect ``view.data``."""
+    name_to_index = {"x": 0, "y": 1, "z": 2, "f": 3}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["f"])}
+    full_stats = {
+        "mean": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+        "stdev": torch.tensor([0.5, 1.0, 2.0, 4.0]),
+        "minimum": torch.tensor([0.0, 0.0, 0.0, 0.0]),
+        "maximum": torch.tensor([10.0, 10.0, 10.0, 10.0]),
+    }
+    module = SimpleNamespace(data_indices=data_indices)
+
+    # Full data-space target: list data, metadata already matches DATA_FULL -> no-op.
+    y = _tabular_view([torch.zeros(5, 4)], list(name_to_index), full_stats)
+    assert BaseTrainingModule._align_view_to_layout(module, y, IndexSpace.DATA_FULL, "data") is y
+
+    # Model-output prediction: list of (grid, 3) tensors but full (4-var) metadata.
+    y_pred = _tabular_view([torch.zeros(5, 3)], list(name_to_index), full_stats)
+    aligned = BaseTrainingModule._align_view_to_layout(module, y_pred, IndexSpace.MODEL_OUTPUT, "data")
+
+    expected_names = list(data_indices["data"].model.output.ordered_names)
+    assert list(aligned.variables) == expected_names
+    for key, value in aligned.statistics.items():
+        assert len(value) == len(expected_names)
+
+    # Realigned metadata lets the post-processor denormalise the list data.
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    denormalised = normalizer(aligned, in_place=False, inverse=True)
+    assert denormalised.data[0].shape == (5, 3)
 
 
 # ── plot_adapter delegation ────────────────────────────────────────────────────

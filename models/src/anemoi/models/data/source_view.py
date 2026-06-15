@@ -267,6 +267,12 @@ class TabularSourceView(SourceView):
             raise TypeError(msg)
 
     @property
+    def ndim(self) -> int:
+        assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
+        assert isinstance(self.data[0], torch.Tensor), f"{self.__class__.__name__} data must be a list of tensors."
+        return self.data[0].ndim
+
+    @property
     def device(self) -> torch.device:
         assert isinstance(self.data, list) and len(self.data) > 0, f"{self.__class__.__name__} data must be a non-empty list of tensors."
         return self.data[0].device

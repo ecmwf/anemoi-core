@@ -106,6 +106,32 @@ def test_validate_unknown_method_raises() -> None:
         InputNormalizer(config=config)
 
 
+def test_norm_parameters_cache_is_device_aware(input_normalizer) -> None:
+    """Cached normalization parameters must be keyed by device, not only by variables.
+
+    Reusing the same variable set across devices (e.g. metrics on GPU, plotting on
+    CPU) previously returned parameters built for the first device, causing
+    'Expected all tensors to be on the same device' at denormalisation time.
+    """
+    name_to_index = {name: idx for idx, name in enumerate(VARIABLES)}
+
+    mul_cpu, add_cpu = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cpu"))
+    assert mul_cpu.device.type == "cpu"
+    assert add_cpu.device.type == "cpu"
+
+    # The cache key must encode the device so a different device cannot reuse these tensors.
+    assert (tuple(name_to_index.keys()), "cpu") in input_normalizer._param_cache
+
+    if torch.cuda.is_available():
+        mul_gpu, add_gpu = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cuda:0"))
+        assert mul_gpu.device.type == "cuda"
+        assert add_gpu.device.type == "cuda"
+        assert (tuple(name_to_index.keys()), "cuda:0") in input_normalizer._param_cache
+        # The original CPU entry is preserved, not clobbered by the GPU call.
+        mul_cpu_again, _ = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cpu"))
+        assert mul_cpu_again.device.type == "cpu"
+
+
 def test_normalizer_not_inplace(input_normalizer, make_view, base_payload) -> None:
     view = make_view(base_payload)
     original = view_data_2d(view).clone()
