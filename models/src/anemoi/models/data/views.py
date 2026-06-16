@@ -43,8 +43,16 @@ class FlatView:
     """
 
     data: torch.Tensor
-    coordinates: torch.Tensor | None
+    coordinates: torch.Tensor
     device: torch.device | None
+
+    def to(self, device: torch.device) -> "FlatView":
+        """Return a copy of this view with all tensors moved to the given device."""
+        return FlatView(
+            data=self.data.to(device),
+            coordinates=self.coordinates.to(device),
+            device=device,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,11 +103,6 @@ class SourceView(ABC):
         return source
 
     @abstractmethod
-    def flatten(self) -> FlatView:
-        """Return a flattened view of the data, coordinates and timedeltas for a single sample."""
-        pass 
-
-    @abstractmethod
     def select_time(self, indices: slice | Sequence[int] | int) -> "SourceView":
         """Return a new view restricted to the given time indices."""
         pass
@@ -110,7 +113,12 @@ class SourceView(ABC):
         pass
 
     @abstractmethod
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> "SourceView":
+    def flatten(self) -> FlatView:
+        """Return a flattened view of the data, coordinates and timedeltas for a single sample."""
+        pass 
+
+    @abstractmethod
+    def unflatten(self, data: torch.Tensor) -> "SourceView":
         """Unflatten a 2D data tensor back to the original grid shape."""
         pass
 
@@ -185,17 +193,13 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.ndim
 
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> "GriddedSourceView":
-        target_layout = self.layout.pattern
-        batch_size = self.data.shape[self.layout.batch]
-        ensemble_size = self.data.shape[self.layout.ensemble]
-        num_out_times = self.data.shape[self.layout.time]
+    def unflatten(self, data: torch.Tensor) -> "GriddedSourceView":
         new_data = einops.rearrange(
-            data_2d,
-            f"{self.pattern_for_2d} -> {target_layout}",
-            batch=batch_size,
-            ensemble=ensemble_size,
-            time=num_out_times
+            data,
+            f"{self.pattern_for_2d} -> {self.layout.pattern}",
+            batch=self.data.shape[self.layout.batch],
+            ensemble=self.data.shape[self.layout.ensemble],
+            time=self.data.shape[self.layout.time]
         )
         return self.clone(data=new_data)
 
@@ -318,11 +322,11 @@ class TabularSourceView(SourceView):
             device=device,
         )
 
-    def unflatten_data_2d(self, data_2d: torch.Tensor) -> "TabularSourceView":
+    def unflatten(self, data: torch.Tensor) -> "TabularSourceView":
         assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
         batch_sizes = [data.shape[self.layout.grid] for data in self.data]
         batch_starts = np.cumsum([0] + batch_sizes[:-1])
-        new_data = [data_2d.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
+        new_data = [data.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
         return self.clone(data=new_data)
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSourceView":

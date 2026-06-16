@@ -21,8 +21,8 @@ import numpy as np
 import torch
 from torch.utils.data import default_collate
 
-from anemoi.models.data import SourceView
-from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import SourceView
+from anemoi.models.data.views import TensorLayout
 from anemoi.models.data.views import create_source_view
 
 LOGGER = logging.getLogger(__name__)
