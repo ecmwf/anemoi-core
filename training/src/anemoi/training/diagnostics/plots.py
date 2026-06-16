@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
-from matplotlib import colormaps as mpl_colormaps
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
