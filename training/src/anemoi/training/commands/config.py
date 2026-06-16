@@ -79,6 +79,13 @@ class ConfigGenerator(Command):
         dump.add_argument("--output", "-o", default="./config.yaml", type=Path, help="Output file path")
         dump.add_argument("--overwrite", "-f", action="store_true")
 
+        help_msg = "Export the JSON schema of the training configuration."
+        subparsers.add_parser(
+            "schema",
+            help=help_msg,
+            description=help_msg,
+        )
+
     def run(self, args: argparse.Namespace) -> None:
 
         self.overwrite = args.overwrite
@@ -110,6 +117,12 @@ class ConfigGenerator(Command):
         if args.subcommand == "dump":
             LOGGER.info("Dumping config to %s", args.output)
             self.dump_config(args.config_path, args.config_name, args.output)
+            return
+
+        if args.subcommand == "schema":
+            import json
+
+            print(json.dumps(BaseSchema.model_json_schema(), indent=2))  # noqa: T201
             return
 
     def traverse_config(self, destination_dir: Path | str) -> None:
