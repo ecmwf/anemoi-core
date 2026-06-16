@@ -90,13 +90,12 @@ optional-dependencies.s3 = [
   "anemoi-utils[s3]>=0.4.37",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                     # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                # required to test the DCT2D spectral loss
-  "anemoi-training[azure,remote,s3,wandb]", # required to test the AzureMlflowLogger / remote / S3 checkpoints
-  "anemoi-training[plotting]",              # required for integration tests with plotting
+  "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                                # required to test the DCT2D spectral loss
+  "anemoi-training[azure,mlflow,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
-  "pytest-asyncio>=0.23",                   # required for async checkpoint tests
+  "pytest-asyncio>=0.23",                                   # required for async checkpoint tests
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
@@ -118,13 +117,13 @@ scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
 [tool.setuptools_scm]
-root = ".."
+version_file = "src/anemoi/training/_version.py"
 version_scheme = "post-release"
 local_scheme = "no-local-version"
-git_describe_command = "git describe --dirty --tags --long --match 'training-*[0-9]*'"
+root = ".."
 tag_regex = "^training-(?P<version>[vV]?[0-9]+[^-]*)"
-version_file = "src/anemoi/training/_version.py"
 fallback_version = "0.0.0"
+git_describe_command = "git describe --dirty --tags --long --match 'training-*[0-9]*'"
 
 [tool.ruff]
 target-version = "py311"
