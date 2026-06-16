@@ -302,8 +302,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                     model_comm_group=model_comm_group,
                     keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
                 )
+                dataset_latents[dataset_name] = x_latent
+
             x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
         x_latent = sum(dataset_latents.values())
