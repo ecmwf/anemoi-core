@@ -577,7 +577,7 @@ Freeze specific layers during fine-tuning:
 .. code:: yaml
 
    training:
-      model_modifier:
+      checkpoint:
          modifiers:
             - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
               submodules_to_freeze:
@@ -602,7 +602,7 @@ Parameter freezing with multiple layers:
 .. code:: yaml
 
    training:
-      model_modifier:
+      checkpoint:
          modifiers:
             - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
               submodules_to_freeze: ["encoder", "processor.0"]
