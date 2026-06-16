@@ -69,10 +69,14 @@ def _make_pl_module(
 
 
 def _make_outputs(
+<<<<<<< HEAD
     n_timesteps: int = TIME,
     n_ens: int = ENS,
     n_grid: int = GRID,
     n_var: int = NVAR,
+=======
+    n_timesteps: int = TIME, n_ens: int = ENS, n_grid: int = GRID, n_var: int = NVAR,
+>>>>>>> 2b3086e0235f91f7ac9043d0da182ec740500ecf
 ) -> TrainingStepOutput:
     """Create outputs as returned by validation_step."""
     val_loss = torch.tensor(0.5)
