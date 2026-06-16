@@ -3,22 +3,22 @@ Evaluation
 ##########
 
 While we can run validation during training, some plotting callbacks take longer to
-execute and it can desirable to be able to run a full validation pass on a saved checkpoint in a decouple way.
-For example, we might want to compute metrics on a held-out period and regenerate diagnostic plots — *without* resuming training.
+execute and it can be desirable to run a full validation pass on a saved checkpoint
+in a decoupled way. For example, to compute metrics on a held-out period, regenerate
+diagnostic plots, or benchmark a model before deployment — *without* resuming training.
 
 .. code:: bash
 
-   anemoi-training evaluate
+   anemoi-training evaluate --config-name <config>
 
-This runs one complete validation epoch using exactly the same Hydra
-configuration as training, so all data loading, normalisation, and
-diagnostics callbacks behave identically.  No optimizer state is
-created and no gradients are computed.
+This runs one complete validation epoch using the same Hydra configuration as
+training, so all data loading, normalisation, and diagnostics callbacks behave
+identically. No optimizer state is created and no gradients are computed.
 
 .. warning::
 
    A checkpoint **must** be specified via ``training.run_id``,
-   ``training.fork_run_id``, or ``system.input.warm_start``.  Omitting
+   ``training.fork_run_id``, or ``system.input.warm_start``. Omitting
    all three raises a :exc:`RuntimeError` immediately — evaluation on a
    randomly-initialised model is almost certainly a user error.
 
@@ -29,29 +29,28 @@ created and no gradients are computed.
 The evaluator reuses :class:`~anemoi.training.train.train.AnemoiTrainer`
 for all setup steps (datamodule, graph, model, callbacks, loggers,
 strategy), but replaces the final ``trainer.fit()`` call with
-``trainer.validate()``.  The only trainer arguments that are relevant
-are therefore:
+``trainer.validate()``. Key behavioural differences:
 
-- ``limit_val_batches`` — limits the number of validation batches (same
-  as during training, controlled by
-  ``config.dataloader.limit_batches.validation``).
-- Logging, callbacks, and hardware settings — identical to a training
-  run so that diagnostic plots and experiment-tracking entries are
-  produced in the same way.
-
-Arguments that only apply to training — ``max_epochs``, ``max_steps``,
-``gradient_clip_val``, ``accumulate_grad_batches``, etc. — are not
-passed to the evaluator trainer.
+- ``limit_val_batches`` controls how many batches to run (``config.dataloader.limit_batches.validation``).
+- Arguments that only apply to training — ``max_epochs``, ``max_steps``,
+  ``gradient_clip_val``, ``accumulate_grad_batches``, etc. — are not passed
+  to the evaluator trainer.
+- **DDP model wrapping is skipped**: Lightning's ``DDPStrategy`` only wraps
+  the model in ``DistributedDataParallel`` during ``fit()``, not ``validate()``,
+  because there are no gradients to reduce. The strategy handles this
+  transparently — hardware and communication groups are set up as normal.
+- Checkpointing and weight-averaging callbacks are automatically disabled
+  (see below).
 
 **************************
  Checkpoint loading
 **************************
 
-A checkpoint source must be configured before evaluation starts.  Three
+A checkpoint source must be configured before evaluation starts. Three
 cases are recognised, in priority order:
 
 1. **``system.input.warm_start``** — load from an explicit file path.
-   Raises :exc:`FileNotFoundError` if the file does not exist.  Takes
+   Raises :exc:`FileNotFoundError` if the file does not exist. Takes
    precedence over ``run_id`` / ``fork_run_id`` when both are set.
 
 2. **``training.run_id`` or ``training.fork_run_id``** — resolve the
@@ -82,25 +81,32 @@ Evaluation is a read-only operation on a trained model and should never
 write new checkpoint files or update model weights.
 
 ***********************************
- Passing overrides via the CLI
+ Config and CLI overrides
 ***********************************
 
-``anemoi-training evaluate`` accepts arbitrary Hydra overrides just like
-the ``train`` command:
+``anemoi-training evaluate`` works exactly like ``anemoi-training train``
+for config selection and Hydra overrides. Pass ``--config-name`` to select
+a config file and any Hydra overrides as positional arguments:
 
 .. code:: bash
 
    anemoi-training evaluate \
+       --config-name evaluate_ana_short \
+       training.run_id=<run_id>
+
+You can also override individual keys without a dedicated config file:
+
+.. code:: bash
+
+   anemoi-training evaluate \
+       --config-name debug_ana_short \
+       training.run_id=<run_id> \
+       training.load_weights_only=true \
        dataloader.limit_batches.validation=10 \
        diagnostics.plot.enabled=true
 
-This makes it straightforward to, for example, enable plots that were
-disabled during training, or evaluate on a different date range by
-overriding the dataset split.
-
-A minimal override file covering the most common evaluation settings is
-provided below.  Save it and pass it with ``--config-dir`` / ``--config-name``,
-or copy the individual keys into your own config:
+A minimal evaluation config that pairs with a training config is shown below.
+It inherits the same defaults and overrides only the evaluation-specific keys:
 
 .. literalinclude:: yaml/config_evaluate.yaml
    :language: yaml
@@ -111,7 +117,7 @@ or copy the individual keys into your own config:
 
 The evaluator supports multi-GPU and multi-node evaluation via the same
 ``DDPGroupStrategy`` / ``DDPEnsGroupStrategy`` strategies used during
-training.  Set the hardware configuration as usual:
+training. Set the hardware configuration as usual:
 
 .. code:: yaml
 
@@ -122,4 +128,7 @@ training.  Set the hardware configuration as usual:
 
 The hidden script entry point ``.anemoi-training-evaluate`` is
 registered alongside ``.anemoi-training-train`` so that Lightning's
-interactive DDP can spawn rank > 0 processes correctly.
+interactive DDP can spawn rank > 0 processes correctly. Note that DDP
+wrapping is not applied during validation (Lightning only wraps the model
+for ``fit()``), but communication groups and sharding are set up
+identically to training.
