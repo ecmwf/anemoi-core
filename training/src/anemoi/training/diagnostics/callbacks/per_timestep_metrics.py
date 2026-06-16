@@ -16,6 +16,7 @@ import torch
 from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,12 +55,12 @@ class PerTimestepMetrics(Callback):
         if batch_idx % self.every_n_batches != 0:
             return
 
-        # validation_step returns (val_loss, metrics, y_preds)
+        # validation_step returns a TrainingStepOutput dataclass
         # y_preds is a list of {dataset_name: tensor}, one entry per task step
-        if not outputs or len(outputs) < 3:
+        if outputs is None:
             return
 
-        y_preds_list = outputs[2]
+        y_preds_list = outputs.predictions
         if not y_preds_list:
             return
 
@@ -103,6 +104,8 @@ class PerTimestepMetrics(Callback):
                     target_t,
                     grid_shard_slice=grid_shard_slice,
                     dataset_name=dataset_name,
+                    pred_layout=IndexSpace.MODEL_OUTPUT,
+                    target_layout=IndexSpace.DATA_FULL,
                 )
 
                 for metric_name, value in metrics.items():
