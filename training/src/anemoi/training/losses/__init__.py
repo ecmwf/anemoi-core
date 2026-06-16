@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
 from .huber import HuberLoss
-from .kcrps import AlmostFairKernelCRPS
-from .kcrps import KernelCRPS
+from .kcrps import CRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
 from .mae import MAELoss
@@ -20,17 +20,17 @@ from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
+from .spectral import SpectralAMSELoss
 from .spectral import SpectralCRPSLoss
 from .spectral import SpectralL2Loss
 from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
-    "AlmostFairKernelCRPS",
+    "CRPS",
     "CombinedLoss",
     "FourierCorrelationLoss",
     "HuberLoss",
-    "KernelCRPS",
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
@@ -39,8 +39,10 @@ __all__ = [
     "MSELoss",
     "MultiscaleLossWrapper",
     "RMSELoss",
+    "SpectralAMSELoss",
     "SpectralCRPSLoss",
     "SpectralL2Loss",
+    "TimeAggregateLossWrapper",
     "WeightedMSELoss",
     "get_loss_function",
 ]

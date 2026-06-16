@@ -117,7 +117,7 @@ class TestGraphTransformerBaseMapper:
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
         assert mapper.hidden_dim == mapper_init.hidden_dim
         assert mapper.out_channels_dst == self.OUT_CHANNELS_DST
-        assert isinstance(mapper.activation, nn.Module)
+        assert mapper.layer_factory is not None
 
     def test_pre_process(self, mapper, pair_tensor):
         # Should be a no-op in the base class
@@ -217,6 +217,26 @@ class TestGraphTransformerForwardMapper(TestGraphTransformerBaseMapper):
         assert torch.allclose(
             x_dst, x_dst_c, atol=1e-4
         ), f"x_dst ({x_dst}) != x_dst_c ({x_dst_c}) when num_chunks is changed"
+
+    def test_unsorted_edges_are_sorted_before_partitioning(self, mapper, pair_tensor, graph_provider):
+        x = pair_tensor
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
+
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+
+        mapper.num_chunks = 4
+        x_src_sorted, x_dst_sorted = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+
+        perm = torch.randperm(edge_index.shape[1], device=edge_index.device)
+        x_src_unsorted, x_dst_unsorted = mapper.forward(
+            x, batch_size, shard_info, edge_attr[perm], edge_index[:, perm], edges_are_dst_sorted=False
+        )
+
+        assert torch.allclose(x_src_sorted, x_src_unsorted, atol=1e-4)
+        assert torch.allclose(x_dst_sorted, x_dst_unsorted, atol=1e-4)
 
     def test_strategy(self, mapper, pair_tensor, graph_provider):
         x = pair_tensor

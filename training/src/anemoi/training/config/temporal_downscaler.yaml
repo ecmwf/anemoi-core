@@ -7,6 +7,7 @@ defaults:
 - model: graphtransformer
 - task: temporal_downscaler
 - training: single
+- override training/training_loss: single_MSE_aggregation
 - _self_
 
 config_validation: True
@@ -22,4 +23,6 @@ config_validation: True
 diagnostics:
   plot:
     callbacks: []
-  callbacks: []
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics
+      every_n_batches: 20

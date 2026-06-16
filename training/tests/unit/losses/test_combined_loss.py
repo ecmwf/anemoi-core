@@ -44,10 +44,9 @@ def test_combined_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test"]},
                 ],
-                "scalers": ["test"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -68,10 +67,9 @@ def test_combined_loss_invalid_loss_weights() -> None:
                 {
                     "_target_": "anemoi.training.losses.combined.CombinedLoss",
                     "losses": [
-                        {"_target_": "anemoi.training.losses.MSELoss"},
-                        {"_target_": "anemoi.training.losses.MAELoss"},
+                        {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                        {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test"]},
                     ],
-                    "scalers": ["test"],
                     "loss_weights": [1.0, 0.5, 1],
                 },
             ),
@@ -106,7 +104,6 @@ def test_combined_loss_seperate_scalers() -> None:
                     {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
                     {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
                 ],
-                "scalers": ["test", "test2"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -208,7 +205,6 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
                     },
                 ],
                 "loss_weights": [1.0, 0.5],
-                "scalers": ["*"],
             },
         ),
         scalers={
@@ -325,7 +321,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
 
     # Match the typical tensor layout used by Anemoi losses:
     pred = torch.randn(batch, 1, ensemble, points, variables, requires_grad=True)
-    target = torch.randn(batch, 1, 1, points, variables)  # allow broadcasting over ensemble if supported
+    target = torch.randn(batch, 1, 1, points, variables)
 
     # Node weights are commonly required by the weighted loss base class; keep them neutral.
     node_weights = torch.ones(points)

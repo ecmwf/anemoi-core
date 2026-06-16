@@ -11,49 +11,163 @@
 import logging
 
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
+import torch
+from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.utils import PYG_AVAILABLE
+from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
 
-class KNNAreaMaskBuilder:
-    """Class to build a mask based on distance to masked reference nodes using KNN.
+class _PYGAreaMaskBackend:
+    """PyG radius backend (CPU/GPU depending on distributed device)."""
 
-    Attributes
-    ----------
-    nearest_neighbour : NearestNeighbors
-        Nearest neighbour object to compute the KNN.
-    margin_radius_km : float
-        Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km.
-    reference_node_name : str
-        Name of the reference nodes in the graph to consider for the Area Mask.
-    mask_attr_name : str
-        Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes.
+    def __init__(self, device: torch.device | str):
+        LOGGER.debug("Initializing %s on device %s", self.__class__.__name__, device)
+        self.device = device
+        self._ref_vectors: torch.Tensor | None = None
+
+    def fit(self, coords_rad: torch.Tensor) -> None:
+
+        if coords_rad.device != self.device:
+            LOGGER.debug(
+                "%s: Moving reference vector coordinates from %s to %s",
+                self.__class__.__name__,
+                coords_rad.device,
+                self.device,
+            )
+
+        self._ref_vectors = latlon_rad_to_cartesian(coords_rad.to(self.device))
+
+    def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
+        from torch_geometric.nn import radius
+
+        assert self._ref_vectors is not None, "The model must be fitted before calling get_mask."
+
+        LOGGER.debug(
+            "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
+            self.__class__.__name__,
+            chord_threshold,
+        )
+
+        if isinstance(coords_rad, np.ndarray):
+            coords_rad = torch.from_numpy(coords_rad)
+
+        LOGGER.debug(
+            "%s: Moving query vector coordinates from %s to %s", self.__class__.__name__, coords_rad.device, self.device
+        )
+        coords_rad = coords_rad.to(self.device)
+
+        query_vectors = latlon_rad_to_cartesian(coords_rad)
+
+        edge_index = radius(
+            x=self._ref_vectors,
+            y=query_vectors,
+            r=chord_threshold,
+            max_num_neighbors=1,
+        )
+
+        mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
+        mask[edge_index[0]] = True
+        return mask.cpu()
+
+
+class _KDTreeAreaMaskBackend:
+    """Scipy cKDTree backend running on CPU."""
+
+    def __init__(self):
+        LOGGER.debug("Initializing %s", self.__class__.__name__)
+        self._ref_vectors: np.ndarray | None = None
+        self._kdtree: cKDTree | None = None
+
+    def fit(self, coords_rad: torch.Tensor) -> None:
+        if coords_rad.device != "cpu":
+            LOGGER.debug("%s: Moving reference coordinates from %s to cpu", self.__class__.__name__, coords_rad.device)
+            coords_rad = coords_rad.cpu()
+
+        self._ref_vectors = latlon_rad_to_cartesian_np(coords_rad.numpy())
+        self._kdtree = cKDTree(self._ref_vectors)
+
+    def get_mask(self, coords_rad: torch.Tensor | np.ndarray, chord_threshold: float) -> torch.Tensor:
+        assert self._kdtree is not None, "The model must be fitted before calling get_mask."
+
+        LOGGER.debug(
+            "%s: Getting the query coordinate mask with Eucl. chord threshold %.4f",
+            self.__class__.__name__,
+            chord_threshold,
+        )
+
+        if isinstance(coords_rad, torch.Tensor):
+            LOGGER.debug(
+                "%s: Moving query vector coordinates from %s to cpu", self.__class__.__name__, coords_rad.device
+            )
+            coords_rad = coords_rad.cpu().numpy()
+
+        query_vectors = latlon_rad_to_cartesian_np(coords_rad)
+        counts = self._kdtree.query_ball_point(query_vectors, r=chord_threshold, workers=-1, return_length=True)
+        return torch.from_numpy(counts > 0)
+
+
+class AreaMaskBuilder:
+    """Area mask builder using radius queries on unit-sphere chord distances.
+
+    The public API is backend-agnostic. At runtime, a dedicated backend is selected:
+    - PyG backend when available
+    - scipy cKDTree backend otherwise
 
     Methods
     -------
-    fit_coords(coords_rad: np.ndarray)
-        Fit the KNN model to the coordinates in radians.
+    fit_coords(coords_rad: torch.Tensor)
+        Fit the backend to the coordinates in radians.
     fit(graph: HeteroData)
-        Fit the KNN model to the reference nodes.
-    get_mask(coords_rad: np.ndarray) -> np.ndarray
+        Fit the backend to the reference nodes.
+    get_mask(coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor
         Get the mask for the nodes based on the distance to the reference nodes.
     """
 
-    def __init__(self, reference_node_name: str, margin_radius_km: float = 100, mask_attr_name: str | None = None):
+    def __init__(
+        self,
+        reference_node_name: str,
+        margin_radius_km: float = 100,
+        mask_attr_name: str | None = None,
+    ):
+        """Initialisation of the AreaMaskBuilder."""
         assert isinstance(margin_radius_km, (int, float)), "The margin radius must be a number."
         assert margin_radius_km > 0, "The margin radius must be positive."
 
-        self.nearest_neighbour = NearestNeighbors(metric="haversine", n_jobs=4)
         self.margin_radius_km = margin_radius_km
         self.reference_node_name = reference_node_name
         self.mask_attr_name = mask_attr_name
 
-    def get_reference_coords(self, graph: HeteroData) -> np.ndarray:
-        """Retrive coordinates from the reference nodes."""
+        self.device = get_distributed_device()
+        if PYG_AVAILABLE:
+            self._backend = _PYGAreaMaskBackend(device=self.device)
+        else:
+            self._backend = _KDTreeAreaMaskBackend()
+
+    @property
+    def _chord_threshold(self) -> float:
+        """Euclidean chord length threshold equivalent to margin_radius_km."""
+        return float(2 * np.sin(self.margin_radius_km / (2 * EARTH_RADIUS)))
+
+    def _get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
+        """Retrieve coordinates from the reference nodes.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            Graph object containing the reference nodes.
+
+        Returns
+        -------
+        torch.Tensor of shape (N_ref, 2)
+            Latitude and longitude of the reference nodes in radians.
+        """
         assert (
             self.reference_node_name in graph.node_types
         ), f'Reference node "{self.reference_node_name}" not found in the graph.'
@@ -66,33 +180,68 @@ class KNNAreaMaskBuilder:
             mask = graph[self.reference_node_name][self.mask_attr_name].squeeze()
             coords_rad = coords_rad[mask]
 
-        return coords_rad.cpu().numpy()
+        return coords_rad
 
-    def fit_coords(self, coords_rad: np.ndarray):
-        """Fit the KNN model to the coordinates in radians."""
-        self.nearest_neighbour.fit(coords_rad)
+    def fit_coords(self, coords_rad: torch.Tensor) -> None:
+        """Store the reference unit-sphere vectors.
 
-    def fit(self, graph: HeteroData):
-        """Fit the KNN model to the nodes of interest."""
-        # Prepare string for logging
+        Parameters
+        ----------
+        coords_rad : torch.Tensor of shape (N_ref, 2)
+            Latitude and longitude of the reference nodes in radians.
+        """
+        self._backend.fit(coords_rad)
+
+    def fit(self, graph: HeteroData) -> None:
+        """Fit to the reference nodes in the graph.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            Graph object containing the reference nodes.
+        """
         reference_mask_str = self.reference_node_name
         if self.mask_attr_name is not None:
-            reference_mask_str += f" ({self.mask_attr_name})"
+            reference_mask_str += f"[{self.mask_attr_name}]"
 
-        # Fit to the reference nodes
-        coords_rad = self.get_reference_coords(graph)
-        self.fit_coords(coords_rad)
-
+        coords_rad = self._get_reference_coords(graph)
         LOGGER.info(
-            'Fitting %s with %d reference nodes from "%s".',
+            "Fitting %s (%s) with %d reference nodes from %s.",
             self.__class__.__name__,
+            self._backend.__class__.__name__,
             len(coords_rad),
             reference_mask_str,
         )
+        LOGGER.debug("Reference nodes live on %s", coords_rad.device)
 
-    def get_mask(self, coords_rad: np.ndarray) -> np.ndarray:
-        """Compute a mask based on the distance to the reference nodes."""
+        self.fit_coords(coords_rad)
 
-        neigh_dists, _ = self.nearest_neighbour.kneighbors(coords_rad, n_neighbors=1)
-        mask = neigh_dists[:, 0] * EARTH_RADIUS <= self.margin_radius_km
-        return mask
+    def get_mask(self, coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor:
+        """Compute a mask based on the distance to the reference nodes.
+
+        For each query node, checks whether it lies within margin_radius_km of
+        any reference node, using the Euclidean chord distance equivalent to margin_radius_km as threshold.
+
+        Parameters
+        ----------
+        coords_rad : torch.Tensor or np.ndarray of shape (N_query, 2)
+            Latitude and longitude of the query nodes in radians.
+
+        Returns
+        -------
+        torch.Tensor of shape (N_query,)
+            Boolean mask, True where the query node is within margin_radius_km
+            of at least one reference node.
+        """
+        LOGGER.info(
+            "Computing area-mask (%s) for %d query nodes with margin: %.1f km",
+            self._backend.__class__.__name__,
+            len(coords_rad),
+            self.margin_radius_km,
+        )
+
+        _device = coords_rad.device if isinstance(coords_rad, torch.Tensor) else "cpu"
+
+        LOGGER.debug("Query nodes live on %s", _device)
+
+        return self._backend.get_mask(coords_rad, chord_threshold=self._chord_threshold)

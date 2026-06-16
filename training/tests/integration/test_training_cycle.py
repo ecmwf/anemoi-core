@@ -54,6 +54,19 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
 
 
+@pytest.fixture(autouse=True)
+def _reset_dynamo() -> None:
+    """Reset torch compile state before and after each test.
+
+    This prevents 'recomputed metadata doesn't match checkpointed value' errors observed with torch 2.12.
+    """
+    import torch._dynamo
+
+    torch._dynamo.reset()
+    yield
+    torch._dynamo.reset()
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_global(
@@ -345,16 +358,21 @@ def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    cfg, url = diffusion_config
+def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = diffusion_config
+def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = edm_transport_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = stochastic_interpolant_config
     BaseSchema(**cfg)
 
 
@@ -395,11 +413,11 @@ def test_training_cycle_imerg_target(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multidatasets_diffusion(
-    multidatasets_diffusion_config: tuple[DictConfig, list[str]],
+def test_training_cycle_multidatasets_edm_transport(
+    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
 ) -> None:
-    cfg, urls = multidatasets_diffusion_config
+    cfg, urls = multidatasets_edm_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
@@ -418,3 +436,10 @@ def test_training_cycle_temporal_downscaler_ensemble(
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = temporal_downscaler_ensemble_config
+    BaseSchema(**cfg)
