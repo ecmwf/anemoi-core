@@ -170,7 +170,6 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: s
     for name, child in module.named_children():
         # If this is the target submodule, freeze its parameters
         if name == target_name:
-            LOGGER.info("Freezing submodule: %s (%s)", child.__class__.__name__, name)
             for param in child.parameters():
                 LOGGER.info("Freezing parameter %s: %s", base_target + name, param.shape)
                 param.requires_grad = False
