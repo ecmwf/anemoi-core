@@ -59,14 +59,10 @@ def compose_test_config(
         checkpoint["source"] = _load_template("source", source)
     if loading is not None:
         checkpoint["loading"] = _load_template("loading", loading)
-
-    training: dict = {}
-    if checkpoint:
-        training["checkpoint"] = checkpoint
     if modifiers:
-        training["model_modifier"] = {
-            "modifiers": [m if isinstance(m, dict) else _freezing_modifier() for m in modifiers],
-        }
+        checkpoint["modifiers"] = [m if isinstance(m, dict) else _freezing_modifier() for m in modifiers]
+
+    training: dict = {"checkpoint": checkpoint} if checkpoint else {}
     return OmegaConf.create({"training": training})
 
 

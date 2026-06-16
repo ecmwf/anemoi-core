@@ -38,15 +38,14 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 # Configuration namespace for the checkpoint pipeline, kept together so the field
-# names can be changed in a single edit without touching the build logic.
-# ``training.checkpoint.{source,loading}`` are single ``_target_`` objects (exactly
-# one source, exactly one loader); ``training.model_modifier.modifiers`` is an
+# names can be changed in a single edit without touching the build logic. All three
+# stages live under ``training.checkpoint``: ``source`` and ``loading`` are single
+# ``_target_`` objects (exactly one source, exactly one loader); ``modifiers`` is an
 # ordered list of ``_target_`` objects applied in list order after loading.
 _TRAINING = "training"
 _CHECKPOINT = "checkpoint"
 _SOURCE = "source"
 _LOADING = "loading"
-_MODEL_MODIFIER = "model_modifier"
 _MODIFIERS = "modifiers"
 
 
@@ -63,7 +62,7 @@ def build_checkpoint_pipeline(cfg: DictConfig) -> CheckpointPipeline:
         - ``cfg.training.checkpoint.loading`` — a single ``_target_`` loading
           strategy, e.g. ``WeightsOnlyLoader`` / ``TransferLearningLoader`` /
           ``WarmStartLoader`` / ``ColdStartLoader``.
-        - ``cfg.training.model_modifier.modifiers`` — an ordered list of
+        - ``cfg.training.checkpoint.modifiers`` — an ordered list of
           ``_target_`` modifier stages, applied in list order after loading.
 
         Any of these blocks may be absent; an absent block contributes no stage.
@@ -88,7 +87,7 @@ def build_checkpoint_pipeline(cfg: DictConfig) -> CheckpointPipeline:
     if loading is not None:
         stage_configs.append(loading)
 
-    modifiers = OmegaConf.select(cfg, f"{_TRAINING}.{_MODEL_MODIFIER}.{_MODIFIERS}", default=None)
+    modifiers = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}", default=None)
     if modifiers:
         # Preserve list order: modifiers execute in the order they are declared.
         stage_configs.extend(modifiers)
