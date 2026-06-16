@@ -525,19 +525,11 @@ class GraphTransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
-        self.shard_strategy = shard_strategy
-
         assert shard_strategy in ["edges", "heads"], (
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
             f"Supported strategies are 'edges' and 'heads'."
         )
-
         self.shard_strategy = shard_strategy
-
-        assert shard_strategy in ["edges", "heads"], (
-            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
-            f"Supported strategies are 'edges' and 'heads'."
-        )
 
         self.build_layers(
             GraphTransformerProcessorBlock,
@@ -548,6 +540,7 @@ class GraphTransformerProcessor(BaseProcessor):
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
@@ -599,7 +592,7 @@ class GraphTransformerProcessor(BaseProcessor):
         Tensor
             Processed node features.
         """
-        size = sum(shard_info.nodes) if shard_info.nodes_are_sharded else x.size(0)
+        size = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
         edge_attr, edge_index = ensure_edges_are_dst_sorted(
             edge_attr,
             edge_index,
@@ -610,9 +603,8 @@ class GraphTransformerProcessor(BaseProcessor):
         )
 
         if not shard_info.edges_are_sharded():  # ensure edges are sharded
-            src_size, dst_size = size, size
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, src_size, dst_size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
+                edge_attr, edge_index, size, size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
             )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 

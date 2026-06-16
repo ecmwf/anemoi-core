@@ -36,6 +36,7 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
@@ -891,6 +892,69 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             for t in (query, key, value, edges)
         )
 
+    def _forward_edges_shard_strategy(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks=1,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        return einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
+
+    def _forward_heads_shard_strategy(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        shard_info: BipartiteGraphShardInfo,
+        batch_size: int,
+        size: Union[int, tuple[int, int]],
+        model_comm_group: Optional[ProcessGroup],
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
+            query, key, value, edges, shard_info, batch_size, model_comm_group
+        )
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks=1,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        return self.shard_output_seq(out, shard_info, head_shard_sizes, batch_size, model_comm_group)
+
     def forward(
         self,
         x: OptPairTensor,
@@ -919,33 +983,21 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
-        head_shard_sizes = None
         if self.shard_strategy == "heads":
-            query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
-                query, key, value, edges, shard_info, batch_size, model_comm_group
+            out = self._forward_heads_shard_strategy(
+                query,
+                key,
+                value,
+                edges,
+                edge_index,
+                shard_info,
+                batch_size,
+                size,
+                model_comm_group,
+                edges_are_dst_sorted,
             )
         else:
-            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
-
-        if self.qk_norm:
-            query = self.q_norm(query)
-            key = self.k_norm(key)
-
-        out = self.attention_block(
-            query,
-            key,
-            value,
-            edges,
-            edge_index,
-            size,
-            num_chunks=1,
-            edges_are_dst_sorted=edges_are_dst_sorted,
-        )
-
-        if self.shard_strategy == "heads":
-            out = self.shard_output_seq(out, shard_info, head_shard_sizes, batch_size, model_comm_group)
-        else:
-            out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
+            out = self._forward_edges_shard_strategy(query, key, value, edges, edge_index, size, edges_are_dst_sorted)
 
         out = self.projection(out + x_r)
         out = out + x_skip[1]
@@ -1032,6 +1084,142 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         self._cached_halo_info = None
         self._cached_partition = None
 
+    def _get_or_build_cached_halo_info(
+        self,
+        x: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ):
+        """Return cached halo info, building it once when model sharding is active."""
+        if not model_is_distributed(model_comm_group):
+            return None
+
+        if self._cached_halo_info is not None:
+            return self._cached_halo_info
+
+        if batch_size != 1:
+            raise ValueError(
+                "GraphTransformerProcessorBlock halo exchange requires batch_size=1 when model sharding is enabled."
+            )
+
+        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
+        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+        partition = build_graph_partition_from_shard_info(edge_index, (x, x), bipartite_shard_info, model_comm_group)
+        self._cached_partition = partition
+        self._cached_halo_info = build_halo_info(
+            partition,
+            edge_index,
+            model_comm_group,
+            shard_info.edges,
+            debug=ANEMOI_DEBUG_SHARDING,
+        )
+
+        if ANEMOI_DEBUG_SHARDING:
+            verify_halo_info(self._cached_halo_info, partition, model_comm_group)
+
+        return self._cached_halo_info
+
+    def _forward_edges_shard_strategy(
+        self,
+        x: Tensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+        num_chunks: int,
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        halo_info = self._get_or_build_cached_halo_info(x, edge_index, shard_info, batch_size, model_comm_group)
+
+        if halo_info is not None:
+            x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
+            edge_index_for_attention = halo_info.edge_index_local
+            # attention_size: local nodes (dst) attend to local + halo nodes (src)
+            attention_size = (halo_info.total_nodes, halo_info.num_local_nodes)
+        else:
+            x_plus_halo = x
+            edge_index_for_attention = edge_index
+            attention_size = (x.size(0), x.size(0))
+
+        # compute q on local nodes (dst), and k,v on local + halo nodes (src)
+        query, key, value, edges = self.get_qkve((x_plus_halo, x), edge_attr)
+        query, key, value, edges = (
+            einops.rearrange(
+                t,
+                "nodes (heads vars) -> nodes heads vars",
+                heads=self.num_heads,
+                vars=self.out_channels_conv,
+            )
+            for t in (query, key, value, edges)
+        )
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index_for_attention,
+            attention_size,
+            num_chunks,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        return einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
+
+    def _forward_heads_shard_strategy(
+        self,
+        x: Tensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        size: Union[int, tuple[int, int]],
+        model_comm_group: Optional[ProcessGroup],
+        num_chunks: int,
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        query, key, value, edges = self.get_qkve(x, edge_attr)
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+
+        query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
+            query, key, value, edges, bipartite_shard_info, batch_size, model_comm_group
+        )
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        return self.shard_output_seq(out, bipartite_shard_info, head_shard_sizes, batch_size, model_comm_group)
+
     def forward(
         self,
         x: OptPairTensor,
@@ -1057,86 +1245,28 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
         if self.shard_strategy == "edges":
-            # --- halo exchange path ----
-            # build and cache HaloInfo on first forward pass
-            if self._cached_halo_info is None:
-                LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
-                assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
-
-                bipartite_shard_info = BipartiteGraphShardInfo(
-                    src_nodes=shard_info.nodes,
-                    dst_nodes=shard_info.nodes,
-                    edges=shard_info.edges,
-                )
-                partition = build_graph_partition_from_shard_info(
-                    edge_index, (x, x), bipartite_shard_info, model_comm_group
-                )
-                self._cached_halo_info = build_halo_info(
-                    partition,
-                    edge_index,
-                    model_comm_group,
-                    shard_info.edges,
-                    debug=ANEMOI_DEBUG_SHARDING,
-                )
-                self._cached_partition = partition
-                if ANEMOI_DEBUG_SHARDING:
-                    verify_halo_info(self._cached_halo_info, partition, model_comm_group)
-
-            halo_info = self._cached_halo_info
-            x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
-
-            # q from local nodes only, k/v from local + halo nodes
-            query, key, value, edges = self.get_qkve((x_plus_halo, x), edge_attr)
-            query, key, value, edges = (
-                einops.rearrange(
-                    t,
-                    "nodes (heads vars) -> nodes heads vars",
-                    heads=self.num_heads,
-                    vars=self.out_channels_conv,
-                )
-                for t in (query, key, value, edges)
-            )
-
-            if self.qk_norm:
-                query = self.q_norm(query)
-                key = self.k_norm(key)
-
-            attn_size = (halo_info.total_nodes, halo_info.num_local_nodes)
-            out = self.attention_block(
-                query,
-                key,
-                value,
-                edges,
-                halo_info.edge_index_local,
-                attn_size,
+            out = self._forward_edges_shard_strategy(
+                x,
+                edge_attr,
+                edge_index,
+                shard_info,
+                batch_size,
+                model_comm_group,
                 num_chunks,
-                edges_are_dst_sorted=edges_are_dst_sorted,
+                edges_are_dst_sorted,
             )
-            out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
         else:
-            # heads sharding path
-            query, key, value, edges = self.get_qkve(x, edge_attr)
-
-            bipartite_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_info.nodes,
-                dst_nodes=shard_info.nodes,
-                edges=shard_info.edges,
+            out = self._forward_heads_shard_strategy(
+                x,
+                edge_attr,
+                edge_index,
+                shard_info,
+                batch_size,
+                size,
+                model_comm_group,
+                num_chunks,
+                edges_are_dst_sorted,
             )
-
-            head_shard_sizes = None
-            query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
-                query, key, value, edges, bipartite_shard_info, batch_size, model_comm_group
-            )
-
-            if self.qk_norm:
-                query = self.q_norm(query)
-                key = self.k_norm(key)
-
-            out = self.attention_block(
-                query, key, value, edges, edge_index, size, num_chunks, edges_are_dst_sorted=edges_are_dst_sorted
-            )
-
-            out = self.shard_output_seq(out, bipartite_shard_info, head_shard_sizes, batch_size, model_comm_group)
 
         # out = self.projection(out + x_r) in chunks:
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)
