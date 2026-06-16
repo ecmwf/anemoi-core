@@ -18,6 +18,7 @@ import torch
 
 from anemoi.training.diagnostics.callbacks.plot_adapter import PlotPayload
 from anemoi.training.tasks import Forecaster
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
 
@@ -76,6 +77,7 @@ class TestPlotPayload:
             post_processors={"data": _identity_post_processor()},
             latlons={"data": np.zeros((50, 2))},
         )
+        # outputs is stored as (loss, preds) tuple internally
         assert payload.batch_idx == 0
         assert "data" in payload.batch
         assert "data" in payload.post_processors
@@ -108,9 +110,10 @@ class TestPreparePayload:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -132,9 +135,10 @@ class TestPreparePayload:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload1 = adapter.prepare_payload(pl_module, batch, output, batch_idx=7)
@@ -154,9 +158,10 @@ class TestPreparePayload:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload1 = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -177,9 +182,10 @@ class TestPreparePayload:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -199,9 +205,10 @@ class TestPreparePayload:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -224,9 +231,10 @@ class TestPreparePayload:
         pl_module.model.model._graph_data["data"].x = torch.ones(10, 2) * (np.pi / 2)
 
         batch = {"data": torch.randn(2, 4, 1, 10, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 10, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 10, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -250,9 +258,10 @@ class TestGetDenormalized:
 
         pl_module = _make_pl_module(nlatlon=50)
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}, {"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -274,9 +283,10 @@ class TestGetDenormalized:
 
         pl_module = _make_pl_module(nlatlon=nlatlon)
         batch = {"data": torch.randn(batch_size, 4, 1, nlatlon, nvar)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -297,9 +307,10 @@ class TestGetDenormalized:
 
         pl_module = _make_pl_module(nlatlon=nlatlon)
         batch = {"data": torch.randn(batch_size, 4, 1, nlatlon, nvar)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)} for _ in range(n_steps)],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)} for _ in range(n_steps)],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -320,9 +331,10 @@ class TestGetDenormalized:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=5)
@@ -345,9 +357,10 @@ class TestGetDenormalized:
 
         pl_module = _make_pl_module()
         batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
@@ -382,9 +395,10 @@ class TestGetDenormalized:
         pl_module.model.model._graph_data["data_b"] = graph_data_mock_b
 
         batch = {"data": torch.randn(2, 4, 1, 50, 3), "data_b": torch.randn(2, 4, 1, 50, 3)}
-        output = (
-            torch.tensor(0.0),
-            [{"data": torch.randn(2, 1, 1, 50, 3), "data_b": torch.randn(2, 1, 1, 50, 3)}],
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3), "data_b": torch.randn(2, 1, 1, 50, 3)}],
         )
 
         payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)

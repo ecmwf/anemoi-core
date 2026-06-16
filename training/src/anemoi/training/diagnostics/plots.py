@@ -10,7 +10,7 @@
 
 import logging
 
-import matplotlib.cm as cm
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
@@ -542,8 +542,8 @@ def _resolve_variable_colormaps(
     tuple[Colormap, Colormap]
         (cmap, error_cmap)
     """
-    cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+    cmap = colormaps.default.get_cmap() if colormaps.get("default") else mpl.colormaps["viridis"]
+    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else mpl.colormaps["bwr"]
     for key in colormaps:
         if key not in ["default", "error"] and variable_name in colormaps[key].variables:
             cmap = colormaps[key].get_cmap()
