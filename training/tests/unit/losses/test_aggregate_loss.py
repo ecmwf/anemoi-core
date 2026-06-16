@@ -262,15 +262,34 @@ def test_unknown_agg_op_raises(pred: torch.Tensor, target: torch.Tensor) -> None
 
 
 def test_ignore_nans_flag() -> None:
-    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss(), ignore_nans=True)
-    assert wrapper.avg_function is torch.nanmean
-    assert wrapper.sum_function is torch.nansum
+    inner = _make_loss()
+    inner.ignore_nans = True
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert wrapper.ignore_nans
+
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    pred.requires_grad_()
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target[..., 0, 0] = torch.nan
+
+    result = wrapper(pred, target)
+    assert torch.isfinite(result).all(), "Expected finite loss with ignore_nans=True"
+    (grad,) = torch.autograd.grad(result, pred, retain_graph=True)
+    assert torch.isfinite(grad).all(), "Expected finite gradients"
 
 
 def test_default_no_ignore_nans() -> None:
-    wrapper = TimeAggregateLossWrapper(["mean"], _make_loss())
-    assert wrapper.avg_function is torch.mean
-    assert wrapper.sum_function is torch.sum
+    inner = _make_loss()
+    wrapper = TimeAggregateLossWrapper(["mean"], inner)
+    assert not wrapper.ignore_nans
+
+    pred = torch.rand(BS, TIME, ENS_CRPS, LATLON, NVAR)
+    pred.requires_grad_()
+    target = torch.rand(BS, TIME, LATLON, NVAR)
+    target[..., 0, 0] = torch.nan
+
+    result = wrapper(pred, target)
+    assert torch.isnan(result).any(), "Expected nan in loss with ignore_nans=False"
 
 
 # ---------------------------------------------------------------------------

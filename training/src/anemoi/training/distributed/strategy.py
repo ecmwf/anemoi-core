@@ -140,9 +140,8 @@ class BaseDDPStrategy(DDPStrategy):
         dict
             A dictionary containing the shard sizes for each dataset.
         """
-        # During fit() the LightningModule is wrapped by DDP and accessible via .module.
-        # During validate() (e.g. AnemoiEvaluator) DDP wrapping may not have happened yet,
-        # so fall back to the model directly.
+        # For training, the model is wrapped in DDP and the LightningModule is accessible via trainer.model.module
+        # For evaluation, the model is not wrapped in DDP and the LightningModule is accessible via trainer.model
         model = getattr(trainer.model, "module", trainer.model)
         shard_sizes = model.shard_sizes
         assert shard_sizes is not None, "Shard shapes should be set after setup"
