@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .base import BaseGraphModel
+from .encoder_processor_cascadedecoder import AnemoiModelEncProcCascadeDec
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
@@ -19,6 +20,7 @@ from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProc
 
 __all__ = [
     "BaseGraphModel",
+    "AnemoiModelEncProcCascadeDec",
     "AnemoiModelEncProcDec",
     "AnemoiEnsModelEncProcDec",
     "AnemoiTransportModelEncProcDec",
