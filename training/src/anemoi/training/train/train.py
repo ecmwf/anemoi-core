@@ -47,6 +47,7 @@ from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -345,8 +346,9 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        training_method = get_class(self.config.training.training_method)
-        model = training_method(**kwargs)  # Task -> pl.LightningModule
+        training_method_cfg = self.config.training.method
+        training_method_cls = get_class(training_method_cfg._target_)
+        model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -359,11 +361,16 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = training_method.load_from_checkpoint(
+
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu,
+                # The model will be sent to GPU when trainer.fit() is called
+                model = training_method_cls.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",
                 )
 
             model.data_indices = self.data_indices
@@ -376,8 +383,11 @@ class AnemoiTrainer(ABC):
             # Freeze the chosen model weights
             LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
             for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
-                LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                is_found = freeze_submodule_by_name(model.model.model, submodule_name)
+                if is_found:
+                    LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                else:
+                    LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
 
         return model
 

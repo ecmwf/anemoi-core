@@ -332,17 +332,18 @@ def _alltoall_transpose(
     Tensor
         Result of the all-to-all exchange
     """
+    # normalise negative dims
+    ndim = input_.dim()
+    dim_split = dim_split % ndim
+    dim_concat = dim_concat % ndim
+    assert dim_split != dim_concat, "Error, all-to-all split and concat dimensions must be different."
+
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return input_
 
     myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
-
-    # normalise negative dims
-    ndim = input_.dim()
-    dim_split = dim_split % ndim
-    dim_concat = dim_concat % ndim
 
     # split input along dim_split
     input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]

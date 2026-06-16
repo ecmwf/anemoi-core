@@ -77,8 +77,8 @@ class RolloutEval(Callback):
         # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,
         # because `_step(..., validation_mode=True)` uses the task setting to determine step count.
         with torch.no_grad():
-            loss, metrics, _ = pl_module._step(batch, validation_mode=True)
-            self._log(pl_module, loss, metrics, batch_tensor.shape[0])
+            step_output = pl_module._step(batch, validation_mode=True)
+            self._log(pl_module, step_output.loss, step_output.metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
 

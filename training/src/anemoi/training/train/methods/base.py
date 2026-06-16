@@ -51,8 +51,6 @@ _trainable_edge_perm_fix_migration = importlib.import_module(
 ).migrate
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -60,6 +58,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
+    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -906,7 +905,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+    ) -> TrainingStepOutput:
         pass
 
     def allgather_batch(self, batch: torch.Tensor, dataset_name: str) -> torch.Tensor:
@@ -1018,8 +1017,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
 
-        train_loss, *_ = self._step(batch)
-        train_loss = train_loss.sum()
+        step_output = self._step(batch)
+        train_loss = step_output.loss.sum()
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -1036,15 +1035,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> TrainingStepOutput:
         """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Validation batch
+            Validation batch.
         batch_idx : int
-            Batch inces
+            Batch index.
+
+        Returns
+        -------
+        TrainingStepOutput
+            Output of the validation step.
         """
         del batch_idx
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
@@ -1053,7 +1057,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch_size = next(iter(batch.values())).shape[0]
 
         with torch.no_grad():
-            val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
+            step_output = self._step(batch, validation_mode=True)
+        val_loss_scales = step_output.loss
+        metrics = step_output.metrics
         val_loss = val_loss_scales.sum()
 
         self.log(
@@ -1100,7 +1106,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     sync_dist=True,
                 )
 
-        return val_loss, *args
+        return step_output
 
     def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
@@ -1125,6 +1131,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        self.trainer.datamodule.set_epoch(self.current_epoch + 1)
 
     def configure_optimizers(
         self,
