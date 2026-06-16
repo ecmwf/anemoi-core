@@ -97,6 +97,8 @@ class BaseGradientLoss(BaseLoss):
         """
         super().__init__(**kwargs)
 
+        print('@OP', 'init',__file__)
+
         LOGGER.info(f'Create instance of BaseGradientLoss from graph {graph} and \
                     graph_name {graph_name}')
 
@@ -125,6 +127,8 @@ class BaseGradientLoss(BaseLoss):
         self.edge_weight = edge_weight
         self.graph = graph
 
+        print('@OP', 'init / graph_provider',__file__)
+
         self.graph_provider = create_graph_provider(
             graph=self.graph,
             edge_attributes=['edge_weight'],
@@ -132,6 +136,8 @@ class BaseGradientLoss(BaseLoss):
             dst_size=self.num_nodes,
             trainable_size=0,
         ) 
+
+        print('@OP', 'init / graph_provider / END',__file__)
 
 
     def forward(
@@ -180,16 +186,24 @@ class BaseGradientLoss(BaseLoss):
         is_sharded = grid_shard_slice is not None
         batch_size = pred.shape[0]
 
+        print('@OP', 'forward / before graphe_provider',__file__)
+
+
         edge_attr, edge_index, edge_shard_sizes = self.graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=group,
         )
         del edge_shard_sizes
 
+
+        print('@OP', 'forward / before graphe_provider / END',__file__)
+
         edge_weight = edge_attr
 
 
         difference = pred - target
+
+        print('@OP', 'Compute metric layer',__file__)
 
         gradient_difference_metric = self.gradient_metric_layer(
             difference,
@@ -199,10 +213,18 @@ class BaseGradientLoss(BaseLoss):
             edge_weight = edge_weight,
         )
         
+        print('@OP', 'Compute metric layer/END',__file__)
+
         out = gradient_difference_metric
        
+        print('@OP', 'Scale',__file__)
+
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
-        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)    
+        print('@OP', 'Reduce',__file__)
+        reduce =  self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)    
+        print('@OP', 'Reduce/END',__file__)
+        return reduce
+
 
 
 class GradientMeanSquareLoss(BaseGradientLoss):
