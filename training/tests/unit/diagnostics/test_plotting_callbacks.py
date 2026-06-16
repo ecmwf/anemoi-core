@@ -197,6 +197,13 @@ def _make_pl_module_forecaster(
     pl_module.model.model._graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
     graph_data = pl_module.model.model._graph_data["data"]
     graph_data.__getitem__ = lambda k: torch.zeros(nlatlon, 2) if k == pl_module.model.model._graph_name_data else None
+    graph_data.x = torch.zeros(nlatlon, 2)
+
+    # allgather_batch is identity in single-rank tests
+    pl_module.allgather_batch = MagicMock(side_effect=lambda x, _name: x)
+
+    # post_processors used by prepare_payload
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
 
     # Use no-op output_mask
     pl_module.output_mask = {"data": NoOutputMask()}
@@ -225,6 +232,13 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     # Mock graph data
     pl_module.model.model._graph_data = {"data": MagicMock()}
     pl_module.model.model._graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
+    pl_module.model.model._graph_data["data"].x = torch.zeros(nlatlon, 2)
+
+    # allgather_batch is identity in single-rank tests
+    pl_module.allgather_batch = MagicMock(side_effect=lambda x, _name: x)
+
+    # post_processors used by prepare_payload
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
 
     # Use no-op output_mask
     pl_module.output_mask = {"data": NoOutputMask()}
@@ -298,8 +312,10 @@ def test_process_forecaster_output_shapes():
             {"data": torch.randn(batch_size, n_step_output, n_ens, nlatlon, nvar)},
         ],
     )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
 
     data, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
@@ -364,8 +380,10 @@ def test_process_time_interpolator_output_shapes():
             {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
         ],
     )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
 
     data, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
@@ -395,8 +413,10 @@ def test_process_temporal_downscaler_multi_out_squeeze():
             {"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)},
         ],
     )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
 
     _, output_tensor = callback.process(pl_module, "data", outputs, batch)
 
@@ -638,8 +658,6 @@ def test_plot_spectrum_temporal_downscaler():
     nlatlon = 20
     pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
 
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
     outputs = _step_output(
         [
@@ -647,6 +665,10 @@ def test_plot_spectrum_temporal_downscaler():
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
         ],
     )
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
     trainer = MagicMock()
     trainer.logger = MagicMock()
 
@@ -684,13 +706,15 @@ def test_plot_spectrum_forecaster():
         validation_rollout=rollout_steps,
         nlatlon=nlatlon,
     )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
     outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(rollout_steps)],
     )
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
     trainer = MagicMock()
     trainer.logger = MagicMock()
 
@@ -727,8 +751,6 @@ def test_plot_histogram_temporal_downscaler():
     nlatlon = 20
     pl_module = _make_pl_module_temporal_downscaler(nlatlon=nlatlon)
 
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
     batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
     outputs = _step_output(
         [
@@ -736,6 +758,10 @@ def test_plot_histogram_temporal_downscaler():
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
         ],
     )
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
     trainer = MagicMock()
     trainer.logger = MagicMock()
 
@@ -773,13 +799,15 @@ def test_plot_histogram_forecaster():
         n_step_output=n_step_output,
         nlatlon=nlatlon,
     )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
     batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
     outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(validation_rollout)],
     )
+    payload = pl_module.plot_adapter.prepare_payload(pl_module, batch, outputs, batch_idx=0)
+    callback.post_processors = payload.post_processors
+    callback.latlons = payload.latlons
+    callback._payload = payload
     trainer = MagicMock()
     trainer.logger = MagicMock()
 

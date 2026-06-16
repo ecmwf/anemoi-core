@@ -853,14 +853,14 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         pl_module: pl.LightningModule,
         dataset_name: str,
         outputs: TrainingStepOutput,
-        batch: dict[str, torch.Tensor],
+        batch: dict[str, torch.Tensor],  # noqa: ARG002
         members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
 
-        Uses the cached denormalized tensors from the payload when available,
-        avoiding redundant post-processing across callbacks that share the same
-        batch.
+        Reads lazily-denormalized tensors from ``self._payload``, which must have
+        been populated by ``on_validation_batch_end`` via ``prepare_payload`` before
+        this method is called.
 
         Parameters
         ----------
@@ -872,7 +872,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             The outputs from the model. The predictions must be a list of dicts
             (one per outer step).
         batch : dict[str, torch.Tensor]
-            The batch of data.
+            The batch of data (unused; kept for API compatibility with subclass overrides).
         members : int | list[int] | None, optional
             Ensemble members to select. Only used when the plot adapter is ensemble-aware.
             None returns all members. Default is 0 (first member).
@@ -881,54 +881,36 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         -------
         tuple[np.ndarray, np.ndarray]
             The data and output tensors for plotting.
-        """
-        if self.latlons is None:
-            self.latlons = {}
 
-        if dataset_name not in self.latlons:
-            # Fallback: extract latlons if not already populated by prepare_payload
-            self.latlons[dataset_name] = np.rad2deg(
-                pl_module.model.model._graph_data[dataset_name].x.detach().cpu().numpy(),
+        Raises
+        ------
+        RuntimeError
+            If ``_payload`` has not been set or does not contain ``dataset_name``.
+        """
+        payload = self._payload
+        if payload is None or dataset_name not in payload.feature_indices:
+            msg = (
+                f"process() called without a valid payload for dataset '{dataset_name}'. "
+                "Ensure on_validation_batch_end has run and prepare_payload was called first."
             )
+            raise RuntimeError(msg)
 
         assert isinstance(
             outputs.predictions,
             list,
         ), "outputs.predictions must be a list of per-step dicts."
 
-        feature_indices = pl_module.data_indices[dataset_name].data.output.full
-
-        # Use lazily-computed denormalized tensors from the payload (computed once
-        # on first access, shared across all callbacks on this batch).
-        payload = getattr(self, "_payload", None)
-        if payload is not None and dataset_name in payload.feature_indices:
-            denormed_input, denormed_output = payload.get_denormalized(dataset_name)
-            data = denormed_input[self.sample_idx]
-            output_tensor = torch.cat(
-                tuple(
-                    pl_module.plot_adapter.select_members(
-                        denormed_output[step_idx, self.sample_idx : self.sample_idx + 1],
-                        members,
-                    )
-                    for step_idx in range(denormed_output.shape[0])
-                ),
-            )
-        else:
-            # Fallback for callers without a payload (e.g. direct process() calls)
-            input_tensor = batch[dataset_name].detach().cpu()[..., feature_indices]
-
-            data = self.post_processors[dataset_name](input_tensor)[self.sample_idx]
-            output_tensor = torch.cat(
-                tuple(
-                    pl_module.plot_adapter.select_members(
-                        self.post_processors[dataset_name](x[dataset_name][:, ...].detach().cpu(), in_place=False)[
-                            self.sample_idx : self.sample_idx + 1
-                        ],
-                        members,
-                    )
-                    for x in outputs.predictions
-                ),
-            )
+        denormed_input, denormed_output = payload.get_denormalized(dataset_name)
+        data = denormed_input[self.sample_idx]
+        output_tensor = torch.cat(
+            tuple(
+                pl_module.plot_adapter.select_members(
+                    denormed_output[step_idx, self.sample_idx : self.sample_idx + 1],
+                    members,
+                )
+                for step_idx in range(denormed_output.shape[0])
+            ),
+        )
 
         output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
         output_tensor = (
