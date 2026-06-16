@@ -15,6 +15,7 @@ import pytest
 import torch
 
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
+from anemoi.training.train.step_output import TrainingStepOutput
 
 BS = 2
 TIME = 6
@@ -67,13 +68,13 @@ def _make_pl_module(
     return pl_module
 
 
-def _make_outputs(n_timesteps: int = TIME, n_ens: int = ENS, n_grid: int = GRID, n_var: int = NVAR) -> tuple:
-    """Create outputs as returned by validation_step: (val_loss, metrics, [y_preds_dict])."""
+def _make_outputs(n_timesteps: int = TIME, n_ens: int = ENS, n_grid: int = GRID, n_var: int = NVAR) -> TrainingStepOutput:
+    """Create outputs as returned by validation_step."""
     val_loss = torch.tensor(0.5)
     metrics = {}
     y_pred = torch.randn(BS, n_timesteps, n_ens, n_grid, n_var)
     y_preds_dict = {"data": y_pred}
-    return (val_loss, metrics, [y_preds_dict])
+    return TrainingStepOutput(loss=val_loss, metrics=metrics, predictions=[y_preds_dict])
 
 
 def _make_trainer() -> MagicMock:
@@ -186,10 +187,11 @@ class TestPerTimestepMetrics:
         pl_module = _make_pl_module()
         batch = _make_batch()
 
-        callback.on_validation_batch_end(trainer, pl_module, (), batch, batch_idx=0)
+        callback.on_validation_batch_end(trainer, pl_module, None, batch, batch_idx=0)
         pl_module.calculate_val_metrics.assert_not_called()
 
-        callback.on_validation_batch_end(trainer, pl_module, (torch.tensor(0.5), {}, []), batch, batch_idx=0)
+        empty_outputs = TrainingStepOutput(loss=torch.tensor(0.5), metrics={}, predictions=[])
+        callback.on_validation_batch_end(trainer, pl_module, empty_outputs, batch, batch_idx=0)
         pl_module.calculate_val_metrics.assert_not_called()
 
     def test_slices_time_dimension_correctly(self, callback: PerTimestepMetrics) -> None:
