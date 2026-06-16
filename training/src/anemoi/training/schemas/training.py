@@ -575,6 +575,10 @@ class BaseTrainingSchema(BaseModel):
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
+    checkpoint: dict | None = Field(default=None)
+    "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
+    " acquisition source under `source` and/or a loading strategy under `loading`,"
+    " each a Hydra `_target_` block. None leaves legacy checkpoint handling in place."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."

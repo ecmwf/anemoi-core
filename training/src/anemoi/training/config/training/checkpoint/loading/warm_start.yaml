@@ -1,0 +1,3 @@
+# Loading strategy — resume an interrupted run: restores weights (exact match),
+# optimizer state, scheduler state, and training progress (epoch, global_step).
+_target_: anemoi.training.checkpoint.loading.strategies.WarmStartLoader
