@@ -1,6 +1,0 @@
-# Loading strategy — transfers matching parameters from a source checkpoint, skipping
-# any with shape mismatches. Does NOT change architecture. To freeze transferred
-# params or add LoRA, chain a ModifierStage after this loader.
-_target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
-skip_mismatched: true
-strict: false

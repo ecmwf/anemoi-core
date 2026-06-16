@@ -1,3 +1,0 @@
-# Loading strategy — full state restoration: model weights + optimizer + scheduler
-# + epoch/step. Use for resuming an interrupted training run. Architecture unchanged.
-_target_: anemoi.training.checkpoint.loading.strategies.WarmStartLoader
