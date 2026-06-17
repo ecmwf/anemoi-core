@@ -22,7 +22,6 @@ from rich.tree import Tree
 from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -323,11 +322,6 @@ class NativeGridDataset(BaseAnemoiReader):
 
     A single sequence covering the whole time series; relative offsets index
     the time axis directly.  This is the default analysis behaviour.
-
-    Optionally accepts ``model_run_info`` (a dict with ``start`` and ``length``
-    keys) to prevent samples from crossing model-run boundaries.  This
-    replicates the legacy ``TrajectoryDataset`` behaviour for 4-D forecast
-    datasets where each model run covers a fixed number of timesteps.
     """
 
     def __init__(
@@ -336,74 +330,12 @@ class NativeGridDataset(BaseAnemoiReader):
         dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-        model_run_info: dict | None = None,
         sampling: dict | None = None,
     ) -> None:
         """Initialize NativeGridDataset."""
         super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
         if sampling is not None:
             self.default_sampling = sampling
-        self._trajectory_ids: np.ndarray | None = None
-        if model_run_info is not None:
-            self._trajectory_ids = self._compute_trajectory_ids(model_run_info["start"], int(model_run_info["length"]))
-
-    def _compute_trajectory_ids(
-        self,
-        trajectory_start: datetime.datetime | str,
-        trajectory_length: int,
-    ) -> np.ndarray:
-        """Assign each date an integer model-run ID.
-
-        Dates before ``trajectory_start`` receive a negative ID (they are kept
-        as usable anchors but a sample window straddling the boundary will be
-        excluded by :func:`get_usable_indices`).
-
-        Parameters
-        ----------
-        trajectory_start : datetime.datetime | str
-            Start datetime of the first model run.
-        trajectory_length : int
-            Number of dataset timesteps per model run.
-        """
-        trajectory_length_seconds = trajectory_length * frequency_to_seconds(self.frequency)
-        return (self.dates - np.datetime64(trajectory_start, "s")) // np.timedelta64(
-            trajectory_length_seconds,
-            "s",
-        )
-
-    def compute_anchors(
-        self,
-        relative_indices: list[int] | np.ndarray,
-        sampling: dict | None = None,
-    ) -> np.ndarray:
-        """Return valid anchors, filtering out any that cross model-run boundaries."""
-        if getattr(self, "_trajectory_ids", None) is None:
-            return super().compute_anchors(relative_indices, sampling)
-
-        sampling = sampling or self.default_sampling
-        rel = np.asarray(list(relative_indices), dtype=np.int64)
-        window = int(rel.max()) - int(rel.min()) + 1
-        raw_stride = sampling.get("stride") if isinstance(sampling, dict) else None
-        stride = window if raw_stride is None else int(raw_stride)
-        if stride < 1:
-            msg = f"trajectory_sampling.stride must be >= 1, got {stride}."
-            raise ValueError(msg)
-
-        positions = get_usable_indices(
-            self.missing_positions(0),
-            self.sequence_length(0),
-            rel,
-            trajectory_ids=self._trajectory_ids,
-        )
-
-        if stride > 1 and positions.size:
-            positions = positions[(positions - positions[0]) % stride == 0]
-
-        if not positions.size:
-            return np.empty((0, 2), dtype=np.int64)
-        seq_col = np.zeros(positions.size, dtype=np.int64)
-        return np.stack([seq_col, positions], axis=1)
-
 
 class TrajectoryDataset(BaseAnemoiReader):
     """Trajectory dataset with an explicit lead-step axis.
@@ -514,24 +446,8 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
 
     if trajectory_config is not None:
         sampling = trajectory_config.get("sampling") if isinstance(trajectory_config, dict) else None
-        if sampling is not None:
-            # 5D trajectory zarr dataset (new behaviour)
-            LOGGER.info("Creating TrajectoryDataset...")
-            return TrajectoryDataset(**dataset_config, sampling=_as_dict(sampling))
-
-        # Legacy 4D dataset with model-run boundary enforcement: trajectory has start/length fields
-        model_run_info = None
-        if isinstance(trajectory_config, dict) and trajectory_config.get("start") is not None:
-            model_run_info = {
-                "start": trajectory_config["start"],
-                "length": trajectory_config["length"],
-            }
-            sampling = _as_dict(trajectory_config.get("sampling"))
-            LOGGER.info("Creating NativeGridDataset with model_run_info (run-boundary enforcement)...")
-        else:
-            sampling = None
-            LOGGER.info("Creating NativeGridDataset...")
-        return NativeGridDataset(**dataset_config, model_run_info=model_run_info, sampling=sampling)
+        LOGGER.info("Creating TrajectoryDataset...")
+        return TrajectoryDataset(**dataset_config, sampling=_as_dict(sampling))
 
     LOGGER.info("Creating NativeGridDataset...")
     return NativeGridDataset(**dataset_config)
