@@ -562,55 +562,39 @@ The above can be adapted depending on the use case and taking advantage
 of hydra, you can also reuse ``config.training.run_id`` or
 ``config.training.fork_run_id`` to define the path to the checkpoint.
 
-*****************
- Model Modifiers
-*****************
+*******************
+ Transfer Learning
+*******************
 
-Composable model modifications for transfer learning and parameter
-control.
+Transfer learning allows the model to reuse knowledge from a previously
+trained checkpoint. This is particularly useful when the new task is
+related to the old one, enabling faster convergence and often improving
+model performance.
 
-Parameter Freezing
-==================
-
-Freeze specific layers during fine-tuning:
-
-.. code:: yaml
-
-   training:
-      checkpoint:
-         modifiers:
-            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
-              submodules_to_freeze:
-                 - "encoder"        # freeze encoder
-                 - "processor.0"    # freeze first processor
-
-The ``FreezingModifierStage`` supports:
-
--  Dot notation for nested modules (e.g., ``processor.0``, ``encoder.attention``)
--  Strict mode to raise errors on missing modules
--  Gradient validation to verify frozen parameters
-
-Submodules are addressed by their full path within the model: an exact
-child name or a dot-separated path. A bare name does not match nested
-submodules.
-
-Example
-========
-
-Parameter freezing with multiple layers:
+To enable transfer learning, set the config.training.transfer_learning
+flag to True in the configuration file.
 
 .. code:: yaml
 
    training:
-      checkpoint:
-         modifiers:
-            - _target_: "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
-              submodules_to_freeze: ["encoder", "processor.0"]
-              strict: false
-              validate_gradients: true
+      # start the training from a checkpoint of a previous run
+      fork_run_id: ...
+      load_weights_only: True
+      transfer_learning: True
 
-Legacy key
-==========
+When this flag is active and a checkpoint path is specified in
+``config.system.input.warm_start`` or ``self.last_checkpoint``, the system loads
+the pre-trained weights using the `transfer_learning_loading()` function.
+This approach ensures only compatible weights are loaded and mismatched
+layers are handled appropriately.
+
+For example, transfer learning might be used to adapt a weather
+forecasting model trained on one geographic region to another region
+with similar characteristics.
+
+****************
+ Model Freezing
+****************
 
 Model freezing is a technique where specific parts (submodules) of a
 model are excluded from training. This is useful when certain parts of
