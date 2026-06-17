@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
-
 from anemoi.training.checkpoint.modifiers.base import ModelModifier
 
 if TYPE_CHECKING:
+    import torch
+
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
@@ -137,68 +137,23 @@ class FreezingModifierStage(ModelModifier):
         return frozen_count
 
     def _validate_gradient_flow(self, model: torch.nn.Module) -> None:
-        """Validate that frozen parameters don't accumulate gradients.
+        """Validate that the frozen submodules' parameters are non-trainable.
 
-        Performs a test forward/backward pass. Failures are logged as warnings,
-        not raised, since validation may fail for models with non-standard inputs.
+        A parameter with ``requires_grad=False`` cannot accumulate gradients, so
+        checking the flag is sufficient and needs no forward/backward pass (which
+        would also require model-specific input). A submodule name that does not
+        resolve was never frozen and is skipped.
         """
-        LOGGER.debug("Validating gradient flow for frozen parameters")
-
-        was_training = model.training
-        model.eval()
-
-        try:
-            test_input = torch.randn(1, 10, requires_grad=True)
-
+        for module_name in self.submodules_to_freeze:
             try:
-                output = model(test_input)
-                if hasattr(output, "mean"):
-                    loss = output.mean()
-                elif isinstance(output, torch.Tensor):
-                    loss = output.sum()
-                else:
-                    loss = output[0].sum()
+                target_module = model.get_submodule(module_name)
+            except AttributeError:
+                continue
 
-                loss.backward()
-
-                for module_name in self.submodules_to_freeze:
-                    self._check_module_gradients(model, module_name)
-
-                LOGGER.debug("Gradient validation successful — frozen parameters have no gradients")
-
-            except (RuntimeError, TypeError, AttributeError) as e:
-                LOGGER.warning("Could not validate gradient flow: %s", e)
-
-        finally:
-            if was_training:
-                model.train()
-            model.zero_grad()
-
-    def _check_module_gradients(self, module: torch.nn.Module, target_name: str) -> None:
-        """Check that a specific module's parameters have no gradients.
-
-        Resolves ``target_name`` exactly as ``_freeze_submodule_by_name``
-        does; a path that does not resolve was never frozen, so there is
-        nothing to check.
-
-        Parameters
-        ----------
-        module : torch.nn.Module
-            The parent module to resolve the path within.
-        target_name : str
-            Full path of the submodule to check.
-
-        Raises
-        ------
-        RuntimeError
-            If frozen parameters have gradients.
-        """
-        try:
-            target_module = module.get_submodule(target_name)
-        except AttributeError:
-            return
-
-        for param_name, param in target_module.named_parameters():
-            if not param.requires_grad and param.grad is not None:
-                msg = f"Frozen parameter '{target_name}.{param_name}' unexpectedly has gradients."
-                raise RuntimeError(msg)
+            trainable = [name for name, p in target_module.named_parameters() if p.requires_grad]
+            if trainable:
+                LOGGER.warning(
+                    "Frozen submodule '%s' still has trainable parameters: %s",
+                    module_name,
+                    trainable,
+                )
