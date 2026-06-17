@@ -9,9 +9,9 @@
 
 """Build a checkpoint pipeline from a training configuration.
 
-This module turns the declarative ``training.checkpoint`` and
-``training.model_modifier`` configuration into an executable
-:class:`~anemoi.training.checkpoint.pipeline.CheckpointPipeline`. It is the single
+This module turns the declarative ``training.checkpoint`` configuration into an
+executable :class:`~anemoi.training.checkpoint.pipeline.CheckpointPipeline`. All
+pipeline stages (source, loading, modifiers) live under that one namespace. It is the single
 place that knows the configuration namespace and the canonical stage order, so a
 caller (the trainer, or a test) can obtain a ready-to-run pipeline from a config
 object without hand-assembling stages.
