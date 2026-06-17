@@ -337,6 +337,7 @@ class NativeGridDataset(BaseAnemoiReader):
         if sampling is not None:
             self.default_sampling = sampling
 
+
 class TrajectoryDataset(BaseAnemoiReader):
     """Trajectory dataset with an explicit lead-step axis.
 
