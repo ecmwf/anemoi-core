@@ -583,8 +583,8 @@ flag to True in the configuration file.
       transfer_learning: True
 
 When this flag is active and a checkpoint path is specified in
-config.system.input.warm_start or self.last_checkpoint, the system loads
-the pre-trained weights using the `transfer_learning_loading` function.
+``config.system.input.warm_start`` or ``self.last_checkpoint``, the system loads
+the pre-trained weights using the `transfer_learning_loading()` function.
 This approach ensures only compatible weights are loaded and mismatched
 layers are handled appropriately.
 
@@ -602,13 +602,16 @@ the model have been sufficiently trained or should remain unchanged for
 the current task.
 
 To specify which submodules to freeze, use the
-config.training.submodules_to_freeze field in the configuration. List
+``config.training.submodules_to_freeze`` field in the configuration. List
 the names of submodules to be frozen. During model initialization, these
 submodules will have their parameters frozen, ensuring they are not
 updated during training.
 
-For example with the following configuration, the processor will be
-frozen and only the encoder and decoder will be trained:
+For example, if you have a pre-trained model on a 'global' dataset and
+want to train a new decoder with the previous model's parameters frozen,
+you would specify the following configuration to freeze the trainable
+parameters of the processor, as well as those of the 'global' encoder and
+decoder.
 
 .. code:: yaml
 
@@ -618,7 +621,9 @@ frozen and only the encoder and decoder will be trained:
       load_weights_only: True
 
       submodules_to_freeze:
+         - encoder.global
          - processor
+         - decoder.global
 
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to

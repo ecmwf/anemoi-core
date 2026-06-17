@@ -387,7 +387,7 @@ class TestValidateCheckpoint:
             },
         }
 
-        assert validate_checkpoint(checkpoint) is True
+        assert validate_checkpoint(checkpoint, check_tensors=True) is True
 
     @pytest.mark.unit
     def test_validate_checkpoint_nested_nan_tensors(self) -> None:
