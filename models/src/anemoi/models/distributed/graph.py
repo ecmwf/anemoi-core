@@ -19,6 +19,7 @@ from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
 
 
 def ensure_sharded(

@@ -9,11 +9,32 @@
 
 
 from enum import Enum
+from importlib.util import find_spec
 
 import torch
 from sklearn.neighbors import NearestNeighbors
+from torch_geometric import __version__ as PYG_VERSION
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+
+if PYG_VERSION >= "2.8":
+    PYG_AVAILABLE = find_spec("pyg_lib") is not None
+    PYG_INSTRUCTIONS = r"""The 'pyg-lib' library is not installed.
+    Installing 'pyg-lib' can significantly improve performance for graph creation.
+    You can install it using:
+        TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
+        pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
+    *NOTE* `torch-cluster` has been deprecated in favor of `pyg-lib` in PyG 2.8,
+        so if you are using PyG 2.8 or later, please install `pyg-lib` instead of `torch-cluster`.
+    """
+else:
+    PYG_AVAILABLE = find_spec("torch_cluster") is not None
+    PYG_INSTRUCTIONS = r"""The 'torch-cluster' library is not installed.
+    Installing 'torch-cluster' can significantly improve performance for graph creation.
+    You can install it using:
+        TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
+        pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
+    """
 
 
 def get_distributed_device() -> torch.device:

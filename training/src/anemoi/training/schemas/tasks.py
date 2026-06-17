@@ -42,8 +42,8 @@ class ForecasterSchema(BaseModel):
     "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
-    validation_rollout: NonNegativeInt = Field(example=[0, 6, 12])
-    "Number of rollouts to use for validation."
+    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
+    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
 
 
 class AutoencoderTaskSchema(BaseModel):
