@@ -20,6 +20,7 @@ from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -403,14 +404,51 @@ class GNNProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:
+        """Run the GNN processor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Node features.
+        batch_size : int
+            Batch size.
+        shard_info : GraphShardInfo
+            Shard metadata for node and edge tensors.
+        edge_attr : Tensor
+            Edge attributes.
+        edge_index : Adj
+            Edge indices.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        *args : tuple
+            Additional positional arguments.
+        **kwargs : dict
+            Additional keyword arguments passed to processor blocks.
+
+        Returns
+        -------
+        Tensor
+            Processed node features.
+        """
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(shard_info.nodes)
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
+                edge_attr,
+                edge_index,
+                target_nodes,
+                target_nodes,
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
@@ -511,10 +549,51 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:
+        """Run the graph-transformer processor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Node features.
+        batch_size : int
+            Batch size.
+        shard_info : GraphShardInfo
+            Shard metadata for node and edge tensors.
+        edge_attr : Tensor
+            Edge attributes.
+        edge_index : Adj
+            Edge indices.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        *args : tuple
+            Additional positional arguments.
+        **kwargs : dict
+            Additional keyword arguments passed to processor blocks.
+
+        Returns
+        -------
+        Tensor
+            Processed node features.
+        """
         size = sum(shard_info.nodes)
+        num_nodes = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=num_nodes,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
 
         if shard_info.edges_are_sharded():
             # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
@@ -533,6 +612,7 @@ class GraphTransformerProcessor(BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=True,  # ensured by ensure_edges_are_dst_sorted above
             **kwargs,
         )
 
