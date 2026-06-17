@@ -28,6 +28,7 @@ class TestMultiDataset:
         mock_dataset_a.missing = set()
         mock_dataset_a.dates = list(range(30))  # 15 reference dates
         mock_dataset_a.frequency = "3h"
+        mock_dataset_a.num_sequences = 1
         # relative_date_indices=[0,2,6], window=7, valid positions [0..23] at sequence 0
         anchors_a = np.column_stack([np.zeros(24, dtype=np.int64), np.arange(24, dtype=np.int64)])
         mock_dataset_a.compute_anchors.return_value = anchors_a
@@ -36,6 +37,7 @@ class TestMultiDataset:
         mock_dataset_b.missing = {7, 8, 9, 10}
         mock_dataset_b.dates = list(range(30))  # 15 reference dates
         mock_dataset_b.frequency = "3h"
+        mock_dataset_b.num_sequences = 1
         # missing {7..10}: exclude positions {1..10}, valid positions [0, 11..23] at sequence 0
         pos_b = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], dtype=np.int64)
         anchors_b = np.column_stack([np.zeros(14, dtype=np.int64), pos_b])
