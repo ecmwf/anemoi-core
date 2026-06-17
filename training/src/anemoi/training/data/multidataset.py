@@ -69,6 +69,21 @@ class MultiDataset(IterableDataset):
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
         self.rollout = rollout
+
+        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
+        # with multi-sequence (TrajectoryDataset, init × step axes).  The anchor
+        # intersection would silently keep only sequence-0 samples and produce
+        # semantically meaningless alignment between the two encoders.
+        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
+        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
+        if single_seq and multi_seq:
+            msg = (
+                "Currently mixing single-sequence datasets (global time axis) with "
+                "Trajectory datasets (init × step axes) in the same MultiDataset is unsupported. "
+                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
+            )
+            raise ValueError(msg)
+
         # Compute valid (sequence, position) anchors and a flat index over them
         # that the shuffle/shard logic operates on.
         self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
