@@ -73,6 +73,7 @@ def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
 def fake_pl_module(mocker: Any, name_to_index: dict) -> MagicMock:
     pl_module = mocker.Mock()
     pl_module._ckpt_model_name_to_index = {"data": name_to_index}
+    pl_module._ckpt_variables_metadata = None
     return pl_module
 
 
@@ -268,3 +269,78 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
 
     # Assert
     assert module._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
+
+
+# --- Tests for _check_variable_units via CheckVariableOrder ---
+
+
+def test_check_variable_units_compatible(mocker: Any) -> None:
+    """Test that compatible units pass without error via callback."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+
+    # Should not raise
+    callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_incompatible(mocker: Any) -> None:
+    """Test that incompatible units raise ValueError via callback with dataset context."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+
+    with pytest.raises(ValueError, match="dataset 'era5'"):
+        callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_no_checkpoint_metadata(mocker: Any) -> None:
+    """Test that missing checkpoint variables_metadata warns but doesn't error."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {"era5": {"variables_metadata": {"t2m": {"units": "K"}}}}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = None
+
+    # Should not raise
+    callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_no_dataset_metadata(mocker: Any) -> None:
+    """Test that missing dataset variables_metadata warns but doesn't error."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {"era5": {}}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {"era5": {"t2m": {"units": "K"}}}
+
+    # Should not raise
+    callback._check_variable_units(trainer, pl_module)

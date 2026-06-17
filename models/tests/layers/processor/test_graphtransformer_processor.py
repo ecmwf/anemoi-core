@@ -20,6 +20,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GraphTransformerProcessor
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -116,7 +117,13 @@ class TestGraphTransformerProcessor:
 
         # Run forward pass of processor
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
-        output = graphtransformer_processor.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        output = graphtransformer_processor.forward(
+            x,
+            batch_size,
+            shard_info,
+            edge_attr,
+            edge_index,
+        )
         assert output.shape == (self.NUM_NODES, graphtransformer_init.num_channels)
 
         # Generate dummy target and loss function
@@ -142,3 +149,46 @@ class TestGraphTransformerProcessor:
             assert (
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+    def test_unsorted_edges_are_sorted_before_forward(
+        self, graphtransformer_processor, graphtransformer_init, graph_provider
+    ):
+        batch_size = 1
+        x = torch.rand(
+            (self.NUM_NODES, graphtransformer_init.num_channels),
+            device=next(graphtransformer_processor.parameters()).device,
+        )
+        shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES * batch_size])
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+
+        with torch.no_grad():
+            output_sorted = graphtransformer_processor.forward(
+                x,
+                batch_size,
+                shard_info,
+                edge_attr,
+                edge_index,
+            )
+
+            perm = torch.randperm(edge_index.shape[1], device=edge_index.device)
+            output_unsorted = graphtransformer_processor.forward(
+                x,
+                batch_size,
+                shard_info,
+                edge_attr[perm],
+                edge_index[:, perm],
+                edges_are_dst_sorted=False,
+            )
+
+        assert torch.allclose(output_sorted, output_unsorted, atol=1e-4)
+
+    def test_graphtransformer_processor_accepts_fractional_mlp_hidden_ratio(
+        self, graphtransformer_init, graph_provider, device
+    ):
+        config = asdict(graphtransformer_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        config["mlp_hidden_ratio"] = 2.67
+        processor = GraphTransformerProcessor(**config).to(device)
+
+        expected_hidden_dim = compute_mlp_hidden_dim(graphtransformer_init.num_channels, 2.67)
+        assert processor.proc[0].node_dst_mlp.mlp[0].out_features == expected_hidden_dim

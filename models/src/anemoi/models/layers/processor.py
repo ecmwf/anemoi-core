@@ -20,6 +20,7 @@ from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -27,6 +28,8 @@ from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
@@ -155,7 +158,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         num_layers: int,
         num_channels: int,
         num_chunks: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         cpu_offload: bool = False,
         dropout_p: float = 0.0,
         layer_kernels: DotDict,
@@ -174,7 +177,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         self.build_layers(
             PointWiseMLPProcessorBlock,
             num_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
         )
@@ -210,11 +213,12 @@ class TransformerProcessor(BaseProcessor):
         num_channels: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         attn_channels: Optional[int] = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
@@ -234,7 +238,7 @@ class TransformerProcessor(BaseProcessor):
             Number of chunks in processor
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         attn_channels : int, optional
             Internal attention width used for q/k/v projections. If None,
@@ -248,6 +252,8 @@ class TransformerProcessor(BaseProcessor):
         attention_implementation: str
             A predefined string which selects which underlying attention
             implementation, by default "flash_attention"
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default None
         use_alibi_slopes : bool
@@ -276,7 +282,7 @@ class TransformerProcessor(BaseProcessor):
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             attn_channels=attn_channels,
             num_heads=num_heads,
             qk_norm=qk_norm,
@@ -284,6 +290,7 @@ class TransformerProcessor(BaseProcessor):
             layer_kernels=self.layer_factory,
             dropout_p=dropout_p,
             attention_implementation=attention_implementation,
+            mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
         )
@@ -322,6 +329,8 @@ class GNNProcessor(BaseProcessor):
         num_chunks: int,
         mlp_extra_layers: int,
         edge_dim: int,
+        mlp_hidden_ratio: float = 1.0,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -340,6 +349,10 @@ class GNNProcessor(BaseProcessor):
             Number of extra layers in MLP
         edge_dim : int
             Edge feature dimension
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to num_channels. Default 1.0 preserves existing behaviour.
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -359,6 +372,8 @@ class GNNProcessor(BaseProcessor):
 
         kwargs_build = {
             "mlp_extra_layers": mlp_extra_layers,
+            "mlp_hidden_ratio": mlp_hidden_ratio,
+            "mlp_implementation": mlp_implementation,
             "layer_kernels": self.layer_factory,
             "edge_dim": None,
         }
@@ -389,14 +404,51 @@ class GNNProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:
+        """Run the GNN processor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Node features.
+        batch_size : int
+            Batch size.
+        shard_info : GraphShardInfo
+            Shard metadata for node and edge tensors.
+        edge_attr : Tensor
+            Edge attributes.
+        edge_index : Adj
+            Edge indices.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        *args : tuple
+            Additional positional arguments.
+        **kwargs : dict
+            Additional keyword arguments passed to processor blocks.
+
+        Returns
+        -------
+        Tensor
+            Processed node features.
+        """
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(shard_info.nodes)
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
+                edge_attr,
+                edge_index,
+                target_nodes,
+                target_nodes,
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
@@ -415,10 +467,11 @@ class GraphTransformerProcessor(BaseProcessor):
         num_channels: int,
         num_chunks: int,
         num_heads: int,
-        mlp_hidden_ratio: int,
+        mlp_hidden_ratio: float,
         edge_dim: int,
         attn_channels: Optional[int] = None,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         graph_attention_backend: str = "triton",
@@ -437,7 +490,7 @@ class GraphTransformerProcessor(BaseProcessor):
             Number of chunks in processor
         num_heads: int
             Number of heads in transformer
-        mlp_hidden_ratio: int
+        mlp_hidden_ratio: float
             Ratio of mlp hidden dimension to embedding dimension
         edge_dim : int
             Edge feature dimension
@@ -448,6 +501,8 @@ class GraphTransformerProcessor(BaseProcessor):
             the width of the surrounding MLPs.
         qk_norm: bool, optional
             Normalize query and key, by default False
+        mlp_implementation: MLPImplementation
+            Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
         layer_kernels : DotDict
@@ -472,12 +527,13 @@ class GraphTransformerProcessor(BaseProcessor):
         self.build_layers(
             GraphTransformerProcessorBlock,
             in_channels=num_channels,
-            hidden_dim=(mlp_hidden_ratio * num_channels),
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             out_channels=num_channels,
             attn_channels=attn_channels,
             num_heads=num_heads,
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
             edge_pre_mlp=edge_pre_mlp,
@@ -493,10 +549,51 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:
+        """Run the graph-transformer processor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Node features.
+        batch_size : int
+            Batch size.
+        shard_info : GraphShardInfo
+            Shard metadata for node and edge tensors.
+        edge_attr : Tensor
+            Edge attributes.
+        edge_index : Adj
+            Edge indices.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        *args : tuple
+            Additional positional arguments.
+        **kwargs : dict
+            Additional keyword arguments passed to processor blocks.
+
+        Returns
+        -------
+        Tensor
+            Processed node features.
+        """
         size = sum(shard_info.nodes)
+        num_nodes = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=num_nodes,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
 
         if shard_info.edges_are_sharded():
             # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
@@ -515,6 +612,7 @@ class GraphTransformerProcessor(BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=True,  # ensured by ensure_edges_are_dst_sorted above
             **kwargs,
         )
 

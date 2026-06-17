@@ -120,3 +120,39 @@ class TestGNNProcessor:
             assert (
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+    def test_unsorted_edge_flag_reaches_sharding(
+        self, graphconv_processor, graphconv_init, graph_provider, monkeypatch
+    ):
+        batch_size = 1
+        x = torch.rand(
+            (self.NUM_NODES, graphconv_init.num_channels), device=next(graphconv_processor.parameters()).device
+        )
+        shape_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=None)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size, shard_edges=False)
+        called = {}
+
+        def fake_shard_edges_1hop(
+            edge_attr,
+            edge_index,
+            src_size,
+            dst_size,
+            model_comm_group,
+            edges_are_dst_sorted=True,
+        ):
+            called["edges_are_dst_sorted"] = edges_are_dst_sorted
+            return edge_attr, edge_index, None
+
+        monkeypatch.setattr("anemoi.models.layers.processor.shard_edges_1hop", fake_shard_edges_1hop)
+
+        output = graphconv_processor.forward(
+            x,
+            batch_size,
+            shape_info,
+            edge_attr,
+            edge_index,
+            edges_are_dst_sorted=False,
+        )
+
+        assert called["edges_are_dst_sorted"] is False
+        assert output.shape == (self.NUM_NODES, graphconv_init.num_channels)

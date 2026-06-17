@@ -53,7 +53,7 @@ class FFT2D(SpectralTransform):
         self,
         x_dim: int,
         y_dim: int,
-        apply_filter: bool = True,
+        apply_filter: bool = False,
         nodes_slice: tuple[int, int | None] | None = None,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
@@ -210,7 +210,21 @@ class DCT2D(SpectralTransform):
         return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
-class RegularSHT(SpectralTransform):
+class SHT(SpectralTransform):
+    """Spherical Harmonic Transform (SHT) baseclass."""
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-L power spectral density: sum over M of |coeff|^2."""
+        return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
+
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-L cross-spectral density."""
+        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
+            dim=-2
+        )
+
+
+class RegularSHT(SHT):
     """SHT on a regular lon-lat grid."""
 
     def __init__(
@@ -246,13 +260,14 @@ class RegularSHT(SpectralTransform):
         return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class ReducedSHT(SpectralTransform):
+class ReducedSHT(SHT):
     """SHT on a reduced Gaussian grid."""
 
     def __init__(
         self,
         grid: str,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -263,6 +278,9 @@ class ReducedSHT(SpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
 
@@ -291,7 +309,9 @@ class ReducedSHT(SpectralTransform):
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -304,13 +324,14 @@ class ReducedSHT(SpectralTransform):
         return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class OctahedralSHT(SpectralTransform):
+class OctahedralSHT(SHT):
     """SHT on an octahedral reduced grid."""
 
     def __init__(
         self,
         nlat: int,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -318,16 +339,21 @@ class OctahedralSHT(SpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
+            on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
