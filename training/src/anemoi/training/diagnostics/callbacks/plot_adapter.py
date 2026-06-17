@@ -63,8 +63,8 @@ class PlotPayload:
         The validation batch index this payload was produced for.
     batch : dict[str, torch.Tensor]
         Gathered (full-grid) batch tensors keyed by dataset name.
-    outputs : tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
-        Gathered model outputs: (loss_scales, [pred_dict_per_step, ...]).
+    predictions : list[dict[str, torch.Tensor]]
+        Gathered per-step prediction dicts, one entry per rollout step.
     post_processors : dict[str, Any]
         Deep-copied, CPU-resident post-processors keyed by dataset name.
     latlons : dict[str, np.ndarray]
@@ -75,7 +75,7 @@ class PlotPayload:
 
     batch_idx: int
     batch: dict[str, torch.Tensor]
-    outputs: tuple[torch.Tensor, list[dict[str, torch.Tensor]]]
+    predictions: list[dict[str, torch.Tensor]]
     post_processors: dict[str, Any]
     latlons: dict[str, np.ndarray] = field(default_factory=dict)
     feature_indices: dict[str, Any] = field(default_factory=dict)
@@ -102,7 +102,7 @@ class PlotPayload:
                         x[dataset_name][:, ...].detach().cpu(),
                         in_place=False,
                     )
-                    for x in self.outputs[1]
+                    for x in self.predictions
                 ],
             )
 
@@ -178,16 +178,13 @@ class BasePlotAdapter(ABC):
         if not isinstance(preds, list):
             msg = f"predictions must be a list of per-step dicts, got {type(preds).__name__}"
             raise TypeError(msg)
-        gathered_outputs: tuple[Any, list[dict[str, torch.Tensor]]] = (
-            output.loss,
-            [
-                {
-                    dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
-                    for dataset_name, dataset_pred in pred.items()
-                }
-                for pred in preds
-            ],
-        )
+        gathered_predictions: list[dict[str, torch.Tensor]] = [
+            {
+                dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                for dataset_name, dataset_pred in pred.items()
+            }
+            for pred in preds
+        ]
 
         # 3. Deep-copy post-processors, gather nan_locations, move to CPU
         post_processors = copy.deepcopy(pl_module.model.post_processors)
@@ -213,7 +210,7 @@ class BasePlotAdapter(ABC):
         self._cached_payload = PlotPayload(
             batch_idx=batch_idx,
             batch=gathered_batch,
-            outputs=gathered_outputs,
+            predictions=gathered_predictions,
             post_processors=post_processors,
             latlons=latlons,
             feature_indices=feature_indices,

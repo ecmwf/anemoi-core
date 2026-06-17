@@ -377,7 +377,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             output = TrainingStepOutput(
                 loss=output.loss,
                 metrics=output.metrics,
-                predictions=payload.outputs[1],
+                predictions=payload.predictions,
             )
             self.plot(
                 trainer,

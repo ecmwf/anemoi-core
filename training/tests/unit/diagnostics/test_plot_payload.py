@@ -73,7 +73,7 @@ class TestPlotPayload:
         payload = PlotPayload(
             batch_idx=0,
             batch={"data": torch.randn(2, 4, 1, 50, 3)},
-            outputs=(torch.tensor(0.0), [{"data": torch.randn(2, 1, 1, 50, 3)}]),
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
             post_processors={"data": _identity_post_processor()},
             latlons={"data": np.zeros((50, 2))},
         )
@@ -88,7 +88,7 @@ class TestPlotPayload:
         payload = PlotPayload(
             batch_idx=5,
             batch={},
-            outputs=(torch.tensor(0.0), []),
+            predictions=[],
             post_processors={},
             latlons={},
         )
