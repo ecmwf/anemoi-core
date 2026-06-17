@@ -476,6 +476,8 @@ def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     assert task.rollout.step == 2
+
+
 # --- Tests for _validate_transfer_learning_units ---
 
 
