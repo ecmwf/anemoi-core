@@ -94,6 +94,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
+        
+        self.interp_skip = InterpolatedConnection(
+            graph=self._graph_data,
+            interpolation_edges_name=("data", "to", "hires")
+            edge_weight_attribute="gauss_weight",
+        )
 
     def _assemble_input(
         self,
@@ -368,6 +374,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
+
+            if dataset_name == "data":
+                x_skip_dict["hires"] = self.interp_skip(
+                    x_out,
+                    grid_shard_sizes=grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None,
+                    model_comm_group=model_comm_group,
+                    n_step_output=self.n_step_output,
+                )
+
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,

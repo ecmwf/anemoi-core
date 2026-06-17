@@ -293,6 +293,125 @@ class TruncatedConnection(BaseResidualConnection):
         return self._expand_time(x, n_step_output)
 
 
+class InterpolationConnection(BaseResidualConnection):
+    """Interpolation connection that maps from source nodes to target nodes.
+
+    Applies a sparse projection to map features directly from a source grid to
+    a target grid, unlike ``TruncatedConnection`` which round-trips through an
+    intermediate grid.
+
+    Edge names and the edge-weight attribute are expected to be pre-resolved by
+    ``ProjectionCreator`` and passed in directly.  File-path loading is still
+    supported as an alternative to the graph-based path.
+
+    Parameters
+    ----------
+    graph : HeteroData, optional
+        Graph containing the interpolation edges.
+    src_node_weight_attribute : str, optional
+        Source-node attribute used as additional projection weights.
+    edge_weight_attribute : str, optional
+        Edge attribute used as projection weights (default: ``gauss_weight``).
+    interpolation_edges_name : tuple[str, str, str], optional
+        Pre-resolved ``(src, relation, dst)`` edge type for the projection.
+    autocast : bool, default False
+        Whether to use automatic mixed precision for the projection.
+    row_normalize : bool, optional
+        Normalize projection weights per target node so each row sums to 1.
+    interpolation_file_path : str, optional
+        Path to an ``.npz`` file for the projection matrix.
+
+    Examples
+    --------
+    >>> conn = InterpolationConnection(
+    ...     graph=graph,
+    ...     interpolation_edges_name=("source", "to", "target"),
+    ...     edge_weight_attribute="gauss_weight",
+    ... )
+    >>> x = torch.randn(2, 4, 1, 40192, 44)  # (batch, time, ens, src_nodes, features)
+    >>> out = conn(x)
+    >>> print(out.shape)  # target node count differs from source
+    torch.Size([2, 1, target_nodes, 44])
+    """
+
+    def __init__(
+        self,
+        graph: Optional[HeteroData] = None,
+        src_node_weight_attribute: Optional[str] = None,
+        edge_weight_attribute: Optional[str] = None,
+        interpolation_edges_name: Optional[tuple[str, str, str]] = None,
+        autocast: bool = False,
+        row_normalize: bool = False,
+        interpolation_file_path: Optional[str] = None,
+        **_,
+    ) -> None:
+        super().__init__()
+
+        _edge_weight_attr = (
+            edge_weight_attribute if edge_weight_attribute is not None else DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+        )
+
+        edges_name = self._resolve_edges(
+            graph=graph,
+            interpolation_file_path=interpolation_file_path,
+            interpolation_edges_name=interpolation_edges_name,
+        )
+
+        self.provider = ProjectionGraphProvider(
+            graph=graph,
+            edges_name=edges_name,
+            edge_weight_attribute=_edge_weight_attr,
+            src_node_weight_attribute=src_node_weight_attribute,
+            file_path=interpolation_file_path,
+            row_normalize=row_normalize,
+        )
+
+        self.projector = SparseProjector(autocast=autocast)
+
+    @staticmethod
+    def _resolve_edges(
+        *,
+        graph: HeteroData | None,
+        interpolation_file_path: str | None,
+        interpolation_edges_name: tuple[str, str, str] | None,
+    ) -> tuple[str, str, str] | None:
+        """Validate and return the edge tuple."""
+        if interpolation_file_path is not None:
+            assert interpolation_edges_name is None, (
+                "Specify either file path or edge name for interpolation, not both."
+            )
+            return None
+
+        assert graph is not None, "graph must be provided when file path is not specified."
+        assert interpolation_edges_name is not None, "interpolation_edges_name must be provided."
+        edges_name = tuple(interpolation_edges_name)
+        assert edges_name in graph.edge_types, f"Graph must contain edges {edges_name} for interpolation."
+        return edges_name
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Apply interpolation from source to target nodes."""
+        batch_size = x.shape[0]
+        x = x[:, -1, ...]  # pick latest step
+
+        x = einops.rearrange(x, "batch ensemble grid features -> (batch ensemble) grid features")
+        channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
+        if grid_shard_sizes is not None:  # grids sharding -> channel sharding
+            x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+        x = self.projector(x, self.provider.get_edges(device=x.device))
+        if grid_shard_sizes is not None:  # channel sharding -> grid sharding
+            x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
+        x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
+
+        return self._expand_time(x, n_step_output)
+
+
+
 def _ornstein_init_theta(
     theta_init: float,
     theta_buff: float,

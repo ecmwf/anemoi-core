@@ -259,6 +259,8 @@ class BaseModelSchema(PydanticBaseModel):
     "List of dataset names to encode. If None, all datasets are encoded."
     decoding_target_forcing: Literal["none", "forcings", "prognostic+forcing"] = Field(default="none")
     "Decoding target forcing strategy."
+    cascade_decoding_order: Optional[list[str]] = Field(default=None)
+    "Order of dataset decoding for cascade decoding. If None, no cascade decoding is applied."
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
     processor: Union[

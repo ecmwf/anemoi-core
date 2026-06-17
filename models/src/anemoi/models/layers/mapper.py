@@ -215,6 +215,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         )
 
+        self.return_latents = False
         self.num_chunks = num_chunks
 
         Linear = self.layer_factory.Linear
@@ -329,6 +330,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             cond=cond_chunk,
             **kwargs,
         )
+
+        if self.return_latents:
+            return x_dst_out, self.post_process(x_dst_out)
 
         return self.post_process(x_dst_out)
 
@@ -620,6 +624,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
+        return_latents: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBackwardMapper.
@@ -684,6 +689,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
+        self.return_latents = return_latents
 
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)

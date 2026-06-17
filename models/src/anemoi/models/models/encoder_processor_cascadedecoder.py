@@ -115,6 +115,7 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
                 hidden_dim=self.num_channels,
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+                return_latents=True,
             )
 
             prev = dataset_name
@@ -357,7 +358,8 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in self.cascade_decoding_order:
+        num_decoders = len(self.cascade_decoding_order)
+        for i, dataset_name in enumerate(self.cascade_decoding_order):
             x_data_target, shard_sizes_data = self._assemble_target(
                 x[dataset_name],
                 x_data_latent_dict.get(dataset_name, None),
@@ -382,7 +384,7 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_latent_proc = self.decoder[dataset_name](
+            x_latent_proc, x_decoded = self.decoder[dataset_name](
                 (x_latent_proc, x_data_target),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
@@ -393,7 +395,7 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_latent_proc,
+                x_decoded,
                 x_skip_dict[dataset_name],
                 batch_size,
                 ensemble_size,
