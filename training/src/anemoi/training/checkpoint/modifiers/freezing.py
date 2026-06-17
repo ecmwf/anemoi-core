@@ -132,11 +132,8 @@ class FreezingModifierStage(ModelModifier):
         except AttributeError:
             return None
 
-        frozen_count = 0
-        for param in target_module.parameters():
-            if param.requires_grad:
-                param.requires_grad = False
-                frozen_count += 1
+        frozen_count = sum(p.requires_grad for p in target_module.parameters())
+        target_module.requires_grad_(False)
         return frozen_count
 
     def _validate_gradient_flow(self, model: torch.nn.Module) -> None:
