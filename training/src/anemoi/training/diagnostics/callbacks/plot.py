@@ -912,10 +912,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             ),
         )
 
-        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
-        output_tensor = (
-            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
-        )
+        output_tensor = self._finalize_output_tensor(pl_module, dataset_name, output_tensor)
         data[1:, ...] = pl_module.output_mask[dataset_name].apply(
             data[1:, ...],
             dim=pl_module.grid_dim,
@@ -924,6 +921,18 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         data = data.numpy()
 
         return data, output_tensor
+
+    def _finalize_output_tensor(
+        self,
+        pl_module: pl.LightningModule,
+        dataset_name: str,
+        output_tensor: torch.Tensor,
+    ) -> np.ndarray:
+        """Apply prepare_plot_output_tensor, output mask, and convert to numpy array."""
+        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
+        return (
+            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
+        )
 
     def process_output_tensor(
         self,
@@ -945,10 +954,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             ),
         )
 
-        output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
-        return (
-            pl_module.output_mask[dataset_name].apply(output_tensor, dim=pl_module.grid_dim, fill_value=np.nan).numpy()
-        )
+        return self._finalize_output_tensor(pl_module, dataset_name, output_tensor)
 
 
 class PlotSample(BasePlotAdditionalMetrics):
