@@ -99,7 +99,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(get_multiple_datasets_config(model_config.model.residual))
+        self._build_residual(model_config.model.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -137,6 +137,10 @@ class BaseGraphModel(nn.Module):
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
+        
+        self._trunc_indices = [
+            data_indices["era5"].model.output.name_to_index[v] for v in data_indices["cerra"].model.output.ordered_names
+        ] 
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
@@ -267,7 +271,7 @@ class BaseGraphModel(nn.Module):
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
-                residual_config[dataset_name],
+                residual_config,
                 graph=self._graph_data,
                 data_node_name=data_node_name,
                 statistics=self.statistics[dataset_name],

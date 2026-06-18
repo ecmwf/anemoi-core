@@ -27,6 +27,9 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
+from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
+
 LOGGER = logging.getLogger(__name__)
 
 

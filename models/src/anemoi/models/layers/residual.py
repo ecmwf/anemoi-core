@@ -393,22 +393,25 @@ class InterpolationConnection(BaseResidualConnection):
         x: torch.Tensor,
         grid_shard_sizes=None,
         model_comm_group=None,
-        n_step_output: int | None = None,
+        batch_size=None,
     ) -> torch.Tensor:
         """Apply interpolation from source to target nodes."""
-        batch_size = x.shape[0]
-        x = x[:, -1, ...]  # pick latest step
-
-        x = einops.rearrange(x, "batch ensemble grid features -> (batch ensemble) grid features")
         channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
+
+        x = einops.rearrange(x, "(batch grid) features -> batch grid features", batch=batch_size)
+
         if grid_shard_sizes is not None:  # grids sharding -> channel sharding
             x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
-        x = self.projector(x, self.provider.get_edges(device=x.device))
+
+        interp_edges = self.provider.get_edges(device=x.device)
+        x = self.projector(x, interp_edges)
+
         if grid_shard_sizes is not None:  # channel sharding -> grid sharding
             x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
-        x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
-        return self._expand_time(x, n_step_output)
+        x = einops.rearrange(x, "batch grid features -> (batch grid) features")
+
+        return x
 
 
 

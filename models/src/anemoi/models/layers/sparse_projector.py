@@ -36,5 +36,5 @@ class SparseProjector(torch.nn.Module):
         out = []
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             for i in range(x.shape[0]):
-                out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
+                out.append(torch.sparse.mm(projection_matrix, x[i, ...].to(projection_matrix.dtype)).to(x.dtype))
         return torch.stack(out)
