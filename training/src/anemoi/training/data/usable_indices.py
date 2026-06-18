@@ -27,7 +27,7 @@ def compute_valid_data_indices(
     A date t is valid if we can sample the elements t + i
     for every relative_date_index i across all data readers.
 
-    Returns the intersection of valid indices from all data readers.
+    Returns the valid indices from each data reader.
     """
     valid_date_indices = {}
     for dataset_name, ds in data_readers.items():

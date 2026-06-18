@@ -28,12 +28,14 @@ class SamplingStrategy(ABC):
 
     def __init__(self) -> None:
         self.per_dataset_valid_indices = None
+        self.valid_indices = None
         self.relative_date_indices = None
 
     def setup(self, data_readers: dict[str, BaseAnemoiReader], relative_date_indices: dict[str, TimeIndices]) -> None:
         """Optionally perform setup after valid date indices are computed."""
         # Refresh which sample dates can provide the currently required time steps.
         self.per_dataset_valid_indices = compute_valid_data_indices(data_readers, relative_date_indices)
+        self.valid_indices = self.compute_valid_indices(self.per_dataset_valid_indices)
 
         # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
@@ -68,9 +70,8 @@ class SamplingStrategy(ABC):
     def num_valid_indices(self) -> int:
         return len(self.valid_indices)
 
-    @property
     @abstractmethod
-    def valid_indices(self) -> list:
+    def compute_valid_indices(self, per_dataset_valid_indices: dict[str, np.ndarray]) -> list:
         pass
 
     @abstractmethod
@@ -85,15 +86,15 @@ class SynchronizedSampling(SamplingStrategy):
     yielded sample contains data from all readers at the same point.
     """
 
-    @property
-    def valid_indices(self) -> list:
-        valid_indices = np.intersect1d(*self.per_dataset_valid_indices.values(), assume_unique=True)
+    def compute_valid_indices(self, per_dataset_valid_indices: dict[str, np.ndarray]) -> list:
+        valid_indices = np.intersect1d(*per_dataset_valid_indices.values(), assume_unique=True)
         if len(valid_indices) == 0:
-            msg = f"No common valid date indices found across all data readers: {self.per_dataset_valid_indices}"
+            msg = f"No common valid date indices found across all data readers: {per_dataset_valid_indices}"
             raise ValueError(msg)
         return valid_indices.tolist()
 
     def get_sample_timesteps(self, sample_index: int) -> dict[str, np.ndarray]:
+        assert self.valid_indices is not None, f"{self.__class__.__name__}.setup() must be called before sampling."
         valid_sample_index = self.valid_indices[sample_index]
         indices = {}
         for dataset_name, relative_indices in self.relative_date_indices.items():
@@ -111,14 +112,14 @@ class VariableSampling(SamplingStrategy):
     is trained with different domains.
     """
 
-    @property
-    def valid_indices(self) -> list:
-        """Valid indices"""
+    def compute_valid_indices(self, per_dataset_valid_indices: dict[str, np.ndarray]) -> list:
+        """Compute valid indices for variable sampling."""
         return [
-            (dataset_name, idx) for dataset_name, indices in self.per_dataset_valid_indices.items() for idx in indices
+            (dataset_name, idx) for dataset_name, indices in per_dataset_valid_indices.items() for idx in indices
         ]
 
     def get_sample_timesteps(self, sample_index: int) -> dict[str, np.ndarray]:
+        assert self.valid_indices is not None, f"{self.__class__.__name__}.setup() must be called before sampling."
         dataset_name, valid_sample_index = self.valid_indices[sample_index]
         relative_indices = self.relative_date_indices[dataset_name]
         return {dataset_name: offset_time_indices(valid_sample_index, relative_indices)}
