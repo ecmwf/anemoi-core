@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from pathlib import Path
 
 from hydra.core.config_search_path import ConfigSearchPath
@@ -39,6 +40,12 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
             Hydra ConfigSearchPath object.
 
         """
+        if os.environ.get("ANEMOI_CONFIG_PATH"):
+            LOGGER.warning(
+                "ANEMOI_CONFIG_PATH is set but is no longer read by anemoi-training. "
+                "Use --config-path to specify a config directory.",
+            )
+
         for suffix in ("", "config"):
             cwd_path = Path.cwd() / suffix
             if cwd_path.exists() and not Path(cwd_path, "config").exists():
