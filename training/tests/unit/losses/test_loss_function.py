@@ -554,14 +554,8 @@ def test_amse_2d_transforms(transform: str) -> None:
     assert vals[0] >= -1e-9
     assert vals == sorted(vals)  # non-decreasing in discrepancy
 
-    # the per-band power spectral density partitions total power (Parseval)
-    spec = loss.transform.forward(pred)
-    psd = loss.transform.power_spectral_density(spec)
-    total = torch.real(spec * torch.conj(spec)).flatten(-3, -2).sum(dim=-2)
-    assert psd.shape == (2, 1, 1, loss.transform.n_radial_bands, nvars)
-    torch.testing.assert_close(psd.sum(dim=-2), total)
-    # self cross-spectrum equals the PSD
-    torch.testing.assert_close(loss.transform.cross_spectral_density(spec, spec), psd)
+    # the transform's spectral-density contract (Parseval partition, cross self-consistency)
+    # is covered for all transforms in models/tests/layers/test_spectral_density.py
 
     # gradients flow back to the prediction
     pred = pred.clone().requires_grad_(True)

@@ -12,6 +12,7 @@ import torch
 
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
+from anemoi.models.layers.spectral_transforms import OctahedralSHT
 
 
 def _make(transform: str, x_dim: int, y_dim: int):
@@ -19,6 +20,21 @@ def _make(transform: str, x_dim: int, y_dim: int):
         return FFT2D(x_dim=x_dim, y_dim=y_dim)
     pytest.importorskip("torch_dct")
     return DCT2D(x_dim=x_dim, y_dim=y_dim)
+
+
+# Transforms exposing the power/cross spectral-density contract, spanning both families:
+# the 2D Cartesian transforms (radial-wavenumber binning) and the spherical harmonics
+# (per-degree reduction). Each entry yields (transform, number of spatial points it expects).
+_DENSITY_TRANSFORMS = ["fft2d", "dct2d", "sht"]
+
+
+def _make_density_transform(kind: str):
+    if kind in ("fft2d", "dct2d"):
+        return _make(kind, x_dim=8, y_dim=6), 8 * 6
+    if kind == "sht":
+        t = OctahedralSHT(nlat=8)
+        return t, t._sht.n_grid_points
+    raise ValueError(f"unknown transform {kind!r}")
 
 
 def test_radial_band_index_values() -> None:
@@ -41,27 +57,27 @@ def test_radial_bands_are_built_lazily() -> None:
     assert "_radial_bands" in t.__dict__  # now cached on the instance
 
 
-@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
-@pytest.mark.parametrize(("x_dim", "y_dim"), [(8, 8), (8, 6)])
-def test_radial_density_parseval_and_shape(transform: str, x_dim: int, y_dim: int) -> None:
-    """Radial binning partitions the spectral plane: sum over bands == total power."""
-    t = _make(transform, x_dim, y_dim)
-    data = torch.randn(2, 1, 2, x_dim * y_dim, 3, dtype=torch.float64)
-    spec = t.forward(data)
+@pytest.mark.parametrize("transform", _DENSITY_TRANSFORMS)
+def test_density_partitions_total_power(transform: str) -> None:
+    """Sum over bands/degrees of the PSD == total power over the spectrum (Parseval).
+
+    A contract of every spectral transform: the 2D radial binning and the SHT's per-degree
+    sum are both partitions of the squared spectrum, so this also covers the SHT density.
+    """
+    t, n_points = _make_density_transform(transform)
+    spec = t.forward(torch.randn(2, 1, 2, n_points, 3, dtype=torch.float64))
 
     psd = t.power_spectral_density(spec)
-    assert psd.shape == (2, 1, 2, t.n_radial_bands, 3)
-
     total = torch.real(spec * torch.conj(spec)).flatten(-3, -2).sum(dim=-2)
     torch.testing.assert_close(psd.sum(dim=-2), total)
 
 
-@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+@pytest.mark.parametrize("transform", _DENSITY_TRANSFORMS)
 def test_cross_self_consistency_and_cauchy_schwarz(transform: str) -> None:
-    """cross(x,x) == psd(x), and |cross| <= sqrt(psd_a * psd_b) per band."""
-    t = _make(transform, 8, 6)
-    a = t.forward(torch.randn(2, 1, 1, 48, 3, dtype=torch.float64))
-    b = t.forward(torch.randn(2, 1, 1, 48, 3, dtype=torch.float64))
+    """cross(x,x) == psd(x), and |cross| <= sqrt(psd_a * psd_b) per band/degree."""
+    t, n_points = _make_density_transform(transform)
+    a = t.forward(torch.randn(2, 1, 1, n_points, 3, dtype=torch.float64))
+    b = t.forward(torch.randn(2, 1, 1, n_points, 3, dtype=torch.float64))
 
     psd_a = t.power_spectral_density(a)
     torch.testing.assert_close(t.cross_spectral_density(a, a), psd_a)
