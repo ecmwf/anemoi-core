@@ -954,7 +954,12 @@ def single_plot(
     dy, dx = ymax - ymin, xmax - xmin
     ybuffer, xbuffer = dy * 0.05, dx * 0.05
     if transform is not None:
-        ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=transform)
+        # For near-global data, set_extent with degree coords can produce NaN/Inf
+        # in projected space (e.g. Robinson at ±90° lat). Skip it and let Cartopy
+        # use the projection's natural global extent instead.
+        is_global = dy > 150 or dx > 340
+        if not is_global:
+            ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=transform)
     else:
         ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
         ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
