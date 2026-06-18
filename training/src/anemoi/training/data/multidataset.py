@@ -97,15 +97,7 @@ class MultiDataset(IterableDataset):
         if relative_date_indices is None:
             return
 
-        # Refresh which sample dates can provide the currently required time steps.
-        self.valid_date_indices = self.sampling_strategy.compute_valid_indices(
-            self.data_readers,
-            relative_date_indices,
-        )
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = self.sampling_strategy.normalize_date_indices(relative_date_indices)
-
+        self.sampling_strategy.setup(data_readers=self.data_readers, relative_date_indices=relative_date_indices)
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -279,7 +271,6 @@ class MultiDataset(IterableDataset):
         self.worker_id = worker_id
 
         self.chunk_index_range, self.n_samples_per_worker = self.sampling_strategy.init_worker_chunks(
-            self.valid_date_indices,
             self.sample_comm_num_groups,
             self.sample_comm_group_id,
             n_workers,
@@ -329,31 +320,23 @@ class MultiDataset(IterableDataset):
         )
         return slice(start, end)
 
-    def get_sample(self, *args) -> dict[str, torch.Tensor]:
-        """Get a sample from the data readers, delegating to the sampling strategy.
+    def get_sample(self, sample_index: int) -> dict[str, torch.Tensor]:
+        sample_timesteps = self.sampling_strategy.get_sample_timesteps(sample_index)
 
-        Parameters
-        ----------
-        *args
-            For ``SynchronizedSampling``: a single date index (int).
-            For ``IndependentSampling``: domain_name (str) and date index (int).
+        x = {}
+        for name, time_steps in sample_timesteps.items():
+            # self.shard_sizes is lazily initalised to None
+            # This if statement guards against the case where shard_sizes is not set
+            # (e.g. if set_comm_group_info hasn't been called yet)
+            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
+                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
+                grid_indices = slice(start, end)
+            else:
+                grid_indices = slice(None)
 
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Dictionary mapping dataset name(s) to tensor samples.
-        """
-        if len(args) == 1:
-            index = args[0]
-        else:
-            index = tuple(args)
-        return self.sampling_strategy.get_sample(
-            index,
-            self.data_readers,
-            self.relative_date_indices,
-            self.shard_sizes,
-            self.reader_group_rank,
-        )
+            x[name] = self.data_readers[name].get_sample(time_steps, grid_indices)
+
+        return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields sample dictionaries.
@@ -363,20 +346,20 @@ class MultiDataset(IterableDataset):
         dict[str, torch.Tensor]
             Dictionary mapping dataset names to their tensor samples.
         """
+        sample_indices = self.sampling_strategy.get_sample_indices(self.rng, shuffle=self.shuffle)
+        chunk_indices = sample_indices[self.chunk_index_range]
+
         LOGGER.debug(
-            "%s worker pid %d, worker id %d",
+            "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
             self.__class__.__name__,
             os.getpid(),
             self.worker_id,
+            chunk_indices[:10],
         )
 
-        yield from self.sampling_strategy.iterate(
-            self.valid_date_indices,
-            self.chunk_index_range,
-            self.shuffle,
-            self.rng,
-            self.get_sample,
-        )
+        # TODO(): improve this...
+        for i in chunk_indices:
+            yield self.get_sample(i)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
