@@ -37,6 +37,8 @@ class MultiDataset(AnemoiDataset):
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
+        epoch: int = 0,
+        rollout: int = 1,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -51,12 +53,41 @@ class MultiDataset(AnemoiDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "multi"
+        epoch : int, optional
+            Epoch used for deterministic epoch-dependent shuffling, by default 0
+        rollout : int, optional
+            Rollout length represented by the loaded relative date indices, by default 1
         """
         super().__init__(
             data_readers=data_readers,
             shuffle=shuffle,
             label=label,
         )
+        self.data_readers = data_readers
+        self.label = label
+        self.shuffle = shuffle
+        self.dataset_names = list(data_readers.keys())
+        self.epoch = epoch
+        self.rollout = rollout
+        self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
+
+        self._lazy_init_model_and_reader_group_info()
+
+    def set_epoch(
+        self,
+        epoch: int,
+        *,
+        rollout: int | None = None,
+        relative_date_indices: dict[str, TimeIndices] | None = None,
+    ) -> None:
+        """Set epoch-dependent sampling state before DataLoader workers are launched."""
+        self.epoch = epoch
+        if rollout is not None:
+            self.rollout = rollout
+        if relative_date_indices is None:
+            return
+
+        # Refresh which sample dates can provide the currently required time steps.
         self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
@@ -104,17 +135,21 @@ class MultiDataset(AnemoiDataset):
         )
 
         base_seed = get_base_seed()
+        seed = base_seed + self.epoch
 
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
+        torch.manual_seed(seed)
+        random.seed(seed)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed=seed)
         sanity_rnd = self.rng.random(1)[0]
         LOGGER.info(
-            ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
+            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
             worker_id,
             self.label,
             os.getpid(),
-            base_seed,
+            self.epoch,
+            self.rollout,
+            seed,
             sanity_rnd,
         )
 

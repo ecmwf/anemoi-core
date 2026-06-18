@@ -42,6 +42,9 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
+            # Install pyg-lib
+            TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
+            pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
             python3 -m pytest -v training/tests/integration --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
             python3 -m pytest -v models/tests/integration --slow
             deactivate
@@ -75,6 +78,9 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            # Install pyg-lib
+            TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
+            pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
             srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
             deactivate
             rm -rf $REPO_NAME
