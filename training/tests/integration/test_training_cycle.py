@@ -22,6 +22,7 @@ from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
+from anemoi.training.utils.config import load_config
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -392,3 +393,13 @@ def test_training_cycle_multidatasets_diffusion(
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+
+def test_config_build() -> None:
+
+    config = load_config("training/tests/integration/config/atmo_integration_test.yaml")
+
+    assert config["diagnostics"]["log"]["interval"] == 53
+
+
