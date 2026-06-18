@@ -11,13 +11,13 @@ import uuid
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.utils import instantiate
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 

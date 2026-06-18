@@ -169,11 +169,16 @@ class StaticGraphProvider(BaseGraphProvider):
         edge_attr_tensor = torch.cat([graph[attr] for attr in edge_attributes], axis=1)
         edge_attr_tensor = edge_attr_tensor.index_select(0, perm)
 
+        # `perm` is only used to reorder edge_attr at construction time, never at forward,
+        # so it does not need to travel in the checkpoint.
         self.register_buffer("perm", perm, persistent=False)
-        self.register_buffer("edge_attr", edge_attr_tensor, persistent=False)
-        self.register_buffer("edge_index_base", edge_index, persistent=False)
+        # The graph topology and edge attributes ARE used at forward time. Persist them so
+        # they are written to / loaded from the checkpoint state_dict alongside the weights
+        # (rather than depending on a separately-pickled graph object). See no-pickle docs.
+        self.register_buffer("edge_attr", edge_attr_tensor, persistent=True)
+        self.register_buffer("edge_index_base", edge_index, persistent=True)
         self.register_buffer(
-            "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=False
+            "edge_inc", torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64)), persistent=True
         )
         self.register_buffer(
             self._TRAINABLE_LAYOUT_VERSION_KEY,
@@ -184,6 +189,21 @@ class StaticGraphProvider(BaseGraphProvider):
         self.trainable = TrainableTensor(trainable_size=trainable_size, tensor_size=edge_attr_tensor.shape[0])
 
         self._edge_dim = edge_attr_tensor.shape[1] + trainable_size
+
+    # Persistent edge buffers that are reconstructed from `graph_data` at __init__. They are
+    # newly persisted (see __init__); checkpoints written before that change do not contain
+    # them. Since they are always rebuilt at construction, tolerate their absence on load so
+    # that older checkpoints still load under strict=True.
+    _OPTIONAL_PERSISTENT_BUFFERS = ("edge_attr", "edge_index_base", "edge_inc")
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+        # signature: (state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+        missing_keys = args[2] if len(args) > 2 else kwargs.get("missing_keys", [])
+        for name in self._OPTIONAL_PERSISTENT_BUFFERS:
+            key = prefix + name
+            if key not in state_dict and key in missing_keys:
+                missing_keys.remove(key)
 
     @property
     def edge_dim(self) -> int:
