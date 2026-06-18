@@ -35,6 +35,7 @@ def test_radial_band_index() -> None:
     # 3x4 grid: |fftfreq*N| gives ky=[0,1,2,1], kx=[0,1,1]; band = round(sqrt(ky^2 + kx^2)),
     # flattened row-major (y outer, x inner).
     t = FFT2D(x_dim=3, y_dim=4)
+    t.power_spectral_density(t.forward(torch.zeros(1, 1, 1, 12, 1)))  # builds the index lazily
     assert torch.equal(t.radial_band_index, torch.tensor([0, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1]))
     assert t.n_radial_bands == 3
 
