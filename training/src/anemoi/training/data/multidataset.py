@@ -32,15 +32,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MultiDataset(IterableDataset):
-    """Multi-dataset wrapper that returns samples from multiple data readers.
-
-    The sampling behaviour is determined by the ``sampling_strategy``:
-
-    * ``SynchronizedSampling`` (default) – all readers are sampled at the same
-      date index (intersection of valid indices).
-    * ``IndependentSampling`` – each reader has its own index pool and
-      samples are interleaved randomly.
-    """
+    """Multi-dataset wrapper that returns samples from multiple data readers."""
 
     def __init__(
         self,
