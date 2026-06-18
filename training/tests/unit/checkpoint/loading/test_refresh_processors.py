@@ -157,9 +157,12 @@ async def test_full_process_call_applies_the_refresh() -> None:
     """Smoke test: the helper actually runs as part of WeightsOnlyLoader.process()."""
     context = _build_context(states=True, tendencies=True)
 
-    await WeightsOnlyLoader().process(context)
+    # strict=False: this fixture's checkpoint keys ("model.<...>") intentionally do not
+    # match the bare-keyed _ModelWithProcessors, so the smoke test only exercises that the
+    # refresh runs inside process() without error; the prefix-matching behaviour itself is
+    # covered by the direct _refresh_checkpoint_processors tests above.
+    await WeightsOnlyLoader(strict=False).process(context)
 
-    # After process() the model's own processor weights end up in the model
-    # (state_dict was rewritten then loaded back), so picking any value != 99.0 is enough.
+    # The model keeps its own (non-stale) processor weights.
     loaded = context.model.state_dict()["pre_processors.weight"]
     assert not torch.all(loaded == 99.0)
