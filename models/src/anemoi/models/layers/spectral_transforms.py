@@ -57,10 +57,9 @@ class Cartesian2DTransform(SpectralTransform):
     _radial_wavenumber_kind: str = "fft"
 
     def _ensure_radial_bands(self) -> None:
-        """Build the ``(per-coefficient band index, number of bands)`` lazily on first use.
+        """Build the ``(per-coefficient band index, number of bands)`` on first use.
 
-        The index is registered as a *non-persistent* buffer so :meth:`torch.nn.Module.to`
-        (and friends) move it with the module, but it is not written to ``state_dict``.
+        The index is registered as a *non-persistent* buffer.
         Depends only on ``x_dim``/``y_dim``/``_radial_wavenumber_kind``.
         """
         if "_radial_band_index" in self._buffers:
@@ -104,8 +103,8 @@ class Cartesian2DTransform(SpectralTransform):
         self._ensure_radial_bands()
         *lead, ky, kx, v = per_mode.shape
         flat = per_mode.reshape(*lead, ky * kx, v)
-        out = per_mode.new_zeros(*lead, self._n_radial_bands, v)
-        out.index_add_(-2, self._radial_band_index, flat)
+        out = per_mode.new_zeros(*lead, self._self.n_radial_bands, v)
+        out.index_add_(-2, self._radial_band_self.radial_band_index, flat)
         return out
 
 

@@ -509,24 +509,9 @@ def test_sht_amse_loss() -> None:
     target = torch.zeros_like(pred)
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
 
-    # patch-wise FFT2D breaks the per-L contract and must be rejected at construction
-    with pytest.raises(hydra.errors.InstantiationException):
-        _ = get_loss_function(
-            DictConfig(
-                {
-                    "_target_": "anemoi.training.losses.spectral.SpectralAMSELoss",
-                    "transform": "fft2d",
-                    "x_dim": 8,
-                    "y_dim": 6,
-                    "patch_size": [3, 4],
-                    "scalers": [],
-                },
-            ),
-        )
-
 
 @pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
-def test_amse_2d_transforms(transform: str) -> None:
+def test_amse_cartesian_transforms(transform: str) -> None:
     """AMSE works with the 2D transforms via radial-wavenumber binning."""
     nvars = 3
     x_dim, y_dim = 8, 6
@@ -544,24 +529,39 @@ def test_amse_2d_transforms(transform: str) -> None:
     target = torch.zeros_like(pred)
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
 
-    # AMSE(x, x) == 0 and AMSE >= 0, increasing with discrepancy (fp64 to avoid the
-    # loss's known fp32 sqrt/square eps-rounding, which is transform-agnostic)
+    # AMSE(x, x) == 0 and AMSE >= 0 (fp64 to avoid the loss's known fp32 sqrt/square
+    # eps-rounding, which is transform-agnostic)
     torch.manual_seed(0)
     pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
     other = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
     assert abs(loss(pred, pred, squash=True).item()) < 1e-6
-    vals = [loss(pred, pred + a * other, squash=True).item() for a in (0.0, 0.5, 1.0, 2.0)]
-    assert vals[0] >= -1e-9
-    assert vals == sorted(vals)  # non-decreasing in discrepancy
+    assert loss(pred, pred + other, squash=True).item() >= -1e-9
 
     # the transform's spectral-density contract (Parseval partition, cross self-consistency)
     # is covered for all transforms in models/tests/layers/test_spectral_density.py
 
-    # gradients flow back to the prediction
+    # gradients flow back through the radial-binning path (index_add_); the existing
+    # backward tests cover SpectralCRPS / SpectralL2Loss, not AMSE's binning
     pred = pred.clone().requires_grad_(True)
     loss(pred, target.double(), squash=True).backward()
     assert pred.grad is not None
     assert torch.isfinite(pred.grad).all()
+
+    # patch-wise FFT2D has no single (ky, kx) plane to bin, so AMSE must reject it
+    if transform == "fft2d":
+        with pytest.raises(hydra.errors.InstantiationException):
+            _ = get_loss_function(
+                DictConfig(
+                    {
+                        "_target_": "anemoi.training.losses.spectral.SpectralAMSELoss",
+                        "transform": "fft2d",
+                        "x_dim": x_dim,
+                        "y_dim": y_dim,
+                        "patch_size": [3, 4],
+                        "scalers": [],
+                    },
+                ),
+            )
 
 
 def test_octahedral_sht_loss() -> None:

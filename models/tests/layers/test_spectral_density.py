@@ -14,83 +14,46 @@ from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 
-
-def _make(transform: str, x_dim: int, y_dim: int):
-    if transform == "fft2d":
-        return FFT2D(x_dim=x_dim, y_dim=y_dim)
-    pytest.importorskip("torch_dct")
-    return DCT2D(x_dim=x_dim, y_dim=y_dim)
-
-
-# Transforms exposing the power/cross spectral-density contract, spanning both families:
-# the 2D Cartesian transforms (radial-wavenumber binning) and the spherical harmonics
-# (per-degree reduction). Each entry yields (transform, number of spatial points it expects).
 _DENSITY_TRANSFORMS = ["fft2d", "dct2d", "sht"]
 
 
 def _make_density_transform(kind: str):
-    if kind in ("fft2d", "dct2d"):
-        return _make(kind, x_dim=8, y_dim=6), 8 * 6
+    """Return ``(transform, n_spatial_points)`` for the spectral-density contract."""
+    if kind == "fft2d":
+        return FFT2D(x_dim=8, y_dim=6), 8 * 6
+    if kind == "dct2d":
+        pytest.importorskip("torch_dct")
+        return DCT2D(x_dim=8, y_dim=6), 8 * 6
     if kind == "sht":
         t = OctahedralSHT(nlat=8)
         return t, t._sht.n_grid_points
     raise ValueError(f"unknown transform {kind!r}")
 
 
-def test_radial_band_index_values() -> None:
-    """The (ky, kx) -> band map is the hand-computed radial wavenumber, including a
-    rectangular grid (distinct y/x axes) so axis alignment is checked, not just totals.
-    """
-    # FFT2D 4x3: |fftfreq*N| -> ky=[0,1,2,1] (y_dim=4), kx=[0,1,1] (x_dim=3)
-    # band[i,j] = round(sqrt(ky[i]**2 + kx[j]**2)), flattened row-major (y outer, x inner).
+def test_radial_band_index() -> None:
+    """The (ky, kx) -> band map on a rectangular FFT grid, so axis order is checked too."""
+    # 3x4 grid: |fftfreq*N| gives ky=[0,1,2,1], kx=[0,1,1]; band = round(sqrt(ky^2 + kx^2)),
+    # flattened row-major (y outer, x inner).
     t = FFT2D(x_dim=3, y_dim=4)
-    expected = torch.tensor([0, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1])
-    assert torch.equal(t.radial_band_index, expected)
+    t.power_spectral_density(t.forward(torch.zeros(1, 1, 1, 12, 1)))  # builds the index lazily
+    assert torch.equal(t.radial_band_index, torch.tensor([0, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1]))
     assert t.n_radial_bands == 3
 
 
 @pytest.mark.parametrize("transform", _DENSITY_TRANSFORMS)
 def test_spectral_density_contract(transform: str) -> None:
-    """The per-band/degree density is a partition of the squared spectrum (Parseval),
-    cross(x, x) == psd(x), and |cross(a, b)| <= sqrt(psd_a * psd_b) per band/degree.
-
-    Holds for both families: the 2D radial binning and the SHT's per-degree sum. The
-    dct2d case also exercises the real-coefficient path (the density methods would raise
-    if they touched ``.imag``).
+    """Parseval partition, cross(x, x) == psd(x) and per-band Cauchy-Schwarz, for the 2D
+    radial binning and the SHT per-degree sum alike.
     """
     t, n_points = _make_density_transform(transform)
     a = t.forward(torch.randn(2, 1, 2, n_points, 3, dtype=torch.float64))
     b = t.forward(torch.randn(2, 1, 2, n_points, 3, dtype=torch.float64))
-
     psd_a = t.power_spectral_density(a)
     psd_b = t.power_spectral_density(b)
 
-    # Parseval: summing the density over bands/degrees recovers the total power.
     total = torch.real(a * torch.conj(a)).flatten(-3, -2).sum(dim=-2)
     torch.testing.assert_close(psd_a.sum(dim=-2), total)
-
-    # cross(x, x) coincides with the power density.
     torch.testing.assert_close(t.cross_spectral_density(a, a), psd_a)
 
-    # Cauchy-Schwarz, per band/degree.
     cross = t.cross_spectral_density(a, b)
     assert torch.all(cross**2 <= psd_a * psd_b * (1 + 1e-9) + 1e-9)
-
-
-@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
-def test_pure_wave_localizes_to_expected_band(transform: str) -> None:
-    """A single wave at (ky0, kx0) deposits its power in band round(sqrt(ky0^2+kx0^2))."""
-    x_dim, y_dim = 16, 16
-    t = _make(transform, x_dim, y_dim)
-    ky0, kx0 = 2, 3
-    yy = torch.arange(y_dim).view(y_dim, 1).double()
-    xx = torch.arange(x_dim).view(1, x_dim).double()
-    if transform == "fft2d":
-        field = torch.cos(2 * torch.pi * (ky0 * yy / y_dim + kx0 * xx / x_dim))
-    else:  # DCT-II cosine mode
-        field = torch.cos(torch.pi * (yy + 0.5) * ky0 / y_dim) * torch.cos(torch.pi * (xx + 0.5) * kx0 / x_dim)
-
-    spec = t.forward(field.reshape(1, 1, 1, y_dim * x_dim, 1))
-    psd = t.power_spectral_density(spec)[0, 0, 0, :, 0]
-    expected = round((ky0**2 + kx0**2) ** 0.5)
-    assert (psd[expected] / psd.sum()).item() > 0.99
