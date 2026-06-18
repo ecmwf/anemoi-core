@@ -103,8 +103,8 @@ class Cartesian2DTransform(SpectralTransform):
         self._ensure_radial_bands()
         *lead, ky, kx, v = per_mode.shape
         flat = per_mode.reshape(*lead, ky * kx, v)
-        out = per_mode.new_zeros(*lead, self._self.n_radial_bands, v)
-        out.index_add_(-2, self._radial_band_self.radial_band_index, flat)
+        out = per_mode.new_zeros(*lead, self.n_radial_bands, v)
+        out.index_add_(-2, self.radial_band_index, flat)
         return out
 
 
