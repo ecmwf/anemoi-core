@@ -111,19 +111,20 @@ class MultiDomainDataset(AnemoiDataset):
                 high,
             )
 
-            base_seed = get_base_seed()
-            torch.manual_seed(base_seed)
-            random.seed(base_seed)
-            self.rng = np.random.default_rng(seed=base_seed)
-            sanity_rnd = self.rng.random(1)[0]
-            LOGGER.info(
-                ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
-                worker_id,
-                self.label,
-                os.getpid(),
-                base_seed,
-                sanity_rnd,
-            )
+        base_seed = get_base_seed()
+        torch.manual_seed(base_seed)
+        random.seed(base_seed)
+        self.rng = np.random.default_rng(seed=base_seed)
+        sanity_rnd = self.rng.random(1)[0]
+        
+        LOGGER.info(
+            ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
+            worker_id,
+            self.label,
+            os.getpid(),
+            base_seed,
+            sanity_rnd,
+        )
 
     def get_sample(self, domain_name: str, index: int) -> dict[str, torch.Tensor]:
         """Get a sample from the specified domain and index.
