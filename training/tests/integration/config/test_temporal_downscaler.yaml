@@ -1,7 +1,8 @@
 # Modifications for the basic template "temporal_downscaler.yaml"
 system:
   input:
-    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-od-fc-oper-0001-mars-o48-2017-2017-6h-1h-v5-testing.zarr
+
 
 data:
   frequency: 6h
