@@ -11,6 +11,9 @@ import logging
 import os
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -19,6 +22,7 @@ from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.utils.mlflow.client import AnemoiMlflowClient
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -37,7 +41,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
     for key, subschema in schema.items():
-
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:
@@ -269,9 +272,9 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    assert len(run_dirs) == 1, (
+        f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    )
 
     checkpoint_dir = run_dirs[0]
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
@@ -282,9 +285,9 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer.train()
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert (
-        trainer.model.trainer.global_step == expected_global_step
-    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    assert trainer.model.trainer.global_step == expected_global_step, (
+        f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+    )
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
@@ -395,11 +398,41 @@ def test_training_cycle_multidatasets_diffusion(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-
 def test_config_build() -> None:
 
     config = load_config("training/tests/integration/config/atmo_integration_test.yaml")
 
-    assert config["diagnostics"]["log"]["interval"] == 53
+    assert config["diagnostics"]["log"]["interval"] == 50
 
+    trainer = AnemoiTrainer(config)
+    assert trainer.cfg.diagnostics.log.interval == 50
 
+    trainer.train()
+
+    client = AnemoiMlflowClient("https://mlflow.ecmwf.int/", authentication=True)
+    experiment = client.get_experiment_by_name("aifs-convergence")
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        order_by=["attributes.start_time DESC"],
+        max_results=10,
+    )
+
+    REFERENCE_ID = "e00340e8cd5c41d2881afd2265677321"
+
+    def get_loss_df(run_id):
+        history = client.get_metric_history(
+            run_id,
+            "train_multi_dataset_loss_step",
+        )
+        return pd.DataFrame(
+            {
+                "step": [m.step for m in history],
+                "loss": [m.value for m in history],
+            }
+        ).set_index("step")
+
+    def is_similar(run_id1, run_id2):
+        df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
+        return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
+
+    assert is_similar(runs[0].info.run_id, REFERENCE_ID), f"Loss curve for run {runs[0].info.run_id} does not match reference"

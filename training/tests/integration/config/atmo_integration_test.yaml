@@ -23,7 +23,7 @@ diagnostics:
       tracking_uri: "https://mlflow.ecmwf.int" 
       enabled: True
       offline: False
-    interval: 53
+    interval: 50
 model:
   num_channels: 256 # 1/4 of number of channels for n320 models
   trainable_parameters:
