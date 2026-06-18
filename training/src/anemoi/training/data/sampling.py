@@ -15,8 +15,8 @@ import numpy as np
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.data.usable_indices import compute_valid_data_indices
+from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.training.utils.time_indices import offset_time_indices
 
@@ -114,9 +114,7 @@ class VariableSampling(SamplingStrategy):
     def valid_indices(self) -> list:
         """Valid indices"""
         return [
-            (dataset_name, idx)
-            for dataset_name, indices in self.per_dataset_valid_indices.items()
-            for idx in indices
+            (dataset_name, idx) for dataset_name, indices in self.per_dataset_valid_indices.items() for idx in indices
         ]
 
     def get_sample_timesteps(self, sample_index: int) -> dict[str, np.ndarray]:

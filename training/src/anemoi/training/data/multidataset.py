@@ -373,4 +373,3 @@ class MultiDataset(IterableDataset):
             subtree = dataset.tree(prefix=name)
             tree.add(subtree)
         return tree
-
