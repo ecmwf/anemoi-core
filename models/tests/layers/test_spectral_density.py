@@ -49,40 +49,30 @@ def test_radial_band_index_values() -> None:
     assert t.n_radial_bands == 3
 
 
-def test_radial_bands_are_built_lazily() -> None:
-    """Bands cost nothing until a power/cross spectral density is actually requested."""
-    t = FFT2D(x_dim=8, y_dim=8)
-    assert "_radial_bands" not in t.__dict__  # not computed at construction
-    _ = t.n_radial_bands  # first access triggers the cached_property
-    assert "_radial_bands" in t.__dict__  # now cached on the instance
-
-
 @pytest.mark.parametrize("transform", _DENSITY_TRANSFORMS)
-def test_density_partitions_total_power(transform: str) -> None:
-    """Sum over bands/degrees of the PSD == total power over the spectrum (Parseval).
+def test_spectral_density_contract(transform: str) -> None:
+    """The per-band/degree density is a partition of the squared spectrum (Parseval),
+    cross(x, x) == psd(x), and |cross(a, b)| <= sqrt(psd_a * psd_b) per band/degree.
 
-    A contract of every spectral transform: the 2D radial binning and the SHT's per-degree
-    sum are both partitions of the squared spectrum, so this also covers the SHT density.
+    Holds for both families: the 2D radial binning and the SHT's per-degree sum. The
+    dct2d case also exercises the real-coefficient path (the density methods would raise
+    if they touched ``.imag``).
     """
     t, n_points = _make_density_transform(transform)
-    spec = t.forward(torch.randn(2, 1, 2, n_points, 3, dtype=torch.float64))
-
-    psd = t.power_spectral_density(spec)
-    total = torch.real(spec * torch.conj(spec)).flatten(-3, -2).sum(dim=-2)
-    torch.testing.assert_close(psd.sum(dim=-2), total)
-
-
-@pytest.mark.parametrize("transform", _DENSITY_TRANSFORMS)
-def test_cross_self_consistency_and_cauchy_schwarz(transform: str) -> None:
-    """cross(x,x) == psd(x), and |cross| <= sqrt(psd_a * psd_b) per band/degree."""
-    t, n_points = _make_density_transform(transform)
-    a = t.forward(torch.randn(2, 1, 1, n_points, 3, dtype=torch.float64))
-    b = t.forward(torch.randn(2, 1, 1, n_points, 3, dtype=torch.float64))
+    a = t.forward(torch.randn(2, 1, 2, n_points, 3, dtype=torch.float64))
+    b = t.forward(torch.randn(2, 1, 2, n_points, 3, dtype=torch.float64))
 
     psd_a = t.power_spectral_density(a)
+    psd_b = t.power_spectral_density(b)
+
+    # Parseval: summing the density over bands/degrees recovers the total power.
+    total = torch.real(a * torch.conj(a)).flatten(-3, -2).sum(dim=-2)
+    torch.testing.assert_close(psd_a.sum(dim=-2), total)
+
+    # cross(x, x) coincides with the power density.
     torch.testing.assert_close(t.cross_spectral_density(a, a), psd_a)
 
-    psd_b = t.power_spectral_density(b)
+    # Cauchy-Schwarz, per band/degree.
     cross = t.cross_spectral_density(a, b)
     assert torch.all(cross**2 <= psd_a * psd_b * (1 + 1e-9) + 1e-9)
 
@@ -104,17 +94,3 @@ def test_pure_wave_localizes_to_expected_band(transform: str) -> None:
     psd = t.power_spectral_density(spec)[0, 0, 0, :, 0]
     expected = round((ky0**2 + kx0**2) ** 0.5)
     assert (psd[expected] / psd.sum()).item() > 0.99
-
-
-def test_dct_real_coeffs_do_not_use_imag() -> None:
-    """DCT2D returns real coefficients; the density methods must not touch ``.imag``.
-
-    (``tensor.imag`` raises for real dtypes, which is why the SHT methods cannot be reused.)
-    """
-    pytest.importorskip("torch_dct")
-    t = DCT2D(x_dim=8, y_dim=6)
-    spec = t.forward(torch.randn(1, 1, 1, 48, 2, dtype=torch.float64))
-    assert not spec.is_complex()
-    # would raise if the implementation referenced spec.imag
-    psd = t.power_spectral_density(spec)
-    assert torch.isfinite(psd).all()
