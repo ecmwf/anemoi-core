@@ -24,14 +24,17 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.residual import InterpolationConnection
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AnemoiModelEncProcDec(BaseGraphModel):
+class AnemoiModelEncProcDecInterpolated(BaseGraphModel):
     """Message passing graph neural network."""
+
+    trunc_conn = "data", "hires"
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
@@ -94,6 +97,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
+        
+        self.interp_skip = InterpolationConnection(
+            graph=self._graph_data,
+            interpolation_edges_name=(self.trunc_conn[0], "to", self.trunc_conn[1]),
+            edge_weight_attribute="gauss_weight",
+        )
 
     def _assemble_input(
         self,
@@ -185,14 +194,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             .to(dtype=dtype)
             .clone()
         )
-
-        # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        assert (
-            x_skip.shape[1] == x_out.shape[1]
-        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+
+        if x_skip is not None:
+            # residual connection (just for the prognostic variables)
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -368,6 +378,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
+
+            if dataset_name == self.trunc_conn[0]:
+                x_skip_dict[self.trunc_conn[1]] = self.interp_skip(
+                    x_out[..., self._trunc_indices],
+                    grid_shard_sizes=grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None,
+                    model_comm_group=model_comm_group,
+                    batch_size=batch_size,
+                )
+
+            if dataset_name == self.trunc_conn[1]:
+                x_out += x_skip_dict[dataset_name]
+                x_skip_dict[dataset_name] = None
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,

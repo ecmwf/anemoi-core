@@ -9,6 +9,7 @@
 
 from .base import BaseGraphModel
 from .encoder_processor_cascadedecoder import AnemoiModelEncProcCascadeDec
+from .encoder_processor_decoder_withinterpolation import AnemoiModelEncProcDecInterpolated
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
@@ -22,6 +23,7 @@ __all__ = [
     "BaseGraphModel",
     "AnemoiModelEncProcCascadeDec",
     "AnemoiModelEncProcDec",
+    "AnemoiModelEncProcDecInterpolated",
     "AnemoiEnsModelEncProcDec",
     "AnemoiTransportModelEncProcDec",
     "AnemoiTransportTendModelEncProcDec",
