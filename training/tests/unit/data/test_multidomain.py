@@ -70,3 +70,27 @@ class TestMultiDomain:
         }
         for key in expected_indices:
             assert np.array_equal(valid_indices[key], expected_indices[key])
+
+    def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain):
+        multi_domain.per_worker_init(n_workers=2, worker_id=0)
+        assert set(multi_domain.n_samples_per_worker) == {"dataset_a", "dataset_b"}
+        assert set(multi_domain.chunk_index_range) == {"dataset_a", "dataset_b"}
+
+        assert isinstance(multi_domain.chunk_index_range["dataset_a"], np.ndarray)
+        assert isinstance(multi_domain.chunk_index_range["dataset_b"], np.ndarray)  
+    
+    def test_worker_shards_do_not_overlap_per_domain(self, multi_domain):
+        multi_domain.per_worker_init(n_workers=2, worker_id=0)
+        worker_0_ranges = {k: v.copy() for k, v in multi_domain.chunk_index_range.items()}
+
+        multi_domain.per_worker_init(n_workers=2, worker_id=1)
+        worker_1_ranges = {k: v.copy() for k, v in multi_domain.chunk_index_range.items()}
+
+        for domain in multi_domain.dataset_names:
+            assert set(worker_0_ranges[domain]).isdisjoint(set(worker_1_ranges[domain]))
+    
+    def test_get_sample_dispatches_to_requested_domain(self, multi_domain):
+        multi_domain.get_sample("dataset_a", 0)
+
+        multi_domain.data_readers["dataset_a"].get_sample.assert_called_once()
+        multi_domain.data_readers["dataset_b"].get_sample.assert_not_called()
