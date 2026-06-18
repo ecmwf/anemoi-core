@@ -46,18 +46,11 @@ class SpectralTransform(torch.nn.Module):
         """
 
 
-class RadialSpectralDensity:
-    """Mixin providing per-radial-band power and cross spectra for 2D spectra.
+class Cartesian2DTransform(SpectralTransform):
+    """Base class for the 2D Cartesian spectral transforms (:class:`FFT2D`, :class:`DCT2D`).
 
-    The 2D transforms (:class:`FFT2D`, :class:`DCT2D`) produce a ``(ky, kx)`` spectral
-    plane rather than the spherical harmonics' ``(L, M)`` layout. This mixin bins that
-    plane into integer radial-wavenumber bands ``L = round(sqrt(ky^2 + kx^2))`` and sums
-    within each band, so the result plays the role of the SHT's per-degree spectra and
-    :class:`~anemoi.training.losses.spectral.SpectralAMSELoss` can consume it unchanged.
-
-    Subclasses set ``_radial_wavenumber_kind`` to select the frequency convention and
-    call :meth:`_init_radial_bands` from their ``__init__`` (after ``x_dim``/``y_dim`` and
-    ``torch.nn.Module.__init__`` are set up).
+    Defines the per-radial-band power and cross spectra the 2D transforms share, binning
+    their ``(ky, kx)`` spectral plane into integer radial-wavenumber bands.
     """
 
     # "fft": signed FFT wavenumbers (|k| in 0..N//2); "index": cosine indices 0..N-1.
@@ -97,7 +90,7 @@ class RadialSpectralDensity:
         return out
 
 
-class FFT2D(RadialSpectralDensity, SpectralTransform):
+class FFT2D(Cartesian2DTransform):
     """2D Fast Fourier Transform (FFT) implementation."""
 
     def __init__(
@@ -237,7 +230,7 @@ class FFT2D(RadialSpectralDensity, SpectralTransform):
         return fft
 
 
-class DCT2D(RadialSpectralDensity, SpectralTransform):
+class DCT2D(Cartesian2DTransform):
     """2D Discrete Cosine Transform."""
 
     # DCT coefficients are real and indexed by non-negative cosine frequencies 0..N-1.
