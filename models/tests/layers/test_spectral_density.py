@@ -33,6 +33,14 @@ def test_radial_band_index_values() -> None:
     assert t.n_radial_bands == 3
 
 
+def test_radial_bands_are_built_lazily() -> None:
+    """Bands cost nothing until a power/cross spectral density is actually requested."""
+    t = FFT2D(x_dim=8, y_dim=8)
+    assert "_radial_bands" not in t.__dict__  # not computed at construction
+    _ = t.n_radial_bands  # first access triggers the cached_property
+    assert "_radial_bands" in t.__dict__  # now cached on the instance
+
+
 @pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
 @pytest.mark.parametrize(("x_dim", "y_dim"), [(8, 8), (8, 6)])
 def test_radial_density_parseval_and_shape(transform: str, x_dim: int, y_dim: int) -> None:

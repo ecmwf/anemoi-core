@@ -9,6 +9,7 @@
 
 import abc
 import logging
+from functools import cached_property
 
 import einops
 import torch
@@ -56,7 +57,14 @@ class Cartesian2DTransform(SpectralTransform):
     # "fft": signed FFT wavenumbers (|k| in 0..N//2); "index": cosine indices 0..N-1.
     _radial_wavenumber_kind: str = "fft"
 
-    def _init_radial_bands(self) -> None:
+    @cached_property
+    def _radial_bands(self) -> tuple[torch.Tensor, int]:
+        """``(per-coefficient band index, number of bands)``, computed once on first use.
+
+        Depends only on ``x_dim``/``y_dim``/``_radial_wavenumber_kind``. Cached on the
+        instance (not a registered buffer, so it never enters the state dict); the index is
+        moved to the spectral coefficients' device at use in :meth:`_sum_over_radial_bands`.
+        """
         if self._radial_wavenumber_kind == "fft":
             ky = (torch.fft.fftfreq(self.y_dim) * self.y_dim).abs()
             kx = (torch.fft.fftfreq(self.x_dim) * self.x_dim).abs()
@@ -68,9 +76,18 @@ class Cartesian2DTransform(SpectralTransform):
 
         ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing="ij")
         band = torch.sqrt(ky_grid**2 + kx_grid**2).round().long()
-        self.n_radial_bands = int(band.max().item()) + 1
-        # flattened (ky*kx,) bucket id per spectral coefficient; not a learnable/saved state
-        self.register_buffer("radial_band_index", band.reshape(-1), persistent=False)
+        # flattened (ky*kx,) bucket id per spectral coefficient
+        return band.reshape(-1), int(band.max().item()) + 1
+
+    @property
+    def radial_band_index(self) -> torch.Tensor:
+        """Flattened ``(ky*kx,)`` radial-band id for each spectral coefficient."""
+        return self._radial_bands[0]
+
+    @property
+    def n_radial_bands(self) -> int:
+        """Number of radial-wavenumber bands the spectral plane collapses to."""
+        return self._radial_bands[1]
 
     def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
         """Return per-band power spectral density: sum of ``|coeff|^2`` within each band."""
@@ -83,10 +100,12 @@ class Cartesian2DTransform(SpectralTransform):
 
     def _sum_over_radial_bands(self, per_mode: torch.Tensor) -> torch.Tensor:
         """Collapse the two spectral dims ``[..., ky, kx, v] -> [..., L, v]``."""
+        index, n_radial_bands = self._radial_bands
+        index = index.to(per_mode.device)
         *lead, ky, kx, v = per_mode.shape
         flat = per_mode.reshape(*lead, ky * kx, v)
-        out = per_mode.new_zeros(*lead, self.n_radial_bands, v)
-        out.index_add_(-2, self.radial_band_index, flat)
+        out = per_mode.new_zeros(*lead, n_radial_bands, v)
+        out.index_add_(-2, index, flat)
         return out
 
 
@@ -171,8 +190,6 @@ class FFT2D(Cartesian2DTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
-        self._init_radial_bands()
-
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
@@ -240,7 +257,6 @@ class DCT2D(Cartesian2DTransform):
         super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
-        self._init_radial_bands()
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         try:
