@@ -69,6 +69,7 @@ class SamplingStrategy(ABC):
         return len(self.valid_indices)
 
     @property
+    @abstractmethod
     def valid_indices(self) -> list:
         pass
 
