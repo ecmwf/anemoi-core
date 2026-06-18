@@ -18,7 +18,7 @@ dataloader:
     validation: 1
 
 graph:
-  overwrite: False
+  overwrite: true
 
 model:
   encoder:
