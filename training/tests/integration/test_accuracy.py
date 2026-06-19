@@ -10,12 +10,11 @@
 import logging
 import os
 from pathlib import Path
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 
 from anemoi.training.train.train import AnemoiTrainer
-
 from anemoi.training.utils.config import load_config
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
@@ -70,5 +69,6 @@ def test_config_build(tmp_path: Path) -> None:
         return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
 
     assert is_similar(
-        runs[0].info.run_id, reference_id,
+        runs[0].info.run_id,
+        reference_id,
     ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
