@@ -10,6 +10,11 @@
 import logging
 import os
 from pathlib import Path
+import pandas as pd
+import numpy as np
+
+
+from anemoi.training.train.train import AnemoiTrainer
 
 from anemoi.training.utils.config import load_config
 
@@ -31,39 +36,39 @@ def test_config_build(tmp_path: Path) -> None:
     # TODO double check
     config.system.output.root = str(tmp_path)
 
-    assert config.diagnostics.log.interval == 53
+    assert config.diagnostics.log.interval == 50
 
-    # trainer = AnemoiTrainer(config)
-    # assert trainer.cfg.diagnostics.log.interval == 50
+    trainer = AnemoiTrainer(config)
+    assert trainer.cfg.diagnostics.log.interval == 50
 
-    # trainer.train()
+    trainer.train()
 
-    # client = AnemoiMlflowClient("https://mlflow.ecmwf.int/", authentication=True)
-    # experiment = client.get_experiment_by_name("aifs-convergence")
-    # runs = client.search_runs(
-    #     experiment_ids=[experiment.experiment_id],
-    #     order_by=["attributes.start_time DESC"],
-    #     max_results=10,
-    # )
+    client = AnemoiMlflowClient("https://mlflow.ecmwf.int/", authentication=True)
+    experiment = client.get_experiment_by_name("aifs-convergence")
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        order_by=["attributes.start_time DESC"],
+        max_results=10,
+    )
 
-    # reference_id: Final = "e00340e8cd5c41d2881afd2265677321"
+    reference_id: Final = "e00340e8cd5c41d2881afd2265677321"
 
-    # def get_loss_df(run_id: str) -> pd.DataFrame:
-    #     history = client.get_metric_history(
-    #         run_id,
-    #         "train_multi_dataset_loss_step",
-    #     )
-    #     return pd.DataFrame(
-    #         {
-    #             "step": [m.step for m in history],
-    #             "loss": [m.value for m in history],
-    #         },
-    #     ).set_index("step")
+    def get_loss_df(run_id: str) -> pd.DataFrame:
+        history = client.get_metric_history(
+            run_id,
+            "train_multi_dataset_loss_step",
+        )
+        return pd.DataFrame(
+            {
+                "step": [m.step for m in history],
+                "loss": [m.value for m in history],
+            },
+        ).set_index("step")
 
-    # def is_similar(run_id1: str, run_id2: str) -> bool:
-    #     df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
-    #     return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
+    def is_similar(run_id1: str, run_id2: str) -> bool:
+        df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
+        return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
 
-    # assert is_similar(
-    #     runs[0].info.run_id, reference_id,
-    # ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
+    assert is_similar(
+        runs[0].info.run_id, reference_id,
+    ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
