@@ -39,6 +39,7 @@ def _make_native_reader(length: int, missing: set[int] | None = None) -> BaseAne
             return self._missing
 
     reader.data = _FakeData(length, missing or set())
+    reader.default_sampling = {"stride": 1}
     return reader
 
 
