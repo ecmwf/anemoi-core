@@ -13,60 +13,14 @@ import logging
 import os
 import sys
 from abc import ABC
-from abc import abstractmethod
-from pathlib import Path
 
-from anemoi.training.commands import Command
+from anemoi.training.commands._base import HydraCommand
 
 LOGGER = logging.getLogger(__name__)
 
 
-class EvaluateBase(Command, ABC):
-    accept_unknown_args = True
-
-    @staticmethod
-    def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-        return parser
-
-    def _merge_sysargv(self, args: argparse.Namespace) -> str:
-        """Merge the sys.argv with the known subcommands to pass to hydra.
-
-        This is done for interactive DDP, which will spawn the rank > 0 processes from sys.argv[0]
-        and for hydra, which ingests sys.argv[1:]
-
-        Parameters
-        ----------
-        args : argparse.Namespace
-            args from the command line
-
-        Returns
-        -------
-        str
-            Modified sys.argv as string
-        """
-        argv = Path(sys.argv[0])
-
-        # this will turn "/env/bin/anemoi-training evaluate" into "/env/bin/.anemoi-training-evaluate"
-        # the dot at the beginning is intentional to not interfere with autocomplete
-        modified_sysargv = argv.with_name(f".{argv.name}-{args.command}")
-
-        if hasattr(args, "subcommand"):
-            modified_sysargv += f"-{args.subcommand}"
-        return str(modified_sysargv)
-
-    def prepare_sysargv(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None:
-        os.environ["ANEMOI_EVALUATE_CMD"] = f"{sys.argv[0]} {args.command}"
-        # Merge the known subcommands with a non-whitespace character for hydra
-        new_sysargv = self._merge_sysargv(args)
-
-        # Add the unknown arguments (belonging to hydra) to sys.argv
-        if unknown_args is not None:
-            sys.argv = [new_sysargv, *unknown_args]
-        else:
-            sys.argv = [new_sysargv]
-
-    @abstractmethod
-    def run(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None: ...
+class EvaluateBase(HydraCommand, ABC):
+    env_var = "ANEMOI_EVALUATE_CMD"
 
 
 class Evaluate(EvaluateBase):
@@ -74,7 +28,6 @@ class Evaluate(EvaluateBase):
 
     def run(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None:
         self.prepare_sysargv(args, unknown_args)
-
         LOGGER.info("Running anemoi evaluation command with overrides: %s", sys.argv[1:])
         main()
 
