@@ -86,24 +86,30 @@ class MultiDomainDataset(AnemoiDataset):
         """
         from anemoi.transform.variables import Variable
 
-        list_with_domain_names_with_units = []
-        for domain, _metadata in self.metadata.items():
-            if not _metadata.get("variables_metadata", {}):  # empty dict
-                continue  # skip dataset
-            list_with_domain_names_with_units.append(domain)
+        domains_with_units = [
+            domain for domain, metadata in self.metadata.items() if metadata.get("variables_metadata", {})
+        ]
 
-        if len(list_with_domain_names_with_units) == len(self.metadata):
+        if len(domains_with_units) == 0:
             LOGGER.warning("All datasets have empty metadata, skipping units check.")
+            return
+        if len(domains_with_units) == 1:
+            LOGGER.warning("Only one dataset has variable metadata, skipping units check.")
             return
 
         # need to cross check all datasets, as some may have missing metadata for some variables
-        for domain1 in list_with_domain_names_with_units:
-            for domain2 in list_with_domain_names_with_units:
-                if domain1 == domain2:
-                    continue  # skip self comparison
+        for i, domain1 in enumerate(domains_with_units):
+            for domain2 in domains_with_units[i + 1 :]:
 
-                variable_domain1 = self.metadata[domain1].get("variables_metadata", {})
-                variable_domain2 = self.metadata[domain2].get("variables_metadata", {})
+                variable_domain1 = {
+                    name: Variable.from_dict(name, data)
+                    for name, data in self.metadata[domain1]["variables_metadata"].items()
+                }
+                variable_domain2 = {
+                    name: Variable.from_dict(name, data)
+                    for name, data in self.metadata[domain2]["variables_metadata"].items()
+                }
+
                 try:
                     Variable.check_compatibility(variable_domain1, variable_domain2)
                 except ValueError as e:
