@@ -11,7 +11,6 @@ import logging
 import os
 from pathlib import Path
 
-
 from anemoi.training.utils.config import load_config
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
