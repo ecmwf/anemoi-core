@@ -39,7 +39,7 @@ class SingleTraining(BaseTrainingModule):
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for task_kwargs in task_steps:
-            y, target = self.task.get_targets(batch, **task_kwargs)
+            y, target = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
 
             y_pred = self(x, target=target)
 

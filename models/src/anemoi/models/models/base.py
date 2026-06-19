@@ -140,7 +140,7 @@ class BaseGraphModel(nn.Module):
             hidden=self._graph_name_hidden,
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
-        self.use_encoder_data_output = {"grid": True, "obs": False}
+        self.use_encoder_data_output = {"data": True, "grid": True, "obs": False}
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)

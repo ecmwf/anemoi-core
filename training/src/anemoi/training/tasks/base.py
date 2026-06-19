@@ -157,13 +157,15 @@ class BaseTask(ABC):
             )
         return new_batch
 
-    def get_targets(self, batch: "Batch", **kwargs) -> tuple["Batch", "Batch"]:
+    def get_targets(self, batch: "Batch", data_indices: dict[str, IndexCollection], **kwargs) -> tuple["Batch", "Batch"]:
         """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
         batch : Batch
             Full batch object (data, coords, metadata) keyed by dataset name.
+        data_indices : dict[str, IndexCollection]
+            Data indices per dataset.
         **kwargs
             Forwarded to ``get_batch_output_indices`` (e.g. ``rollout_step``).
 
@@ -179,17 +181,20 @@ class BaseTask(ABC):
         time_indices = self.get_batch_output_indices(**kwargs)
         time_indices = normalize_time_indices(time_indices)
 
-        new_batch = batch.select(time=time_indices)
-        for dataset_name, payload in new_batch.data.items():
+        y = batch.select(time=time_indices)
+        for dataset_name, payload in y.data.items():
             LOGGER.debug(
                 "SHAPE: y[%s] = %s",
                 dataset_name,
                 payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
             )
 
+        var_indices = {dataset_name: data_indices[dataset_name].data.output.full for dataset_name in batch.dataset_names}
+        target = y.select(variables=var_indices)
+
         empty_data = {}
-        for dataset_name, payload in new_batch.data.items():
-            layout = new_batch.layouts.get(dataset_name)
+        for dataset_name, payload in target.data.items():
+            layout = y.layouts.get(dataset_name)
             assert (
                 layout is not None
             ), f"Layout is required for dataset '{dataset_name}' to determine variable axis for target slicing."
@@ -198,9 +203,9 @@ class BaseTask(ABC):
             else:
                 empty_data[dataset_name] = payload.narrow(layout.variables, 0, 0)
 
-        target = new_batch.with_data(empty_data)
+        target = target.with_data(empty_data)
 
-        return new_batch, target
+        return y, target
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""

@@ -359,6 +359,12 @@ class Batch:
         """Return a new batch with one dataset replaced from a ``SourceView``."""
         new_data = {**self.data, source_name: source_view.data}
 
+        new_variables = dict(self.variables)
+        if source_view.variables is not None:
+            new_variables[source_name] = source_view.variables
+        else:
+            new_variables.pop(source_name, None)
+
         new_coordinates = dict(self.coordinates)
         if source_view.coordinates is None:
             new_coordinates.pop(source_name, None)
@@ -386,7 +392,7 @@ class Batch:
             timedeltas=new_timedeltas,
             grid_shard_indices=self.grid_shard_indices,
             layouts=self.layouts,
-            variables=self.variables,
+            variables=new_variables,
             statistics=self.statistics,
         )
 
