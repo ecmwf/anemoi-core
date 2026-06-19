@@ -257,7 +257,7 @@ Supported transforms include:
    significant speedups, but may not be supported on all devices and can have higher memory usage.
 
 Spectral kernel CRPS
---------------------
+====================
 
 ``SpectralCRPSLoss`` computes a CRPS-style probabilistic loss in spectral space.
 Conceptually, it applies a spectral transform to both forecast ensemble and target,
@@ -268,7 +268,7 @@ This loss is intended for *ensemble* training (``ensemble > 1``). For determinis
 training, consider spectral distance losses instead.
 
 Example configuration (FFT2D)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------------
 
 Use this for limited-area or other regular 2D fields that can be reshaped to
 ``[y_dim, x_dim]``:
@@ -285,9 +285,9 @@ Use this for limited-area or other regular 2D fields that can be reshaped to
          y_dim: 128
 
 Example configuration (reduced Gaussian grid SHT)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------------------------------
 
-Use this for global models on the reduced Gaussian grid (only N320 supported so far):
+Use this for global models on the reduced Gaussian grid (only N320 supported):
 
 .. code-block:: yaml
 
@@ -302,7 +302,7 @@ Truncation is by default set to 319 for n320 grids, but can be set to a higher o
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
 Power Spectrum Loss
--------------------
+===================
 
 ``PowerSpectrumLoss`` (PSL) is a spectral loss that compares
 the *power spectrum* (energy per total wavenumber) of the prediction against
@@ -332,7 +332,7 @@ transforms (``reduced_sht``, ``octahedral_sht``). For these,
    the spectral dimension), not a spatial weight such as ``node_weights``.
 
 Example configuration (octahedral SHT)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------------
 
 .. code-block:: yaml
 
@@ -351,7 +351,7 @@ grid-point loss (e.g. ``MSELoss``) via ``CombinedLoss``, where it acts as
 a spectral regulariser that discourages spectral blurring.
 
 Combining spectral and grid-point losses
-----------------------------------------
+========================================
 
 Spectral losses can be combined with standard grid-point losses through
 ``CombinedLoss``:
@@ -398,7 +398,7 @@ excluded add `!scaler_name`, i.e. ``['*', '!scaler_1']``, and
 ``scaler_1`` will not be added.
 
 Tendency Scalers
-----------------
+================
 
 Tendency scalers allow the scaling of prognostic losses by the standard
 deviation or variance of the variable tendencies (e.g. the 6-hourly
@@ -420,7 +420,7 @@ unintended bias in the training process.
      _target_: anemoi.training.losses.scalers.VarTendencyScaler
 
 Variable Level Scalers
-----------------------
+======================
 
 Variable level scalers allow the user to scale variables by its level,
 i.e. model or pressure levels for upper air variables. The variable
@@ -443,7 +443,7 @@ This will scale all variables in the `pl` group by max(0.2, 0.001 *
 level), where `level` is the pressure level of the variable.
 
 Variable Groups
-===============
+---------------
 
 Define a default group and a list of groups to be used in the variable
 level scalers.
@@ -527,7 +527,7 @@ If multiple groups are defined for a variable, the first group in the
 assigned to the default group.
 
 Spectral Loss Scalers
----------------------
+=====================
 
 Spectral scalers weight the spectral dimension of spectral losses. They
 are required whenever using a
@@ -586,7 +586,7 @@ Then reference it from the loss:
             scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
 
 Custom Scalers
---------------
+==============
 
 To create a custom scaler, subclass the ``BaseScaler`` and implement the
 ``get_scaling_values`` method. This method should return an array of the
@@ -608,7 +608,7 @@ This scaler will only be instantiated once at the start of training, and
 thus cannot adapt throughout batches and epochs.
 
 Custom Updating Scalers
-=======================
+-----------------------
 
 If you want a scaler that adapts throughout the training process, you
 can subclass the ``BaseUpdatingScaler``.
