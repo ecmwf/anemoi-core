@@ -51,13 +51,20 @@ class TestMultiDomain:
             assert np.array_equal(multi_domain.chunk_index_range[key], expected_indices[key])
 
     def test_valid_date_indices(self, multi_domain: MultiDomainDataset) -> None:
-        """Test that valid_date_indices returns a dictionary of indices from all datasets."""
-        # relative_date_indices are: [0, 1, 2]
-        # dataset_a has dates [0, 1, 2, ..., 29]
-        # dataset_a has indices [0, 1, 2, 3, 4, ..., 22, 23], where 23 = 29 - max(data_relative_time_indices) = 29 - 6
-        # dataset_b has missing indices {26, 27, 28, 29}
-        # dataset_b has indices [20, 21, 22, 23, 24, 25, 30, 31, 32], where 32 = 49 - max(data_relative_time_indices) = 49 - 18
+        """Test that valid_date_indices returns a dictionary of indices from all datasets.
 
+        relative_date_indices = [0, 1, 2]
+
+        dataset_a:
+        dates:   [0, 1, 2, ..., 29]
+        indices: [0, 1, 2, ..., 22, 23]
+                where 23 = 29 - max(data_relative_time_indices) = 29 - 6
+
+        dataset_b:
+        missing indices: {26, 27, 28, 29}
+        indices: [20, 21, 22, 23, 24, 25, 30, 31, 32]
+                where 32 = 49 - max(data_relative_time_indices) = 49 - 18
+        """
         # Test valid_date_indices property
         valid_indices = multi_domain.valid_date_indices
 
@@ -71,7 +78,7 @@ class TestMultiDomain:
         for key in expected_indices:
             assert np.array_equal(valid_indices[key], expected_indices[key])
 
-    def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain):
+    def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         assert set(multi_domain.n_samples_per_worker) == {"dataset_a", "dataset_b"}
         assert set(multi_domain.chunk_index_range) == {"dataset_a", "dataset_b"}
@@ -79,7 +86,7 @@ class TestMultiDomain:
         assert isinstance(multi_domain.chunk_index_range["dataset_a"], np.ndarray)
         assert isinstance(multi_domain.chunk_index_range["dataset_b"], np.ndarray)
 
-    def test_worker_shards_do_not_overlap_per_domain(self, multi_domain):
+    def test_worker_shards_do_not_overlap_per_domain(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         worker_0_ranges = {k: v.copy() for k, v in multi_domain.chunk_index_range.items()}
 
@@ -89,8 +96,47 @@ class TestMultiDomain:
         for domain in multi_domain.dataset_names:
             assert set(worker_0_ranges[domain]).isdisjoint(set(worker_1_ranges[domain]))
 
-    def test_get_sample_dispatches_to_requested_domain(self, multi_domain):
+    def test_get_sample_dispatches_to_requested_domain(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.get_sample("dataset_a", 0)
 
         multi_domain.data_readers["dataset_a"].get_sample.assert_called_once()
         multi_domain.data_readers["dataset_b"].get_sample.assert_not_called()
+
+    def test_check_datasets_units_raises_error_for_incompatible_units(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.metadata = {
+            "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
+            "dataset_b": {"variables_metadata": {"10u": {"units": "km/h"}}},
+        }
+        with pytest.raises(
+            ValueError,
+            match="Variable compatibility check failed for domain1 'dataset_a' and domain2 'dataset_b'",
+        ):
+            multi_domain._check_datasets_units()
+
+    def test_check_datasets_units_passes_for_compatible_units(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.metadata = {
+            "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
+            "dataset_b": {"variables_metadata": {"10u": {"units": "m/s"}}},
+        }
+
+        assert multi_domain._check_datasets_units() is None
+
+    def test_check_datasets_units_skips_when_no_dataset_has_metadata(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.metadata = {
+            "dataset_a": {"variables_metadata": {}},
+            "dataset_b": {"variables_metadata": {}},
+        }
+
+        assert multi_domain._check_datasets_units() is None
+
+    def test_check_datasets_units_skips_when_only_one_dataset_has_metadata(
+        self,
+        multi_domain: MultiDomainDataset,
+    ) -> None:
+        multi_domain.metadata = {
+            "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
+            "dataset_b": {"variables_metadata": {}},
+        }
+        assert (
+            multi_domain._check_datasets_units() is None
+        ), "Should skip units check when only one dataset has variable metadata"
