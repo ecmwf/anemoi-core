@@ -12,19 +12,16 @@ import argparse
 import logging
 import os
 import sys
-from abc import ABC
 
 from anemoi.training.commands._base import HydraCommand
 
 LOGGER = logging.getLogger(__name__)
 
 
-class EvaluateBase(HydraCommand, ABC):
-    env_var = "ANEMOI_EVALUATE_CMD"
-
-
-class Evaluate(EvaluateBase):
+class Evaluate(HydraCommand):
     """Commands to evaluate Anemoi models."""
+
+    env_var = "ANEMOI_EVALUATE_CMD"
 
     def run(self, args: argparse.Namespace, unknown_args: list[str] | None = None) -> None:
         self.prepare_sysargv(args, unknown_args)
