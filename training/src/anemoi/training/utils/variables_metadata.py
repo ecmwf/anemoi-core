@@ -159,7 +159,7 @@ def check_loss_variable_units_compatibility(
         compatible, reason = pred_variable.compatible(target_variable, return_reason=True, **options)
         if not compatible:
             msg = (
-                f"Loss variable unit mismatch: predicted variable '{pred_var}' and "
+                f"Loss variable mismatch: predicted variable '{pred_var}' and "
                 f"target variable '{target_var}' are not compatible: {reason}"
             )
             raise ValueError(msg)

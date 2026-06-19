@@ -278,9 +278,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             # Check unit compatibility between predicted and target variables
             ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
-            compat_cfg = loss_configs[dataset_name].get("check_variables_compatibility", {})
-            compat_options = OmegaConf.to_container(compat_cfg, resolve=True) if compat_cfg else {}
-            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata, **compat_options)
+            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],

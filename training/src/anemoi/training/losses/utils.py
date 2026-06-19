@@ -112,7 +112,15 @@ def check_loss_tree_variable_units(
     target_variables = getattr(loss, "target_variables", None)
 
     if predicted_variables is not None and target_variables is not None:
-        check_loss_variable_units_compatibility(predicted_variables, target_variables, variables_metadata, **options)
+        # Per-loss options (from check_variables_compatibility on this loss config entry)
+        # take precedence over any inherited options passed from the caller.
+        node_options = {**options, **getattr(loss, "compatibility_options", {})}
+        check_loss_variable_units_compatibility(
+            predicted_variables,
+            target_variables,
+            variables_metadata,
+            **node_options,
+        )
 
     # Recurse into composite losses (e.g. CombinedLoss.losses)
     for sub_loss in getattr(loss, "losses", []):
