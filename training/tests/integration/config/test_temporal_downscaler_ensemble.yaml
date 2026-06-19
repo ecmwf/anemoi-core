@@ -4,7 +4,7 @@ system:
     loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 data:
-  frequency: 6h
+  frequency: null
 
 task:
   _target_: anemoi.training.tasks.TemporalDownscaler

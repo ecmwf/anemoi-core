@@ -365,6 +365,18 @@ class TrajectoryDataset(BaseAnemoiReader):
         if source is None:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
+
+        # Trajectory datasets derive their step frequency from the dataset itself.
+        # Passing data.frequency would be misleading and is not supported.
+        source_dict = _as_dict(source) if not isinstance(source, str) else {}
+        if isinstance(source_dict, dict) and source_dict.get("frequency") is not None:
+            msg = (
+                "TrajectoryDataset does not accept a 'frequency' in dataset_config. "
+                "The step frequency is read directly from the dataset. "
+                "Set data.frequency: null in your config."
+            )
+            raise AssertionError(msg)
+
         # Trajectory datasets use base_start/base_end to filter by initialisation date;
         # passing start/end would trigger access to .dates which doesn't exist on them.
         open_kwargs: dict = {}

@@ -5,7 +5,7 @@ system:
 
 
 data:
-  frequency: 6h
+  frequency: null
 
 task:
   _target_: anemoi.training.tasks.TemporalDownscaler

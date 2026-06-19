@@ -15,6 +15,7 @@ import torch
 from pydantic import ValidationError
 
 from anemoi.training.data.data_reader import NativeGridDataset
+from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
@@ -427,3 +428,32 @@ def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> N
     )
 
     assert cfg.dataset_config == {"invalid_key": "not-supported"}
+
+
+def test_trajectory_dataset_rejects_frequency_in_dataset_config() -> None:
+    """TrajectoryDataset must raise if dataset_config contains a non-null frequency."""
+    dataset_cfg = {
+        "dataset_config": {
+            "dataset": "mock-trajectory-dataset.zarr",
+            "frequency": "6h",
+        },
+        "trajectory": {"sampling": None},
+    }
+    with pytest.raises(AssertionError, match="data.frequency: null"):
+        create_dataset(dataset_cfg)
+
+
+def test_trajectory_dataset_accepts_null_frequency_in_dataset_config() -> None:
+    """TrajectoryDataset must not raise if dataset_config has frequency: null."""
+    dataset_cfg = {
+        "dataset_config": {
+            "dataset": "mock-trajectory-dataset.zarr",
+            "frequency": None,
+        },
+        "trajectory": {"sampling": None},
+    }
+    # No AssertionError is raised; open_dataset will fail (dataset doesn't exist),
+    # so we expect a non-AssertionError here.
+    with pytest.raises(Exception) as exc_info:  # noqa: BLE001
+        create_dataset(dataset_cfg)
+    assert not isinstance(exc_info.value, AssertionError)
