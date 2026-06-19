@@ -4,6 +4,7 @@ from typing import Never
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
@@ -419,6 +420,7 @@ def test_validate_transfer_learning_units_compatible() -> None:
         },
     }
     trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {}}),
         datamodule=SimpleNamespace(metadata=datamodule_metadata),
     )
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
@@ -444,6 +446,7 @@ def test_validate_transfer_learning_units_incompatible() -> None:
         },
     }
     trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {}}),
         datamodule=SimpleNamespace(metadata=datamodule_metadata),
     )
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
@@ -462,6 +465,7 @@ def test_validate_transfer_learning_units_missing_checkpoint_metadata() -> None:
         },
     }
     trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {}}),
         datamodule=SimpleNamespace(metadata=datamodule_metadata),
     )
     model = SimpleNamespace(_ckpt_variables_metadata=None)
@@ -481,6 +485,7 @@ def test_validate_transfer_learning_units_missing_dataset_metadata() -> None:
         "era5": {},  # No variables_metadata
     }
     trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {}}),
         datamodule=SimpleNamespace(metadata=datamodule_metadata),
     )
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
@@ -506,6 +511,7 @@ def test_validate_transfer_learning_units_mismatched_variables_raises() -> None:
         },
     }
     trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {}}),
         datamodule=SimpleNamespace(metadata=datamodule_metadata),
     )
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
@@ -535,9 +541,36 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
         },
     }
     trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {}}),
         datamodule=SimpleNamespace(metadata=datamodule_metadata),
     )
     model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
 
     # Should not raise: cerra is not in checkpoint
+    AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def test_validate_transfer_learning_units_ignore_units_option() -> None:
+    """Test that ignore_units=True suppresses an otherwise-failing unit check."""
+    ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {"check_variables_compatibility": {"ignore_units": True}}}),
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
+
+    # Should not raise because ignore_units=True
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
