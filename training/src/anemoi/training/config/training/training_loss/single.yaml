@@ -8,8 +8,10 @@ datasets:
     scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
     ignore_nans: False
 
-    # # disable variables compatibility check for target-vs-prediction
-    # # if the metadata in your dataset is incorrect
+    # To remap predicted variables to different target variables (e.g. model output 'tp' vs.
+    # observation 'imerg') add predicted_variables / target_variables to the relevant sub-loss
+    # entry. If the dataset metadata is incorrect, suppress the compatibility check there:
+    # target_variables: [imerg]
     # check_variables_compatibility:
-    #   ignore_units: True # bool, or list of variable names to ignore units for
-    #   ignore_period: False # bool, or list of variable names to ignore periods for
+    #   ignore_units: False   # True, or list of variable names
+    #   ignore_period: False  # True, or list of variable names
