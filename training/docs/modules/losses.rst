@@ -227,7 +227,8 @@ In Anemoi, spectral losses follow the same API as other losses (scalers/node wei
 etc.), but they additionally require a *spectral transform* configuration.
 
 Spectral transforms
--------------------
+===================
+
 
 Spectral losses rely on a transform that maps grid-point fields to spectral coefficients.
 
@@ -256,7 +257,7 @@ Supported transforms include:
    significant speedups, but may not be supported on all devices and can have higher memory usage.
 
 Spectral kernel CRPS
-===============
+--------------------
 
 ``SpectralCRPSLoss`` computes a CRPS-style probabilistic loss in spectral space.
 Conceptually, it applies a spectral transform to both forecast ensemble and target,
@@ -301,7 +302,7 @@ Truncation is by default set to 319 for n320 grids, but can be set to a higher o
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
 Power Spectrum Loss
-===============
+-------------------
 
 ``PowerSpectrumLoss`` (PSL) is a spectral loss that compares
 the *power spectrum* (energy per total wavenumber) of the prediction against
@@ -397,7 +398,7 @@ excluded add `!scaler_name`, i.e. ``['*', '!scaler_1']``, and
 ``scaler_1`` will not be added.
 
 Tendency Scalers
-================
+----------------
 
 Tendency scalers allow the scaling of prognostic losses by the standard
 deviation or variance of the variable tendencies (e.g. the 6-hourly
@@ -419,7 +420,7 @@ unintended bias in the training process.
      _target_: anemoi.training.losses.scalers.VarTendencyScaler
 
 Variable Level Scalers
-======================
+----------------------
 
 Variable level scalers allow the user to scale variables by its level,
 i.e. model or pressure levels for upper air variables. The variable
@@ -442,7 +443,7 @@ This will scale all variables in the `pl` group by max(0.2, 0.001 *
 level), where `level` is the pressure level of the variable.
 
 Variable Groups
----------------
+===============
 
 Define a default group and a list of groups to be used in the variable
 level scalers.
@@ -525,8 +526,8 @@ If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
 
-Spectral Scalers
-================
+Spectral Loss Scalers
+---------------------
 
 Spectral scalers weight the spectral dimension of spectral losses. They
 are required whenever using a
@@ -585,7 +586,7 @@ Then reference it from the loss:
             scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
 
 Custom Scalers
-==============
+--------------
 
 To create a custom scaler, subclass the ``BaseScaler`` and implement the
 ``get_scaling_values`` method. This method should return an array of the
@@ -607,7 +608,7 @@ This scaler will only be instantiated once at the start of training, and
 thus cannot adapt throughout batches and epochs.
 
 Custom Updating Scalers
------------------------
+=======================
 
 If you want a scaler that adapts throughout the training process, you
 can subclass the ``BaseUpdatingScaler``.
