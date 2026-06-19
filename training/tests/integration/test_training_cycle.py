@@ -54,19 +54,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
 
 
-@pytest.fixture(autouse=True)
-def _reset_dynamo() -> None:
-    """Reset torch compile state before and after each test.
-
-    This prevents 'recomputed metadata doesn't match checkpointed value' errors observed with torch 2.12.
-    """
-    import torch._dynamo
-
-    torch._dynamo.reset()
-    yield
-    torch._dynamo.reset()
-
-
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_global(
