@@ -290,13 +290,15 @@ class BasePlotCallback(Callback, ABC):
         del trainer, stage  # unused
         LOGGER.info("Teardown of the Plot Callback ...")
 
-        # Release cached payload to free gathered/denormalized tensors
+        LOGGER.info("waiting and shutting down the executor ...")
+        self._executor.shutdown()
+
+        # Release cached payload to free gathered/denormalized tensors.
+        # Done *after* executor shutdown so in-flight async plots can still
+        # access self._payload during their execution.
         if hasattr(pl_module, "plot_adapter"):
             pl_module.plot_adapter.clear_cache()
         self._payload = None
-
-        LOGGER.info("waiting and shutting down the executor ...")
-        self._executor.shutdown()
 
     def apply_output_mask(self, pl_module: pl.LightningModule, data: torch.Tensor) -> torch.Tensor:
         if hasattr(pl_module, "output_mask") and pl_module.output_mask is not None:
