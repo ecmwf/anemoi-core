@@ -47,7 +47,7 @@ dependencies = [
   "pydantic>=2.9",
   "pytorch-lightning>=2.1",
   "timm>=0.9.2",
-  "torch>=2.2",
+  "torch>=2.2,<2.11",
   "torch-geometric>=2.3.1",
   "torchinfo>=1.8",
   "torchvision>=0.18",
@@ -87,7 +87,7 @@ optional-dependencies.remote = [
   "aiohttp>=3.8",
 ]
 optional-dependencies.s3 = [
-  "anemoi-utils[s3]>=0.4.37",
+  "anemoi-utils[s3]>=0.5.7",
 ]
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
