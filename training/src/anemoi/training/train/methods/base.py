@@ -950,6 +950,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         step: int | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        without_scalers: list[str] | list[int] | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -1006,6 +1007,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     metric_kwargs["pred_layout"] = pred_layout
                 if target_layout is not None:
                     metric_kwargs["target_layout"] = target_layout
+                if without_scalers is not None:
+                    metric_kwargs["without_scalers"] = without_scalers
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
