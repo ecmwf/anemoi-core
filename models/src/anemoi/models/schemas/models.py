@@ -68,6 +68,8 @@ class DefinedModels(str, Enum):
     ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
+    ANEMOI_MODEL_CASCADE = "anemoi.models.models.AnemoiModelEncProcCascadeDec"
+    ANEMOI_MODEL_INTERPOLATED = "anemoi.models.models.AnemoiModelEncProcDecInterpolated"
 
 
 class Model(BaseModel):

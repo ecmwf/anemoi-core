@@ -139,7 +139,7 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
         
         self._trunc_indices = [
-            data_indices["era5"].model.output.name_to_index[v] for v in data_indices["cerra"].model.output.ordered_names
+            data_indices["data"].model.output.name_to_index[v] for v in data_indices["hires"].model.output.ordered_names
         ] 
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
