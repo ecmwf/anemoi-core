@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import pandas as pd
 import numpy as np
+from anemoi.utils.mlflow.client import AnemoiMlflowClient
+from typing import Final
 
 
 from anemoi.training.train.train import AnemoiTrainer
@@ -70,5 +72,6 @@ def test_config_build(tmp_path: Path) -> None:
         return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
 
     assert is_similar(
-        runs[0].info.run_id, reference_id,
+        runs[0].info.run_id,
+        reference_id,
     ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
