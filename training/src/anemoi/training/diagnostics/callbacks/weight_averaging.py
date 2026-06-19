@@ -9,6 +9,7 @@
 
 import logging
 from typing import Any
+from typing import NamedTuple
 from typing import Union
 
 import pytorch_lightning as pl
@@ -23,13 +24,22 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_warn
 from torch.optim.swa_utils import AveragedModel as _TorchAveragedModel
 from torch.optim.swa_utils import get_ema_avg_fn
 from torch.optim.swa_utils import get_swa_avg_fn
-from torch.optim.swa_utils import get_swa_multi_avg_fn
-from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 LOGGER = logging.getLogger(__name__)
 
 MIN_PL_VERSION = "2.6.0"
+
+
+class _UpdateModelPlan(NamedTuple):
+    """Tensors partitioned for updating averaged-model.
+
+    ``avg_self`` and ``avg_model`` are parallel lists of (averaged-model, source-model)
+    tensors that get averaged together. ``sync_pairs`` are (averaged-model, source-model).
+    """
+
+    avg_self: list[torch.Tensor]
+    avg_model: list[torch.Tensor]
+    sync_pairs: list[tuple[torch.Tensor, torch.Tensor]]
 
 
 class AveragedModel(_TorchAveragedModel):
@@ -56,10 +66,7 @@ class AveragedModel(_TorchAveragedModel):
             b_avg.copy_(b_model)
         self.n_averaged += 1
 
-    def _collect_pairs(
-        self,
-        model: torch.nn.Module,
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[tuple[torch.Tensor, torch.Tensor]]]:
+    def _collect_pairs(self, model: torch.nn.Module) -> _UpdateModelPlan:
         """Partition tensors into (averaged, sync-only) pairs, matched by name.
 
         Parameters and floating-point buffers (when ``use_buffers`` is True) go into the
@@ -101,27 +108,17 @@ class AveragedModel(_TorchAveragedModel):
             else:
                 sync_pairs.append((b_avg_det, b_model_))
 
-        return avg_self, avg_model, sync_pairs
+        return _UpdateModelPlan(avg_self, avg_model, sync_pairs)
 
     def _apply_averaging(self, avg_self: list[torch.Tensor], avg_model: list[torch.Tensor]) -> None:
-        """Apply the averaging step to the averaging set."""
-        if self.avg_fn is not None and self.multi_avg_fn is None:
-            for p_avg, p_model in zip(avg_self, avg_model, strict=True):
-                n_averaged = self.n_averaged.to(p_avg.device)
-                p_avg.detach().copy_(self.avg_fn(p_avg.detach(), p_model, n_averaged))
-            return
-
-        grouped = _group_tensors_by_device_and_dtype([avg_self, avg_model])
-        for (device, _), ([self_params, model_params], _) in grouped.items():
-            if self.multi_avg_fn:
-                self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
-            elif device is not None and device.type in _get_foreach_kernels_supported_devices():
-                get_swa_multi_avg_fn()(self_params, model_params, self.n_averaged.to(device))
-            else:
-                avg_fn = get_swa_avg_fn()
-                n_averaged = self.n_averaged.to(device)
-                for p_avg, p_model in zip(self_params, model_params, strict=True):
-                    p_avg.copy_(avg_fn(p_avg, p_model, n_averaged))
+        """Apply the averaging step to the averaging set, pairwise."""
+        if self.multi_avg_fn is not None:
+            msg = "anemoi AveragedModel supports a per-tensor avg_fn only, not multi_avg_fn."
+            raise NotImplementedError(msg)
+        avg_fn = self.avg_fn if self.avg_fn is not None else get_swa_avg_fn()
+        for p_avg, p_model in zip(avg_self, avg_model, strict=True):
+            n_averaged = self.n_averaged.to(p_avg.device)
+            p_avg.copy_(avg_fn(p_avg, p_model, n_averaged))
 
 
 class WeightAveraging(_PLWeightAveraging):
