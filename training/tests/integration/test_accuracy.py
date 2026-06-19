@@ -10,15 +10,14 @@
 import logging
 import os
 from pathlib import Path
-import pandas as pd
-import numpy as np
-from anemoi.utils.mlflow.client import AnemoiMlflowClient
 from typing import Final
 
+import numpy as np
+import pandas as pd
 
 from anemoi.training.train.train import AnemoiTrainer
-
 from anemoi.training.utils.config import load_config
+from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
