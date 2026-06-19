@@ -32,6 +32,19 @@ class KNNEdgeSchema(BaseModel):
     "Mask to apply to target nodes of the edges. Default to None."
 
 
+class MutualKNNEdgeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.MutualKNNEdges"] = Field(..., alias="_target_")
+    "Mutual KNN based edges implementation from anemoi.graphs.edges."
+    num_nearest_neighbours: PositiveInt = Field(example=3)
+    "Number of nearest source nodes considered for each target node."
+    reversed_num_nearest_neighbours: PositiveInt | None = Field(default=None, example=3)
+    "Number of nearest target nodes considered for each source node. Defaults to num_nearest_neighbours."
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to source nodes of the edges. Default to None."
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to target nodes of the edges. Default to None."
+
+
 class CutoffEdgeSchema(BaseModel):
     target_: Literal["anemoi.graphs.edges.CutOffEdges", "anemoi.graphs.edges.ReversedCutOffEdges"] = Field(
         ..., alias="_target_"
@@ -111,6 +124,11 @@ class EdgeAttributeSchema(BaseModel):
 
 
 EdgeBuilderSchemas = Annotated[
-    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | HEALPixMultiScaleEdgesSchema | ICONTopologicalEdgeSchema,
+    KNNEdgeSchema
+    | MutualKNNEdgeSchema
+    | CutoffEdgeSchema
+    | MultiScaleEdgeSchema
+    | HEALPixMultiScaleEdgesSchema
+    | ICONTopologicalEdgeSchema,
     Field(discriminator="target_"),
 ]
