@@ -199,6 +199,9 @@ class CombinedLoss(BaseLoss):
     @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         for loss in self.losses:
+            loss_scaler = getattr(loss, "scaler", None)
+            if loss_scaler is not None and name not in loss_scaler:
+                continue
             loss.update_scaler(name=name, scaler=scaler, override=override)
 
     def has_scaler_for_dim(self, dim: TensorDim) -> bool:
