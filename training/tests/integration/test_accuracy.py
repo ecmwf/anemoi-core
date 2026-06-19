@@ -10,16 +10,9 @@
 import logging
 import os
 from pathlib import Path
-from typing import Final
 
-import numpy as np
-import pandas as pd
-import pytest
 
-from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.config import load_config
-from anemoi.utils.mlflow.client import AnemoiMlflowClient
-from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -75,4 +68,3 @@ def test_config_build(tmp_path: Path) -> None:
     # assert is_similar(
     #     runs[0].info.run_id, reference_id,
     # ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
-

@@ -11,6 +11,7 @@ import logging
 import os
 from copy import deepcopy
 from pathlib import Path
+
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -21,8 +22,6 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.utils.config import load_config
-from anemoi.utils.mlflow.client import AnemoiMlflowClient
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
 
