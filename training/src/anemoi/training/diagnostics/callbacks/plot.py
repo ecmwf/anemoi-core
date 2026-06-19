@@ -287,8 +287,13 @@ class BasePlotCallback(Callback, ABC):
 
     def teardown(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         """Teardown the callback."""
-        del trainer, pl_module, stage  # unused
+        del trainer, stage  # unused
         LOGGER.info("Teardown of the Plot Callback ...")
+
+        # Release cached payload to free gathered/denormalized tensors
+        if hasattr(pl_module, "plot_adapter"):
+            pl_module.plot_adapter.clear_cache()
+        self._payload = None
 
         LOGGER.info("waiting and shutting down the executor ...")
         self._executor.shutdown()

@@ -407,3 +407,55 @@ class TestGetDenormalized:
         result_b = payload.get_denormalized("data_b")
 
         assert result_a[0] is not result_b[0]
+
+
+class TestClearCache:
+    """Tests for BasePlotAdapter.clear_cache."""
+
+    def test_clear_cache_releases_payload(self) -> None:
+        """clear_cache sets _cached_payload to None."""
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module()
+        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+        assert adapter._cached_payload is not None
+
+        adapter.clear_cache()
+        assert adapter._cached_payload is None
+
+    def test_prepare_payload_works_after_clear(self) -> None:
+        """prepare_payload produces a fresh payload after clear_cache."""
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module()
+        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        payload1 = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+        adapter.clear_cache()
+        payload2 = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+
+        assert payload1 is not payload2

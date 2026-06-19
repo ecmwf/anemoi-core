@@ -134,6 +134,15 @@ class BasePlotAdapter(ABC):
         """Prepare batch for loss plotting. No-op for non-ensemble adapters."""
         return batch
 
+    def clear_cache(self) -> None:
+        """Release the cached payload to free memory.
+
+        Called during callback teardown and at the end of each validation
+        epoch to ensure large tensors are not pinned between epochs or
+        across test runs.
+        """
+        self._cached_payload = None
+
     def prepare_payload(
         self,
         pl_module: pl.LightningModule,
