@@ -78,21 +78,6 @@ def _assert_spectral_scalers_compatible(scaler_tensor: ScaleTensor, n_spectral: 
         )
 
 
-def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
-    """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
-
-    Some pipelines pass numeric scaler indices and rely on excluding scalers over grid dimension
-    by default. Ensure this exclusion is present for numeric lists.
-    """
-    if without_scalers is None:
-        return [TensorDim.GRID.value]
-    if len(without_scalers) == 0:
-        return [TensorDim.GRID.value]
-    if not isinstance(without_scalers[0], str) and TensorDim.GRID.value not in without_scalers:
-        without_scalers.append(TensorDim.GRID.value)  # type: ignore[arg-type]
-    return without_scalers
-
-
 class SpectralLoss(BaseLoss):
     """Base class for spectral losses."""
 
@@ -261,7 +246,7 @@ class SpectralAMSELoss(SpectralLoss):
 
 
 class PowerSpectrumLoss(SpectralLoss):
-    r"""L2 loss on power-per-wavenumber in spectral domain.
+    r"""PSL: L2 loss on power-per-wavenumber in spectral domain.
 
     This loss compares the power spectrum
     (energy per total wavenumber) of prediction and target.
@@ -352,10 +337,11 @@ class LogSpectralDistance(SpectralLoss):
 
         log_diff = torch.log(power_tgt + eps) - torch.log(power_pred + eps)
 
+        _assert_spectral_scalers_compatible(self.scaler, log_diff.size(TensorDim.GRID))
         result = self.scale(
             log_diff**2,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
@@ -382,7 +368,6 @@ class FourierCorrelationLoss(SpectralLoss):
 
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
-        n_modes = pred_spectral.size(dim=TensorDim.GRID.value)
 
         # compute correlation per mode before applying any external weighting
         # keeps the ratio bounded by Cauchy-Schwarz (up to numerical error)
@@ -390,12 +375,14 @@ class FourierCorrelationLoss(SpectralLoss):
         denom = torch.sqrt(torch.abs(pred_spectral) ** 2 * torch.abs(target_spectral) ** 2 + eps)
         correlation = torch.clamp(cross / denom, min=-1.0, max=1.0)
 
-        # apply weighting/scaling after correlation is computed
-        result = (1 - correlation) / n_modes
+        # compute correlation
+        result = 1 - correlation
+
+        _assert_spectral_scalers_compatible(self.scaler, result.size(TensorDim.GRID))
         result = self.scale(
             result,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
