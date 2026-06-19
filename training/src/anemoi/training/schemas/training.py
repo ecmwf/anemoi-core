@@ -260,6 +260,27 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
 
 
+class CheckVariablesCompatibilitySchema(BaseModel):
+    """Options forwarded to ``Variable.check_compatibility`` / ``Variable.compatible``.
+
+    Each field may be set to ``True`` to skip the check for all variables, or to a list
+    of variable names to skip only those specific variables.
+    """
+
+    ignore_units: bool | list[str] = False
+    """Ignore unit mismatches.  ``True`` skips all unit checks; a list of variable names
+    skips only those variables."""
+    ignore_period: bool | list[str] = False
+    """Ignore accumulation-period mismatches.  ``True`` skips all period checks; a list of
+    variable names skips only those variables."""
+    ignore_time_processing: bool | list[str] = False
+    """Ignore time-processing type mismatches.  ``True`` skips all time-processing checks;
+    a list of variable names skips only those variables."""
+    ignore_type_of_level: bool | list[str] = False
+    """Ignore mismatches in pressure level status.  ``True`` skips all type-of-level checks;
+    a list of variable names skips only those variables."""
+
+
 class BaseLossSchema(BaseModel):
     target_: ImplementedLossesUsingBaseLossSchema = Field(..., alias="_target_")
     "Loss function object from anemoi.training.losses."
@@ -269,6 +290,10 @@ class BaseLossSchema(BaseModel):
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
     target_variables: list[str] | None = None
+    check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
+        default_factory=CheckVariablesCompatibilitySchema,
+    )
+    "Options forwarded to ``Variable.check_compatibility`` when checking predicted vs. target variable units."
 
 
 class CRPSSchema(BaseLossSchema):
@@ -570,6 +595,10 @@ class BaseTrainingSchema(BaseModel):
     "Load only the weights from the checkpoint, not the optimiser state."
     transfer_learning: bool = Field(example=False)
     "Flag to activate transfer learning mode when loading a checkpoint."
+    check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
+        default_factory=CheckVariablesCompatibilitySchema,
+    )
+    "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
