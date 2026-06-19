@@ -15,7 +15,6 @@ import torch
 from pydantic import ValidationError
 
 from anemoi.training.data.data_reader import NativeGridDataset
-from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
