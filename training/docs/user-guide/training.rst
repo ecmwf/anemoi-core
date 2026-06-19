@@ -592,6 +592,57 @@ For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
 with similar characteristics.
 
+.. _variable-compatibility-checks:
+
+*******************************
+ Variable Compatibility Checks
+*******************************
+
+When loading a checkpoint (for transfer learning, fine-tuning, or
+resuming a run), Anemoi checks that the variable metadata in the
+checkpoint matches the current dataset — for example that units have
+not changed. The same check is applied at training start between any
+predicted variable and its paired target variable in the loss function.
+
+Both checks respect a ``check_variables_compatibility`` configuration
+block. Each field can be set to ``true`` to suppress the check for all
+variables, or to a list of variable names to suppress it only for those
+variables.
+
+**Checkpoint vs. current dataset** (resuming / fine-tuning)
+
+Configure this at ``training.check_variables_compatibility``:
+
+.. code:: yaml
+
+   training:
+      check_variables_compatibility:
+        ignore_units: false           # true, or [var1, var2, ...]
+        ignore_period: false          # true, or [var1, var2, ...]
+        ignore_time_processing: false # true, or [var1, var2, ...]
+        ignore_type_of_level: false   # true, or [var1, var2, ...]
+
+**Predicted vs. target variables in the loss** (e.g. ``tp`` → ``imerg``)
+
+This check runs on every training run, not only when resuming from a
+checkpoint. Configure it directly on the loss entry that defines the
+pairing:
+
+.. code:: yaml
+
+   training:
+      training_loss:
+        datasets:
+          data:
+            _target_: anemoi.training.losses.MAELoss
+            scalers: [node_weights]
+            predicted_variables: [tp]
+            target_variables: [imerg]
+            check_variables_compatibility:
+              ignore_units: false   # true, or [tp]
+              ignore_period: false  # true, or [tp]
+
+
 ****************
  Model Freezing
 ****************
