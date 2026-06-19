@@ -30,6 +30,20 @@ class TwoBranchModel(nn.Module):
         self.decoder = nn.ModuleDict({"data": nn.Linear(4, 4)})
 
 
+class BranchModel(nn.Module):
+    """A sub-model with a direct child and a nested ``Sequential``.
+
+    Used under a two-entry ``ModuleDict`` to mirror the legacy
+    ``freeze_submodule_by_name`` fixture from #1159, so the stage is exercised
+    on a deep dot-path (``a.sequential.0``) and a bare branch name (``a``).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.lin1 = nn.Linear(10, 10)
+        self.sequential = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10))
+
+
 def test_freezing_adapter_extends_pipeline_stage() -> None:
     assert issubclass(FreezingModifierStage, PipelineStage)
 
@@ -146,6 +160,42 @@ async def test_freezing_stage_matches_legacy_helper() -> None:
     legacy_map = {name: param.requires_grad for name, param in legacy_model.named_parameters()}
     stage_map = {name: param.requires_grad for name, param in stage_model.named_parameters()}
     assert stage_map == legacy_map
+
+
+@pytest.mark.asyncio
+async def test_freezing_deep_dot_path_targets_single_branch() -> None:
+    """A deep dot-path freezes only that submodule; siblings and the other branch stay trainable.
+
+    Ports the legacy ``freeze_submodule_by_name`` test for ``a.sequential.0`` (#1159).
+    """
+    model = nn.ModuleDict({"a": BranchModel(), "b": BranchModel()})
+    adapter = FreezingModifierStage(submodules_to_freeze=["a.sequential.0"])
+    result = await adapter.process(CheckpointContext(model=model))
+
+    assert result.model["a"].lin1.weight.requires_grad
+    assert not result.model["a"].sequential[0].weight.requires_grad
+    assert result.model["a"].sequential[1].weight.requires_grad
+    assert result.model["b"].lin1.weight.requires_grad
+    assert result.model["b"].sequential[0].weight.requires_grad
+    assert result.model["b"].sequential[1].weight.requires_grad
+
+
+@pytest.mark.asyncio
+async def test_freezing_branch_name_freezes_whole_subtree() -> None:
+    """A bare branch name freezes the entire branch, leaving the sibling branch trainable.
+
+    Ports the legacy ``freeze_submodule_by_name`` test for ``a`` (#1159).
+    """
+    model = nn.ModuleDict({"a": BranchModel(), "b": BranchModel()})
+    adapter = FreezingModifierStage(submodules_to_freeze=["a"])
+    result = await adapter.process(CheckpointContext(model=model))
+
+    assert not result.model["a"].lin1.weight.requires_grad
+    assert not result.model["a"].sequential[0].weight.requires_grad
+    assert not result.model["a"].sequential[1].weight.requires_grad
+    assert result.model["b"].lin1.weight.requires_grad
+    assert result.model["b"].sequential[0].weight.requires_grad
+    assert result.model["b"].sequential[1].weight.requires_grad
 
 
 @pytest.mark.asyncio
