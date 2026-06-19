@@ -90,13 +90,17 @@ class PlotPayload:
         The full batch is denormalized on first call and cached. Subsequent calls
         for the same dataset return the cached tensors. Callbacks that never call
         this (e.g. PlotLoss) pay no denormalization cost.
+
+        Thread-safety: multiple async plot executors may call this concurrently.
+        The guard checks ``_denormed_output`` (assigned last) so that a thread
+        never skips into the return path before both dicts are populated.
         """
-        if dataset_name not in self._denormed_input:
+        if dataset_name not in self._denormed_output:
             feat_idx = self.feature_indices[dataset_name]
             input_tensor = self.batch[dataset_name].detach().cpu()[..., feat_idx]
-            self._denormed_input[dataset_name] = self.post_processors[dataset_name](input_tensor)
+            denormed_in = self.post_processors[dataset_name](input_tensor)
 
-            self._denormed_output[dataset_name] = torch.stack(
+            denormed_out = torch.stack(
                 [
                     self.post_processors[dataset_name](
                         x[dataset_name][:, ...].detach().cpu(),
@@ -105,6 +109,10 @@ class PlotPayload:
                     for x in self.predictions
                 ],
             )
+
+            # Assign input first, output last — the guard checks output.
+            self._denormed_input[dataset_name] = denormed_in
+            self._denormed_output[dataset_name] = denormed_out
 
         return self._denormed_input[dataset_name], self._denormed_output[dataset_name]
 
