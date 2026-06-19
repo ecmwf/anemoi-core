@@ -77,8 +77,8 @@ class TestMultiDomain:
         assert set(multi_domain.chunk_index_range) == {"dataset_a", "dataset_b"}
 
         assert isinstance(multi_domain.chunk_index_range["dataset_a"], np.ndarray)
-        assert isinstance(multi_domain.chunk_index_range["dataset_b"], np.ndarray)  
-    
+        assert isinstance(multi_domain.chunk_index_range["dataset_b"], np.ndarray)
+
     def test_worker_shards_do_not_overlap_per_domain(self, multi_domain):
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         worker_0_ranges = {k: v.copy() for k, v in multi_domain.chunk_index_range.items()}
@@ -88,7 +88,7 @@ class TestMultiDomain:
 
         for domain in multi_domain.dataset_names:
             assert set(worker_0_ranges[domain]).isdisjoint(set(worker_1_ranges[domain]))
-    
+
     def test_get_sample_dispatches_to_requested_domain(self, multi_domain):
         multi_domain.get_sample("dataset_a", 0)
 
