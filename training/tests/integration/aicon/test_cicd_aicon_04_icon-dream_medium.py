@@ -30,6 +30,7 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
+from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
 os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
@@ -72,13 +73,16 @@ def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data:
 
 @pytest.fixture
 @typechecked
-def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float]:
+def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float, int]:
     """Train AICON and return testable objects."""
     trainer = AnemoiTrainer(aicon_config_with_grid)
     initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
     trainer.train()
     final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
-    return trainer, initial_sum, final_sum
+    nhidden_mesh_edges = trainer.model.model.graph_data["hidden", "to", "hidden"]["edge_index"].shape[
+        1
+    ]  # no. of hidden mesh edges
+    return trainer, initial_sum, final_sum, nhidden_mesh_edges
 
 
 @typechecked
@@ -99,6 +103,7 @@ def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None
         raise KeyError("\n".join(errors))
 
 
+@skip_if_offline
 @typechecked
 def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
     BaseSchema(**aicon_config_with_tmp_dir)
@@ -117,7 +122,7 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
     dataset_name = "data"
     assert_metadatakeys(
         trainer.metadata,
-        ("config", "data", "timestep"),
+        ("metadata_inference", dataset_name, "timesteps", "timestep"),
         ("config", "graph", "nodes", "data", "node_builder", "max_level"),
         ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
         ("config", "training", "precision"),
@@ -150,8 +155,18 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 @pytest.mark.slow
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
-    _, initial_sum, final_sum = trained_aicon
+    _, initial_sum, final_sum, nhidden_mesh_edges = trained_aicon
     assert initial_sum != final_sum
+
+    # calculate number of multi-mesh edges for global ICON grid RnBm
+    n = 3
+    m = 4  # max_level_multimesh
+    nedges_hidden_total = 0
+    for k in range(m):
+        # no. of mesh edges for level k:
+        nedges_hidden_total += 30 * n**2 * 4**k
+    nedges_hidden_total *= 2  # bidirectional edges
+    assert nhidden_mesh_edges == nedges_hidden_total
 
 
 if __name__ == "__main__":

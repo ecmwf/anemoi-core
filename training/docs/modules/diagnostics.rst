@@ -66,10 +66,8 @@ Task-specific plot adapters normalize output handling so plotting
 callbacks can use the same interface across task types:
 
 - forecaster tasks use ``ForecasterPlotAdapter``;
-- diffusion tasks use ``DiffusionPlotAdapter``;
 - autoencoder tasks use ``AutoencoderPlotAdapter``;
-- multi-output interpolation uses
-  ``InterpolatorMultiOutPlotAdapter``.
+- temporal downscaler tasks use ``TemporalDownscalerPlotAdapter``.
 
 These adapters rely on the shared task ``_step`` return format
 ``(loss, metrics, predictions)`` where ``predictions`` is always a list
@@ -191,7 +189,6 @@ which is recommended for interactive terminals and
             sample_idx: ${diagnostics.plot.sample_idx}
             per_sample : 6
             parameters: ${diagnostics.plot.parameters}
-            output_steps: ${training.multistep_output}
 
 Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:
@@ -212,6 +209,11 @@ also possible for users to add callbacks using the same structure:
    :show-inheritance:
 
 .. automodule:: anemoi.training.diagnostics.callbacks.plot
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.callbacks.plot_adapter
    :members:
    :no-undoc-members:
    :show-inheritance:

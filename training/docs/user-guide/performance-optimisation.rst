@@ -277,10 +277,8 @@ their recommended settings
 
 .. note::
 
-   Longer rollout increases the CPU memory required by the dataloaders.
-   It can be beneficial to break rollout runs into multiple runs (e.g.
-   rollout 1->6 and rollout 7->12) and tune the number of workers for
-   both runs accordingly.
+   Dataloader CPU memory can increase as the active rollout length
+   grows. Longer rollouts might require reducing the number of workers.
 
 Change attention backend
 ========================
@@ -315,6 +313,26 @@ Triton is the default backend when using the GraphTransformer processor.
 However it requires the 'triton' library to be installed. On AMD systems
 the library is called 'pytorch-triton-rocm'. Triton is not officially
 supported on CPUs.
+
+.. note::
+
+   The attention backend for both the Transformer and GraphTransformer
+   processors can be overridden at runtime using environment variables,
+   without modifying the model config. This is useful when switching
+   backends at inference time.
+
+   .. code:: bash
+
+      # Override the Transformer attention backend
+      export ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND='scaled_dot_product_attention'
+
+      # Override the GraphTransformer attention backend
+      export ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND='pyg'
+
+   The override is applied once on the first forward pass. Valid values
+   are the same as the corresponding config options (e.g.
+   ``flash_attention``, ``scaled_dot_product_attention`` for the
+   Transformer; ``triton``, ``pyg`` for the GraphTransformer).
 
 Compiling
 =========

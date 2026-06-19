@@ -56,7 +56,7 @@ class TestDownloadWithRetry:
             assert dest_path.exists()
             assert dest_path.stat().st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError) as e:
+        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")
 
     @pytest.mark.unit
@@ -65,13 +65,16 @@ class TestDownloadWithRetry:
         """Test download timeout and retry behavior."""
         dest_path = temp_checkpoint_dir / "timeout_file.bin"
 
-        with pytest.raises(CheckpointTimeoutError):
-            await download_with_retry(
-                network_urls["timeout"],
-                dest_path,
-                max_retries=2,
-                timeout=2,  # Short timeout to trigger error quickly
-            )
+        try:
+            with pytest.raises((CheckpointTimeoutError, CheckpointSourceError)):
+                await download_with_retry(
+                    network_urls["timeout"],
+                    dest_path,
+                    max_retries=2,
+                    timeout=2,  # Short timeout to trigger error quickly
+                )
+        except CheckpointSourceError as e:
+            pytest.skip(f"Network not available: {e}")
 
     @pytest.mark.unit
     @pytest.mark.network
@@ -354,7 +357,7 @@ class TestValidateCheckpoint:
         checkpoint = {"state_dict": corrupted_state_dict}
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         assert "NaN values" in str(exc_info.value)
         assert "corrupted_tensor" in str(exc_info.value)
@@ -369,7 +372,7 @@ class TestValidateCheckpoint:
         checkpoint = {"state_dict": corrupted_state_dict}
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         assert "infinite values" in str(exc_info.value)
         assert "inf_tensor" in str(exc_info.value)
@@ -384,7 +387,7 @@ class TestValidateCheckpoint:
             },
         }
 
-        assert validate_checkpoint(checkpoint) is True
+        assert validate_checkpoint(checkpoint, check_tensors=True) is True
 
     @pytest.mark.unit
     def test_validate_checkpoint_nested_nan_tensors(self) -> None:
@@ -396,7 +399,7 @@ class TestValidateCheckpoint:
         }
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         assert "model_state_dict.layer1.bias" in str(exc_info.value)
 
@@ -411,7 +414,7 @@ class TestValidateCheckpoint:
         }
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         # Should capture both errors
         error_str = str(exc_info.value)
@@ -929,5 +932,5 @@ class TestUtilsIntegration:
             file_stat = dest_path.stat()
             assert file_stat.st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError) as e:
+        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")

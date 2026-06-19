@@ -4,10 +4,12 @@ from typing import Never
 
 import pytest
 import torch
+from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.training.train.tasks.base import BaseGraphModule
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 
@@ -60,8 +62,27 @@ class DummyModel(torch.nn.Module):
         self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})
 
 
-class DummyGraphModule(BaseGraphModule):
-    task_type = "forecaster"
+def _make_static_graph_provider(trainable_size: int = 2) -> StaticGraphProvider:
+    graph = HeteroData()
+    graph.edge_index = torch.tensor([[0, 1, 2, 0], [1, 0, 1, 0]], dtype=torch.long)
+    graph.edge_attr = torch.tensor([[0.0], [1.0], [2.0], [3.0]], dtype=torch.float32)
+
+    return StaticGraphProvider(
+        graph=graph,
+        edge_attributes=["edge_attr"],
+        src_size=3,
+        dst_size=2,
+        trainable_size=trainable_size,
+    )
+
+
+class DummyGraphModel(torch.nn.Module):
+    def __init__(self, trainable_size: int = 2) -> None:
+        super().__init__()
+        self.graph_provider = _make_static_graph_provider(trainable_size)
+
+
+class DummyTrainingModule(BaseTrainingModule):
 
     def __init__(self) -> None:
         pass
@@ -74,8 +95,8 @@ def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
     return SimpleNamespace(states=states, tendencies=tendencies)
 
 
-def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyGraphModule:
-    module = DummyGraphModule.__new__(DummyGraphModule)
+def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.model = model
     module._device = torch.device("cpu")
@@ -98,14 +119,14 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyGraphModule.__new__(DummyGraphModule)
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.model = new_model
     module.config = SimpleNamespace(
         training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, True)),
     )
 
-    BaseGraphModule.on_load_checkpoint(module, checkpoint)
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
     assert not any(
@@ -131,14 +152,14 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyGraphModule.__new__(DummyGraphModule)
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     module.model = new_model
     module.config = SimpleNamespace(
         training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
     )
 
-    BaseGraphModule.on_load_checkpoint(module, checkpoint)
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     state_dict = checkpoint["state_dict"]
     assert any(
@@ -252,6 +273,32 @@ def test_transfer_learning_loading_populates_ckpt_indices_from_dict(tmp_path: Pa
     }
 
 
+def test_transfer_learning_loading_filters_trainable_edge_mismatch_before_migration(tmp_path: Path) -> None:
+    new_module = _make_dummy_module(DummyGraphModel(trainable_size=2), update_states=False, update_tendencies=False)
+    trainable_key = "model.graph_provider.trainable.trainable"
+    layout_version_key = "model.graph_provider.trainable_layout_version"
+    trainable_before = new_module.state_dict()[trainable_key].clone()
+
+    state_dict = new_module.state_dict()
+    state_dict[trainable_key] = torch.ones(2, 2)
+    del state_dict[layout_version_key]
+
+    checkpoint = {
+        "state_dict": state_dict,
+        "hyper_parameters": {
+            "config": _make_minimal_ckpt_config(),
+            "data_indices": {"data": SimpleNamespace(name_to_index={})},
+        },
+    }
+    ckpt_path = tmp_path / "checkpoint.pt"
+    torch.save(checkpoint, ckpt_path)
+
+    transfer_learning_loading(new_module, ckpt_path)
+
+    assert torch.equal(new_module.state_dict()[trainable_key], trainable_before)
+    assert new_module.state_dict()[layout_version_key].item() == 1
+
+
 def test_transfer_learning_loading_raises_on_old_checkpoint_data_indices_format(tmp_path: Path) -> None:
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
@@ -350,3 +397,147 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     # Assert: compare_variables was called for ERA5
     assert len(era5_index.compare_called_with) == 1
     # Method completes without error (CERRA is silently ignored)
+
+
+# --- Tests for _validate_transfer_learning_units ---
+
+
+def test_validate_transfer_learning_units_compatible() -> None:
+    """Test that compatible units pass without error."""
+    ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
+
+    # Should not raise
+    AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def test_validate_transfer_learning_units_incompatible() -> None:
+    """Test that incompatible units raise ValueError."""
+    ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
+
+    with pytest.raises(ValueError, match="dataset 'era5'"):
+        AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def test_validate_transfer_learning_units_missing_checkpoint_metadata() -> None:
+    """Test that missing checkpoint variables_metadata produces a warning but no error."""
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=None)
+
+    # Should not raise, just warn
+    AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def test_validate_transfer_learning_units_missing_dataset_metadata() -> None:
+    """Test that missing dataset variables_metadata produces a warning but no error."""
+    ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+        },
+    }
+    datamodule_metadata = {
+        "era5": {},  # No variables_metadata
+    }
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
+
+    # Should not raise, just warn
+    AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def test_validate_transfer_learning_units_mismatched_variables_raises() -> None:
+    """Test that differing variable sets raise ValueError."""
+    ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+                "v10": {"units": "m s**-1"},  # Different variable, not in checkpoint
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
+
+    # Should raise: variable sets differ (u10 missing, v10 added)
+    with pytest.raises(ValueError, match="dataset 'era5'"):
+        AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
+    """Test that datasets present in config but not in checkpoint are skipped."""
+    ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+        },
+    }
+    datamodule_metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+            },
+        },
+        "cerra": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},  # Different unit, but dataset not in checkpoint
+            },
+        },
+    }
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(metadata=datamodule_metadata),
+    )
+    model = SimpleNamespace(_ckpt_variables_metadata=ckpt_variables_metadata)
+
+    # Should not raise: cerra is not in checkpoint
+    AnemoiTrainer._validate_transfer_learning_units(trainer, model)

@@ -11,22 +11,20 @@ from .base import BaseGraphModel
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
-from .interpolator import AnemoiModelEncProcDecMultiOutInterpolator
 
 from .autoencoder import AnemoiModelAutoEncoder  # isort: skip
 from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder  # isort: skip
-from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec  # isort: skip
-from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec  # isort: skip
+from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec  # isort: skip
+from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
 
 __all__ = [
     "BaseGraphModel",
     "AnemoiModelEncProcDec",
     "AnemoiEnsModelEncProcDec",
-    "AnemoiDiffusionModelEncProcDec",
-    "AnemoiDiffusionTendModelEncProcDec",
+    "AnemoiTransportModelEncProcDec",
+    "AnemoiTransportTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiEnsModelEncProcDec",
     "AnemoiModelAutoEncoder",
     "AnemoiModelHierarchicalAutoEncoder",
-    "AnemoiModelEncProcDecMultiOutInterpolator",
 ]

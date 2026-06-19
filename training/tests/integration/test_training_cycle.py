@@ -9,7 +9,9 @@
 
 import logging
 import os
+from copy import deepcopy
 from pathlib import Path
+from typing import Final
 
 import numpy as np
 import pandas as pd
@@ -23,6 +25,7 @@ from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
+from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -219,8 +222,21 @@ def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_te
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
+@skip_if_offline
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = ensemble_graph_multiscale_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_ensemble_truncated_connection(
+    ensemble_truncated_connection_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_truncated_connection_config
     BaseSchema(**cfg)
 
 
@@ -316,36 +332,41 @@ def test_restart_from_existing_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_interpolator(
-    interpolator_config: tuple[DictConfig, str],
+def test_training_cycle_temporal_downscaler(
+    temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    """Full training-cycle smoke-test for the temporal interpolation task."""
-    cfg, url = interpolator_config
+    """Full training-cycle smoke-test for the temporal downscaler task."""
+    cfg, url = temporal_downscaler_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
-    """Schema-level validation for the temporal interpolation config."""
-    cfg, _ = interpolator_config
+def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple[DictConfig, str]) -> None:
+    """Schema-level validation for the temporal downscaler config."""
+    cfg, _ = temporal_downscaler_config
     BaseSchema(**cfg)
 
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    cfg, url = diffusion_config
+def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = diffusion_config
+def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = edm_transport_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = stochastic_interpolant_config
     BaseSchema(**cfg)
 
 
@@ -386,11 +407,11 @@ def test_training_cycle_imerg_target(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multidatasets_diffusion(
-    multidatasets_diffusion_config: tuple[DictConfig, list[str]],
+def test_training_cycle_multidatasets_edm_transport(
+    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
 ) -> None:
-    cfg, urls = multidatasets_diffusion_config
+    cfg, urls = multidatasets_edm_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
@@ -398,6 +419,8 @@ def test_training_cycle_multidatasets_diffusion(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
+@skip_if_offline
+@pytest.mark.slow
 def test_config_build() -> None:
 
     config = load_config("training/tests/integration/config/atmo_integration_test.yaml")
@@ -417,9 +440,9 @@ def test_config_build() -> None:
         max_results=10,
     )
 
-    REFERENCE_ID = "e00340e8cd5c41d2881afd2265677321"
+    REFERENCE_ID: Final = "e00340e8cd5c41d2881afd2265677321"
 
-    def get_loss_df(run_id):
+    def get_loss_df(run_id: str) -> pd.DataFrame:
         history = client.get_metric_history(
             run_id,
             "train_multi_dataset_loss_step",
@@ -431,8 +454,54 @@ def test_config_build() -> None:
             }
         ).set_index("step")
 
-    def is_similar(run_id1, run_id2):
+    def is_similar(run_id1: str, run_id2: str) -> bool:
         df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
         return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
 
-    assert is_similar(runs[0].info.run_id, REFERENCE_ID), f"Loss curve for run {runs[0].info.run_id} does not match reference"
+    assert is_similar(runs[0].info.run_id, REFERENCE_ID), (
+        f"Loss curve for run {runs[0].info.run_id} does not match reference"
+    )
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = temporal_downscaler_ensemble_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = temporal_downscaler_ensemble_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_evaluator(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config
+    get_test_archive(url)
+    training_cfg = deepcopy(cfg)
+    training_cfg.diagnostics.plot.callbacks = []
+    training_cfg.dataloader.limit_batches.validation = 0
+    AnemoiTrainer(training_cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    checkpoint_dir = run_dirs[0]
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.load_weights_only = True
+    evaluator = AnemoiEvaluator(cfg)
+    evaluator.evaluate()

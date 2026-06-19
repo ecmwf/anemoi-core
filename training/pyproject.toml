@@ -36,13 +36,11 @@ dependencies = [
   "anemoi-datasets>=0.5.34",
   "anemoi-graphs>=0.5.2",
   "anemoi-models[migrations]>=0.9.5",
-  "anemoi-training[mlflow]",
-  "anemoi-transform>=0.1.11",
+  "anemoi-transform>=0.3",
+  "anemoi-utils[mlflow]>=0.4.37",
   "anemoi-utils[provenance]>=0.5.1",
-  "datashader>=0.17",
   "einops>=0.6.1",
   "hydra-core>=1.3",
-  "matplotlib>=3.7.1",
   "numba",
   "numpy",
   "nvidia-ml-py>=13.580.82",
@@ -56,7 +54,7 @@ dependencies = [
   "tqdm>=4.65",
   "zarr>=2.14.2",
 ]
-# Optional extras: pip install anemoi-training[mlflow,tests], etc.
+# Optional extras: pip install anemoi-training[azure,tests], etc.
 optional-dependencies.all = [ "anemoi-training[remote]" ]
 optional-dependencies.azure = [ "azure-ai-ml", "azure-identity", "azureml-mlflow>=1.6", "strenum" ]
 optional-dependencies.dev = [
@@ -72,13 +70,11 @@ optional-dependencies.docs = [
   "sphinx-argparse",
   "sphinx-rtd-theme",
 ]
-optional-dependencies.mlflow = [
-  "anemoi-utils[mlflow]>=0.4.37",
-  "mlflow-skinny>=2.11.1",
-]
 optional-dependencies.plotting = [
   "cartopy>=0.25",
+  "datashader>=0.17",
   "distinctipy>=1",
+  "matplotlib>=3.7.1",
   "pyshtools>=4.13",
 ]
 optional-dependencies.profile = [
@@ -90,13 +86,16 @@ optional-dependencies.profile = [
 optional-dependencies.remote = [
   "aiohttp>=3.8",
 ]
+optional-dependencies.s3 = [
+  "anemoi-utils[s3]>=0.5.7",
+]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                         # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                    # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,remote,wandb]", # required to test the AzureMlflowLogger / remote checkpoints
+  "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                                # required to test the DCT2D spectral loss
+  "anemoi-training[azure,mlflow,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
   "hypothesis>=6.11",
   "pytest>=8",
-  "pytest-asyncio>=0.23",                       # required for async checkpoint tests
+  "pytest-asyncio>=0.23",                                   # required for async checkpoint tests
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",
@@ -109,6 +108,7 @@ urls.Documentation = "https://anemoi-training.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-training/"
 urls.Issues = "https://github.com/ecmwf/anemoi-training/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-training/"
+scripts.".anemoi-training-evaluate" = "anemoi.training.commands.evaluate:main"
 # command for interactive DDP (not supposed to be used directly)
 # the dot is intentional, so it doesn't trigger autocomplete
 # Files need to be named profiler due to A005 Module `profile` is shadowing a Python builtin module
@@ -118,13 +118,13 @@ scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
 [tool.setuptools_scm]
-root = ".."
+version_file = "src/anemoi/training/_version.py"
 version_scheme = "post-release"
 local_scheme = "no-local-version"
-git_describe_command = "git describe --dirty --tags --long --match 'training-*[0-9]*'"
+root = ".."
 tag_regex = "^training-(?P<version>[vV]?[0-9]+[^-]*)"
-version_file = "src/anemoi/training/_version.py"
 fallback_version = "0.0.0"
+git_describe_command = "git describe --dirty --tags --long --match 'training-*[0-9]*'"
 
 [tool.ruff]
 target-version = "py311"

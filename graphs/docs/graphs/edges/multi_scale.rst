@@ -16,7 +16,7 @@ refinement level of an icosahedron. The higher the refinement level, the
 shorther the length of the edges. By default, all possible refinements
 levels are considered.
 
-.. image:: ../../_static/multi_scale_edges.png
+.. image:: ../../_static/multi_scale_edges.svg
    :alt: Multi-scale edges
    :align: center
 
