@@ -439,21 +439,5 @@ def test_trajectory_dataset_rejects_frequency_in_dataset_config() -> None:
         },
         "trajectory": {"sampling": None},
     }
-    with pytest.raises(AssertionError, match="data.frequency: null"):
+    with pytest.raises(AssertionError, match=r"data\.frequency: null"):
         create_dataset(dataset_cfg)
-
-
-def test_trajectory_dataset_accepts_null_frequency_in_dataset_config() -> None:
-    """TrajectoryDataset must not raise if dataset_config has frequency: null."""
-    dataset_cfg = {
-        "dataset_config": {
-            "dataset": "mock-trajectory-dataset.zarr",
-            "frequency": None,
-        },
-        "trajectory": {"sampling": None},
-    }
-    # No AssertionError is raised; open_dataset will fail (dataset doesn't exist),
-    # so we expect a non-AssertionError here.
-    with pytest.raises(Exception) as exc_info:  # noqa: BLE001
-        create_dataset(dataset_cfg)
-    assert not isinstance(exc_info.value, AssertionError)

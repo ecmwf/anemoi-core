@@ -222,7 +222,8 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
                 "The step frequency is read directly from the dataset. "
                 f"Got data.frequency={self.data.frequency!r}."
             )
-            raise PydanticCustomError("trajectory_frequency_conflict", msg)
+            error = "trajectory_frequency_conflict"
+            raise PydanticCustomError(error, msg)
         return self
 
     @model_validator(mode="after")
