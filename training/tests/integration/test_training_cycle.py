@@ -15,7 +15,6 @@ from typing import Final
 
 import numpy as np
 import pandas as pd
-
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -24,12 +23,12 @@ from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
-from anemoi.utils.mlflow.client import AnemoiMlflowClient
 from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils.config import load_config
+from anemoi.utils.mlflow.client import AnemoiMlflowClient
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
-from anemoi.training.utils.config import load_config
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 
@@ -288,9 +287,9 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
 
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert len(run_dirs) == 1, (
-        f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
-    )
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
 
     checkpoint_dir = run_dirs[0]
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
@@ -301,9 +300,9 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer.train()
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
-    assert trainer.model.trainer.global_step == expected_global_step, (
-        f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
-    )
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
@@ -451,16 +450,16 @@ def test_config_build() -> None:
             {
                 "step": [m.step for m in history],
                 "loss": [m.value for m in history],
-            }
+            },
         ).set_index("step")
 
     def is_similar(run_id1: str, run_id2: str) -> bool:
         df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
         return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
 
-    assert is_similar(runs[0].info.run_id, REFERENCE_ID), (
-        f"Loss curve for run {runs[0].info.run_id} does not match reference"
-    )
+    assert is_similar(
+        runs[0].info.run_id, REFERENCE_ID,
+    ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
 
 
 @skip_if_offline

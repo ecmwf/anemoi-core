@@ -20,7 +20,7 @@ diagnostics:
       authentication: True
       experiment_name: 'aifs-convergence'
       run_name: "different_beta2020"
-      tracking_uri: "https://mlflow.ecmwf.int" 
+      tracking_uri: "https://mlflow.ecmwf.int"
       enabled: True
       offline: False
     interval: 50
@@ -37,7 +37,7 @@ system:
     dataset: /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr #o96 instead of n320 input/output grid
 
     # ref data from Vera
-    # dataset: 
+    # dataset:
     graph: ${system.output.root}/graphs/graph_enc_proc_dec_o96.pt
   output:
     root: '${oc.env:SCRATCH}/aifs/o96/'
@@ -59,7 +59,7 @@ training:
   max_steps: 1000
   optimization:  # this changed recently so might need updating!
     lr: 0.625e-4 #local_lr # LR for 8 GPUs and batchsize 2 # try 4 GPUS and batchsize 4
-    lr_scheduler: 
+    lr_scheduler:
       warmup_t: 100 # number of optimizer steps after that LR reaches the maximum
       t_initial: ${training.max_steps} # number of optimizer steps after that LR reaches the minimum
     optimizer:
