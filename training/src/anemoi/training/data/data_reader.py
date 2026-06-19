@@ -10,7 +10,6 @@
 import datetime
 import logging
 from functools import cached_property
-from typing import ClassVar
 
 import numpy as np
 import torch
@@ -94,11 +93,6 @@ class BaseAnemoiReader:
     per initialisation (base date), with the forecast step as the position.
     """
 
-    #: Default sampling config used by :meth:`compute_anchors`.
-    #: ``{"stride": 1}`` keeps every valid position;
-    #: ``{"stride": None}`` uses stride = window size (non-overlapping).
-    default_sampling: ClassVar[dict] = {"stride": 1}
-
     def __init__(
         self,
         dataset: str | dict | None = None,
@@ -112,6 +106,10 @@ class BaseAnemoiReader:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
         self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+        #: Sampling config used by :meth:`compute_anchors`.
+        #: ``{"stride": 1}`` keeps every valid position;
+        #: ``{"stride": None}`` uses stride = window size (non-overlapping).
+        self.default_sampling: dict = {"stride": 1}
 
     # ------------------------------------------------------------------
     # Sequence / position geometry
