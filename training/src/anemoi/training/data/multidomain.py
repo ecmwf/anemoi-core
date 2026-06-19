@@ -71,28 +71,27 @@ class MultiDomainDataset(AnemoiDataset):
         }
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
-            name: normalize_time_indices(indices)
-            for name, indices in relative_date_indices.items()
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
-    
+
     def _check_datasets_units(self) -> None:
         """Check that all datasets have the same units.
 
-        Raises:
+        Raises
+        ------
             ValueError: If the datasets have different units.
         """
-
         from anemoi.transform.variables import Variable
 
         list_with_domain_names_with_units = []
         for domain, _metadata in self.metadata.items():
-            if not _metadata.get("variables_metadata", {}): # empty dict 
-                continue #skip dataset 
+            if not _metadata.get("variables_metadata", {}):  # empty dict
+                continue  # skip dataset
             list_with_domain_names_with_units.append(domain)
-        
+
         if len(list_with_domain_names_with_units) == len(self.metadata):
             LOGGER.warning("All datasets have empty metadata, skipping units check.")
             return
@@ -101,8 +100,8 @@ class MultiDomainDataset(AnemoiDataset):
         for domain1 in list_with_domain_names_with_units:
             for domain2 in list_with_domain_names_with_units:
                 if domain1 == domain2:
-                    continue # skip self comparison
-                
+                    continue  # skip self comparison
+
                 variable_domain1 = self.metadata[domain1].get("variables_metadata", {})
                 variable_domain2 = self.metadata[domain2].get("variables_metadata", {})
                 try:
@@ -110,8 +109,6 @@ class MultiDomainDataset(AnemoiDataset):
                 except ValueError as e:
                     msg = f"Variable compatibility check failed for domain1 '{domain1}' and domain2 '{domain2}': {e}"
                     raise ValueError(msg) from e
-
-
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize a specific worker.
@@ -129,15 +126,11 @@ class MultiDomainDataset(AnemoiDataset):
         self.worker_id = worker_id
 
         for dataset in self.dataset_names:
-            shard_size = (
-                len(self.valid_date_indices[dataset]) // self.sample_comm_num_groups
-            )
+            shard_size = len(self.valid_date_indices[dataset]) // self.sample_comm_num_groups
             shard_start = self.sample_comm_group_id * shard_size
 
             self.n_samples_per_worker[dataset] = shard_size // n_workers
-            low, high = get_balanced_partition_range(
-                shard_size, n_workers, worker_id, offset=shard_start
-            )
+            low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
 
             self.chunk_index_range[dataset] = np.arange(low, high, dtype=np.uint32)
 
@@ -179,18 +172,12 @@ class MultiDomainDataset(AnemoiDataset):
         """
         time_step = offset_time_indices(index, self.relative_date_indices[domain_name])
         if self.shard_shapes is not None and self.shard_shapes[domain_name] is not None:
-            start, end = get_partition_range(
-                self.shard_shapes[domain_name], self.reader_group_rank
-            )
+            start, end = get_partition_range(self.shard_shapes[domain_name], self.reader_group_rank)
             grid_indices = slice(start, end)
         else:
             grid_indices = slice(None)
 
-        return {
-            domain_name: self.data_readers[domain_name].get_sample(
-                time_step, grid_indices
-            )
-        }
+        return {domain_name: self.data_readers[domain_name].get_sample(time_step, grid_indices)}
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Return an iterator that yields a tuple torch.Tensor and its corresponding domain name.
@@ -211,9 +198,7 @@ class MultiDomainDataset(AnemoiDataset):
             }
 
             labeled_samples_and_indexes = [
-                (domain, i)
-                for domain, indices in shuffled_chunk_indices.items()
-                for i in indices
+                (domain, i) for domain, indices in shuffled_chunk_indices.items() for i in indices
             ]
 
             labeled_samples = self.rng.choice(
@@ -223,14 +208,9 @@ class MultiDomainDataset(AnemoiDataset):
             )
         else:
             shuffled_chunk_indices = {
-                domain: indices[self.chunk_index_range[domain]]
-                for domain, indices in self.valid_date_indices.items()
+                domain: indices[self.chunk_index_range[domain]] for domain, indices in self.valid_date_indices.items()
             }
-            labeled_samples = [
-                (domain, i)
-                for domain, inds in shuffled_chunk_indices.items()
-                for i in inds
-            ]
+            labeled_samples = [(domain, i) for domain, inds in shuffled_chunk_indices.items() for i in inds]
 
         LOGGER.debug(
             (
