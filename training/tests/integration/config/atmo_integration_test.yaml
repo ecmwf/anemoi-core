@@ -7,7 +7,8 @@ defaults:
 - system: example
 - graph: multi_scale
 - model: graphtransformer
-- training: default
+- task: forecaster
+- training: single
 - _self_
 
 # set to true to switch off config validation
