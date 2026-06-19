@@ -15,7 +15,6 @@ import torch
 from pydantic import ValidationError
 
 from anemoi.training.data.data_reader import NativeGridDataset
-from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
@@ -454,6 +453,6 @@ def test_trajectory_dataset_accepts_null_frequency_in_dataset_config() -> None:
     }
     # No AssertionError is raised; open_dataset will fail (dataset doesn't exist),
     # so we expect a non-AssertionError here.
-    with pytest.raises(Exception) as exc_info:  # noqa: BLE001
+    with pytest.raises(Exception) as exc_info:
         create_dataset(dataset_cfg)
     assert not isinstance(exc_info.value, AssertionError)
