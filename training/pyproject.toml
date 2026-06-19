@@ -87,7 +87,7 @@ optional-dependencies.remote = [
   "aiohttp>=3.8",
 ]
 optional-dependencies.s3 = [
-  "anemoi-utils[s3]>=0.4.37",
+  "anemoi-utils[s3]>=0.5.7",
 ]
 optional-dependencies.tests = [
   "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
