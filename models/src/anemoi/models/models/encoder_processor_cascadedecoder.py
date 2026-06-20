@@ -46,6 +46,9 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
         n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
+        self.cascade_decoding_order = model_config.model.get("cascade_decoding_order", None)
+        assert self.cascade_decoding_order is not None, "cascade_decoding_order must be specified in the config for AnemoiModelEncProcCascadeDec"
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -54,9 +57,6 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
             n_step_output=n_step_output,
             graph_data=graph_data,
         )
-        self.cascade_decoding_order = model_config.model.get("cascade_decoding_order", None)
-        assert self.cascade_decoding_order is not None, "cascade_decoding_order must be specified in the config for AnemoiModelEncProcCascadeDec"
-
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden

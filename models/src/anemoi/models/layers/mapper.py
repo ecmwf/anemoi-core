@@ -366,9 +366,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
+        if self.return_latents:
+            latents_dst = torch.empty((*x_dst.shape[:-1], self.hidden_dim), device=x_dst.device, dtype=out_type)
+
         for chunk_id in range(chunk_partition.num_parts):
             dst_range = chunk_partition._get_dst_range(chunk_id)
-            out_dst[dst_range] = maybe_checkpoint(
+            chunk_result = maybe_checkpoint(
                 self.run_processor_chunk,
                 self.gradient_checkpointing,
                 chunk_partition,
@@ -382,10 +385,22 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
                 cond,
                 edges_are_dst_sorted=True,  # ensured by prepare_edge_sharding_wrapper
                 **kwargs,
-            ).to(dtype=out_type)
+            )
+
+            if self.return_latents:
+                latents_chunk, out_chunk = chunk_result
+                latents_dst[dst_range] = latents_chunk.to(dtype=out_type)
+                out_dst[dst_range] = out_chunk.to(dtype=out_type)
+            else:
+                out_dst[dst_range] = chunk_result.to(dtype=out_type)
 
         if not keep_x_dst_sharded:  # gather after processing chunks
             out_dst = gather_tensor(out_dst, 0, shard_info.dst_nodes, model_comm_group)
+            if self.return_latents:
+                latents_dst = gather_tensor(latents_dst, 0, shard_info.dst_nodes, model_comm_group)
+
+        if self.return_latents:
+            return latents_dst, out_dst
 
         return out_dst
 
@@ -439,10 +454,18 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         )
 
+        if self.return_latents:
+            latents_dst = x_dst
+
         x_dst = self.post_process(x_dst)
 
         if not keep_x_dst_sharded:  # gather after processing
             x_dst = gather_tensor(x_dst, 0, shard_info.dst_nodes, model_comm_group)
+            if self.return_latents:
+                latents_dst = gather_tensor(latents_dst, 0, shard_info.dst_nodes, model_comm_group)
+
+        if self.return_latents:
+            return latents_dst, x_dst
 
         return x_dst
 
