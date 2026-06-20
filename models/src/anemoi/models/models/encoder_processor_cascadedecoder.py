@@ -362,6 +362,7 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         num_decoders = len(self.cascade_decoding_order)
+        shard_sizes_src = shard_sizes_hidden  # initially, src is the hidden grid
         for i, dataset_name in enumerate(self.cascade_decoding_order):
             x_data_target, shard_sizes_data = self._assemble_target(
                 x[dataset_name],
@@ -382,7 +383,7 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
             ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 
             dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden,
+                src_nodes=shard_sizes_src,
                 dst_nodes=shard_sizes_data,  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
@@ -396,6 +397,10 @@ class AnemoiModelEncProcCascadeDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
+
+            # Update src shard sizes for the next cascade step:
+            # x_latent_proc is now on the dst grid of this decoder
+            shard_sizes_src = shard_sizes_data if in_out_sharded[dataset_name] else None
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_decoded,
