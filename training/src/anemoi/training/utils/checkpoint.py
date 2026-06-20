@@ -95,8 +95,12 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     # Load the filtered st-ate_dict into the model
     model.load_state_dict(state_dict, strict=False)
-    # Needed for data indices check
-    model._ckpt_model_name_to_index = checkpoint["hyper_parameters"]["data_indices"].name_to_index
+    # Needed for data indices check. The downscaling IndexCollection no longer exposes a
+    # flat `name_to_index` (split into name_to_index_input_lres/_hres/_output), so only set
+    # this when present; otherwise the sanity callback falls back to the live data indices.
+    data_indices = checkpoint["hyper_parameters"]["data_indices"]
+    if hasattr(data_indices, "name_to_index"):
+        model._ckpt_model_name_to_index = data_indices.name_to_index
     return model
 
 

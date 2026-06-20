@@ -18,6 +18,10 @@ import torch
 from hydra.utils import instantiate
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.training.diagnostics.sigma_bands import DEFAULT_TRAIN_SIGMA_EDGES
+from anemoi.training.diagnostics.sigma_bands import DEFAULT_VAL_SIGMA_EDGES
+from anemoi.training.diagnostics.sigma_bands import SIGMA_BAND_PREFIX
+from anemoi.training.diagnostics.sigma_bands import SigmaBandLossTracker
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.train.tasks.base import BaseGraphModule
@@ -85,6 +89,29 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         self.lres_grid_shard_slice = None
         self.hres_grid_shard_shapes = None
         self.hres_grid_shard_slice = None
+
+        # Log the loss split by noise level, grouped under the "sigma_bands/"
+        # folder in MLflow. On by default; the getattr default keeps existing
+        # configs working untouched. Turn off with diagnostics.log.sigma_bands=false.
+        self.log_sigma_bands = self.logger_enabled and bool(
+            getattr(config.diagnostics.log, "sigma_bands", True),
+        )
+        if self.log_sigma_bands:
+            sigma_data = config.model.model.diffusion.sigma_data
+            self._sigma_tracker_train = SigmaBandLossTracker(
+                DEFAULT_TRAIN_SIGMA_EDGES,
+                sigma_data=sigma_data,
+                name="train",
+            )
+            self._sigma_tracker_val = SigmaBandLossTracker(
+                DEFAULT_VAL_SIGMA_EDGES,
+                sigma_data=sigma_data,
+                name="val",
+            )
+        else:
+            self._sigma_tracker_train = None
+            self._sigma_tracker_val = None
+        self._last_sigma = None
 
     def forward(
         self,
@@ -179,6 +206,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             rho=self.rho,
             device=y_target_norm.device,
         )
+
+        # stash this step's noise level(s) for per-sigma-band loss logging
+        self._last_sigma = sigma.detach().reshape(-1)
 
         # get targets and noised targets
         y_target_norm_noised = self._noise_target(y_target_norm, sigma)
@@ -281,6 +311,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         with torch.no_grad():
             val_loss, metrics, y_preds = self._step(batch, batch_idx, training_mode=True, validation_mode=True)
 
+        if self._sigma_tracker_val is not None and self._sigma_tracker_val.active:
+            self._sigma_tracker_val.update(val_loss, self._last_sigma)
+
         self.log(
             "val_" + self.loss.name + "_loss",
             val_loss,
@@ -308,6 +341,10 @@ class GraphDiffusionDownscaler(BaseGraphModule):
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         train_loss, _, _ = self._step(batch, batch_idx, training_mode=True, validation_mode=False)
+
+        if self._sigma_tracker_train is not None and self._sigma_tracker_train.active:
+            self._sigma_tracker_train.update(train_loss, self._last_sigma)
+
         self.log(
             "train_" + self.loss.name + "_loss",
             train_loss,
@@ -320,6 +357,60 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         )
 
         return train_loss
+
+    # ------------------------------------------------------------------
+    # Per-sigma-band loss logging (epoch-level accumulate + single reduce)
+    # ------------------------------------------------------------------
+    def on_train_epoch_start(self) -> None:
+        if self._sigma_tracker_train is not None:
+            self._sigma_tracker_train.reset(self.device)
+
+    def on_train_epoch_end(self) -> None:
+        super().on_train_epoch_end()
+        self._log_sigma_bands(self._sigma_tracker_train, log_fraction=True)
+
+    def on_validation_epoch_start(self) -> None:
+        if self._sigma_tracker_val is not None:
+            self._sigma_tracker_val.reset(self.device)
+
+    def on_validation_epoch_end(self) -> None:
+        if self.trainer.sanity_checking:
+            return
+        self._log_sigma_bands(self._sigma_tracker_val, log_fraction=False)
+
+    def _log_sigma_bands(self, tracker: SigmaBandLossTracker | None, *, log_fraction: bool) -> None:
+        """Sum each band across GPUs, then log the per-band mean loss.
+
+        The cross-GPU sum is a collective, so every GPU must run this (they do —
+        the epoch-end hook fires on all of them). Afterwards the values match on
+        every GPU, so we only record from rank 0.
+        """
+        if tracker is None or not tracker.active:
+            return
+        for label, (mean_loss, frac, count) in tracker.compute().items():
+            if count <= 0:  # empty band this epoch -> skip rather than log NaN
+                continue
+            self.log(
+                f"{SIGMA_BAND_PREFIX}/{tracker.name}_loss/{label}",
+                mean_loss,
+                on_epoch=True,
+                on_step=False,
+                logger=self.logger_enabled,
+                sync_dist=False,
+                rank_zero_only=True,
+                batch_size=1,
+            )
+            if log_fraction:
+                self.log(
+                    f"{SIGMA_BAND_PREFIX}/{tracker.name}_frac/{label}",
+                    frac,
+                    on_epoch=True,
+                    on_step=False,
+                    logger=self.logger_enabled,
+                    sync_dist=False,
+                    rank_zero_only=True,
+                    batch_size=1,
+                )
 
     def calculate_val_metrics(
         self,
