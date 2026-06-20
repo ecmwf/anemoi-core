@@ -14,11 +14,13 @@ from .builders.icon import ICONTopologicalDecoderEdges
 from .builders.icon import ICONTopologicalEncoderEdges
 from .builders.icon import ICONTopologicalProcessorEdges
 from .builders.knn import KNNEdges
+from .builders.knn import MutualKNNEdges
 from .builders.knn import ReversedKNNEdges
 from .builders.multi_scale import MultiScaleEdges
 
 __all__ = [
     "KNNEdges",
+    "MutualKNNEdges",
     "CutOffEdges",
     "HEALPixMultiScaleEdges",
     "MultiScaleEdges",
