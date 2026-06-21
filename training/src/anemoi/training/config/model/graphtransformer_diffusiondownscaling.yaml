@@ -22,8 +22,12 @@ model:
     sigma_max: 100000.0
     sigma_min: 0.02
     rho: 7.0
-    log_normal_mean: -1.2
-    log_normal_std: 1.2
+    # ln(0, 3.5) is the established downscaling noise schedule (heavy-tailed residuals, up to
+    # ~150-485 sigma). The EDM default ln(-1.2, 1.2) never trains high sigma and amputates
+    # extremes -> root cause of the o96->o320 TC under-intensification (2026-06). Override
+    # only for a deliberate low-noise experiment.
+    log_normal_mean: 0.0
+    log_normal_std: 3.5
     noise_embedder:
       _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
       num_channels: ${model.model.diffusion.noise_channels}
