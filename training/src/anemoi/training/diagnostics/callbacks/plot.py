@@ -105,6 +105,10 @@ class BasePlotExecutor(ABC):
         """Schedule *fn(trainer, *args, **kwargs)* for execution."""
 
     @abstractmethod
+    def drain(self) -> None:
+        """Block until all previously scheduled work has finished."""
+
+    @abstractmethod
     def shutdown(self, wait: bool = True) -> None:
         """Release any resources held by the executor."""
 
@@ -114,6 +118,9 @@ class SyncPlotExecutor(BasePlotExecutor):
 
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
         self._run(fn, trainer, *args, **kwargs)
+
+    def drain(self) -> None:
+        pass  # synchronous — nothing in flight
 
     def shutdown(self, wait: bool = True) -> None:
         pass
@@ -149,6 +156,15 @@ class AsyncPlotExecutor(BasePlotExecutor):
     def schedule(self, fn: Any, trainer: pl.Trainer, *args: Any, **kwargs: Any) -> None:
         """Schedule *fn(trainer, *args, **kwargs)* to run asynchronously."""
         asyncio.run_coroutine_threadsafe(self._submit(fn, trainer, args, kwargs), self._loop)
+
+    def drain(self) -> None:
+        """Block until all previously scheduled async work has finished.
+
+        Submits a no-op coroutine through the same executor queue; when it
+        completes, all earlier submissions are guaranteed to have finished.
+        """
+        future = asyncio.run_coroutine_threadsafe(self._submit(lambda *_: None, None, (), {}), self._loop)
+        future.result()
 
     def shutdown(self, wait: bool = True) -> None:
         """Shut down the executor and stop the event loop.
@@ -285,6 +301,19 @@ class BasePlotCallback(Callback, ABC):
 
         plt.close(fig)  # cleanup
 
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Drain in-flight async plots and release this callback's payload reference.
+
+        Each callback drops its own ``self._payload`` reference after draining.
+        The shared adapter cache is intentionally left alone — other callbacks
+        may still be running their epoch-end drain.  Once all callbacks have
+        dropped their references the payload is GC'd naturally.  The adapter
+        cache is overwritten on the next ``prepare_payload`` call anyway.
+        """
+        del trainer, pl_module  # unused
+        self._executor.drain()
+        self._payload = None
+
     def teardown(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         """Teardown the callback."""
         del trainer, stage  # unused
@@ -293,9 +322,6 @@ class BasePlotCallback(Callback, ABC):
         LOGGER.info("waiting and shutting down the executor ...")
         self._executor.shutdown()
 
-        # Release cached payload to free gathered/denormalized tensors.
-        # Done *after* executor shutdown so in-flight async plots can still
-        # access self._payload during their execution.
         if hasattr(pl_module, "plot_adapter"):
             pl_module.plot_adapter.clear_cache()
         self._payload = None
@@ -432,6 +458,7 @@ class BasePerEpochPlotCallback(BasePlotCallback):
         pl_module: pl.LightningModule,
         **kwargs,
     ) -> None:
+        super().on_validation_epoch_end(trainer, pl_module)
         if trainer.current_epoch % self.every_n_epochs == 0:
 
             self.plot(
