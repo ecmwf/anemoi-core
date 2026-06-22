@@ -388,7 +388,7 @@ class AnemoiModelEncProcDecInterpolated(BaseGraphModel):
                 )
 
             if dataset_name == self.trunc_conn[1]:
-                x_out += x_skip_dict[dataset_name]
+                x_out = x_out.clone() + x_skip_dict[dataset_name]
                 x_skip_dict[dataset_name] = None
 
             x_out_dict[dataset_name] = self._assemble_output(
