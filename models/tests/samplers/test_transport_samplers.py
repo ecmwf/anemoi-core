@@ -266,10 +266,10 @@ def test_vector_field_samplers_integrate_constant_velocity(
     assert torch.allclose(result[DATASET_NAME], y[DATASET_NAME] + 1.0)
 
 
-def test_vector_field_heun_matches_linear_ode_predictor_corrector_step() -> None:
+def test_vector_field_heun_matches_linear_ode_euler_final_step() -> None:
     x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float64)}
     y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float64)}
-    times = torch.tensor([0.0, 0.25], dtype=torch.float64)
+    times = torch.tensor([0.0, 0.25, 0.5], dtype=torch.float64)
 
     def vector_field_fn(
         x: dict[str, torch.Tensor],
@@ -281,12 +281,16 @@ def test_vector_field_heun_matches_linear_ode_predictor_corrector_step() -> None
         del x, model_comm_group, grid_shard_sizes
         return {DATASET_NAME: 2.0 * y[DATASET_NAME] + time[DATASET_NAME]}
 
-    sampler = VectorFieldHeunSampler(dtype=torch.float64)
+    sampler = VectorFieldHeunSampler(dtype=torch.float64, euler_final_step=True)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=vector_field_fn)
 
-    dt = times[1] - times[0]
-    f1 = 2.0 * y[DATASET_NAME] + times[0]
-    y_predictor = y[DATASET_NAME] + dt * f1
-    f2 = 2.0 * y_predictor + times[1]
-    expected = y[DATASET_NAME] + dt * (f1 + f2) / 2.0
+    first_dt = times[1] - times[0]
+    first_f1 = 2.0 * y[DATASET_NAME] + times[0]
+    first_predictor = y[DATASET_NAME] + first_dt * first_f1
+    first_f2 = 2.0 * first_predictor + times[1]
+    first_corrected = y[DATASET_NAME] + first_dt * (first_f1 + first_f2) / 2.0
+
+    final_dt = times[2] - times[1]
+    final_f1 = 2.0 * first_corrected + times[1]
+    expected = first_corrected + final_dt * final_f1
     torch.testing.assert_close(result[DATASET_NAME], expected)
