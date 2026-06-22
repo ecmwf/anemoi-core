@@ -12,6 +12,7 @@ from abc import ABC
 from abc import abstractmethod
 
 import matplotlib.cm as cm
+from matplotlib import colormaps as mpl_colormaps
 from matplotlib.colors import Colormap
 from matplotlib.colors import ListedColormap
 
@@ -53,7 +54,7 @@ class MatplotlibColormap(CustomColormap):
         """
         super().__init__(variables)
         self.name = name
-        self.colormap = cm.get_cmap(self.name)
+        self.colormap = mpl_colormaps.get_cmap(self.name)
 
     def get_cmap(self) -> cm:
         return self.colormap

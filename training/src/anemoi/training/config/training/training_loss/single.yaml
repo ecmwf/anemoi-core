@@ -7,3 +7,11 @@ datasets:
     # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
     scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
     ignore_nans: False
+
+    # To remap predicted variables to different target variables (e.g. model output 'tp' vs.
+    # observation 'imerg') add predicted_variables / target_variables to the relevant sub-loss
+    # entry. If the dataset metadata is incorrect, suppress the compatibility check there:
+    # target_variables: [imerg]
+    # check_variables_compatibility:
+    #   ignore_units: False   # True, or list of variable names
+    #   ignore_period: False  # True, or list of variable names
