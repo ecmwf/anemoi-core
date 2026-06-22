@@ -106,7 +106,7 @@ def check_loss_tree_variable_units(
         Per-variable metadata dict keyed by variable name.
     **options : object
         Additional keyword arguments forwarded to ``Variable.compatible``
-        (e.g. ``ignore_units``, ``ignore_period``).
+        (e.g. ``ignore_units``, ``ignore_processing_period``).
     """
     predicted_variables = getattr(loss, "predicted_variables", None)
     target_variables = getattr(loss, "target_variables", None)

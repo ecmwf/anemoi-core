@@ -72,9 +72,13 @@ class WeightAveragingSchema(GenericSchema):
 
     Example:
         weight_averaging:
-          _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+          _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
           decay: 0.999
           update_starting_at_step: 1000
+
+    The stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes also instantiate
+    but pair parameters/buffers positionally; that is unsafe with anemoi imputers and
+    updating loss scalers (a warning will be logged).
     """
 
 
@@ -270,7 +274,7 @@ class CheckVariablesCompatibilitySchema(BaseModel):
     ignore_units: bool | list[str] = False
     """Ignore unit mismatches.  ``True`` skips all unit checks; a list of variable names
     skips only those variables."""
-    ignore_period: bool | list[str] = False
+    ignore_processing_period: bool | list[str] = False
     """Ignore accumulation-period mismatches.  ``True`` skips all period checks; a list of
     variable names skips only those variables."""
     ignore_time_processing: bool | list[str] = False
