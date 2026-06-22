@@ -38,6 +38,7 @@ def extract_variables_metadata_from_checkpoint(
 def check_variables_metadata_compatibility(
     ckpt_variables_metadata: dict[str, dict] | None,
     dataset_metadata: dict[str, dict],
+    **options: object,
 ) -> None:
     """Check unit compatibility between checkpoint and dataset variables_metadata.
 
@@ -53,6 +54,9 @@ def check_variables_metadata_compatibility(
     dataset_metadata : dict[str, dict]
         Per-dataset metadata from the current datamodule. Each entry is expected to have
         a ``"variables_metadata"`` key.
+    **options : object
+        Additional keyword arguments forwarded to ``Variable.check_compatibility``
+        (e.g. ``ignore_units``, ``ignore_period``).
 
     Raises
     ------
@@ -86,10 +90,79 @@ def check_variables_metadata_compatibility(
         ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
 
         try:
-            Variable.check_compatibility(ckpt_vars, ds_vars)
+            Variable.check_compatibility(ckpt_vars, ds_vars, **options)
         except ValueError as e:
             msg = f"Variable compatibility check failed for dataset '{dataset_name}': {e}"
             raise ValueError(msg) from e
+
+
+def check_loss_variable_units_compatibility(
+    predicted_variables: list[str],
+    target_variables: list[str],
+    variables_metadata: dict[str, dict] | None,
+    **options: object,
+) -> None:
+    """Check unit compatibility between paired predicted and target variables.
+
+    When a loss function maps predicted variables to different target variables
+    (e.g. model output ``tp`` compared against observation ``imerg``), this function
+    verifies that the units of each predicted/target pair are compatible.
+
+    Parameters
+    ----------
+    predicted_variables : list[str]
+        Names of the predicted (model output) variables.
+    target_variables : list[str]
+        Names of the target (observation) variables.
+    variables_metadata : dict[str, dict] | None
+        Per-variable metadata dict keyed by variable name.
+    **options : object
+        Additional keyword arguments forwarded to ``Variable.compatible``
+        (e.g. ``ignore_units``, ``ignore_period``).
+    """
+    if variables_metadata is None:
+        LOG.warning(
+            "No variables_metadata available. Skipping loss variable unit compatibility check.",
+        )
+        return
+
+    for pred_var, target_var in zip(predicted_variables, target_variables, strict=True):
+
+        if pred_var == target_var:
+            continue
+
+        if pred_var not in variables_metadata:
+            LOG.warning(
+                "Predicted variable '%s' not found in variables_metadata. "
+                "Skipping unit check for pair ('%s', '%s').",
+                pred_var,
+                pred_var,
+                target_var,
+            )
+            continue
+
+        if target_var not in variables_metadata:
+            LOG.warning(
+                "Target variable '%s' not found in variables_metadata. Skipping unit check for pair ('%s', '%s').",
+                target_var,
+                pred_var,
+                target_var,
+            )
+            continue
+
+        pred_variable = Variable.from_dict(pred_var, variables_metadata[pred_var])
+        # Build the target variable under the predicted variable's name so that
+        # Variable.compatible()'s name assertion passes (we are comparing metadata
+        # properties, not variable identity).
+        target_variable = Variable.from_dict(pred_var, variables_metadata[target_var])
+
+        compatible, reason = pred_variable.compatible(target_variable, return_reason=True, **options)
+        if not compatible:
+            msg = (
+                f"Loss variable mismatch: predicted variable '{pred_var}' and "
+                f"target variable '{target_var}' are not compatible: {reason}"
+            )
+            raise ValueError(msg)
 
 
 @lru_cache
