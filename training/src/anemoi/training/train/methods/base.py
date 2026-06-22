@@ -40,6 +40,7 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -274,6 +275,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 graph_data=graph_data,
                 data_node_name=data_node_name,
             )
+
+            # Check unit compatibility between predicted and target variables
+            ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
+            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
@@ -945,6 +950,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         step: int | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        without_scalers: list[str] | list[int] | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -1001,6 +1007,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     metric_kwargs["pred_layout"] = pred_layout
                 if target_layout is not None:
                     metric_kwargs["target_layout"] = target_layout
+                if without_scalers is not None:
+                    metric_kwargs["without_scalers"] = without_scalers
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
