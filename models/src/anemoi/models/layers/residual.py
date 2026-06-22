@@ -407,7 +407,8 @@ class InterpolationConnection(BaseResidualConnection):
         x = self.projector(x, interp_edges)
 
         if grid_shard_sizes is not None:  # channel sharding -> grid sharding
-            x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
+            target_grid_shard_sizes = get_shard_sizes(x, -2, model_comm_group)
+            x = all_to_all_transpose(x, -2, target_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
 
         x = einops.rearrange(x, "batch grid features -> (batch grid) features")
 
