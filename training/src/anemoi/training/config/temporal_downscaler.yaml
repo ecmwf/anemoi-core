@@ -14,6 +14,34 @@ config_validation: True
 
 data:
   frequency: null
+  datasets:
+    data:
+      forcing:
+        - "cos_latitude"
+        - "cos_longitude"
+        - "sin_latitude"
+        - "sin_longitude"
+        - "cos_julian_day"
+        - "cos_local_time"
+        - "sin_julian_day"
+        - "sin_local_time"
+        - "insolation"
+        - "lsm"
+        - "z"
+      processors:
+        normalizer:
+          config:
+            max: ["z"]
+            none:
+              - "cos_latitude"
+              - "cos_longitude"
+              - "sin_latitude"
+              - "sin_longitude"
+              - "cos_julian_day"
+              - "cos_local_time"
+              - "sin_julian_day"
+              - "sin_local_time"
+              - "insolation"
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords

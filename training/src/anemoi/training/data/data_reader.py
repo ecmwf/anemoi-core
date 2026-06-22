@@ -408,7 +408,15 @@ class TrajectoryDataset(BaseAnemoiReader):
     @property
     def frequency(self) -> datetime.timedelta:
         """Return the step frequency (spacing between consecutive forecast steps)."""
-        return self.data.step_frequency
+        freq = self.data.step_frequency
+        if freq is not None:
+            return freq
+        else:
+            msg = (
+                f"Cannot determine step frequency: data.step_frequency is None for dataset {self.data}. "
+                "Ensure that the dataset configuration includes a valid step_frequency (e.g. '6H')."
+        )
+        raise ValueError(msg)
 
     def statistics_tendencies(
         self,
