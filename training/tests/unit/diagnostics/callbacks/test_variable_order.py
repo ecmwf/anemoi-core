@@ -359,7 +359,7 @@ def test_check_variable_units_ignore_units_option(mocker: Any) -> None:
             },
         },
     }
-    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_period": False}
+    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_processing_period": False}
     pl_module = mocker.Mock()
     pl_module._ckpt_variables_metadata = {
         "era5": {
