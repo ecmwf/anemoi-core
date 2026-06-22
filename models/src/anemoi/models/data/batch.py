@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch.utils.data import default_collate
+from torch.distributed import ProcessGroup
 
 from anemoi.models.data.views import SourceView
 from anemoi.models.data.views import TensorLayout
@@ -106,10 +107,11 @@ class Batch:
         consumed independently. For sparse datasets the value is a
         ``list[torch.Tensor]`` of length ``batch``. Transferred to
         device alongside data.
-    grid_shard_indices : dict[str, Any], optional
-        Per-dataset grid shard indices (``np.ndarray``, ``slice``, or
-        ``None``). Describes which grid points are present in this
-        batch's shard. Not transferred to device.
+    shard_sizes : dict[str, Any], optional
+        Per-dataset sharding descriptors from readers. For gridded readers
+        values are a single ``ShardSizes`` over the static grid axis; for
+        sparse/tabular readers values are ``list[ShardSizes]`` (one entry
+        per window boundary for each sample payload).
     layouts : dict[str, TensorLayout], optional
         Per-dataset :class:`TensorLayout` descriptors mapping logical
         axes (time, ensemble, grid, variables) to physical dimension
@@ -121,7 +123,7 @@ class Batch:
     metadata: dict[str, Any] = field(default_factory=dict)
     grid_sizes: dict[str, int] = field(default_factory=dict)
     timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = field(default_factory=dict)
-    grid_shard_indices: dict[str, Any] = field(default_factory=dict)
+    shard_sizes: dict[str, Any] = field(default_factory=dict)
     layouts: dict[str, TensorLayout] = field(default_factory=dict)
     variables: dict[str, list[str]] = field(default_factory=dict)
     statistics: dict[str, np.ndarray] = field(default_factory=dict)
@@ -217,9 +219,9 @@ class Batch:
             coordinates=self.coordinates.get(dataset_name),
             is_static=self.is_static_coords(dataset_name),
             timedeltas=self.timedeltas.get(dataset_name),
-            grid_shard_indices=self.grid_shard_indices.get(dataset_name),
             layout=layout,
             boundaries=boundaries,
+            shard_sizes=self.shard_sizes.get(dataset_name),
         )
 
     def __contains__(self, dataset_name: str) -> bool:
@@ -273,7 +275,7 @@ class Batch:
             metadata=self.metadata,
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
-            grid_shard_indices=self.grid_shard_indices,
+            shard_sizes=self.shard_sizes,
             layouts=self.layouts,
             variables=self.variables,
             statistics=self.statistics,
@@ -299,7 +301,7 @@ class Batch:
             metadata=self.metadata,
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
-            grid_shard_indices=self.grid_shard_indices,
+            shard_sizes=self.shard_sizes,
             layouts=self.layouts,
             variables=self.variables,
             statistics=self.statistics,
@@ -333,7 +335,7 @@ class Batch:
                 metadata=self.metadata,
                 grid_sizes=self.grid_sizes,
                 timedeltas=self.timedeltas,
-                grid_shard_indices=self.grid_shard_indices,
+                shard_sizes=self.shard_sizes,
                 layouts=self.layouts,
                 variables=self.variables,
                 statistics=self.statistics,
@@ -349,7 +351,7 @@ class Batch:
             | {name: self.metadata[name] for name in new_data_keys if name in self.metadata},
             grid_sizes={name: self.grid_sizes[name] for name in new_data_keys},
             timedeltas={name: self.timedeltas[name] for name in new_data_keys if name in self.timedeltas},
-            grid_shard_indices={name: self.grid_shard_indices[name] for name in new_data_keys},
+            shard_sizes={name: self.shard_sizes[name] for name in new_data_keys if name in self.shard_sizes},
             layouts={name: self.layouts[name] for name in new_data_keys},
             variables={name: self.variables[name] for name in new_data_keys},
             statistics=self.statistics,
@@ -390,7 +392,7 @@ class Batch:
             metadata=new_metadata,
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
-            grid_shard_indices=self.grid_shard_indices,
+            shard_sizes=self.shard_sizes,
             layouts=self.layouts,
             variables=new_variables,
             statistics=self.statistics,
@@ -414,7 +416,7 @@ class Batch:
 
     @staticmethod
     def collate(
-        samples: list[dict[str, dict[str, Any]]],
+        samples: list[dict[str, dict[str, Any]]] | dict[str, dict[str, Any]],
         *,
         static_coord_datasets: Iterable[str] = (),
     ) -> "Batch":
@@ -449,6 +451,9 @@ class Batch:
           ``static_coord_datasets`` — see
           :attr:`anemoi.training.data.data_reader.BaseAnemoiReader.is_static_grid`.
         """
+        if isinstance(samples, dict):
+            samples = [samples]
+
         if not samples:
             msg = "Cannot collate an empty list of samples."
             raise ValueError(msg)
@@ -462,6 +467,7 @@ class Batch:
         collated_data: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         collated_coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         collated_timedeltas: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+        collated_shard_sizes: dict[str, Any] = {}
         collated_variables: dict[str, list[str]] = {}
         collated_statistics: dict[str, np.ndarray] = {}
         per_dataset_metadata: dict[str, dict[str, list[Any]]] = {}
@@ -483,6 +489,9 @@ class Batch:
                 collated_statistics[name] = first_payload["statistics"]
                 # Assumed that all samples have the same variables and statistics
 
+            if "grid_shard_sizes" in first_payload:
+                collated_shard_sizes[name] = first_payload["grid_shard_sizes"]
+
             if is_sparse:
                 if name in static:
                     msg = (
@@ -501,6 +510,9 @@ class Batch:
 
                 if "timedeltas" in first_payload:
                     collated_timedeltas[name] = [sample[name]["timedeltas"] for sample in samples]
+
+                if "shard_sizes" in first_payload:
+                    collated_shard_sizes[name] = [sample[name]["shard_sizes"] for sample in samples]
 
                 # metadata: each leaf becomes a list of length B (one per sample).
                 meta_keys = tuple(sample_meta.keys())
@@ -535,13 +547,6 @@ class Batch:
             payload = first[name]
             if "grid_size" in payload:
                 collated_grid_sizes[name] = payload["grid_size"]
-
-        # Grid shard indices: same for all samples in a batch (same worker/shard).
-        collated_grid_shard_indices: dict[str, Any] = {}
-        for name in dataset_names:
-            payload = first[name]
-            if "grid_shard_indices" in payload:
-                collated_grid_shard_indices[name] = payload["grid_shard_indices"]
 
         # Layouts: per-dataset TensorLayout from sample payloads. For
         # gridded datasets the data is stacked along a new leading batch
@@ -594,10 +599,35 @@ class Batch:
             metadata=metadata,
             grid_sizes=collated_grid_sizes,
             timedeltas=collated_timedeltas,
-            grid_shard_indices=collated_grid_shard_indices,
+            shard_sizes=collated_shard_sizes,
             layouts=collated_layouts,
             variables=collated_variables,
             statistics=collated_statistics,
         )
         LOGGER.debug("Batch.collate produced:\n%r", batch)
+        return batch
+
+    def allgather(self, group: ProcessGroup | None) -> "Batch":
+        """Allgather the batch across the given process group.
+
+        This is a collective operation that synchronizes all processes in
+        ``group``. All processes must call this method with the same group
+        and have batches of the same size and dataset structure.
+
+        Parameters
+        ----------
+        group : ProcessGroup or None
+            The process group to allgather across.
+
+        Returns
+        -------
+        Batch
+            A new :class:`Batch` with allgathered data.
+        """
+        batch = self
+        for dataset in self.dataset_names:
+            view = self[dataset]
+            gathered_view = view.allgather(group=group)
+            batch = batch._update_source(dataset, gathered_view)
+
         return batch

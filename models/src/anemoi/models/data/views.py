@@ -7,21 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from abc import ABC, abstractmethod
+import logging
+from abc import ABC
+from abc import abstractmethod
 from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
-from typing import Any
 from functools import cached_property
+from typing import Any
+
 import einops
 import numpy as np
 import torch
+from torch.distributed import ProcessGroup
 
 from anemoi.models.data.tensor_layout import TensorLayout
-
-import logging
-
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.utils import model_is_distributed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -73,8 +77,9 @@ class SourceView(ABC):
     coordinates: torch.Tensor | list[torch.Tensor] | None
     layout: TensorLayout
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
-    grid_shard_indices: Any = None
+    grid_shard_indices: list[int] | None = None # TODO(Jan): remove this or derive from shard_sizes
     boundaries: list[tuple[slice, ...]] | None = None
+    shard_sizes: list[ShardSizes] | list[list[ShardSizes]] = None
 
     @cached_property
     def name_to_index(self) -> dict[str, int]:
@@ -87,7 +92,7 @@ class SourceView(ABC):
 
     def select(self, **kwargs) -> "SourceView":
         """Return a new view restricted to the given indices along logical dimensions.
-        
+
         Example
         -------
         >>> view.select(time=slice(0, 10), variables=[0, 2])
@@ -99,7 +104,9 @@ class SourceView(ABC):
             elif dim == "variables":
                 source = source.select_variables(indices)
             else:
-                raise ValueError(f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'.")
+                raise ValueError(
+                    f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
+                )
         return source
 
     @abstractmethod
@@ -115,7 +122,7 @@ class SourceView(ABC):
     @abstractmethod
     def flatten(self) -> FlatView:
         """Return a flattened view of the data, coordinates and timedeltas for a single sample."""
-        pass 
+        pass
 
     @abstractmethod
     def unflatten(self, data: torch.Tensor) -> "SourceView":
@@ -130,6 +137,27 @@ class SourceView(ABC):
     @abstractmethod
     def apply_loss(self, other: "SourceView", loss_func: Callable, **kwargs) -> "SourceView":
         """Apply a loss function to this view and another view, returning the result."""
+        pass
+
+    @abstractmethod
+    def allgather(self, group: ProcessGroup | None) -> "SourceView":
+        """Allgather this view across the given process group.
+
+        This is a collective operation that synchronizes all processes in
+        the group. The view's data and coordinates are allgathered, while
+        metadata like layout and variables are unchanged.
+
+        Parameters
+        ----------
+        group : ProcessGroup or None
+            The process group to allgather across. If None, defaults to the
+            global process group.
+
+        Returns
+        -------
+        SourceView
+            A new view with allgathered data.
+        """
         pass
 
     def _time_axis_size(self) -> int:
@@ -151,7 +179,9 @@ class SourceView(ABC):
             slicer: list[Any] = [slice(None)] * tensor.ndim
             slicer[var_dim] = indices
             return tensor[tuple(slicer)]
-        idx = torch.as_tensor(list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device)
+        idx = torch.as_tensor(
+            list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device
+        )
         return tensor.index_select(var_dim, idx)
 
 
@@ -199,7 +229,7 @@ class GriddedSourceView(SourceView):
             f"{self.pattern_for_2d} -> {self.layout.pattern}",
             batch=self.data.shape[self.layout.batch],
             ensemble=self.data.shape[self.layout.ensemble],
-            time=self.data.shape[self.layout.time]
+            time=self.data.shape[self.layout.time],
         )
         return self.clone(data=new_data)
 
@@ -215,18 +245,50 @@ class GriddedSourceView(SourceView):
 
     def apply_loss(self, other: "GriddedSourceView", loss_func: Callable, **kwargs) -> torch.Tensor:
         """Apply a loss function to this view and another view, returning the result."""
-        assert isinstance(other, GriddedSourceView), f"Other view must be a GriddedSourceView; got {type(other).__name__}."
-        assert self.layout == other.layout, f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
-        #assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
-        assert torch.all(self.coordinates == other.coordinates), f"Both views must have the same coordinates; got {self.coordinates} and {other.coordinates}."
+        assert isinstance(
+            other, GriddedSourceView
+        ), f"Other view must be a GriddedSourceView; got {type(other).__name__}."
+        assert (
+            self.layout == other.layout
+        ), f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
+        # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
+        assert torch.all(
+            self.coordinates == other.coordinates
+        ), f"Both views must have the same coordinates; got {self.coordinates} and {other.coordinates}."
         return loss_func(
             self.data,
             other.data,
             layout=self.layout,
             statistics=self.statistics,
             name_to_index=self.name_to_index,
-            **kwargs
+            **kwargs,
         )
+
+    def allgather(self, group: ProcessGroup | None) -> "GriddedSourceView":
+        """Allgather this view across the given process group.
+
+        This is a collective operation that synchronizes all processes in
+        the group. The view's data is allgathered across the grid dimension
+        while metadata like layout and variables are unchanged.
+
+        Parameters
+        ----------
+        group : ProcessGroup or None
+            The process group to allgather across. If None, defaults to the
+            global process group.
+
+        Returns
+        -------
+        GriddedSourceView
+            A new view with allgathered data.
+        """
+        gathered_data = gather_tensor(
+            self.data,
+            dim=self.layout.grid,
+            sizes=self.shard_sizes,
+            mgroup=group,
+        )
+        return self.clone(data=gathered_data, shard_sizes=None)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSourceView":
         """Return a new view restricted to the given variable indices.
@@ -303,7 +365,9 @@ class TabularSourceView(SourceView):
 
     @property
     def device(self) -> torch.device:
-        assert isinstance(self.data, list) and len(self.data) > 0, f"{self.__class__.__name__} data must be a non-empty list of tensors."
+        assert (
+            isinstance(self.data, list) and len(self.data) > 0
+        ), f"{self.__class__.__name__} data must be a non-empty list of tensors."
         return self.data[0].device
 
     def flatten(self) -> FlatView:
@@ -337,21 +401,32 @@ class TabularSourceView(SourceView):
                 statistics=self.statistics,
                 name_to_index=self.name_to_index,
                 **kwargs,
-            ) for data in self.data
+            )
+            for data in self.data
         ]
         return self.clone(data=new_data)
 
     def apply_loss(self, other: "TabularSourceView", loss_func: Callable, **kwargs) -> torch.Tensor:
         """Apply a loss function to this view and another view, returning the result."""
-        assert isinstance(other, TabularSourceView), f"Other view must be a TabularSourceView; got {type(other).__name__}."
-        assert self.layout == other.layout, f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
-        assert len(self.data) == len(other.data), f"Both views must have the same number of samples; got {len(self.data)} and {len(other.data)}."
-        #assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
+        assert isinstance(
+            other, TabularSourceView
+        ), f"Other view must be a TabularSourceView; got {type(other).__name__}."
+        assert (
+            self.layout == other.layout
+        ), f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
+        assert len(self.data) == len(
+            other.data
+        ), f"Both views must have the same number of samples; got {len(self.data)} and {len(other.data)}."
+        # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
 
         losses = []
         for i, (pred, target) in enumerate(zip(self.data, other.data)):
-            assert pred.shape == target.shape, f"Sample {i} of both views must have the same shape; got {pred.shape} and {target.shape}."
-            assert torch.all(self.coordinates[i] == other.coordinates[i]), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."
+            assert (
+                pred.shape == target.shape
+            ), f"Sample {i} of both views must have the same shape; got {pred.shape} and {target.shape}."
+            assert torch.all(
+                self.coordinates[i] == other.coordinates[i]
+            ), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."
 
             losses.append(
                 loss_func(
@@ -360,11 +435,92 @@ class TabularSourceView(SourceView):
                     layout=self.layout,
                     statistics=self.statistics,
                     name_to_index=self.name_to_index,
-                    **kwargs
+                    **kwargs,
                 )
             )
-    
+
         return torch.mean(*tuple(losses))
+
+    def allgather(self, group: ProcessGroup | None) -> "TabularSourceView":
+        """Allgather this view across the given process group.
+
+        This is a collective operation that synchronizes all processes in
+        the group. The view's data and coordinates are allgathered across
+        the grid dimension while metadata like layout and variables are
+        unchanged.
+
+        Parameters
+        ----------
+        group : ProcessGroup or None
+            The process group to allgather across. If None, defaults to the
+            global process group.
+
+        Returns
+        -------
+        TabularSourceView
+            A new view with allgathered data and coordinates.
+        """
+        if self.shard_sizes is None or not model_is_distributed(group):
+            return self  # nothing to gather, or not in a distributed setting
+            
+        gathered_data = []
+        gathered_coords = []
+        gathered_timedeltas = []
+        gathered_boundaries = []
+        for data, coords, timedeltas, boundaries, shard_sizes in zip(self.data, self.coordinates, self.timedeltas, self.boundaries, self.shard_sizes):
+            gathered_data.append([])
+            gathered_coords.append([])
+            gathered_timedeltas.append([])
+            gathered_boundaries.append([])
+            boundary_offset = 0
+
+            # reconstruct per-window tensors using boundaries, then allgather and concatenates
+            for window_slice, window_shard_sizes in zip(boundaries, shard_sizes):
+                window_size = window_slice.stop - window_slice.start
+                window_data = data.narrow(self.layout.grid, window_slice.start, window_size)
+                gathered_window_data = gather_tensor(
+                    window_data,
+                    dim=self.layout.grid,
+                    sizes=window_shard_sizes,
+                    mgroup=group,
+                )
+                gathered_data[-1].append(gathered_window_data)
+
+                # TODO(Jan): coordinates/td/boundaries is None?
+                window_coords = coords[window_slice]
+                gathered_window_coords = gather_tensor(
+                    window_coords,
+                    dim=0,
+                    sizes=window_shard_sizes,
+                    mgroup=group,
+                )
+                gathered_coords[-1].append(gathered_window_coords)
+
+                window_timedeltas = timedeltas[window_slice]
+                gathered_window_timedeltas = gather_tensor(
+                    window_timedeltas,
+                    dim=0,
+                    sizes=window_shard_sizes,
+                    mgroup=group,
+                )
+                gathered_timedeltas[-1].append(gathered_window_timedeltas)
+
+                new_window_size = sum(window_shard_sizes)
+                gathered_boundaries[-1].append(slice(boundary_offset, boundary_offset + new_window_size))
+                boundary_offset += new_window_size
+            
+            gathered_data[-1] = torch.cat(gathered_data[-1], dim=self.layout.grid)
+            gathered_coords[-1] = torch.cat(gathered_coords[-1], dim=0)
+            gathered_timedeltas[-1] = torch.cat(gathered_timedeltas[-1], dim=0)
+
+        return self.clone(
+            data=gathered_data,
+            coordinates=gathered_coords,
+            timedeltas=gathered_timedeltas,
+            boundaries=gathered_boundaries,
+            shard_sizes=None,
+        )     
+
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":
         """Return a new view restricted to the given variable indices.
@@ -418,7 +574,11 @@ class TabularSourceView(SourceView):
             selected_slices = [sample_bounds[t] for t in idx_list]
             sample_data = self.data[sample_idx]
             data_pieces = [sample_data.narrow(self.layout.grid, s.start, s.stop - s.start) for s in selected_slices]
-            new_data.append(torch.cat(data_pieces, dim=self.layout.grid) if data_pieces else sample_data.narrow(self.layout.grid, 0, 0))
+            new_data.append(
+                torch.cat(data_pieces, dim=self.layout.grid)
+                if data_pieces
+                else sample_data.narrow(self.layout.grid, 0, 0)
+            )
 
             if new_coords is not None and self.coordinates is not None:
                 sample_coords = self.coordinates[sample_idx]

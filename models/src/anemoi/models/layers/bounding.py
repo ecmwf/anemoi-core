@@ -60,7 +60,7 @@ class BaseBounding(nn.Module, ABC):
         SourceView
             A source view with the bounding applied.
         """
-        indices = self._get_indices(x.name_to_index).to(x.data.device)
+        indices = self._get_indices(x.name_to_index).to(x.device)
         x = x.apply_func(self.bound, indices=indices)
         return x
 

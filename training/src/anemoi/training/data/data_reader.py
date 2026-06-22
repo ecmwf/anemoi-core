@@ -22,6 +22,9 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data import TensorLayout
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.utils.dates import frequency_to_seconds
 
@@ -103,6 +106,77 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
     return normalized
 
 
+def _to_local_window_shard_data(
+    data: torch.Tensor,
+    coordinates: torch.Tensor,
+    timedeltas: torch.Tensor,
+    boundaries: list[slice],
+    *,
+    reader_group_rank: int,
+    reader_group_size: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes]]:
+    """Project sparse windowed tensors to the local reader-rank shard.
+
+    Parameters
+    ----------
+    data : torch.Tensor
+        Full sparse payload of shape ``(N, V)``.
+    coordinates : torch.Tensor
+        Full coordinates of shape ``(N, 2)``.
+    timedeltas : torch.Tensor
+        Full per-point timedeltas of shape ``(N,)``.
+    boundaries : list[slice]
+        One boundary slice per logical time window over the flattened ``N`` axis.
+    reader_group_rank : int
+        Rank inside the reader group.
+    reader_group_size : int
+        Size of the reader group.
+
+    Returns
+    -------
+    tuple
+        ``(data_local, coordinates_local, timedeltas_local, boundaries_local, window_shard_sizes)``
+        where ``window_shard_sizes`` stores the per-window balanced partition sizes.
+    """
+    if reader_group_size <= 1:
+        window_shard_sizes_all = [
+            get_balanced_partition_sizes(boundary.stop - boundary.start, 1) for boundary in boundaries
+        ]
+        return data, coordinates, timedeltas, boundaries, window_shard_sizes_all
+
+    data_parts: list[torch.Tensor] = []
+    coord_parts: list[torch.Tensor] = []
+    td_parts: list[torch.Tensor] = []
+    boundaries_local: list[slice] = []
+    window_shard_sizes_all: list[ShardSizes] = []
+
+    offset = 0
+    for boundary in boundaries:
+        window_size = boundary.stop - boundary.start
+        window_shard_sizes = get_balanced_partition_sizes(window_size, reader_group_size)
+        start, end = get_partition_range(window_shard_sizes, reader_group_rank)
+        local_slice = slice(boundary.start + start, boundary.start + end)
+        local_size = end - start
+
+        data_parts.append(data[local_slice])
+        coord_parts.append(coordinates[local_slice])
+        td_parts.append(timedeltas[local_slice])
+        boundaries_local.append(slice(offset, offset + local_size))
+        window_shard_sizes_all.append(window_shard_sizes)
+        offset += local_size
+
+    if data_parts:
+        data_local = torch.cat(data_parts, dim=0)
+        coordinates_local = torch.cat(coord_parts, dim=0)
+        timedeltas_local = torch.cat(td_parts, dim=0)
+    else:
+        data_local = data[:0]
+        coordinates_local = coordinates[:0]
+        timedeltas_local = timedeltas[:0]
+
+    return data_local, coordinates_local, timedeltas_local, boundaries_local, window_shard_sizes_all
+
+
 class BaseAnemoiReader(ABC):
     """Generic anemoi data reader."""
 
@@ -123,6 +197,12 @@ class BaseAnemoiReader(ABC):
         # tabular datasets
 
         self.data = open_dataset(source)
+
+        # lazy init reader group info (will be set by DDPGroupStrategy)
+        self.reader_group_rank = 0
+        self.reader_group_size = 1
+        self.grid_shard_sizes = None
+        self.grid_shard_slice = None
 
     @property
     def dates(self) -> np.ndarray:
@@ -210,11 +290,32 @@ class BaseAnemoiReader(ABC):
     def has_trajectories(self) -> bool:
         """Return whether the dataset has trajectories."""
 
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
+        """Set reader communication group information (called by DDPGroupStrategy).
+
+        Arguments
+        ---------
+        reader_group_rank : int
+             Reader group rank
+        reader_group_size : int
+             Reader group size
+        """
+        self.reader_group_rank = reader_group_rank
+        self.reader_group_size = reader_group_size
+
+        assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
+
+        LOGGER.info(
+            "Reader group info set for %s: rank %d / %d",
+            self.__class__.__name__,
+            self.reader_group_rank,
+            self.reader_group_size-1,
+        )
+
     @abstractmethod
     def get_sample(
         self,
         time_indices: TimeIndices,
-        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> dict:
         """Return a single per-sample payload.
 
@@ -252,6 +353,11 @@ class BaseAnemoiReader(ABC):
 
 class GriddedDataReader(BaseAnemoiReader, ABC):
     """Gridded dataset reader with static grid."""
+
+    @property
+    def grid_size(self) -> int:
+        """Return dataset grid size."""
+        return self.data.shape[-1]
 
     @property
     def is_static_grid(self) -> bool:
@@ -297,23 +403,32 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         """Return boundary mask, defined as the complement of the cutout mask."""
         return ~self.cutout_mask
 
+    def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
+        super().set_reader_group_info(reader_group_rank, reader_group_size)
+
+        self.grid_shard_sizes = get_balanced_partition_sizes(self.grid_size, self.reader_group_size)
+        start, end = get_partition_range(self.grid_shard_sizes, self.reader_group_rank)
+        self.grid_shard_slice = slice(start, end)
+
+        LOGGER.info(
+            "Gridded reader shard sizes: %s, assigned shard: [%d:%d]",
+            self.grid_shard_sizes,
+            start,
+            end,
+        )
+
     def get_data(
         self,
         time_indices: TimeIndices,
-        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Return data tensor for the requested time/grid slice.
 
         Output shape: ``(dates, ensemble, gridpoints, variables)``.
         """
-        if isinstance(grid_shard_indices, slice):
-            # Load only the shard into CPU memory.
-            x = self.data[time_indices, :, :, grid_shard_indices]
+        if self.grid_shard_slice is not None:
+            x = self.data[time_indices, :, :, self.grid_shard_slice]
         else:
-            # Load the full grid then select the shard, because anemoi-datasets
-            # currently doesn't support slicing + fancy indexing in the same op.
-            x = self.data[time_indices, ...]
-            x = x[..., grid_shard_indices]
+            x = self.data[time_indices]
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
@@ -321,20 +436,16 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def get_coordinates(
         self,
         time_indices: TimeIndices | None = None,
-        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> torch.Tensor:
         """Return per-grid-point ``(latitude, longitude)`` coordinates.
 
         For a static grid the ``time_indices`` argument is ignored and the
-        full grid is returned (sliced by ``grid_shard_indices`` when given).
-        Subclasses with dynamic grids must override.
+        full grid is returned. Subclasses with dynamic grids must override.
 
         Parameters
         ----------
         time_indices : TimeIndices, optional
             Time indices; ignored on static grids.
-        grid_shard_indices : np.ndarray or slice, optional
-            Per-rank grid shard.
 
         Returns
         -------
@@ -345,9 +456,7 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         del time_indices  # unused for static grids
         lats = self.latitudes
         lons = self.longitudes
-        if grid_shard_indices is not None:
-            lats = lats[grid_shard_indices]
-            lons = lons[grid_shard_indices]
+        # TODO(Jan): sort out coordinate sharding
 
         coords = np.stack(
             [np.ascontiguousarray(lats), np.ascontiguousarray(lons)],
@@ -358,18 +467,17 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def get_sample(
         self,
         time_indices: TimeIndices,
-        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> dict:
         """Return the per-sample payload in the unified contract."""
         return {
-            "data": self.get_data(time_indices, grid_shard_indices),
+            "data": self.get_data(time_indices),
             "variables": self.variables,
             "statistics": self.statistics,
             "layout": TensorLayout(time=0, ensemble=1, grid=2, variables=3),
-            "coordinates": self.get_coordinates(time_indices, grid_shard_indices),
+            "coordinates": self.get_coordinates(time_indices),
             "metadata": {},
             "grid_size": self.grid_size,
-            "grid_shard_indices": grid_shard_indices,
+            "grid_shard_sizes": self.grid_shard_sizes,
         }
 
     def tree(self, prefix: str = "") -> Tree:
@@ -425,13 +533,8 @@ class ObservationDataReader(BaseAnemoiReader):
     def get_sample(
         self,
         time_indices: TimeIndices,
-        grid_shard_indices: np.ndarray | slice | None = None,
     ) -> dict:
         """Get a sample from the observation dataset.
-
-        ``grid_shard_indices`` is accepted for API compatibility with
-        :class:`GriddedDataReader` but ignored — sharding for sparse
-        observations is not yet implemented.
 
         Returns
         -------
@@ -450,6 +553,7 @@ class ObservationDataReader(BaseAnemoiReader):
             ``timedeltas`` are kept separate from ``coordinates`` so the model layer can route
             them independently.
         """
+        # should return list(window_shard_sizes)
         x = self.data[time_indices]
 
         # the leading time axis is intentionally absent — per-time
@@ -461,6 +565,15 @@ class ObservationDataReader(BaseAnemoiReader):
             np.stack([latitudes, longitudes], axis=-1),
         )
         timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
+        boundaries = list(x.boundaries)
+        data, coordinates, timedeltas, boundaries, shard_sizes = _to_local_window_shard_data(
+            data,
+            coordinates,
+            timedeltas,
+            boundaries,
+            reader_group_rank=self.reader_group_rank,
+            reader_group_size=self.reader_group_size,
+        )
 
         return {
             "data": data,
@@ -469,9 +582,9 @@ class ObservationDataReader(BaseAnemoiReader):
             "layout": TensorLayout(grid=0, variables=1, time_in_grid=True, ensemble=None),
             "coordinates": coordinates,
             "timedeltas": timedeltas,
-            "metadata": {"boundaries": x.boundaries},
+            "metadata": {"boundaries": boundaries},
             "grid_size": self.grid_size,
-            "grid_shard_indices": grid_shard_indices,
+            "shard_sizes": shard_sizes,
         }
 
     def tree(self, prefix: str = "") -> Tree:

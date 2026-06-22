@@ -22,9 +22,6 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_data_indices
 from anemoi.training.utils.seeding import get_base_seed
@@ -109,9 +106,6 @@ class MultiDataset(IterableDataset):
         self.model_comm_group_id = 0
         self.global_rank = 0
 
-        self.reader_group_rank = 0
-        self.reader_group_size = 1
-
         self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
         self.sample_comm_group_id = 0
 
@@ -188,7 +182,6 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
-        shard_sizes: dict[str, ShardSizes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -206,22 +199,18 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
-        shard_sizes : dict[str, ShardSizes]
-            Shard sizes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
         self.model_comm_group_rank = model_comm_group_rank
         self.model_comm_num_groups = model_comm_num_groups
-        self.reader_group_rank = reader_group_rank
-        self.reader_group_size = reader_group_size
 
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        self.shard_sizes = shard_sizes
-
-        assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
+        # pass reader group info to readers:
+        for dataset in self.data_readers.values():
+            dataset.set_reader_group_info(reader_group_rank, reader_group_size)
 
         LOGGER.info(
             "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
@@ -318,32 +307,6 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    @cached_property
-    def shard_shapes(self) -> dict[str, list | None]:
-        """Return shard shapes for all data readers.
-
-        Datasets without a static grid (e.g. observation readers) get ``None``
-        since they cannot be read-time-sharded across ranks.
-        """
-        shard_shapes = {}
-        for name, dataset in self.data_readers.items():
-            if dataset.grid_size is None:
-                shard_shapes[name] = None
-            else:
-                shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
-        return shard_shapes
-
-    def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
-        """Get the grid shard slice according to the reader rank."""
-        shapes = self.shard_shapes[dataset_name]
-        if shapes is None:
-            return slice(None)
-        start, end = get_partition_range(
-            partition_sizes=shapes,
-            partition_id=reader_group_rank,
-        )
-        return slice(start, end)
-
     def get_sample(self, index: int) -> dict[str, dict]:
         """Return per-dataset samples for ``index``.
 
@@ -356,16 +319,7 @@ class MultiDataset(IterableDataset):
         x: dict[str, dict[str, torch.Tensor]] = {}
         for name, dataset in self.data_readers.items():
             time_steps = offset_time_indices(index, self.relative_date_indices[name])
-            # self.shard_sizes is lazily initalised to None
-            # This if statement guards against the case where shard_sizes is not set
-            # (e.g. if set_comm_group_info hasn't been called yet)
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-
-            x[name] = dataset.get_sample(time_steps, grid_indices)
+            x[name] = dataset.get_sample(time_steps)
             LOGGER.debug(
                 "Worker %d (pid %d) read sample for dataset '%s' : %s",
                 self.worker_id,
