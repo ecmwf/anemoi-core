@@ -30,11 +30,9 @@ LOGGER = logging.getLogger(__name__)
 # @pytest.mark.slow
 def test_config_build(tmp_path: Path) -> None:
 
-    # assert Path.cwd() == 5
-
     config = load_config("training/tests/integration/config/atmo_integration_test.yaml")
 
-    # TODO double check
+    # TODO(Oskar): double check
     config.system.output.root = str(tmp_path)
 
     assert config.diagnostics.log.interval == 50
