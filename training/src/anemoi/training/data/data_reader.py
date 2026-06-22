@@ -411,10 +411,9 @@ class TrajectoryDataset(BaseAnemoiReader):
         freq = self.data.step_frequency
         if freq is not None:
             return freq
-        else:
-            msg = (
-                f"Cannot determine step frequency: data.step_frequency is None for dataset {self.data}. "
-                "Ensure that the dataset configuration includes a valid step_frequency (e.g. '6H')."
+        msg = (
+            f"Cannot determine step frequency: data.step_frequency is None for dataset {self.data}. "
+            "Ensure that the dataset configuration includes a valid step_frequency (e.g. '6H')."
         )
         raise ValueError(msg)
 
