@@ -1,0 +1,26 @@
+# @package training.training_loss.datasets.data
+# CombinedLoss: multiscale CRPS + MSE term.
+# Swap in via defaults:
+#   defaults:
+#     - override training/training_loss: combined_multiscale_crps_mse
+_target_: anemoi.training.losses.combined.CombinedLoss
+scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+loss_weights: [0.9, 0.1]
+losses:
+  - _target_: anemoi.training.losses.MultiscaleLossWrapper
+    keep_batch_sharded: false
+    weights: [0.5, 0.25, 0.15, 0.1]
+    multiscale_config:
+      num_scales: 3
+      base_num_nearest_neighbours: 4
+      base_sigma: 0.1
+      scale_factor: 2
+    per_scale_loss:
+      _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+      ignore_nans: False
+      no_autocast: True
+      alpha: 0.95
+  - _target_: anemoi.training.losses.MSELoss
+    scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+    ignore_nans: False

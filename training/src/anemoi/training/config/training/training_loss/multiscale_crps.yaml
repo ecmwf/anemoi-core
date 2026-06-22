@@ -1,0 +1,20 @@
+# @package training.training_loss.datasets.data
+# Default ensemble training loss: MultiscaleLossWrapper with AlmostFairKernelCRPS.
+# To train without multiscale smoothing set multiscale_config to null.
+# To use a different loss (e.g. CombinedLoss), override this in defaults:
+#   defaults:
+#     - override training/training_loss: combined_crps_mse
+_target_: anemoi.training.losses.MultiscaleLossWrapper
+# Disk mode:   multiscale_config: {loss_matrices_path: /path, loss_matrices: ["file.npz", null]}
+# On-the-fly:  multiscale_config: {num_scales: 4, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
+multiscale_config: null  # null = single scale, no smoothing
+weights: [1.0]
+
+keep_batch_sharded: ${model.keep_batch_sharded}
+
+per_scale_loss:
+  _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+  scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+  ignore_nans: False
+  no_autocast: True
+  alpha: 0.95
