@@ -16,13 +16,13 @@ update_ds_stats_on_ckpt_load:
 transfer_learning: False # activate to perform transfer learning
 
 # Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
-# dataset (fine-tuning / transfer learning). Set ignore_units/ignore_period to True to
+# dataset (fine-tuning / transfer learning). Set ignore_units/ignore_processing_period to True to
 # skip those checks globally, or to a list of variable names to skip only those variables.
 # For predicted-vs-target variable checks, configure check_variables_compatibility on the
 # loss entry that defines predicted_variables / target_variables.
 check_variables_compatibility:
   ignore_units: False
-  ignore_period: False
+  ignore_processing_period: False
 
 # run in deterministic mode ; slows down
 deterministic: False
