@@ -52,6 +52,7 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
     gc.collect()
     # Ask glibc to return free arenas to the OS so RSS reflects actual usage.
     import ctypes
+
     ctypes.CDLL("libc.so.6").malloc_trim(0)
     rss_after = process.memory_info().rss / 1024**3
     heap_current, heap_peak = tracemalloc.get_traced_memory()
