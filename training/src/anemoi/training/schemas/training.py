@@ -504,6 +504,16 @@ class SpectralLossSchema(BaseLossSchema):
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
 
+    @model_validator(mode="after")
+    def check_subgrid_transform(self) -> Self:
+        if self.subgrid is not None and self.transform in ("reduced_sht", "octahedral_sht"):
+            msg = (
+                f"subgrid is not supported for the '{self.transform}' transform: "
+                "spherical harmonic transforms require the full grid"
+            )
+            raise ValueError(msg)
+        return self
+
     class Config(BaseModel.Config):
         """Override to allow extra parameters for spectral transforms."""
 

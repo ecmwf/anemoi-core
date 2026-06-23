@@ -537,24 +537,6 @@ def test_sht_amse_loss() -> None:
         )
 
 
-def test_sht_amse_loss_applies_subgrid() -> None:
-    # SpectralAMSELoss.forward has its own transform path; subgrid must still be applied there.
-    nlat = 8
-    nvars = 3
-    expected_points = _octahedral_expected_points(nlat)
-
-    loss = _make_loss(
-        "anemoi.training.losses.spectral.SpectralAMSELoss",
-        transform="octahedral_sht",
-        nlat=nlat,
-        subgrid=(0, expected_points),
-    )
-    # twice the expected nodes; without the slice the SHT receives the wrong node count and raises.
-    pred = torch.zeros((2, 1, 1, 2 * expected_points, nvars))
-    target = torch.zeros_like(pred)
-    assert loss(pred, target, squash=True).numel() == 1
-
-
 def test_octahedral_sht_loss() -> None:
 
     nlat = 8

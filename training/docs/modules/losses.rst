@@ -259,7 +259,25 @@ Supported transforms include:
 
    Before the transform is applied the grid can be subset to a subgrid by setting the optional ``subgrid`` argument.
    This can be a slice represented by a tuple, e.g. ``(0, 100)``, to select the first 100 gridpoints, or the string ``output_mask``
-   that will restrict to grid to the region specified by the ``output_mask`` of LAM models.
+   that will restrict the grid to the region specified by the ``output_mask`` of LAM models.
+
+   ``subgrid`` is only supported for the Cartesian transforms (``FFT2D`` / ``DCT2D``). Spherical harmonic
+   transforms (``ReducedSHT`` / ``OctahedralSHT``) compute the spectra over the whole domain and reject an
+   explicit ``subgrid``.
+
+   For example, to restrict an ``FFT2D`` loss to the first 100 gridpoints (a tuple) or to the LAM output
+   region (``output_mask``):
+
+   .. code-block:: yaml
+
+      training_loss:
+        datasets:
+          your_dataset_name:
+            _target_: anemoi.training.losses.spectral.SpectralL2Loss
+            transform: fft2d
+            x_dim: 10
+            y_dim: 10
+            subgrid: [0, 100]   # or, for a LAM model:  subgrid: output_mask
 
 
 Spectral projections
@@ -299,7 +317,7 @@ regular array expected by FFT2D.
          y_dim: 128
          projection_config:
            matrix_path: /path/to/projection.npz
-         # nodes_slice: [0, 32768] # stretched-grid case, need to select y*x points first
+         # subgrid: [0, 32768] # stretched-grid case, need to select y*x points first
 
 Example: spectral L2 loss with a graph-derived projection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

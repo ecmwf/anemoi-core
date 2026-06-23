@@ -125,6 +125,15 @@ class SpectralLoss(BaseLoss):
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
 
+        # subgrid selects a contiguous block of the grid before the transform. This only makes
+        # sense for the Cartesian transforms (FFT2D/DCT2D); spherical harmonic transforms need the
+        # whole domain to compute the spectra, so reject an explicit subgrid for them.
+        if subgrid is not None and transform in ("reduced_sht", "octahedral_sht"):
+            msg = (
+                f"subgrid is not supported for the '{transform}' transform: "
+                "spherical harmonic transforms require the full grid"
+            )
+            raise ValueError(msg)
         self.subgrid = slice(*(subgrid or (0, None)))
         self.projection_provider = ProjectionGraphProvider.from_config(
             projection_config,
@@ -162,8 +171,10 @@ class SpectralLoss(BaseLoss):
 
     def _select_and_project(self, x: torch.Tensor) -> torch.Tensor:
         x = self._select_subgrid(x)
+        LOGGER.debug("Spectral loss: shape after subgrid selection: %s", tuple(x.shape))
         if self.projection_provider is not None:
             x = self.projector.project(x, self.projection_provider)
+            LOGGER.debug("Spectral loss: shape after projection: %s", tuple(x.shape))
         return x
 
     def _to_spectral(self, x: torch.Tensor) -> torch.Tensor:
