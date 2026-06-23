@@ -202,6 +202,31 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Flag to disable validation of the configuration"""
 
     @model_validator(mode="after")
+    def check_frequency_null_for_trajectory_datasets(self) -> Self:
+        """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
+        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+
+        all_splits = [
+            self.dataloader.training,
+            self.dataloader.validation,
+            self.dataloader.test,
+        ]
+        uses_trajectory = any(
+            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            for split in all_splits
+            for dataset in split.values()
+        )
+        if uses_trajectory and self.data.frequency is not None:
+            msg = (
+                "data.frequency must be null when using trajectory (forecast) datasets. "
+                "The step frequency is read directly from the dataset. "
+                f"Got data.frequency={self.data.frequency!r}."
+            )
+            error = "trajectory_frequency_conflict"
+            raise PydanticCustomError(error, msg)
+        return self
+
+    @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
         if not self.dataloader.read_group_size:
             self.dataloader.read_group_size = self.system.hardware.num_gpus_per_model
