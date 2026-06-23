@@ -135,6 +135,8 @@ def test_multi_scale(
         weights=weights,
     )
 
+    assert smoothing_provider.projection_matrix.layout == torch.sparse_csr
+
     pred, target, _ = loss_inputs_multiscale
     loss = multiscale_loss(pred, target, squash=True)
 

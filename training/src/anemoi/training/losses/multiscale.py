@@ -109,10 +109,12 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 cfg.setdefault("loss_matrices_path", loss_matrices_path)
             multiscale_config = cfg
 
-        self.smoothing_matrices = self._load_smoothing_matrices(
-            multiscale_config,
-            graph_data,
-            data_node_name,
+        self.smoothing_matrices = self._prepare_smoothing_matrices(
+            self._load_smoothing_matrices(
+                multiscale_config,
+                graph_data,
+                data_node_name,
+            ),
         )
         self.num_scales = len(self.smoothing_matrices)
         assert (
@@ -171,6 +173,28 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
         assert graph_data is not None, "graph_data must be provided for on-the-fly multiscale_config."
         return self._build_graph_smoothing_matrices(cfg, graph_data, data_node_name)
+
+    @staticmethod
+    def _prepare_smoothing_matrices(
+        smoothing_matrices: list[ProjectionGraphProvider | None],
+    ) -> list[ProjectionGraphProvider | None]:
+        """Convert smoothing projection matrices once for faster repeated sparse matmuls."""
+        for provider in smoothing_matrices:
+            if provider is not None:
+                provider.projection_matrix = MultiscaleLossWrapper._as_coalesced_csr(provider.projection_matrix)
+        return smoothing_matrices
+
+    @staticmethod
+    def _as_coalesced_csr(projection_matrix: torch.Tensor) -> torch.Tensor:
+        """Return *projection_matrix* in canonical CSR layout."""
+        if projection_matrix.layout == torch.sparse_csr:
+            return projection_matrix
+
+        if projection_matrix.layout != torch.sparse_coo:
+            msg = f"Expected a sparse COO/CSR projection matrix, got layout {projection_matrix.layout}."
+            raise TypeError(msg)
+
+        return projection_matrix.coalesce().to_sparse_csr()
 
     def _build_graph_smoothing_matrices(
         self,
@@ -332,11 +356,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         y_preds_ens = []
         y_ens = []
         for i, provider in enumerate(self.smoothing_matrices):
-            LOGGER.debug(
-                "Loss: %s %s",
-                i,
-                provider.get_edges().shape if provider is not None else None,
-            )
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug("Loss: %s %s", i, provider.projection_matrix.shape if provider is not None else None)
 
             # smooth the predictions and the truth for loss computation
             y_pred_ens_tmp, y_tmp = self._smooth_for_loss(y_pred_ens_for_smooth, y_for_smooth, i)
