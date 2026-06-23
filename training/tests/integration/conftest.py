@@ -32,20 +32,37 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.fixture(autouse=True)
 def log_memory_usage(request: pytest.FixtureRequest) -> None:
-    """Log CPU RSS before and after each test to help debug memory leaks."""
+    """Log memory usage before and after each test.
+
+    Reports both RSS (OS view, never decreases) and tracemalloc live heap
+    (Python view, drops when objects are freed).  The heap delta is the
+    reliable signal for leaks; the RSS delta only ever grows.
+    """
+    import tracemalloc
+
     import psutil
 
     process = psutil.Process()
+    tracemalloc.start()
     rss_before = process.memory_info().rss / 1024**3
     LOGGER.info("MEMORY [%s] before: %.2f GB RSS", request.node.name, rss_before)
+
     yield
+
     gc.collect()
+    # Ask glibc to return free arenas to the OS so RSS reflects actual usage.
+    import ctypes
+    ctypes.CDLL("libc.so.6").malloc_trim(0)
     rss_after = process.memory_info().rss / 1024**3
+    heap_current, heap_peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
     LOGGER.info(
-        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB)",
+        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB) | heap live: %.2f GB peak: %.2f GB",
         request.node.name,
         rss_after,
         rss_after - rss_before,
+        heap_current / 1024**3,
+        heap_peak / 1024**3,
     )
 
 

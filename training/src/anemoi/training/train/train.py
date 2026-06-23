@@ -9,6 +9,7 @@
 
 
 import datetime
+import gc
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -725,11 +726,14 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("---- DONE. ----")
 
-        # Release heavy cached properties so GC can reclaim graph/model/dataset
-        # memory promptly. metadata and supporting_arrays are already computed
-        # and cached before this point by checkpoint callbacks.
+        # Release heavy cached properties and run GC to break reference cycles
+        # between the Lightning trainer, pl_module, callbacks, and graph data.
+        # metadata and supporting_arrays are already computed and cached by
+        # checkpoint callbacks before this point.
         for attr in ("model", "graph_data", "datamodule", "fit_parameters", "callbacks"):
             self.__dict__.pop(attr, None)
+        del trainer
+        gc.collect()
 
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
