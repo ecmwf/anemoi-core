@@ -468,6 +468,12 @@ class CombinedLossSchema(BaseLossSchema):
     "Losses to combine, can be any of the normal losses."
     loss_weights: list[int | float] | None = None
     "Weightings of losses, if not set, all losses are weighted equally."
+    checkpoint_losses: bool | list[bool] = False
+    "Whether to checkpoint/recompute child losses. A bool applies to all losses; a list configures each loss."
+    offload_saved_tensors: bool | list[bool] = False
+    "Whether to offload tensors saved for backward by child losses to CPU."
+    offload_pin_memory: bool = True
+    "Whether CPU-offloaded saved tensors use pinned memory."
 
     @model_validator(mode="before")
     @classmethod
@@ -506,6 +512,11 @@ class CombinedLossSchema(BaseLossSchema):
         if loss_weights is not None and len(losses) != len(loss_weights):
             error_msg = "Number of losses and weights must match"
             raise ValueError(error_msg)
+        for name in ("checkpoint_losses", "offload_saved_tensors"):
+            value = getattr(self, name)
+            if isinstance(value, list) and len(value) != len(losses):
+                error_msg = f"{name} must be a bool or have one entry per loss"
+                raise ValueError(error_msg)
         return self
 
 

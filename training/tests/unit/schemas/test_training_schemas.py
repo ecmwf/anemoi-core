@@ -117,6 +117,33 @@ def test_multiscale_loss_on_the_fly_valid() -> None:
     MultiScaleLossSchema(**{**_MULTISCALE_BASE, "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG})
 
 
+def test_multiscale_loss_projection_options_valid() -> None:
+    schema = MultiScaleLossSchema(
+        **{
+            **_MULTISCALE_BASE,
+            "multiscale_config": {"loss_matrices": [None, None]},
+            "projection_format": "indexed",
+            "dense_density_threshold": 0.25,
+            "dense_max_elements": 1024,
+        },
+    )
+
+    assert schema.projection_format == "indexed"
+    assert schema.dense_density_threshold == 0.25
+    assert schema.dense_max_elements == 1024
+
+
+def test_multiscale_loss_invalid_projection_format_rejected() -> None:
+    with pytest.raises(ValidationError):
+        MultiScaleLossSchema(
+            **{
+                **_MULTISCALE_BASE,
+                "multiscale_config": {"loss_matrices": [None, None]},
+                "projection_format": "bad-format",
+            },
+        )
+
+
 def test_multiscale_loss_mixed_mode_rejected() -> None:
     """loss_matrices (disk) and num_scales (on-the-fly) must not coexist in multiscale_config."""
     with pytest.raises(ValidationError):
@@ -168,6 +195,39 @@ def test_combined_loss_with_scalers_valid() -> None:
             "loss_weights": [1.0, 1.0],
         },
     )
+
+
+def test_combined_loss_memory_options_valid() -> None:
+    schema = CombinedLossSchema(
+        **{
+            **_COMBINED_LOSS_BASE,
+            "losses": [
+                {"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
+                {"_target_": "anemoi.training.losses.MAELoss", "scalers": []},
+            ],
+            "checkpoint_losses": [True, False],
+            "offload_saved_tensors": [True, False],
+            "offload_pin_memory": True,
+        },
+    )
+
+    assert schema.checkpoint_losses == [True, False]
+    assert schema.offload_saved_tensors == [True, False]
+    assert schema.offload_pin_memory is True
+
+
+def test_combined_loss_memory_options_length_mismatch_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CombinedLossSchema(
+            **{
+                **_COMBINED_LOSS_BASE,
+                "losses": [
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": []},
+                ],
+                "checkpoint_losses": [True],
+            },
+        )
 
 
 def test_combined_loss_with_multiscale_valid() -> None:
