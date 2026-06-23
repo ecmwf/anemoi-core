@@ -40,8 +40,8 @@ system:
     # ref data from Vera
     # dataset:
     graph: ${system.output.root}/graphs/graph_enc_proc_dec_o96.pt
-  output:
-    root: '${oc.env:SCRATCH}/aifs/o96/'
+  # output:
+  #   root: '${oc.env:SCRATCH}/aifs/o96/'
 graph:
   nodes:
     hidden:
