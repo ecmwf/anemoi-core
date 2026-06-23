@@ -11,12 +11,14 @@
 
 from .base import CheckpointSource
 from .http import HTTPSource
+from .lineage import LineageResolver
 from .local import LocalSource
 from .s3 import S3Source
 
 __all__ = [
     "CheckpointSource",
     "HTTPSource",
+    "LineageResolver",
     "LocalSource",
     "S3Source",
 ]

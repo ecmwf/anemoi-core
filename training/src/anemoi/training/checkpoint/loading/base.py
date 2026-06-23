@@ -166,9 +166,12 @@ class LoadingStrategy(PipelineStage):
           attribute becomes ``{dataset_name: ic.name_to_index for ...}``,
           which matches what ``DiagnosticsSanityCallback`` indexes by
           dataset name.
-        - **Single-dataset** (legacy): ``hyper_parameters["data_indices"]``
-          is a single ``IndexCollection`` with a ``.name_to_index``
-          attribute. The flat mapping is assigned unchanged.
+        - **Single-dataset** (legacy, pre-multi-dataset):
+          ``hyper_parameters["data_indices"]`` is a single ``IndexCollection``.
+          This is rejected with a ``TypeError`` — the current loaders require
+          the dataset-keyed dict, matching legacy ``transfer_learning_loading``
+          (utils/checkpoint.py). The checkpoint must be upgraded first
+          (``anemoi-models migration sync``).
 
         If neither shape is recognised, the attribute is left alone and
         a debug message is logged.
@@ -179,6 +182,12 @@ class LoadingStrategy(PipelineStage):
             Target model to attach metadata to
         checkpoint_data : dict
             Full checkpoint data dictionary (not just the state dict)
+
+        Raises
+        ------
+        TypeError
+            If ``data_indices`` is a single-dataset ``IndexCollection`` from a
+            pre-multi-dataset checkpoint.
         """
         hyper_params = checkpoint_data.get("hyper_parameters", {})
         data_indices = hyper_params.get("data_indices")
@@ -198,9 +207,18 @@ class LoadingStrategy(PipelineStage):
             return
 
         if data_indices is not None and hasattr(data_indices, "name_to_index"):
-            model._ckpt_model_name_to_index = data_indices.name_to_index
-            LOGGER.debug("Restored single-dataset _ckpt_model_name_to_index from checkpoint hyper_parameters")
-            return
+            # Single-dataset IndexCollection from a pre-multi-dataset anemoi-core.
+            # The current loaders expect dict[str, IndexCollection] keyed by dataset
+            # name; a flat mapping silently breaks the dataset-keyed lookups
+            # downstream, so reject it loudly rather than load a subtly-wrong model.
+            msg = (
+                "Checkpoint hyper_parameters.data_indices is a single-dataset "
+                "IndexCollection from a pre-multi-dataset anemoi-core, incompatible "
+                "with the current loaders (e.g. training.transfer_learning). Run "
+                "`anemoi-models migration sync <checkpoint>` to upgrade it to the "
+                "multi-dataset format, or re-export it with current anemoi-core."
+            )
+            raise TypeError(msg)
 
         LOGGER.debug(
             "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
@@ -336,6 +354,85 @@ class LoadingStrategy(PipelineStage):
         model.weights_initialized = True
         LOGGER.debug("Marked model weights as initialized")
 
+    def _apply_trainable_edge_perm_migration(self, context: CheckpointContext) -> None:
+        """Apply the runtime trainable-edge-permutation migration to the checkpoint.
+
+        Mirrors the ``trainable_edge_perm_fix_migration(checkpoint, model)`` call in
+        ``anemoi.training.utils.checkpoint.transfer_learning_loading`` and the Lightning
+        ``on_load_checkpoint`` hook. The migration is runtime and model-dependent: the
+        graph-provider permutation depends on the instantiated model's provider state, so
+        it must run with the model available, after the processor refresh and before
+        ``load_state_dict``. It is idempotent — already-migrated checkpoints are unaffected.
+
+        Best-effort import: anemoi-models versions predating the migration are a no-op, so
+        the pipeline does not hard-require a specific anemoi-models version.
+        """
+        if context.checkpoint_data is None or context.model is None:
+            return
+
+        migrate = _load_trainable_edge_perm_migration()
+        if migrate is None:
+            return
+
+        try:
+            context.checkpoint_data = migrate(context.checkpoint_data, context.model)
+        except (KeyError, AttributeError) as exc:
+            LOGGER.debug("trainable_edge_perm migration skipped: checkpoint shape incomplete (%s)", exc)
+            return
+        LOGGER.debug("Applied trainable_edge_perm migration to checkpoint data")
+
+    def _extract_variables_metadata(self, model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
+        """Populate ``model._ckpt_variables_metadata`` from the checkpoint.
+
+        Mirrors ``anemoi.training.utils.checkpoint.transfer_learning_loading``: once
+        ``_ckpt_model_name_to_index`` is set, extract the per-dataset variables metadata
+        so the downstream unit-compatibility check can run. No-op when the model has no
+        ``_ckpt_model_name_to_index`` (metadata was not restored).
+        """
+        from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+        name_to_index = getattr(model, "_ckpt_model_name_to_index", None)
+        if name_to_index is None:
+            return
+        model._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+            checkpoint_data,
+            name_to_index,
+        )
+
+    def _warn_on_hparams_divergence(self, context: CheckpointContext) -> None:
+        """Warn when the checkpoint's stored hyper-parameters differ from the run config.
+
+        Fill-model loading keeps the current model's architecture. If the checkpoint was
+        trained with a different model config but the tensor shapes happen to coincide, the
+        divergence would otherwise pass unnoticed; this surfaces it as a warning. Compares
+        ``checkpoint_data["hyper_parameters"]["config"]["model"]`` against
+        ``context.config.model``. Best-effort: any comparison failure is silently skipped.
+        """
+        if context.config is None or context.checkpoint_data is None:
+            return
+
+        hyper_params = context.checkpoint_data.get("hyper_parameters")
+        if not isinstance(hyper_params, dict):
+            return
+        ckpt_config = hyper_params.get("config")
+        if ckpt_config is None:
+            return
+
+        from omegaconf import OmegaConf
+
+        try:
+            ckpt_model = OmegaConf.to_container(OmegaConf.create(ckpt_config), resolve=True).get("model")
+            run_model = OmegaConf.to_container(OmegaConf.create(context.config), resolve=True).get("model")
+        except (ValueError, TypeError, AttributeError):
+            return
+
+        if ckpt_model is not None and ckpt_model != run_model:
+            LOGGER.warning(
+                "Checkpoint hparams differ from the run config (checkpoint "
+                "hyper_parameters.config.model != training config model); fill-model loading "
+                "keeps the current architecture. Verify the checkpoint matches this run.",
+            )
+
 
 # Candidate import paths for the chunking_fix migration. Try the friendly
 # dotted name first; fall back to the timestamp-prefixed module that
@@ -366,6 +463,34 @@ def _load_chunking_fix_migration() -> Any | None:
     return None
 
 
+# The trainable-edge permutation migration is runtime and model-dependent
+# (``migrate(ckpt, model)``); it ships alongside chunking_fix in anemoi-models.
+# Resolve the friendly name first, then the timestamp-prefixed module
+# (``1779202136_trainable_edge_perm_fix``, the name the legacy import in
+# ``anemoi.training.utils.checkpoint`` uses). Returns ``None`` when neither is
+# importable (older anemoi-models), treated as "no migration needed".
+_TRAINABLE_EDGE_PERM_PATHS = (
+    "anemoi.models.migrations.scripts.trainable_edge_perm_fix",
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+)
+
+
+def _load_trainable_edge_perm_migration() -> Any | None:
+    """Resolve the ``trainable_edge_perm_fix.migrate`` callable from anemoi-models, or ``None``."""
+    import importlib
+
+    for path in _TRAINABLE_EDGE_PERM_PATHS:
+        try:
+            module = importlib.import_module(path)
+        except ImportError:
+            continue
+        migrate = getattr(module, "migrate", None)
+        if migrate is not None:
+            return migrate
+    LOGGER.debug("trainable_edge_perm migration not available in anemoi-models; skipping")
+    return None
+
+
 def _drop_keys_with_prefix(state_dict: dict[str, Any], prefixes: tuple[str, ...]) -> int:
     """Remove every key in ``state_dict`` starting with one of ``prefixes``; return count."""
     to_remove = [key for key in state_dict if key.startswith(prefixes)]
@@ -379,11 +504,18 @@ def _inject_model_weights(
     model: nn.Module,
     prefixes: tuple[str, ...],
 ) -> int:
-    """Copy model parameters into ``state_dict`` under ``model.<key>``; return count injected."""
+    """Copy model parameters into ``state_dict`` under ``model.<key>``; return count injected.
+
+    Mirrors the legacy refresh (``train/methods/base.py``): the configured processor
+    prefixes are extended with every live-model key containing ``model_output_idx``,
+    so those index buffers always carry the live values, not stale checkpoint ones.
+    """
+    model_state_dict = model.state_dict()
+    effective_prefixes = prefixes + tuple(f"model.{key}" for key in model_state_dict if "model_output_idx" in key)
     injected = 0
-    for key, value in model.state_dict().items():
+    for key, value in model_state_dict.items():
         full_key = f"model.{key}"
-        if full_key.startswith(prefixes):
+        if full_key.startswith(effective_prefixes):
             state_dict[full_key] = value
             injected += 1
     return injected

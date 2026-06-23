@@ -32,7 +32,7 @@ class WeightsOnlyLoader(LoadingStrategy):
 
     Behavior
     --------
-    - Loads weights with ``strict=self.strict`` (default ``False``)
+    - Loads weights with ``strict=self.strict`` (default ``True``)
     - Clears ``context.optimizer`` and ``context.scheduler`` to ``None``
     - **Leaves training-progress metadata untouched** (``epoch``,
       ``global_step``, ``best_metric``). A prior pipeline stage that set
@@ -47,10 +47,10 @@ class WeightsOnlyLoader(LoadingStrategy):
     ----------
     strict : bool, optional
         Whether to require an exact match between checkpoint keys and
-        model keys (default: False)
+        model keys (default: True). Missing keys raise ``CheckpointLoadError``.
     """
 
-    def __init__(self, strict: bool = False) -> None:
+    def __init__(self, strict: bool = True) -> None:
         self.strict = strict
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
@@ -68,16 +68,18 @@ class WeightsOnlyLoader(LoadingStrategy):
         """
         self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
+        self._apply_trainable_edge_perm_migration(context)
 
         state_dict = self._extract_state_dict(context)
 
         try:
             context.model.load_state_dict(state_dict, strict=self.strict)
         except RuntimeError as e:
-            msg = f"Failed to load state dict into model: {e}"
-            raise CheckpointLoadError(msg) from e
+            raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
+        self._warn_on_hparams_divergence(context)
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
 
         # Discard optimizer/scheduler — weights-only means fresh training state
@@ -129,6 +131,7 @@ class TransferLearningLoader(LoadingStrategy):
 
         self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
+        self._apply_trainable_edge_perm_migration(context)
 
         source_state = self._extract_state_dict(context)
         target_state = context.model.state_dict()
@@ -146,10 +149,10 @@ class TransferLearningLoader(LoadingStrategy):
         try:
             context.model.load_state_dict(filtered, strict=False)
         except RuntimeError as e:
-            msg = f"Failed to load filtered state dict into model: {e}"
-            raise CheckpointLoadError(msg) from e
+            raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
 
         # Discard optimizer/scheduler — transfer learning means fresh training state
@@ -200,6 +203,7 @@ class WarmStartLoader(LoadingStrategy):
 
         self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
+        self._apply_trainable_edge_perm_migration(context)
 
         # 1. Model weights (strict — exact match expected for resume)
         state_dict = self._extract_state_dict(context)
@@ -236,6 +240,7 @@ class WarmStartLoader(LoadingStrategy):
 
         # 5. Anemoi metadata
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
         context.metadata["loading_strategy"] = "warm_start"
 
