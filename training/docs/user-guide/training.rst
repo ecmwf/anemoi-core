@@ -592,6 +592,57 @@ For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
 with similar characteristics.
 
+.. _variable-compatibility-checks:
+
+*******************************
+ Variable Compatibility Checks
+*******************************
+
+When loading a checkpoint (for transfer learning, fine-tuning, or
+resuming a run), Anemoi checks that the variable metadata in the
+checkpoint matches the current dataset — for example that units have
+not changed. The same check is applied at training start between any
+predicted variable and its paired target variable in the loss function.
+
+Both checks respect a ``check_variables_compatibility`` configuration
+block. Each field can be set to ``true`` to suppress the check for all
+variables, or to a list of variable names to suppress it only for those
+variables.
+
+**Checkpoint vs. current dataset** (resuming / fine-tuning)
+
+Configure this at ``training.check_variables_compatibility``:
+
+.. code:: yaml
+
+   training:
+      check_variables_compatibility:
+        ignore_units: false           # true, or [var1, var2, ...]
+        ignore_period: false          # true, or [var1, var2, ...]
+        ignore_time_processing: false # true, or [var1, var2, ...]
+        ignore_type_of_level: false   # true, or [var1, var2, ...]
+
+**Predicted vs. target variables in the loss** (e.g. ``tp`` → ``imerg``)
+
+This check runs on every training run, not only when resuming from a
+checkpoint. Configure it directly on the loss entry that defines the
+pairing:
+
+.. code:: yaml
+
+   training:
+      training_loss:
+        datasets:
+          data:
+            _target_: anemoi.training.losses.MAELoss
+            scalers: [node_weights]
+            predicted_variables: [tp]
+            target_variables: [imerg]
+            check_variables_compatibility:
+              ignore_units: false   # true, or [tp]
+              ignore_period: false  # true, or [tp]
+
+
 ****************
  Model Freezing
 ****************
@@ -650,8 +701,25 @@ default selection of PyTorch.
 ******************
 
 Weight averaging is a technique to improve model generalization by
-averaging model weights during training. Anemoi Training supports weight
-averaging methods through PyTorch Lightning callbacks:
+averaging model weights during training. Anemoi Training provides its own
+weight-averaging callbacks that wrap PyTorch Lightning's
+``WeightAveraging`` infrastructure with pair parameters and buffers
+*by name* rather than positionally.
+
+Using the stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes
+directly will crash or silently mis-pair tensors when used with:
+
+-  **Imputers** (e.g. ``ConstantImputer``), which register scratch
+   buffers whose shapes change on the first forward pass.
+-  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
+   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+   shuffling the buffer order in the live model relative to the averaged
+   model's snapshot.
+
+A warning will be logged if the stock PyTorch Lightning weight-averaging
+callbacks are used, recommending the anemoi variants instead.
+
+The supported methods are:
 
 -  **Exponential Moving Average (EMA)**: Maintains an exponential moving
       average of model weights, which can lead to smoother convergence
@@ -660,13 +728,12 @@ averaging methods through PyTorch Lightning callbacks:
       .. code:: yaml
 
          weight_averaging:
-            _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
             decay: 0.999
+            update_every_n_steps: 1
+            update_starting_at_step: null
+            update_starting_at_epoch: null
 
-      The ``decay`` parameter (typically between 0.99 and 0.9999)
-      controls the smoothing factor. Higher values give more weight to
-      historical weights, resulting in a more stable average. By
-      default, the decay is set to 0.999.
 
 -  **Stochastic Weight Averaging (SWA)**: Averages weights from multiple
       points along the training trajectory, typically resulting in wider
@@ -675,14 +742,11 @@ averaging methods through PyTorch Lightning callbacks:
       .. code:: yaml
 
          weight_averaging:
-            _target_: pytorch_lightning.callbacks.StochasticWeightAveraging
-            swa_lrs: 1.e-4
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.SWAWeightAveraging
+            update_every_n_steps: 1
+            update_starting_at_step: null
+            update_starting_at_epoch: null
 
-      The ``swa_lrs`` parameter specifies the learning rate to use
-      during the SWA phase. By default, the learning rate is set to
-      1e-4. Additional parameters can be configured as described in the
-      [PyTorch Lightning
-      documentation](https://lightning.ai/docs/pytorch/latest/api/lightning.pytorch.callbacks.StochasticWeightAveraging.html#lightning.pytorch.callbacks.StochasticWeightAveraging)
 
 By default, weight averaging is disabled. To explicitly disable it or to
 override a parent configuration, set ``weight_averaging`` to null.

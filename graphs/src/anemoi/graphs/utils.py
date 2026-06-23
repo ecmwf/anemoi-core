@@ -9,32 +9,11 @@
 
 
 from enum import Enum
-from importlib.util import find_spec
 
 import torch
 from sklearn.neighbors import NearestNeighbors
-from torch_geometric import __version__ as PYG_VERSION
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
-
-if PYG_VERSION >= "2.8":
-    PYG_AVAILABLE = find_spec("pyg_lib") is not None
-    PYG_INSTRUCTIONS = r"""The 'pyg-lib' library is not installed.
-    Installing 'pyg-lib' can significantly improve performance for graph creation.
-    You can install it using:
-        TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-        pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-    *NOTE* `torch-cluster` has been deprecated in favor of `pyg-lib` in PyG 2.8,
-        so if you are using PyG 2.8 or later, please install `pyg-lib` instead of `torch-cluster`.
-    """
-else:
-    PYG_AVAILABLE = find_spec("torch_cluster") is not None
-    PYG_INSTRUCTIONS = r"""The 'torch-cluster' library is not installed.
-    Installing 'torch-cluster' can significantly improve performance for graph creation.
-    You can install it using:
-        TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-        pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-    """
 
 
 def get_distributed_device() -> torch.device:
@@ -122,6 +101,39 @@ def concat_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> to
         Concatenated edge indices.
     """
     return torch.unique(torch.cat([edge_indices1, edge_indices2], axis=1), dim=1)
+
+
+def intersect_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> torch.Tensor:
+    """Intersect two sets of edges, keeping only edges present in both.
+
+    Parameters
+    ----------
+    edge_indices1 : torch.Tensor
+        Edge indices of the first set of edges. Shape: (2, num_edges1).
+    edge_indices2 : torch.Tensor
+        Edge indices of the second set of edges. Shape: (2, num_edges2).
+
+    Returns
+    -------
+    torch.Tensor
+        The edges (columns) that appear in both inputs, in the column order of
+        ``edge_indices1``. Shape: (2, num_mutual_edges). Assumes non-negative
+        indices (always true for node indices).
+    """
+    if edge_indices1.numel() == 0 or edge_indices2.numel() == 0:
+        return torch.empty((2, 0), dtype=torch.int64)
+
+    edge_indices1 = edge_indices1.to(torch.int64)
+    edge_indices2 = edge_indices2.to(torch.int64)
+
+    # Encode each (row0, row1) column as a single integer so membership can be
+    # tested with torch.isin. The stride must exceed every row-1 index.
+    stride = max(int(edge_indices1[1].max()), int(edge_indices2[1].max())) + 1
+    keys1 = edge_indices1[0] * stride + edge_indices1[1]
+    keys2 = edge_indices2[0] * stride + edge_indices2[1]
+
+    mask = torch.isin(keys1, keys2)
+    return edge_indices1[:, mask]
 
 
 def haversine_distance(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
