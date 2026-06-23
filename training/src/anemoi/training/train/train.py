@@ -725,6 +725,12 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("---- DONE. ----")
 
+        # Release heavy cached properties so GC can reclaim graph/model/dataset
+        # memory promptly. metadata and supporting_arrays are already computed
+        # and cached before this point by checkpoint callbacks.
+        for attr in ("model", "graph_data", "datamodule", "fit_parameters", "callbacks"):
+            self.__dict__.pop(attr, None)
+
 
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(config: DictConfig) -> None:
