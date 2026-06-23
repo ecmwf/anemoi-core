@@ -521,41 +521,32 @@ class AnemoiTrainer(ABC):
 
         return str(uuid.uuid4())
 
-    def _get_warm_start_checkpoint(self) -> Path | None:
-        """Returns the warm start checkpoint path if specified."""
-        raw_path = self.config.system.input.warm_start
-        if not raw_path:
-            return None
-
-        warm_start_path = Path(raw_path)
-
-        if not warm_start_path.is_file():
-            msg = f"Warm start checkpoint not found: {warm_start_path}"
-            raise FileNotFoundError(msg)
-        return warm_start_path
-
-    def _get_checkpoint_directory(self, fork_id: str) -> Path:
-        """Returns the directory where checkpoints are stored."""
-        return Path(self.config.system.output.checkpoints.root.parent, fork_id or self.lineage_run) / "last.ckpt"
-
     @cached_property
     def last_checkpoint(self) -> Path | None:
-        """Path to the last checkpoint."""
+        """Path to the checkpoint to resume from, resolved by the run-lineage resolver.
+
+        Delegates to :class:`LineageResolver` so the checkpoint-path formula
+        (warm-start path > fork id > lineage run id, shape
+        ``<checkpoints.root.parent>/<fork id or lineage run>/last.ckpt``) lives in
+        one place — the acquisition layer. The K4 ``ckpt_path`` passthrough
+        consumes this for the exact-resume path.
+
+        Returns ``None`` when there is nothing to resume; raises
+        ``FileNotFoundError`` for a configured-but-missing warm-start file and
+        ``RuntimeError`` (rank 0) for a missing lineage checkpoint.
+        """
         if not self.start_from_checkpoint:
             return None
 
-        fork_id = self.fork_run_server2server or self.config.training.fork_run_id
-        checkpoint = self._get_warm_start_checkpoint() or self._get_checkpoint_directory(fork_id)
-        # Check if the last checkpoint exists
-        if checkpoint.exists():
-            LOGGER.info("Resuming training from last checkpoint: %s", checkpoint)
-            return checkpoint
+        from anemoi.training.checkpoint.base import CheckpointContext
+        from anemoi.training.checkpoint.sources import LineageResolver
 
-        if rank_zero_only.rank == 0:
-            msg = "Could not find last checkpoint: %s", checkpoint
-            raise RuntimeError(msg)
-
-        return None
+        resolver = LineageResolver(
+            parent_run_server2server=getattr(self, "parent_run_server2server", None),
+            fork_run_server2server=getattr(self, "fork_run_server2server", None),
+        )
+        context = CheckpointContext(config=self.config)
+        return asyncio.run(resolver.process(context)).checkpoint_path
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:

@@ -23,12 +23,13 @@ if TYPE_CHECKING:
 
     from omegaconf import DictConfig
 
-RANK_ENV_VARS = ("RANK", "SLURM_PROCID", "PMI_RANK", "OMPI_COMM_WORLD_RANK")
+# Mirrors lightning_fabric._get_rank() — the env set the legacy rank_zero_only.rank read.
+RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 @pytest.fixture
 def rank_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force a deterministic global-rank-0 environment (no launcher vars set)."""
+    """Force a deterministic rank-0 environment (no launcher rank vars set)."""
     for var in RANK_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
 
@@ -220,3 +221,19 @@ async def test_non_integer_rank_treated_as_rank_zero(tmp_path: Path, monkeypatch
 
     with pytest.raises(RuntimeError):
         await LineageResolver().process(context)
+
+
+async def test_local_rank_nonzero_defers_on_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A worker with only LOCAL_RANK set (non-zero) defers, matching lightning_fabric._get_rank().
+
+    Regression guard: LOCAL_RANK must be honoured (it is in the legacy rank_zero_only.rank
+    fallback). If it were dropped, such a worker would mis-detect as rank 0 and raise on every node.
+    """
+    for var in ("RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("LOCAL_RANK", "3")
+    context = CheckpointContext(config=_make_config(root=tmp_path / "run_A", run_id="run_A"))
+
+    result = await LineageResolver().process(context)  # must NOT raise
+
+    assert result.checkpoint_path is None

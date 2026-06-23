@@ -63,10 +63,14 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-# Global-rank launcher variables, in priority order. LOCAL_RANK is deliberately
-# excluded: the legacy guard uses ``rank_zero_only.rank``, which is the *global*
-# rank, so a per-node local rank must not be mistaken for it.
-_RANK_ENV_VARS = ("RANK", "SLURM_PROCID", "PMI_RANK", "OMPI_COMM_WORLD_RANK")
+# Launcher rank variables, in the exact priority order of
+# ``lightning_fabric.utilities.rank_zero._get_rank()`` — the value behind the
+# legacy ``rank_zero_only.rank`` guard at the point ``last_checkpoint`` is
+# evaluated (before the Lightning strategy overwrites it). Matching this set and
+# order keeps the resolver's rank-0 gate at parity with the legacy guard it
+# replaces; diverging from it (e.g. dropping LOCAL_RANK) misclassifies workers
+# on some launchers and can defer/raise on the wrong ranks.
+_RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 class LineageResolver(PipelineStage):
@@ -219,14 +223,16 @@ class LineageResolver(PipelineStage):
 
 
 def _is_rank_zero() -> bool:
-    """Best-effort global-rank-0 detection without coupling to Lightning.
+    """Best-effort rank-0 detection without coupling to Lightning.
 
     The acquisition layer must not import the trainer/Lightning stack (rule 8);
-    the legacy site used ``pytorch_lightning.utilities.rank_zero.rank_zero_only``.
-    Rank is read from the distributed-launcher environment; a process with no
-    rank variable set (single-process / unit test) is treated as rank 0. A
-    malformed value — non-integer or negative — is treated conservatively as
-    rank 0 so the missing-checkpoint error is never silently swallowed.
+    the legacy site used ``pytorch_lightning.utilities.rank_zero.rank_zero_only``,
+    whose value comes from ``lightning_fabric``'s ``_get_rank()``. Rank is read
+    from the same launcher environment variables, in the same priority order
+    (``_RANK_ENV_VARS``), so the gate agrees with the legacy guard. A process with
+    no rank variable set (single-process / unit test) is treated as rank 0, and a
+    malformed value — non-integer or negative — is treated conservatively as rank
+    0 so the missing-checkpoint error is never silently swallowed.
     """
     for var in _RANK_ENV_VARS:
         value = os.environ.get(var)
