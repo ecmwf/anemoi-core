@@ -93,6 +93,7 @@ class LinearSpectralDimensionScaler(SpectralDimensionScaler):
     def __init__(
         self,
         n_spectral_modes: int,
+        n_spectral: int | None = None,
         slope: float | None = None,
         y_intercept: float | None = None,
         norm: str | None = None,
@@ -104,6 +105,8 @@ class LinearSpectralDimensionScaler(SpectralDimensionScaler):
         ----------
         n_spectral_modes : int
             Number of total wavenumbers (L dimension).
+        n_spectral : int, optional
+            Total number of spectral modes (length of the (flattened) spectral dimension). Default to n_spectral_modes
         slope : float
             Slope of the linear function.  Positive values give higher weights
             to higher wavenumbers.
@@ -114,18 +117,37 @@ class LinearSpectralDimensionScaler(SpectralDimensionScaler):
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
-        super().__init__(n_spectral_modes=n_spectral_modes, norm=norm, **kwargs)
+        super().__init__(n_spectral_modes=n_spectral_modes, n_spectral=n_spectral, norm=norm, **kwargs)
         self.slope = slope if slope is not None else 1.0 / self.n_spectral_modes
         self.y_intercept = y_intercept if y_intercept is not None else 1.0 / self.n_spectral_modes
 
     def get_scaling_values(self) -> torch.Tensor:
 
-        LOGGER.info(
-            "Spectral Scaling: Applying %s with n_spectral_modes=%d, slope=%s, y_intercept=%s.",
-            self.__class__.__name__,
-            self.n_spectral_modes,
-            self.slope,
-            self.y_intercept,
-        )
+        if self.n_spectral_modes == self.n_spectral:
+            # if n_spectral_modes == n_spectral, then the scaling values are simply a linear function of the frequency
+            # the frequency is increasing with index
+            LOGGER.info(
+                "Spectral Scaling: Applying %s with n_spectral_modes=%d, slope=%s, y_intercept=%s.",
+                self.__class__.__name__,
+                self.n_spectral_modes,
+                self.slope,
+                self.y_intercept,
+            )
+            return self.slope * torch.arange(self.n_spectral, dtype=torch.float32) + self.y_intercept
 
-        return self.slope * torch.arange(self.n_spectral, dtype=torch.float32) + self.y_intercept
+        else:
+            # if n_spectral_modes < n_spectral, then the scaling values are a linear function of frequency
+            # the frequency is increasing with index, and the scaling values are repeated 
+            flat_indices = torch.arange(self.n_spectral, dtype=torch.float32)
+            wavenumbers = flat_indices // self.n_spectral_modes
+
+            LOGGER.info(
+                "Spectral Scaling: Applying %s with n_spectral_modes=%d, loss tensor dimensions n_spectral=%d, slope=%s, y_intercept=%s.",
+                self.__class__.__name__,
+                self.n_spectral_modes,
+                self.n_spectral,
+                self.slope,
+                self.y_intercept,
+            )
+
+            return self.slope * wavenumbers + self.y_intercept
