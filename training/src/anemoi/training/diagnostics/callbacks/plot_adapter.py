@@ -80,41 +80,29 @@ class PlotPayload:
     latlons: dict[str, np.ndarray] = field(default_factory=dict)
     feature_indices: dict[str, Any] = field(default_factory=dict)
 
-    # Lazy denormalization cache (populated on first get_denormalized call)
-    _denormed_input: dict[str, torch.Tensor] = field(default_factory=dict, repr=False)
-    _denormed_output: dict[str, torch.Tensor] = field(default_factory=dict, repr=False)
-
     def get_denormalized(self, dataset_name: str) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return denormalized (input, output) tensors for a dataset, computing once.
+        """Return denormalized (input, output) tensors for a dataset.
 
-        The full batch is denormalized on first call and cached. Subsequent calls
-        for the same dataset return the cached tensors. Callbacks that never call
-        this (e.g. PlotLoss) pay no denormalization cost.
-
-        Thread-safety: multiple async plot executors may call this concurrently.
-        The guard checks ``_denormed_output`` (assigned last) so that a thread
-        never skips into the return path before both dicts are populated.
+        Computed fresh on each call — not cached — so denormalized tensors are
+        freed as soon as the caller drops its reference, rather than living for
+        the lifetime of the payload.  The shared payload already avoids the
+        expensive parts (allgather, post-processor deep-copy) across callbacks.
         """
-        if dataset_name not in self._denormed_output:
-            feat_idx = self.feature_indices[dataset_name]
-            input_tensor = self.batch[dataset_name].detach().cpu()[..., feat_idx]
-            denormed_in = self.post_processors[dataset_name](input_tensor)
+        feat_idx = self.feature_indices[dataset_name]
+        input_tensor = self.batch[dataset_name].detach().cpu()[..., feat_idx]
+        denormed_in = self.post_processors[dataset_name](input_tensor)
 
-            denormed_out = torch.stack(
-                [
-                    self.post_processors[dataset_name](
-                        x[dataset_name][:, ...].detach().cpu(),
-                        in_place=False,
-                    )
-                    for x in self.predictions
-                ],
-            )
+        denormed_out = torch.stack(
+            [
+                self.post_processors[dataset_name](
+                    x[dataset_name][:, ...].detach().cpu(),
+                    in_place=False,
+                )
+                for x in self.predictions
+            ],
+        )
 
-            # Assign input first, output last — the guard checks output.
-            self._denormed_input[dataset_name] = denormed_in
-            self._denormed_output[dataset_name] = denormed_out
-
-        return self._denormed_input[dataset_name], self._denormed_output[dataset_name]
+        return denormed_in, denormed_out
 
 
 class BasePlotAdapter(ABC):

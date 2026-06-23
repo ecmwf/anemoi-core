@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import gc
 import logging
 import os
 from pathlib import Path
@@ -27,6 +28,19 @@ from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
 LOGGER = logging.getLogger(__name__)
+
+
+@pytest.fixture(autouse=True)
+def log_memory_usage(request: pytest.FixtureRequest) -> None:
+    """Log CPU RSS before and after each test to help debug memory leaks."""
+    import psutil
+    process = psutil.Process()
+    rss_before = process.memory_info().rss / 1024**3
+    LOGGER.info("MEMORY [%s] before: %.2f GB RSS", request.node.name, rss_before)
+    yield
+    gc.collect()
+    rss_after = process.memory_info().rss / 1024**3
+    LOGGER.info("MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB)", request.node.name, rss_after, rss_after - rss_before)
 
 
 @pytest.fixture(autouse=True)
