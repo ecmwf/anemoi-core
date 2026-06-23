@@ -16,6 +16,7 @@ from hydra import compose
 from hydra import initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig
+from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 
@@ -116,16 +117,20 @@ def load_config2(base_config: Path, input_config: Path, *, resolve: bool = True)
     return cfg
 
 
-def _merge_config(base_config: Path, config_file: Path, current_dir: Path) -> DictConfig:
+def _merge_config(base_config: Path, config_file: Path, current_dir: Path) -> DictConfig | ListConfig:
     """Recursively load *config_file* and merge its ``defaults:`` entries."""
-    raw: DictConfig = OmegaConf.load(config_file)
+    raw: DictConfig | ListConfig = OmegaConf.load(config_file)
+
+    # Non-dict configs (e.g. a plain list like `[]`) have no defaults to process.
+    if not isinstance(raw, DictConfig):
+        return raw
 
     # Extract and remove defaults list before merging so it doesn't appear in output.
     defaults_node = raw.pop("defaults", OmegaConf.create([]))
     defaults: list[Any] = OmegaConf.to_container(defaults_node, resolve=False)  # type: ignore[assignment]
 
-    before_self: list[DictConfig] = []
-    after_self: list[DictConfig] = []
+    before_self: list[DictConfig | ListConfig] = []
+    after_self: list[DictConfig | ListConfig] = []
     self_seen = False
 
     for entry in defaults:
@@ -140,7 +145,9 @@ def _merge_config(base_config: Path, config_file: Path, current_dir: Path) -> Di
                 before_self.append(loaded)
 
     # Build ordered merge list.  Without _self_, primary keys come last (win).
-    parts: list[DictConfig] = [*before_self, raw, *after_self] if self_seen else [*before_self, *after_self, raw]
+    parts: list[DictConfig | ListConfig] = (
+        [*before_self, raw, *after_self] if self_seen else [*before_self, *after_self, raw]
+    )
 
     if not parts:
         return OmegaConf.create({})
@@ -150,7 +157,7 @@ def _merge_config(base_config: Path, config_file: Path, current_dir: Path) -> Di
     return result
 
 
-def _load_default_entry(base_config: Path, current_dir: Path, entry: Any) -> DictConfig | None:
+def _load_default_entry(base_config: Path, current_dir: Path, entry: Any) -> DictConfig | ListConfig | None:
     """Resolve and load a single entry from a ``defaults:`` list.
 
     Parameters
@@ -166,7 +173,7 @@ def _load_default_entry(base_config: Path, current_dir: Path, entry: Any) -> Dic
 
     Returns
     -------
-    DictConfig | None
+    DictConfig | ListConfig | None
         The loaded (and recursively merged) config, wrapped under the group key when
         the entry is a ``{group: value}`` mapping, or ``None`` when disabled (``null``).
     """
