@@ -8,11 +8,31 @@ class SparseProjector(torch.nn.Module):
     """
 
     def __init__(self, autocast: bool = False) -> None:
+        """Initialize SparseProjector.
+
+        Parameters
+        ----------
+        autocast : bool
+            Use automatic mixed precision
+        """
         super().__init__()
         self.autocast = autocast
 
     def forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
-        """Project ``x`` through ``projection_matrix`` (assumed to be on the right device)."""
+        """Apply sparse projection.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor
+        projection_matrix : torch.Tensor
+            Sparse projection matrix (assumed to be on the correct device)
+
+        Returns
+        -------
+        torch.Tensor
+            Projected tensor
+        """
         out = []
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
             for i in range(x.shape[0]):
