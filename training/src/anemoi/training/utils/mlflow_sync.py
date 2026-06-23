@@ -238,21 +238,19 @@ class MlFlowSync:
             return dest_mlflow_client.create_experiment(self.experiment_name)
         return experiment.experiment_id
 
-    def _get_artifacts_path(self, server2server: str, run: mlflow.entities.Run) -> Path:
+    def _get_artifacts_path(self, server2server: bool, run: mlflow.entities.Run) -> Path:
         if server2server:
-            # Download each artifact
             temp_dir = os.getenv("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY")
             artifact_path = Path(temp_dir, run.info.run_id)
             artifact_path.mkdir(parents=True, exist_ok=True)
-        else:
-            artifact_path = Path(
-                self.source_tracking_uri,
-                run.info.experiment_id,
-                run.info.run_id,
-                "artifacts",
-            )
+            return artifact_path
 
-        return artifact_path
+        # Use the artifact_uri recorded in the run metadata — authoritative path
+        # regardless of whether the source uses filesystem store or SQLite backend.
+        artifact_uri = run.info.artifact_uri
+        if artifact_uri.startswith("file://"):
+            return Path(artifact_uri[len("file://") :])
+        return Path(artifact_uri)
 
     def _download_artifacts(
         self,

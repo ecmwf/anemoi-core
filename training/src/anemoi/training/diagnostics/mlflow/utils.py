@@ -9,10 +9,21 @@
 
 
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from omegaconf import DictConfig
 from omegaconf import ListConfig
+
+
+def sqlite_tracking_uri(save_dir: str) -> str:
+    """Return a sqlite:///... URI for the given save directory."""
+    return "sqlite:///" + str(Path(save_dir).resolve() / "mlflow.db")
+
+
+def artifact_root_from_save_dir(save_dir: str) -> str:
+    """Return the artifact root directory alongside the SQLite DB."""
+    return str(Path(save_dir).resolve() / "mlartifacts")
 
 
 class FixedLengthSet:

@@ -337,7 +337,7 @@ class MlflowSchema(BaseModel):
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
     save_dir: str | None = None
-    "Directory to save logs to when offline=True, default={system.output.root}/{system.output.logs.mlflow}"
+    "Directory for offline MLflow data. SQLite DB at {save_dir}/mlflow.db, artifacts at {save_dir}/mlartifacts/."
 
     @root_validator(pre=True)
     def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805

@@ -38,8 +38,10 @@ from typing_extensions import override
 from anemoi.training.diagnostics.mlflow import LOG_MODEL
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
+from anemoi.training.diagnostics.mlflow.utils import artifact_root_from_save_dir
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
+from anemoi.training.diagnostics.mlflow.utils import sqlite_tracking_uri
 from anemoi.utils.mlflow.auth import AuthBase
 from anemoi.utils.mlflow.auth import TokenAuth
 from anemoi.utils.mlflow.utils import health_check
@@ -350,25 +352,39 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         LOGGER.info("Maximum number of params allowed to be logged is: %s", max_params_length)
 
         self.tracking_uri = tracking_uri
+        artifact_location = None
         # Before creating the run we need to overwrite the tracking_uri and save_dir if offline
         if self.offline:
-            if self._resumed or self._forked:
-                self.tracking_uri = save_dir
-            else:
-                # OFFLINE - When we run offline we can pass a save_dir pointing to a local path
-                self.tracking_uri = None
-                if save_dir is None:
-                    # otherwise, by default we create a dir called "None"... not ideal
-                    save_dir = "./mlruns"
+            if save_dir is None:
+                save_dir = "./mlruns"
+
+            save_dir_path = Path(save_dir).resolve()
+
+            # Warn if this looks like a legacy filesystem mlruns directory without a SQLite DB
+            if save_dir_path.is_dir() and not (save_dir_path / "mlflow.db").exists():
+                numeric_subdirs = [d for d in save_dir_path.iterdir() if d.is_dir() and d.name.isdigit()]
+                if numeric_subdirs:
+                    LOGGER.warning(
+                        "save_dir '%s' appears to be a legacy MLflow filesystem store. "
+                        "The SQLite backend will be used for new runs. Existing runs in the "
+                        "filesystem store will not be visible until migrated.",
+                        save_dir,
+                    )
+
+            save_dir_path.mkdir(parents=True, exist_ok=True)
+            self.tracking_uri = sqlite_tracking_uri(str(save_dir_path))
+            # Explicitly set the artifact location so it is stored alongside the DB,
+            # deterministic regardless of cwd. Passed to MLFlowLogger as artifact_location,
+            # which forwards it to create_experiment.
+            artifact_location = artifact_root_from_save_dir(str(save_dir_path))
+            LOGGER.info("AnemoiMLFlow offline logging to %s (artifacts: %s)", self.tracking_uri, artifact_location)
+            save_dir = None  # tracking_uri is the SQLite URI; save_dir is no longer needed
 
         else:
             # ONLINE - When we pass a tracking_uri to mlflow then it will ignore the
             # saving dir and save all artifacts/metrics to the remote server database
             LOGGER.info("AnemoiMLFlow logging to %s", self.tracking_uri)
             save_dir = None
-
-        if save_dir is not None:
-            Path(save_dir).mkdir(parents=True, exist_ok=True)
 
         self._init_authentication()
         run_id, run_name, tags = self._get_mlflow_run_params(
@@ -388,6 +404,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             log_model=log_model,
             prefix=prefix,
             run_id=run_id,
+            artifact_location=artifact_location,
         )
 
         # Track logged metrics to prevent duplicate logs

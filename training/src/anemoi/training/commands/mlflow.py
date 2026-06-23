@@ -141,8 +141,12 @@ class MlFlow(Command):
         sync.add_argument(
             "--source",
             "-s",
-            help="The MLflow logs source directory.",
-            metavar="DIR",
+            help=(
+                "The MLflow offline tracking source. "
+                "Accepts a SQLite URI (sqlite:///path/to/mlflow.db) "
+                "or a legacy filesystem mlruns directory path."
+            ),
+            metavar="URI_OR_DIR",
             required=True,
             default=argparse.SUPPRESS,
         )
@@ -257,6 +261,15 @@ class MlFlow(Command):
 
             extra_tags = {}
 
+            # Normalize a legacy directory path to a SQLite URI when possible
+            source = args.source
+            if not source.startswith("sqlite://") and not source.startswith("http"):
+                source_path = Path(source)
+                sqlite_db = source_path / "mlflow.db"
+                if sqlite_db.exists():
+                    source = f"sqlite:///{source_path.resolve() / 'mlflow.db'}"
+                    LOGGER.info("Converted source directory to SQLite URI: %s", source)
+
             if args.authentication:
                 from anemoi.utils.mlflow.auth import TokenAuth
 
@@ -273,7 +286,7 @@ class MlFlow(Command):
             log_level = "DEBUG" if args.verbose else "INFO"
 
             MlFlowSync(
-                args.source,
+                source,
                 args.destination,
                 args.run_id,
                 args.experiment_name,
