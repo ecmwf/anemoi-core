@@ -642,3 +642,100 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 
     # Should not raise because ignore_units=True
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+# --- Tests for legacy-key delegation + deprecation (K5) ---
+
+
+def test_legacy_weights_only_delegates_with_deprecation_warning() -> None:
+    """load_weights_only (no TL) translates to a WeightsOnlyLoader block + one warning."""
+    trainer = SimpleNamespace(
+        load_weights_only=True,
+        config=OmegaConf.create({"training": {"transfer_learning": False}}),
+    )
+    with pytest.warns(FutureWarning, match="WeightsOnlyLoader") as record:
+        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
+
+    assert len(record) == 1
+    assert block["source"]["_target_"].endswith("LocalSource")
+    assert block["loading"]["_target_"].endswith("WeightsOnlyLoader")
+    assert "modifiers" not in block
+
+
+def test_legacy_transfer_learning_delegates_with_deprecation_warning() -> None:
+    """transfer_learning translates to a TransferLearningLoader block + one warning."""
+    trainer = SimpleNamespace(
+        load_weights_only=True,
+        config=OmegaConf.create({"training": {"transfer_learning": True}}),
+    )
+    with pytest.warns(FutureWarning, match="TransferLearningLoader"):
+        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
+
+    assert block["loading"]["_target_"].endswith("TransferLearningLoader")
+    assert block["loading"]["skip_mismatched"] is True
+
+
+def test_legacy_submodules_to_freeze_prefixes_model_model_for_rooting_parity() -> None:
+    """Freeze names are prefixed ``model.model.`` for rooting parity.
+
+    The modifier (Task-rooted ``get_submodule``) must target the same submodules
+    the legacy freeze (rooted at ``model.model.model``) did.
+    """
+    trainer = SimpleNamespace(
+        load_weights_only=False,
+        config=OmegaConf.create({"training": {"submodules_to_freeze": ["encoder", "processor.0"]}}),
+    )
+    with pytest.warns(FutureWarning, match="FreezingModifierStage"):
+        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
+
+    modifier = block["modifiers"][0]
+    assert modifier["_target_"].endswith("FreezingModifierStage")
+    assert modifier["submodules_to_freeze"] == ["model.model.encoder", "model.model.processor.0"]
+    # Freeze-only: no acquisition / loading stage.
+    assert "source" not in block
+    assert "loading" not in block
+
+
+def test_legacy_checkpoint_config_none_when_no_legacy_key() -> None:
+    """No deprecated key set => no delegation block, no warning."""
+    trainer = SimpleNamespace(
+        load_weights_only=False,
+        config=OmegaConf.create({"training": {"transfer_learning": False}}),
+    )
+    assert AnemoiTrainer._legacy_checkpoint_config(trainer) is None
+
+
+def test_legacy_weights_only_delegation_loads_via_pipeline(tmp_path: Path) -> None:
+    """End to end: load_weights_only delegates through the pipeline and fills the model."""
+    torch.manual_seed(1)
+    model = torch.nn.Linear(4, 2)
+    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
+
+    run_id = "run_L"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
+
+    cfg = OmegaConf.create(
+        {
+            "training": {"run_id": run_id, "fork_run_id": None, "transfer_learning": False},
+            "system": {"input": {"warm_start": None}, "output": {"checkpoints": {"root": str(ckpt_dir)}}},
+        },
+    )
+    trainer = SimpleNamespace(
+        load_weights_only=True,
+        config=cfg,
+        data_indices={"data": DummyIndex()},
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    with pytest.warns(FutureWarning, match="WeightsOnlyLoader"):
+        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model, checkpoint_config=block)
+
+    assert result is model
+    for key, value in new_state.items():
+        assert torch.equal(result.state_dict()[key], value)

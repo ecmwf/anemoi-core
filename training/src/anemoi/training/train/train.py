@@ -11,6 +11,7 @@
 import asyncio
 import datetime
 import logging
+import warnings
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
@@ -21,7 +22,6 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -46,8 +46,6 @@ from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.training.tasks.base import BaseTask
-from anemoi.training.utils.checkpoint import freeze_submodule_by_name
-from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
@@ -352,54 +350,22 @@ class AnemoiTrainer(ABC):
         }
 
         training_method_cfg = self.config.training.method
-        training_method_cls = get_class(training_method_cfg._target_)
         model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Declarative checkpoint pipeline (opt-in via ``training.checkpoint``): when
         # configured, the source -> loading -> modifier pipeline owns weight loading
-        # and model modification, and the legacy load/freeze block below is bypassed.
-        # Runs without ``training.checkpoint`` keep the legacy path unchanged.
+        # and model modification. Runs without ``training.checkpoint`` fall through to
+        # the deprecated legacy keys, which are translated into the same pipeline below.
         if self._checkpoint_pipeline_configured():
             return self._load_via_checkpoint_pipeline(model)
 
-        # Load the model weights
-        if self.load_weights_only:
-            # Sanify the checkpoint for transfer learning
-            if self.config.training.transfer_learning:
-                LOGGER.info("Loading weights with Transfer Learning from %s", self.last_checkpoint)
-                model = transfer_learning_loading(model, self.last_checkpoint)
-            else:
-                LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
-                # pop data_indices so that the data indices on the checkpoint do not get overwritten
-                # by the data indices from the new config
-                kwargs.pop("data_indices")
-
-                # Load to CPU explictly, to avoid loading entire model on GPU initially
-                # Modifications to the model occur on cpu,
-                # The model will be sent to GPU when trainer.fit() is called
-                model = training_method_cls.load_from_checkpoint(
-                    self.last_checkpoint,
-                    **kwargs,
-                    strict=False,
-                    weights_only=False,  # required for Pytorch Lightning 2.6
-                    map_location="cpu",
-                )
-
-            model.data_indices = self.data_indices
-            # Validate data indices between checkpoint and current config
-            self._validate_transfer_learning_datasets(model)
-            # Validate variable units between checkpoint and current dataset
-            self._validate_transfer_learning_units(model)
-
-        if hasattr(self.config.training, "submodules_to_freeze"):
-            # Freeze the chosen model weights
-            LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
-            for submodule_name in self.config.training.submodules_to_freeze:
-                is_found = freeze_submodule_by_name(model.model.model, submodule_name)
-                if is_found:
-                    LOGGER.info("%s frozen successfully.", submodule_name.upper())
-                else:
-                    LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
+        # Legacy checkpoint keys delegate through the same pipeline (deprecated):
+        # load_weights_only / transfer_learning / submodules_to_freeze are translated
+        # into a ``training.checkpoint`` block, each with a deprecation warning naming
+        # its replacement, so there is a single load path.
+        legacy_checkpoint = self._legacy_checkpoint_config()
+        if legacy_checkpoint is not None:
+            return self._load_via_checkpoint_pipeline(model, checkpoint_config=legacy_checkpoint)
 
         return model
 
@@ -413,20 +379,28 @@ class AnemoiTrainer(ABC):
         """
         return OmegaConf.select(self.config, "training.checkpoint", default=None) is not None
 
-    def _load_via_checkpoint_pipeline(self, model: pl.LightningModule) -> pl.LightningModule:
+    def _load_via_checkpoint_pipeline(
+        self,
+        model: pl.LightningModule,
+        checkpoint_config: DictConfig | dict | None = None,
+    ) -> pl.LightningModule:
         """Load weights and apply modifiers through the checkpoint pipeline.
 
-        Resolves the checkpoint path from the run lineage, then runs the
-        configured ``source`` -> ``loading`` -> ``modifiers`` stages. This is the
-        opt-in replacement for the legacy ``load_weights_only`` /
-        ``transfer_learning`` / ``submodules_to_freeze`` handling, used when the
-        run configures ``training.checkpoint``.
+        Resolves the checkpoint path from the run lineage (when a source stage is
+        present), then runs the configured ``source`` -> ``loading`` ->
+        ``modifiers`` stages. This is the single load path for both the
+        ``training.checkpoint`` config and the deprecated legacy keys.
 
         Parameters
         ----------
         model : pl.LightningModule
             The freshly instantiated training module whose parameter slots the
             loading stage fills in place (no re-instantiation).
+        checkpoint_config : DictConfig | dict, optional
+            A ``training.checkpoint`` block to use instead of the one on
+            ``self.config`` — used by the legacy-key delegation to run a
+            translated pipeline. When ``None`` the block on ``self.config`` is
+            used.
 
         Returns
         -------
@@ -438,26 +412,92 @@ class AnemoiTrainer(ABC):
         from anemoi.training.checkpoint.base import CheckpointContext
         from anemoi.training.checkpoint.sources import LineageResolver
 
-        context = CheckpointContext(model=model, config=self.config)
-        resolver = LineageResolver(
-            parent_run_server2server=getattr(self, "parent_run_server2server", None),
-            fork_run_server2server=getattr(self, "fork_run_server2server", None),
+        pipeline_cfg = (
+            self.config
+            if checkpoint_config is None
+            else OmegaConf.create({"training": {"checkpoint": checkpoint_config}})
         )
-        pipeline = build_checkpoint_pipeline(self.config)
+        has_source = OmegaConf.select(pipeline_cfg, "training.checkpoint.source", default=None) is not None
+        has_loading = OmegaConf.select(pipeline_cfg, "training.checkpoint.loading", default=None) is not None
+
+        context = CheckpointContext(model=model, config=self.config)
+        pipeline = build_checkpoint_pipeline(pipeline_cfg)
 
         async def _run() -> CheckpointContext:
-            resolved = await resolver.process(context)
+            resolved = context
+            # The run-lineage resolver only matters when a source stage will read
+            # the resolved path; a modifier-only pipeline (e.g. legacy
+            # submodules_to_freeze with no load) needs no checkpoint acquisition.
+            if has_source:
+                resolver = LineageResolver(
+                    parent_run_server2server=getattr(self, "parent_run_server2server", None),
+                    fork_run_server2server=getattr(self, "fork_run_server2server", None),
+                )
+                resolved = await resolver.process(resolved)
             return await pipeline.execute(resolved)
 
         loaded_model = asyncio.run(_run()).model
 
         # Trainer-side parity until the dataset/units validators move into the
-        # pipeline: keep the current config's data indices and run the transfer
-        # learning compatibility checks (both are no-ops when nothing was loaded).
-        loaded_model.data_indices = self.data_indices
-        self._validate_transfer_learning_datasets(loaded_model)
-        self._validate_transfer_learning_units(loaded_model)
+        # pipeline: when weights were loaded, keep the current config's data
+        # indices and run the transfer-learning compatibility checks.
+        if has_loading:
+            loaded_model.data_indices = self.data_indices
+            self._validate_transfer_learning_datasets(loaded_model)
+            self._validate_transfer_learning_units(loaded_model)
         return loaded_model
+
+    def _legacy_checkpoint_config(self) -> dict | None:
+        """Translate deprecated checkpoint keys into a ``training.checkpoint`` block.
+
+        Returns ``None`` when no legacy checkpoint key is set. Emits one
+        ``FutureWarning`` per deprecated configuration, each naming the
+        ``training.checkpoint.*`` replacement, so that legacy runs delegate to the
+        same pipeline as new-style configs.
+        """
+        loaders = "anemoi.training.checkpoint.loading.strategies"
+        block: dict[str, Any] = {}
+
+        if self.load_weights_only:
+            if OmegaConf.select(self.config, "training.transfer_learning", default=False):
+                warnings.warn(
+                    "training.transfer_learning is deprecated; set training.checkpoint.loading to "
+                    f"{{_target_: {loaders}.TransferLearningLoader}}.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+                block["loading"] = {"_target_": f"{loaders}.TransferLearningLoader", "skip_mismatched": True}
+            else:
+                warnings.warn(
+                    "training.load_weights_only is deprecated; set training.checkpoint.loading to "
+                    f"{{_target_: {loaders}.WeightsOnlyLoader}}.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+                block["loading"] = {"_target_": f"{loaders}.WeightsOnlyLoader"}
+            block["source"] = {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource"}
+
+        submodules = OmegaConf.select(self.config, "training.submodules_to_freeze", default=None)
+        if submodules:
+            freezing = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+            warnings.warn(
+                f"training.submodules_to_freeze is deprecated; set training.checkpoint.modifiers to "
+                f"[{{_target_: {freezing}}}].",
+                FutureWarning,
+                stacklevel=2,
+            )
+            # The legacy path froze submodules of ``model.model.model``; the modifier
+            # resolves names from the Task root via ``get_submodule``, so prefix the
+            # ``model.model.`` path to target the identical submodules.
+            block["modifiers"] = [
+                {
+                    "_target_": freezing,
+                    "submodules_to_freeze": [f"model.model.{name}" for name in submodules],
+                    "strict": False,
+                },
+            ]
+
+        return block or None
 
     @cached_property
     def run_id(self) -> str:
