@@ -22,13 +22,13 @@ class SpectralDimensionScaler(BaseScaler):
     """Base class for scaling over the spectral dimension.
 
     When spectral losses are used the grid dimension is mapped to a spectral
-    representation via a spectral transform.  The output of the transforms has 
+    representation via a spectral transform.  The output of the transforms has
     - shape ``(L, M)`` (total wavenumber, zonal wavenumber) for SHT.
     - shape  ``(x_dim, y_dim)`` for 2D spectral transforms.
     Different losses have different output shape: some losses use the flattened
     output (L*M) and others collapse over one dimension.
 
-    n_spectral refers to the length of the spectral dimension, 
+    n_spectral refers to the length of the spectral dimension,
     and n_spectral_modes the number of total wavenumbers/frequencies.
     The default implementation scales uniformly by ``1 / n_spectral_modes``.
     """
