@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import asyncio
 import datetime
 import logging
 from abc import ABC
@@ -350,6 +351,13 @@ class AnemoiTrainer(ABC):
         training_method_cls = get_class(training_method_cfg._target_)
         model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
+        # Declarative checkpoint pipeline (opt-in via ``training.checkpoint``): when
+        # configured, the source -> loading -> modifier pipeline owns weight loading
+        # and model modification, and the legacy load/freeze block below is bypassed.
+        # Runs without ``training.checkpoint`` keep the legacy path unchanged.
+        if self._checkpoint_pipeline_configured():
+            return self._load_via_checkpoint_pipeline(model)
+
         # Load the model weights
         if self.load_weights_only:
             # Sanify the checkpoint for transfer learning
@@ -390,6 +398,62 @@ class AnemoiTrainer(ABC):
                     LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
 
         return model
+
+    def _checkpoint_pipeline_configured(self) -> bool:
+        """Return whether a declarative checkpoint pipeline is configured.
+
+        ``True`` when ``training.checkpoint`` is present (a ``source`` and/or
+        ``loading`` block). When absent, :meth:`model` uses the legacy
+        ``load_weights_only`` / ``transfer_learning`` / ``submodules_to_freeze``
+        path unchanged.
+        """
+        return OmegaConf.select(self.config, "training.checkpoint", default=None) is not None
+
+    def _load_via_checkpoint_pipeline(self, model: pl.LightningModule) -> pl.LightningModule:
+        """Load weights and apply modifiers through the checkpoint pipeline.
+
+        Resolves the checkpoint path from the run lineage, then runs the
+        configured ``source`` -> ``loading`` -> ``modifiers`` stages. This is the
+        opt-in replacement for the legacy ``load_weights_only`` /
+        ``transfer_learning`` / ``submodules_to_freeze`` handling, used when the
+        run configures ``training.checkpoint``.
+
+        Parameters
+        ----------
+        model : pl.LightningModule
+            The freshly instantiated training module whose parameter slots the
+            loading stage fills in place (no re-instantiation).
+
+        Returns
+        -------
+        pl.LightningModule
+            The same module, with checkpoint weights loaded and any modifier
+            stages applied.
+        """
+        from anemoi.training.checkpoint import build_checkpoint_pipeline
+        from anemoi.training.checkpoint.base import CheckpointContext
+        from anemoi.training.checkpoint.sources import LineageResolver
+
+        context = CheckpointContext(model=model, config=self.config)
+        resolver = LineageResolver(
+            parent_run_server2server=getattr(self, "parent_run_server2server", None),
+            fork_run_server2server=getattr(self, "fork_run_server2server", None),
+        )
+        pipeline = build_checkpoint_pipeline(self.config)
+
+        async def _run() -> CheckpointContext:
+            resolved = await resolver.process(context)
+            return await pipeline.execute(resolved)
+
+        loaded_model = asyncio.run(_run()).model
+
+        # Trainer-side parity until the dataset/units validators move into the
+        # pipeline: keep the current config's data indices and run the transfer
+        # learning compatibility checks (both are no-ops when nothing was loaded).
+        loaded_model.data_indices = self.data_indices
+        self._validate_transfer_learning_datasets(loaded_model)
+        self._validate_transfer_learning_units(loaded_model)
+        return loaded_model
 
     @cached_property
     def run_id(self) -> str:

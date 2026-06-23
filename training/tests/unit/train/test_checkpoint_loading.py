@@ -4,6 +4,7 @@ from typing import Never
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
@@ -83,7 +84,6 @@ class DummyGraphModel(torch.nn.Module):
 
 
 class DummyTrainingModule(BaseTrainingModule):
-
     def __init__(self) -> None:
         pass
 
@@ -541,3 +541,72 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
 
     # Should not raise: cerra is not in checkpoint
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+# --- Tests for the opt-in checkpoint pipeline path (training.checkpoint) ---
+
+
+def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
+    """``_checkpoint_pipeline_configured`` is True only when training.checkpoint is set."""
+    configured = SimpleNamespace(
+        config=OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": "x"}}}}),
+    )
+    assert AnemoiTrainer._checkpoint_pipeline_configured(configured) is True
+
+    absent = SimpleNamespace(config=OmegaConf.create({"training": {"run_id": "abc"}}))
+    assert AnemoiTrainer._checkpoint_pipeline_configured(absent) is False
+
+
+def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
+    """The opt-in pipeline path resolves the lineage checkpoint and fills the model in place.
+
+    Exercises the trainer-side wiring end to end: the run-lineage resolver turns
+    ``run_id`` into ``<root.parent>/<run_id>/last.ckpt``, the LocalSource loads it,
+    and the WeightsOnlyLoader fills the existing model's parameter slots
+    (fill-model semantics — same object, no re-instantiation).
+    """
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 2)
+    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
+
+    run_id = "run_A"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
+
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "run_id": run_id,
+                "fork_run_id": None,
+                "checkpoint": {
+                    "source": {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource"},
+                    "loading": {
+                        "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
+                        "strict": False,
+                    },
+                },
+            },
+            "system": {
+                "input": {"warm_start": None},
+                "output": {"checkpoints": {"root": str(ckpt_dir)}},
+            },
+        },
+    )
+
+    data_indices = {"data": DummyIndex()}
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices=data_indices,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    assert result is model
+    for key, value in new_state.items():
+        assert torch.equal(result.state_dict()[key], value)
+    assert result.data_indices is data_indices
