@@ -75,24 +75,16 @@ def create_graph_provider(
 
 
 def normalize_projection_edges_name(
-    edges_name: str | tuple[str, str, str] | list[str] | None,
+    edges_name: tuple[str, str, str] | list[str] | None,
 ) -> tuple[str, str, str]:
-    if edges_name is None:
-        raise ValueError("edges_name must be provided")
-    if isinstance(edges_name, (tuple, list)):
-        if len(edges_name) == 3:
-            return (edges_name[0], edges_name[1], edges_name[2])
-        if len(edges_name) == 2:
-            return (edges_name[0], "to", edges_name[1])
-        raise ValueError(f"edges_name tuple must have 2 or 3 elements, got {len(edges_name)}")
-    if isinstance(edges_name, str):
-        parts = edges_name.split("/")
-        if len(parts) == 3:
-            return tuple(parts)
-        if len(parts) == 2:
-            return (parts[0], "to", parts[1])
-        raise ValueError(f"edges_name string must have 2 or 3 slash-separated parts, got {len(parts)}")
-    raise ValueError(f"edges_name must be str, tuple, list, or None, got {type(edges_name)}")
+    """Coerce a projection ``edges_name`` to the canonical PyG edge key ``(src, "to", dst)``.
+
+    Only the explicit 3-element form is accepted; YAML yields a list, which is returned as a
+    tuple (PyG's ``HeteroData`` requires a tuple key). Any other shape raises ``ValueError``.
+    """
+    if not (isinstance(edges_name, (list, tuple)) and len(edges_name) == 3):
+        raise ValueError(f"edges_name must be a (src, 'to', dst) triple, got {edges_name!r}")
+    return tuple(edges_name)
 
 
 class BaseGraphProvider(nn.Module, ABC):

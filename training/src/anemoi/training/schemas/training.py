@@ -453,7 +453,7 @@ class SpectralProjectionConfigSchema(BaseModel):
     matrix_path: str | None = None
 
     # --- edge mode ---
-    edges_name: str | tuple[str, str] | tuple[str, str, str] | None = None
+    edges_name: tuple[str, str, str] | None = None
 
     # --- target-grid mode ---
     num_nearest_neighbours: int | None = None
