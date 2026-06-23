@@ -16,8 +16,15 @@ from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
+import anemoi.training
 
-def load_config(base_config: Path, input_config: Path, *, resolve: bool = True) -> DictConfig:
+
+def load_config(
+    input_config: Path,
+    *,
+    base_config: Path | None = None,
+    resolve: bool = True,
+) -> DictConfig | ListConfig:
     """Load a config file, resolving ``defaults:`` entries from *base_config* using only OmegaConf.
 
     Replicates the Hydra defaults-list mechanism without requiring Hydra at runtime.
@@ -47,7 +54,10 @@ def load_config(base_config: Path, input_config: Path, *, resolve: bool = True) 
     FileNotFoundError
         If *input_config* or any referenced default file does not exist.
     """
-    base_config = Path(base_config).expanduser().resolve()
+    if base_config is None:
+        base_config = Path(anemoi.training.__file__).parent / "config"
+    else:
+        base_config = Path(base_config).expanduser().resolve()
     input_config = Path(input_config).expanduser().resolve()
 
     if not base_config.is_dir():
