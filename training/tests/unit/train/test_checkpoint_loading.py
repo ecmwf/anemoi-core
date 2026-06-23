@@ -739,3 +739,67 @@ def test_legacy_weights_only_delegation_loads_via_pipeline(tmp_path: Path) -> No
     assert result is model
     for key, value in new_state.items():
         assert torch.equal(result.state_dict()[key], value)
+
+
+class _FreezeInner(torch.nn.Module):
+    """The innermost nn model (``Task.model.model``) with named submodules."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = torch.nn.Linear(4, 4)
+        self.processor = torch.nn.Sequential(torch.nn.Linear(4, 4))
+        self.decoder = torch.nn.Linear(4, 2)
+
+
+class _FreezeInterface(torch.nn.Module):
+    """The model interface (``Task.model``)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.model = _FreezeInner()
+
+
+class _FreezeTask(torch.nn.Module):
+    """A Task-like module nesting ``.model.model`` like the real training module."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.model = _FreezeInterface()
+
+
+def test_legacy_freeze_delegation_matches_legacy_on_nested_model() -> None:
+    """End-to-end freeze-rooting parity on a real ``Task.model.model`` nesting.
+
+    The delegated ``FreezingModifierStage`` (names prefixed ``model.model.``) must
+    freeze the exact same parameters as the legacy ``freeze_submodule_by_name``
+    rooted at ``model.model.model``.
+    """
+    from anemoi.training.utils.checkpoint import freeze_submodule_by_name
+
+    submodules = ["encoder", "processor.0"]
+
+    # Legacy path: freeze rooted at model.model.model.
+    legacy_model = _FreezeTask()
+    for name in submodules:
+        assert freeze_submodule_by_name(legacy_model.model.model, name)
+
+    # Delegated path: legacy keys translated to a FreezingModifierStage and run
+    # through the pipeline (freeze-only: no source, no loading stage).
+    delegated_model = _FreezeTask()
+    trainer = SimpleNamespace(
+        load_weights_only=False,
+        config=OmegaConf.create({"training": {"submodules_to_freeze": submodules}}),
+    )
+    with pytest.warns(FutureWarning, match="FreezingModifierStage"):
+        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
+    AnemoiTrainer._load_via_checkpoint_pipeline(trainer, delegated_model, checkpoint_config=block)
+
+    legacy_grads = {name: param.requires_grad for name, param in legacy_model.named_parameters()}
+    delegated_grads = {name: param.requires_grad for name, param in delegated_model.named_parameters()}
+
+    # Identical requires_grad map: the delegation froze exactly what legacy froze.
+    assert delegated_grads == legacy_grads
+    # Sanity: the targeted submodules are frozen, the others remain trainable.
+    assert not delegated_grads["model.model.encoder.weight"]
+    assert not delegated_grads["model.model.processor.0.weight"]
+    assert delegated_grads["model.model.decoder.weight"]
