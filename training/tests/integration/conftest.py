@@ -41,8 +41,6 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
     """
     import tracemalloc
 
-    import psutil
-
     process = psutil.Process()
     tracemalloc.start()
     rss_before = process.memory_info().rss / 1024**3
@@ -52,20 +50,16 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
 
     gc.collect()
     # Ask glibc to return free arenas to the OS so RSS reflects actual usage.
-    import ctypes
-    ctypes.CDLL("libc.so.6").malloc_trim(0)
     rss_after = process.memory_info().rss / 1024**3
     heap_current, heap_peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
     LOGGER.info(
-        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB) | heap live: %.2f GB peak: %.2f GB",
+        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB) | eap live: %.2f GB peak: %.2f GB",
         request.node.name,
         rss_after,
         rss_after - rss_before,
         heap_current / 1024**3,
         heap_peak / 1024**3,
     )
-
 
 
 @pytest.fixture(autouse=True)
