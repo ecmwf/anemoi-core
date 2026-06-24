@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import copy
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -124,6 +125,25 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         self.supports_sharding = True
         self.mloss = None
         self.projector = SparseProjector(autocast=autocast)
+
+    def __deepcopy__(self, memo: dict) -> "MultiscaleLossWrapper":
+        """Deepcopy that shares the static smoothing matrices by reference.
+
+        ``smoothing_matrices`` hold sparse CSR projection tensors (created by
+        ``_prepare_smoothing_matrices`` for faster matmuls). Sparse CSR tensors
+        cannot be deepcopied (``NotImplementedError: Cannot access storage of
+        SparseCsrTensorImpl``), which breaks ``copy.deepcopy(pl_module.loss)``
+        during validation/plotting. They are constant lookup tables, so sharing
+        them by reference is safe and avoids the copy.
+        """
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        # Share the smoothing matrices (and thus their CSR tensors) by reference.
+        memo[id(self.smoothing_matrices)] = self.smoothing_matrices
+        for key, value in self.__dict__.items():
+            new.__dict__[key] = copy.deepcopy(value, memo)
+        return new
 
     @property
     def needs_shard_layout_info(self) -> bool:
