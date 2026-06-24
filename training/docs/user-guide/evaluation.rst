@@ -72,15 +72,13 @@ Once a checkpoint path is resolved, two loading modes are available:
 
 .. note::
 
-   ``training.load_weights_only`` is deprecated as a general checkpoint-loading
-   switch. For training runs, prefer the ``training.checkpoint`` surface
-   (see :ref:`checkpoint_pipeline_configuration`), e.g.
-   ``training/checkpoint/loading=weights_only``. The flag still works and now
-   emits a ``FutureWarning``; it remains the switch that requests the
-   evaluation behaviour above, where it also passes ``ckpt_path=None`` to
-   ``trainer.validate()``. The ``training.checkpoint`` surface configures weight
-   loading only and does not alter ``ckpt_path``, so evaluation continues to use
-   this flag.
+   ``training.load_weights_only`` is deprecated; prefer the ``training.checkpoint``
+   surface (see :ref:`checkpoint_pipeline_configuration`), e.g.
+   ``training/checkpoint/source=local training/checkpoint/loading=weights_only``.
+   Any non-warm-start loading strategy on that surface also passes
+   ``ckpt_path=None`` to ``trainer.validate()`` — the same weights-only behaviour
+   described above — so it fully covers evaluation. The legacy flag still works
+   and emits a ``FutureWarning``.
 
 **************************
  Checkpointing and weight averaging

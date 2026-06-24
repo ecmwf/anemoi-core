@@ -16,8 +16,8 @@ training:
   run_id: ???               # run_id of the completed training run
   load_weights_only: True   # only restore model weights; skips a redundant second
                             # load by Lightning and avoids restoring optimiser state.
-                            # Deprecated as a general loader (prefer training.checkpoint);
-                            # still the evaluation switch — see the Evaluation guide.
+                            # Deprecated - prefer the training.checkpoint surface (e.g.
+                            # training/checkpoint/loading=weights_only); see the Evaluation guide.
 
 # Pattern B: point directly at a checkpoint file
 # warm_start takes precedence over run_id when both are set.

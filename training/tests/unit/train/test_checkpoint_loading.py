@@ -772,6 +772,35 @@ def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pyte
     assert result is sentinel
 
 
+_LOADERS = "anemoi.training.checkpoint.loading.strategies"
+
+
+@pytest.mark.parametrize(
+    ("load_weights_only", "checkpoint", "expected"),
+    [
+        (False, None, False),  # keyless: Lightning resume keeps ckpt_path
+        (True, None, True),  # legacy load_weights_only
+        (False, {"loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}}, True),
+        (False, {"loading": {"_target_": f"{_LOADERS}.TransferLearningLoader"}}, True),
+        (False, {"loading": {"_target_": f"{_LOADERS}.ColdStartLoader"}}, True),
+        (False, {"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),  # full restore keeps ckpt_path
+        (False, {"modifiers": [{"_target_": "x"}]}, False),  # freeze-only, no loader: resume
+    ],
+)
+def test_skip_lightning_restore_matches_loading_strategy(
+    load_weights_only: bool,
+    checkpoint: dict | None,
+    expected: bool,
+) -> None:
+    """ckpt_path is suppressed for weights-style loads (legacy flag or pipeline), kept for warm start/resume."""
+    training = {"checkpoint": checkpoint} if checkpoint is not None else {}
+    trainer = SimpleNamespace(
+        load_weights_only=load_weights_only,
+        config=OmegaConf.create({"training": training}),
+    )
+    assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
+
+
 def test_legacy_weights_only_delegation_loads_via_pipeline(tmp_path: Path) -> None:
     """End to end: load_weights_only delegates through the pipeline and fills the model."""
     torch.manual_seed(1)

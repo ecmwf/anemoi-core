@@ -760,6 +760,25 @@ class AnemoiTrainer(ABC):
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
+    def _skip_lightning_restore(self) -> bool:
+        """Whether to skip Lightning's ``ckpt_path`` full-state restore.
+
+        The model already carries its checkpoint weights when either the legacy
+        ``load_weights_only`` flag is set or a ``training.checkpoint`` loading
+        strategy has run in :meth:`model`. In both cases Lightning must not also
+        restore the full training state from ``ckpt_path`` (which would re-apply
+        optimizer and epoch state on top of a weights-only load). Warm start is
+        the exception: it intends a full optimizer/epoch restore, which only
+        Lightning can perform once the optimizer exists, so it keeps ``ckpt_path``.
+        """
+        if self.load_weights_only:
+            return True
+        loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None)
+        if loading is None:
+            return False
+        target = OmegaConf.select(loading, "_target_", default="") or ""
+        return not target.endswith("WarmStartLoader")
+
     @cached_property
     def fit_parameters(self) -> Any:
         """Options to be passed to trainer.fit().
@@ -776,7 +795,7 @@ class AnemoiTrainer(ABC):
 
         params["model"] = self.model
         params["datamodule"] = self.datamodule
-        params["ckpt_path"] = None if (self.load_weights_only) else self.last_checkpoint
+        params["ckpt_path"] = None if self._skip_lightning_restore() else self.last_checkpoint
 
         if version.parse("2.6.0") <= PL_VERSION:
             params["weights_only"] = False
