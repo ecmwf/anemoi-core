@@ -298,68 +298,6 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
 
 
-def test_combined_loss_checkpoints_selected_children(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = []
-
-    def fake_checkpoint(function, *args, **kwargs):
-        calls.append(kwargs)
-        return function(*args)
-
-    monkeypatch.setattr("anemoi.training.losses.combined.checkpoint", fake_checkpoint)
-
-    loss = CombinedLoss(
-        losses=[MSELoss(), MAELoss()],
-        loss_weights=[1.0, 0.5],
-        checkpoint_losses=[True, False],
-    )
-    pred = torch.ones((1, 1, 1, 2, 1), requires_grad=True)
-    target = torch.zeros_like(pred)
-
-    out = loss(pred, target)
-    out.backward()
-
-    assert len(calls) == 1
-    assert calls[0]["use_reentrant"] is False
-    assert pred.grad is not None
-
-
-def test_combined_loss_offloads_saved_tensors_for_selected_children(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = []
-
-    class FakeSaveOnCpu:
-        def __init__(self, *, pin_memory: bool) -> None:
-            calls.append(pin_memory)
-
-        def __enter__(self) -> None:
-            return None
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-    monkeypatch.setattr(torch.autograd.graph, "save_on_cpu", FakeSaveOnCpu)
-
-    loss = CombinedLoss(
-        losses=[MSELoss(), MAELoss()],
-        loss_weights=[1.0, 0.5],
-        offload_saved_tensors=[True, False],
-        offload_pin_memory=True,
-    )
-    pred = torch.ones((1, 1, 1, 2, 1), requires_grad=True)
-    target = torch.zeros_like(pred)
-
-    loss(pred, target).backward()
-
-    assert calls == [True]
-
-
-def test_combined_loss_memory_options_length_mismatch_raises() -> None:
-    with pytest.raises(ValueError, match="checkpoint_losses"):
-        CombinedLoss(
-            losses=[MSELoss(), MAELoss()],
-            checkpoint_losses=[True],
-        )
-
-
 def test_iter_leaf_losses_combined() -> None:
     """Test that iter_leaf_losses on a CombinedLoss yields the sub-losses."""
     mse = MSELoss()

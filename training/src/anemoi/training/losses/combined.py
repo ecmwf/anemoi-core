@@ -9,14 +9,11 @@
 
 
 import functools
-from collections.abc import Sequence
 from collections.abc import Callable
 from collections.abc import Iterator
-from contextlib import nullcontext
 from typing import Any
 
 import torch
-from torch.utils.checkpoint import checkpoint
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -44,9 +41,6 @@ class CombinedLoss(BaseLoss):
         *extra_losses: dict[str, Any] | Callable | BaseLoss,
         loss_weights: tuple[int, ...] | None = None,
         losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
-        checkpoint_losses: bool | Sequence[bool] = False,
-        offload_saved_tensors: bool | Sequence[bool] = False,
-        offload_pin_memory: bool = False,
         available_scalers: dict[str, TENSOR_SPEC] | None = None,
         data_indices: IndexCollection | None = None,
         **kwargs,
@@ -78,14 +72,6 @@ class CombinedLoss(BaseLoss):
             Must be the same length as the number of losses.
             If None, all losses are weighted equally.
             by default None.
-        checkpoint_losses : bool | Sequence[bool], optional
-            Whether to checkpoint child losses and recompute them during backward.
-            A single bool applies to all children; a sequence configures each child separately.
-        offload_saved_tensors : bool | Sequence[bool], optional
-            Whether to offload tensors saved for backward by child losses to CPU.
-            A single bool applies to all children; a sequence configures each child separately.
-        offload_pin_memory : bool, optional
-            Whether CPU-offloaded saved tensors use pinned memory.
         available_scalers : dict[str, TENSOR_SPEC] | None, optional
             All scaler tensors available. Passed through to child losses.
         data_indices : IndexCollection | None, optional
@@ -130,14 +116,6 @@ class CombinedLoss(BaseLoss):
         assert len(losses) == len(loss_weights), "Number of losses and weights must match"
         assert len(losses) > 0, "At least one loss must be provided"
 
-        self.checkpoint_losses = self._expand_bool_option(checkpoint_losses, len(losses), "checkpoint_losses")
-        self.offload_saved_tensors = self._expand_bool_option(
-            offload_saved_tensors,
-            len(losses),
-            "offload_saved_tensors",
-        )
-        self.offload_pin_memory = offload_pin_memory
-
         for i, loss in enumerate(losses):
             if isinstance(loss, DictConfig | dict):
                 loss_config = dict(loss)
@@ -160,18 +138,6 @@ class CombinedLoss(BaseLoss):
         self.loss_weights = loss_weights
         del self.scaler  # Remove scaler property from parent class, as it is not used here
 
-    @staticmethod
-    def _expand_bool_option(value: bool | Sequence[bool], length: int, name: str) -> tuple[bool, ...]:
-        """Expand a bool or per-loss bool sequence to one flag per child loss."""
-        if isinstance(value, bool):
-            return (value,) * length
-
-        result = tuple(bool(item) for item in value)
-        if len(result) != length:
-            msg = f"{name} must be a bool or have one entry per loss."
-            raise ValueError(msg)
-        return result
-
     @property
     def needs_shard_layout_info(self) -> bool:
         """Whether any wrapped loss requires explicit shard-layout metadata."""
@@ -192,32 +158,6 @@ class CombinedLoss(BaseLoss):
         """Recursively yield leaf losses from all sub-losses."""
         for sub_loss in self.losses:
             yield from sub_loss.iter_leaf_losses()
-
-    def _call_loss(
-        self,
-        loss_fn: BaseLoss,
-        pred: torch.Tensor,
-        target: torch.Tensor,
-        loss_kwargs: dict[str, Any],
-        *,
-        checkpoint_loss: bool,
-        offload_saved_tensors: bool,
-    ) -> torch.Tensor:
-        """Call a child loss, optionally checkpointing or offloading saved tensors."""
-
-        def run_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-            context = (
-                torch.autograd.graph.save_on_cpu(pin_memory=self.offload_pin_memory)
-                if offload_saved_tensors and torch.is_grad_enabled()
-                else nullcontext()
-            )
-            with context:
-                return loss_fn(pred, target, **loss_kwargs)
-
-        if checkpoint_loss and torch.is_grad_enabled():
-            return checkpoint(run_loss, pred, target, use_reentrant=False)
-
-        return run_loss(pred, target)
 
     def forward(
         self,
@@ -245,16 +185,10 @@ class CombinedLoss(BaseLoss):
         loss = None
         for i, loss_fn in enumerate(self.losses):
             loss_kwargs = self._forward_kwargs_for_loss(loss_fn, kwargs)
-            loss_value = self._call_loss(
-                loss_fn,
-                pred,
-                target,
-                loss_kwargs,
-                checkpoint_loss=self.checkpoint_losses[i],
-                offload_saved_tensors=self.offload_saved_tensors[i],
-            )
-            weighted_loss = self.loss_weights[i] * loss_value
-            loss = weighted_loss if loss is None else loss + weighted_loss
+            if loss is not None:
+                loss += self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
+            else:
+                loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
         return loss
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
