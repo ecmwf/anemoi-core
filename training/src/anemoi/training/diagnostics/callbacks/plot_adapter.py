@@ -47,15 +47,43 @@ LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
+class PlotSetup:
+    """Shared per-epoch setup data for plotting callbacks.
+
+    Produced once per epoch by ``BasePlotAdapter.prepare_setup`` and cached
+    so that all callbacks sharing the same adapter avoid redundant
+    post-processor deep-copy and latlon extraction.
+
+    This object does NOT hold gathered batch tensors or predictions, so it
+    is safe to keep alive for the full validation epoch without significant
+    memory overhead.
+
+    Attributes
+    ----------
+    post_processors : dict[str, Any]
+        Deep-copied, CPU-resident post-processors keyed by dataset name.
+    latlons : dict[str, np.ndarray]
+        Latitude/longitude arrays in degrees, keyed by dataset name.
+    feature_indices : dict[str, Any]
+        Per-dataset feature indices (from data_indices[ds].data.output.full).
+    """
+
+    post_processors: dict[str, Any]
+    latlons: dict[str, np.ndarray] = field(default_factory=dict)
+    feature_indices: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class PlotPayload:
     """Processed batch data ready for plotting callbacks.
 
     Produced once per batch by ``BasePlotAdapter.prepare_payload`` and shared
     across all callbacks that use that batch.
 
-    Denormalization is lazy: only computed on the first call to
-    ``get_denormalized(dataset_name)``.  Callbacks that never call it
-    (e.g. PlotLoss) pay no denormalization cost.
+    Holds the gathered batch and predictions for a single validation batch,
+    together with the shared per-epoch setup (post_processors, latlons,
+    feature_indices).  The large tensor fields (batch, predictions) should
+    be released as soon as all async plot tasks for the batch are complete.
 
     Attributes
     ----------
@@ -110,7 +138,7 @@ class BasePlotAdapter(ABC):
 
     def __init__(self, task: BaseTask) -> None:
         self._task = task
-        self._cached_payload: PlotPayload | None = None
+        self._cached_setup: PlotSetup | None = None
 
     @property
     def is_ensemble(self) -> bool:
@@ -131,13 +159,13 @@ class BasePlotAdapter(ABC):
         return batch
 
     def clear_cache(self) -> None:
-        """Release the cached payload to free memory.
+        """Release the cached setup to free memory.
 
         Called during callback teardown and at the end of each validation
-        epoch to ensure large tensors are not pinned between epochs or
-        across test runs.
+        epoch to ensure objects are not pinned between epochs or across
+        test runs.
         """
-        self._cached_payload = None
+        self._cached_setup = None
 
     def prepare_payload(
         self,
@@ -146,12 +174,13 @@ class BasePlotAdapter(ABC):
         output: TrainingStepOutput,
         batch_idx: int,
     ) -> PlotPayload:
-        """Gather, denormalize, and cache batch data for plotting.
+        """Gather batch data and build a PlotPayload for one validation batch.
 
-        This method performs the expensive shared pre-processing (distributed
-        gather, post-processor deep-copy, latlon extraction) exactly once per
-        batch.  Subsequent calls with the same ``batch_idx`` return the cached
-        payload.
+        The expensive per-epoch setup (post-processor deep-copy, latlon
+        extraction, feature-index lookup) is performed once and cached as
+        ``_cached_setup``.  The large per-batch tensors (gathered batch and
+        predictions) are gathered fresh each call so they are not held in
+        the adapter cache between batches.
 
         Parameters
         ----------
@@ -162,23 +191,50 @@ class BasePlotAdapter(ABC):
         output : TrainingStepOutput
             Model output.  Predictions must be a list of per-step dicts.
         batch_idx : int
-            Current validation batch index, used as cache key.
+            Current validation batch index.
 
         Returns
         -------
         PlotPayload
             Gathered, CPU-resident data ready for plotting.
         """
-        if self._cached_payload is not None and self._cached_payload.batch_idx == batch_idx:
-            return self._cached_payload
+        # Build per-epoch setup once (no large tensors — safe to cache).
+        if self._cached_setup is None:
+            post_processors = copy.deepcopy(pl_module.model.post_processors)
+            for dataset_name in post_processors:
+                for post_processor in post_processors[dataset_name].processors.values():
+                    if hasattr(post_processor, "nan_locations"):
+                        post_processor.nan_locations = pl_module.allgather_batch(
+                            post_processor.nan_locations,
+                            dataset_name,
+                        )
+                post_processors[dataset_name] = post_processors[dataset_name].cpu()
 
-        # 1. Gather batch shards across ranks
+            latlons: dict[str, np.ndarray] = {
+                dataset_name: np.rad2deg(
+                    pl_module.model.model._graph_data[dataset_name].x.detach().cpu().numpy(),
+                )
+                for dataset_name in batch
+            }
+            feature_indices: dict[str, Any] = {
+                dataset_name: pl_module.data_indices[dataset_name].data.output.full
+                for dataset_name in batch
+            }
+            self._cached_setup = PlotSetup(
+                post_processors=post_processors,
+                latlons=latlons,
+                feature_indices=feature_indices,
+            )
+
+        setup = self._cached_setup
+
+        # Gather batch shards — not cached so tensors are freed after use.
         gathered_batch = {
             dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
             for dataset_name, dataset_tensor in batch.items()
         }
 
-        # 2. Gather prediction shards
+        # Gather prediction shards.
         preds = output.predictions
         if not isinstance(preds, list):
             msg = f"predictions must be a list of per-step dicts, got {type(preds).__name__}"
@@ -191,36 +247,14 @@ class BasePlotAdapter(ABC):
             for pred in preds
         ]
 
-        # 3. Deep-copy post-processors, gather nan_locations, move to CPU
-        post_processors = copy.deepcopy(pl_module.model.post_processors)
-        for dataset_name in post_processors:
-            for post_processor in post_processors[dataset_name].processors.values():
-                if hasattr(post_processor, "nan_locations"):
-                    post_processor.nan_locations = pl_module.allgather_batch(
-                        post_processor.nan_locations,
-                        dataset_name,
-                    )
-            post_processors[dataset_name] = post_processors[dataset_name].cpu()
-
-        # 4. Extract latlons (radians -> degrees)
-        latlons: dict[str, np.ndarray] = {}
-        for dataset_name in gathered_batch:
-            latlons[dataset_name] = np.rad2deg(pl_module.model.model._graph_data[dataset_name].x.detach().cpu().numpy())
-
-        # 5. Store feature indices for lazy denormalization
-        feature_indices: dict[str, Any] = {}
-        for dataset_name in gathered_batch:
-            feature_indices[dataset_name] = pl_module.data_indices[dataset_name].data.output.full
-
-        self._cached_payload = PlotPayload(
+        return PlotPayload(
             batch_idx=batch_idx,
             batch=gathered_batch,
             predictions=gathered_predictions,
-            post_processors=post_processors,
-            latlons=latlons,
-            feature_indices=feature_indices,
+            post_processors=setup.post_processors,
+            latlons=setup.latlons,
+            feature_indices=setup.feature_indices,
         )
-        return self._cached_payload
 
     @abstractmethod
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
@@ -311,7 +345,7 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     def __init__(self, inner: BasePlotAdapter) -> None:
         self._inner = inner
         self._task = inner._task
-        self._cached_payload: PlotPayload | None = None
+        self._cached_setup: PlotSetup | None = None
 
     @property
     def is_ensemble(self) -> bool:

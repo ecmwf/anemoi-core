@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from typing import Union
 
+import psutil
 import pytest
 import torch
 from hydra import compose
@@ -40,8 +41,6 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
     """
     import tracemalloc
 
-    import psutil
-
     process = psutil.Process()
     tracemalloc.start()
     rss_before = process.memory_info().rss / 1024**3
@@ -50,10 +49,8 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
     yield
 
     gc.collect()
-    # Ask glibc to return free arenas to the OS so RSS reflects actual usage.
-    import ctypes
-    ctypes.CDLL("libc.so.6").malloc_trim(0)
     rss_after = process.memory_info().rss / 1024**3
+    snapshot = tracemalloc.take_snapshot()
     heap_current, heap_peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     LOGGER.info(
@@ -64,6 +61,8 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
         heap_current / 1024**3,
         heap_peak / 1024**3,
     )
+    for stat in snapshot.statistics("traceback")[:5]:
+        LOGGER.info("MEMORY top alloc: %.1f MB\n%s", stat.size / 1024**2, stat.traceback.format())
 
 
 @pytest.fixture(autouse=True)

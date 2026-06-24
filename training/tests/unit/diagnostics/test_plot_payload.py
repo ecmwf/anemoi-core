@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for PlotPayload caching in BasePlotAdapter."""
+"""Tests for PlotPayload and PlotSetup in BasePlotAdapter."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from anemoi.training.diagnostics.callbacks.plot_adapter import PlotPayload
+from anemoi.training.diagnostics.callbacks.plot_adapter import PlotSetup
 from anemoi.training.tasks import Forecaster
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
@@ -77,14 +78,13 @@ class TestPlotPayload:
             post_processors={"data": _identity_post_processor()},
             latlons={"data": np.zeros((50, 2))},
         )
-        # outputs is stored as (loss, preds) tuple internally
         assert payload.batch_idx == 0
         assert "data" in payload.batch
         assert "data" in payload.post_processors
         assert "data" in payload.latlons
 
     def test_payload_is_immutable_batch_idx(self) -> None:
-        """PlotPayload batch_idx is frozen (dataclass)."""
+        """PlotPayload batch_idx is set correctly."""
         payload = PlotPayload(
             batch_idx=5,
             batch={},
@@ -93,6 +93,21 @@ class TestPlotPayload:
             latlons={},
         )
         assert payload.batch_idx == 5
+
+
+class TestPlotSetup:
+    """Tests for the PlotSetup dataclass."""
+
+    def test_plot_setup_creation(self) -> None:
+        """PlotSetup can be created with expected fields."""
+        setup = PlotSetup(
+            post_processors={"data": _identity_post_processor()},
+            latlons={"data": np.zeros((50, 2))},
+            feature_indices={"data": slice(None)},
+        )
+        assert "data" in setup.post_processors
+        assert "data" in setup.latlons
+        assert "data" in setup.feature_indices
 
 
 class TestPreparePayload:
@@ -123,8 +138,14 @@ class TestPreparePayload:
         assert "data" in payload.batch
         assert "data" in payload.latlons
 
-    def test_prepare_payload_caches_by_batch_idx(self) -> None:
-        """Calling prepare_payload twice with same batch_idx returns cached result."""
+    def test_prepare_payload_caches_setup_not_payload(self) -> None:
+        """Calling prepare_payload twice caches only the setup, not the payload itself.
+
+        The PlotSetup (post_processors, latlons, feature_indices) is reused
+        across calls so that the expensive post-processor deep-copy runs only
+        once per epoch.  The large per-batch tensors (batch, predictions) are
+        gathered fresh each call so they are freed between batches.
+        """
         task = Forecaster(
             multistep_input=2,
             multistep_output=1,
@@ -142,9 +163,15 @@ class TestPreparePayload:
         )
 
         payload1 = adapter.prepare_payload(pl_module, batch, output, batch_idx=7)
+        setup_after_first = adapter._cached_setup
         payload2 = adapter.prepare_payload(pl_module, batch, output, batch_idx=7)
 
-        assert payload1 is payload2
+        # Setup is cached and reused
+        assert adapter._cached_setup is setup_after_first
+        assert payload1.post_processors is payload2.post_processors
+        assert payload1.latlons is payload2.latlons
+        # But payloads themselves are distinct objects
+        assert payload1 is not payload2
 
     def test_prepare_payload_invalidates_on_new_batch_idx(self) -> None:
         """Calling prepare_payload with a different batch_idx produces a new payload."""
@@ -242,6 +269,41 @@ class TestPreparePayload:
         # pi/2 radians = 90 degrees
         np.testing.assert_allclose(payload.latlons["data"], 90.0, atol=1e-5)
 
+    def test_post_processor_deepcopy_called_once_across_batches(self) -> None:
+        """post-processor deep-copy is done only once even across multiple batch calls."""
+        import copy
+
+        task = Forecaster(
+            multistep_input=2,
+            multistep_output=1,
+            timestep="6H",
+            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
+        )
+        adapter = task._plot_adapter
+
+        pl_module = _make_pl_module()
+        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
+        output = TrainingStepOutput(
+            loss=torch.tensor(0.0),
+            metrics={},
+            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
+        )
+
+        with MagicMock(wraps=copy.deepcopy) as mock_deepcopy:
+            import anemoi.training.diagnostics.callbacks.plot_adapter as _mod
+            original = _mod.copy.deepcopy
+            _mod.copy.deepcopy = mock_deepcopy
+            try:
+                adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
+                count_after_first = mock_deepcopy.call_count
+                adapter.prepare_payload(pl_module, batch, output, batch_idx=1)
+                count_after_second = mock_deepcopy.call_count
+            finally:
+                _mod.copy.deepcopy = original
+
+        # deepcopy called once (for setup), not again for subsequent batches
+        assert count_after_first == count_after_second
+
 
 class TestGetDenormalized:
     """Tests for PlotPayload.get_denormalized lazy denormalization."""
@@ -319,8 +381,8 @@ class TestGetDenormalized:
         assert denormed_output.shape[0] == n_steps
         assert denormed_output.shape[1] == batch_size
 
-    def test_caches_result(self) -> None:
-        """Calling get_denormalized twice returns the same cached tensors."""
+    def test_get_denormalized_not_cached(self) -> None:
+        """get_denormalized computes fresh each call (no caching) to avoid holding tensors."""
         task = Forecaster(
             multistep_input=2,
             multistep_output=1,
@@ -342,37 +404,9 @@ class TestGetDenormalized:
         result1 = payload.get_denormalized("data")
         result2 = payload.get_denormalized("data")
 
-        assert result1[0] is result2[0]
-        assert result1[1] is result2[1]
-
-    def test_not_computed_until_accessed(self) -> None:
-        """Denormalization is lazy: not computed until get_denormalized is called."""
-        task = Forecaster(
-            multistep_input=2,
-            multistep_output=1,
-            timestep="6H",
-            rollout={"start": 1, "epoch_increment": 1, "maximum": 1},
-        )
-        adapter = task._plot_adapter
-
-        pl_module = _make_pl_module()
-        batch = {"data": torch.randn(2, 4, 1, 50, 3)}
-        output = TrainingStepOutput(
-            loss=torch.tensor(0.0),
-            metrics={},
-            predictions=[{"data": torch.randn(2, 1, 1, 50, 3)}],
-        )
-
-        payload = adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
-
-        # Before get_denormalized, cache is empty
-        assert "data" not in payload._denormed_input
-        assert "data" not in payload._denormed_output
-
-        # After, it's populated
-        payload.get_denormalized("data")
-        assert "data" in payload._denormed_input
-        assert "data" in payload._denormed_output
+        # Each call returns new tensor objects (not cached)
+        assert result1[0] is not result2[0]
+        assert result1[1] is not result2[1]
 
     def test_multiple_datasets_independent(self) -> None:
         """Each dataset gets its own independent denormalized tensors."""
@@ -412,8 +446,8 @@ class TestGetDenormalized:
 class TestClearCache:
     """Tests for BasePlotAdapter.clear_cache."""
 
-    def test_clear_cache_releases_payload(self) -> None:
-        """clear_cache sets _cached_payload to None."""
+    def test_clear_cache_releases_setup(self) -> None:
+        """clear_cache sets _cached_setup to None."""
         task = Forecaster(
             multistep_input=2,
             multistep_output=1,
@@ -431,10 +465,10 @@ class TestClearCache:
         )
 
         adapter.prepare_payload(pl_module, batch, output, batch_idx=0)
-        assert adapter._cached_payload is not None
+        assert adapter._cached_setup is not None
 
         adapter.clear_cache()
-        assert adapter._cached_payload is None
+        assert adapter._cached_setup is None
 
     def test_prepare_payload_works_after_clear(self) -> None:
         """prepare_payload produces a fresh payload after clear_cache."""
