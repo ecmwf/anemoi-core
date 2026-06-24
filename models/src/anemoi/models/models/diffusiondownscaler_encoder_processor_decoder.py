@@ -53,6 +53,15 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         self._encoder_datasets = model_config["model"]["model"].get("encoder_datasets", None)
         self._decoder_datasets = model_config["model"]["model"].get("decoder_datasets", None)
 
+        # Processor highway / skip connection (x_latent_proc = x_latent_proc + x_latent).
+        # The ds AnemoiDownscalingModelEncProcDec always applied this residual; dropping it on the
+        # unified branch under-disperses (epic old-vs-new-ml-difference, ckpt 712fce). ON BY DEFAULT.
+        # Backward-compat knob ONLY: set `model.model.processor_highway: false` to reproduce the
+        # legacy no-highway behaviour (e.g. exact replay of a checkpoint trained without it).
+        # Never disabled by default.
+        self._processor_highway = bool(model_config["model"]["model"].get("processor_highway", True))
+        LOGGER.info("Processor highway (skip connection) enabled: %s", self._processor_highway)
+
         # Residual prediction: maps target_dataset -> source_dataset for residual computation.
         # Must be a dict {target: source} e.g. {"out_hres": "in_lres"}, or False/empty for none.
         raw = model_config["model"]["model"].get("residual_prediction", False)
@@ -587,6 +596,10 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             model_comm_group=model_comm_group,
             **processor_kwargs,
         )
+
+        # Processor highway (skip connection); see __init__. ON unless processor_highway=false.
+        if self._processor_highway:
+            x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
         decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
