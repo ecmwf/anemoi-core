@@ -105,7 +105,11 @@ class AnemoiTrainer(ABC):
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
-        self.load_weights_only = self.config.training.load_weights_only
+        # Read defensively: the schema supplies a False default, but the
+        # unvalidated config path (config_validation: false) types ``training``
+        # as ``Any`` and so does not fill it. ``select`` mirrors the falsy legacy
+        # default whether the key is present, absent, or omitted post-migration.
+        self.load_weights_only = OmegaConf.select(self.config, "training.load_weights_only", default=False)
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id

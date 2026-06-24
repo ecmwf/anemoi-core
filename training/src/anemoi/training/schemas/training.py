@@ -595,9 +595,9 @@ class BaseTrainingSchema(BaseModel):
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
     "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
-    load_weights_only: bool = Field(example=False)
+    load_weights_only: bool = Field(default=False, example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
-    transfer_learning: bool = Field(example=False)
+    transfer_learning: bool = Field(default=False, example=False)
     "Flag to activate transfer learning mode when loading a checkpoint."
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
@@ -605,7 +605,7 @@ class BaseTrainingSchema(BaseModel):
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
-    submodules_to_freeze: list[str] = Field(example=["processor"])
+    submodules_to_freeze: list[str] = Field(default_factory=list, example=["processor"])
     "List of submodules to freeze during transfer learning."
     checkpoint: dict | None = Field(default=None)
     "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"

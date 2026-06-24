@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
@@ -703,6 +704,72 @@ def test_legacy_checkpoint_config_none_when_no_legacy_key() -> None:
         config=OmegaConf.create({"training": {"transfer_learning": False}}),
     )
     assert AnemoiTrainer._legacy_checkpoint_config(trainer) is None
+
+
+# --- Keyless neutrality: the default-surface flip must not change keyless runs ---
+
+
+def test_checkpoint_pipeline_configured_false_when_keyless() -> None:
+    """No ``training.checkpoint`` key (or an explicit null) is not pipeline-configured."""
+    empty = SimpleNamespace(config=OmegaConf.create({"training": {}}))
+    assert AnemoiTrainer._checkpoint_pipeline_configured(empty) is False
+
+    explicit_none = SimpleNamespace(config=OmegaConf.create({"training": {"checkpoint": None}}))
+    assert AnemoiTrainer._checkpoint_pipeline_configured(explicit_none) is False
+
+
+def test_legacy_checkpoint_config_none_and_silent_when_keyless() -> None:
+    """A fully keyless config yields no delegation block and emits no warning.
+
+    Mirrors the migrated shipped presets (no ``training.checkpoint`` block; legacy
+    keys absent or at their falsy defaults). ``simplefilter("error")`` turns any
+    stray ``FutureWarning`` into a failure, which the global pytest config does not.
+    """
+    trainer = SimpleNamespace(
+        load_weights_only=False,
+        config=OmegaConf.create({"training": {"transfer_learning": False, "submodules_to_freeze": []}}),
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert AnemoiTrainer._legacy_checkpoint_config(trainer) is None
+
+
+def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``.model`` property returns the freshly instantiated module unchanged when keyless.
+
+    With no ``training.checkpoint`` block and no truthy legacy key, neither the
+    declarative pipeline nor the legacy delegation may run, and no deprecation
+    warning may fire — the default-surface flip leaves keyless runs byte-identical.
+    """
+    import anemoi.training.train.train as train_module
+
+    sentinel = torch.nn.Linear(2, 2)
+    monkeypatch.setattr(train_module, "instantiate_with_runtime_kwargs", lambda *_args, **_kwargs: sentinel)
+
+    cfg = OmegaConf.create(
+        {"training": {"method": {"_target_": "unused"}, "transfer_learning": False, "submodules_to_freeze": []}},
+    )
+    trainer = SimpleNamespace(
+        config=cfg,
+        load_weights_only=False,
+        task=object(),
+        data_indices={"data": DummyIndex()},
+        graph_data=object(),
+        metadata={},
+        datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
+        supporting_arrays=object(),
+    )
+    trainer._checkpoint_pipeline_configured = AnemoiTrainer._checkpoint_pipeline_configured.__get__(trainer)
+    trainer._legacy_checkpoint_config = AnemoiTrainer._legacy_checkpoint_config.__get__(trainer)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = AnemoiTrainer.model.func(trainer)
+
+    # Same object the instantiation returned: neither pipeline branch ran (a
+    # SimpleNamespace has no real ``_load_via_checkpoint_pipeline``, so taking
+    # either branch would raise), and ``simplefilter("error")`` proves silence.
+    assert result is sentinel
 
 
 def test_legacy_weights_only_delegation_loads_via_pipeline(tmp_path: Path) -> None:
