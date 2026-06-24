@@ -200,6 +200,10 @@ class AnemoiProfiler(AnemoiTrainer):
     def to_mlflow(self) -> None:
         """Log report into MLFlow."""
         LOGGER.info("logging to MLFlow Profiler report")
+        # Ensure the (offline) MLflow store exists and the run is materialised before logging
+        if self.mlflow_logger.save_dir is not None:
+            Path(self.mlflow_logger.save_dir).mkdir(parents=True, exist_ok=True)
+        _ = self.mlflow_logger.experiment  # force-create the run in the tracking store
         self.write_benchmark_profiler_report()
         # check this https://stackoverflow.com/questions/71151054/how-to-log- d da-table-of-metrics-into-mlflow
 
