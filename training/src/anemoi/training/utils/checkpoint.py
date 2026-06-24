@@ -53,12 +53,12 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     Parameters
     ----------
     lightning_checkpoint_path : str
-        path to lightning checkpoint
+        path to lightning checkpoint.
 
     Returns
     -------
     tuple[torch.nn.Module, dict]
-        pytorch model, metadata
+        pytorch model, metadata.
 
     """
     module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
@@ -77,16 +77,16 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     Parameters
     ----------
     model : torch.nn.Module
-        Pytorch model
+        Pytorch model.
     metadata : dict
-        Anemoi Metadata to inject into checkpoint
+        Anemoi Metadata to inject into checkpoint.
     save_path : Path | str
-        Directory to save anemoi checkpoint
+        Directory to save anemoi checkpoint.
 
     Returns
     -------
     Path
-        Path to saved checkpoint
+        Path to saved checkpoint.
     """
     save_path = Path(save_path)
     inference_filepath = save_path.parent / f"inference-{save_path.name}"
@@ -147,40 +147,6 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
     )
 
     return model
-
-
-def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: str = "") -> bool:
-    """Recursively freezes the parameters of a submodule with the specified name.
-
-    Parameters
-    ----------
-    module : torch.nn.Module
-        Pytorch model
-    target_name : str
-        The name of the submodule to freeze. Examples: "encoder", "encoder.lam".
-    base_target : str
-        Used for logging to show the full path of the current module being checked. Should not be set by the user.
-
-    Returns
-    -------
-    bool
-        True if the target submodule was found and frozen, False otherwise.
-    """
-    are_submodules_found = False
-    for name, child in module.named_children():
-        # If this is the target submodule, freeze its parameters
-        if name == target_name:
-            for param in child.parameters():
-                LOGGER.info("Freezing parameter %s: %s", base_target + name, param.shape)
-                param.requires_grad = False
-            are_submodules_found = True
-        elif target_name.startswith(name + "."):
-            new_target = target_name.replace(name + ".", "", 1)
-            is_found = freeze_submodule_by_name(child, new_target, base_target=base_target + name + ".")
-            are_submodules_found = are_submodules_found or is_found
-        else:
-            LOGGER.debug("Skipping submodule (looking for %s): %s", base_target + target_name, name)
-    return are_submodules_found
 
 
 class LoggingUnpickler(pickle.Unpickler):

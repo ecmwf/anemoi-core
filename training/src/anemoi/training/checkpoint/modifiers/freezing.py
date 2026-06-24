@@ -21,8 +21,7 @@ class FreezingModifierStage(ModelModifier):
     Submodules are addressed by their full path within the model: an exact
     child name or a dot-separated path (e.g., "processor.0",
     "encoder.layers.2"). A bare name does not match nested submodules —
-    the same path semantics as the legacy
-    ``anemoi.training.utils.checkpoint.freeze_submodule_by_name`` (#1159).
+    the full dot-path resolution introduced in #1159.
 
     Parameters
     ----------
@@ -110,7 +109,7 @@ class FreezingModifierStage(ModelModifier):
         ``target_name`` is resolved with :meth:`torch.nn.Module.get_submodule`,
         i.e. as a full path relative to ``module``. There is no name-match
         search at arbitrary depth — a bare name only resolves a direct child,
-        matching the legacy ``freeze_submodule_by_name`` semantics (#1159).
+        the dot-path semantics introduced in #1159.
 
         Parameters
         ----------

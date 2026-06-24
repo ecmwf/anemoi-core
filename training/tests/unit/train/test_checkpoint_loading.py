@@ -863,21 +863,14 @@ class _FreezeTask(torch.nn.Module):
         self.model = _FreezeInterface()
 
 
-def test_legacy_freeze_delegation_matches_legacy_on_nested_model() -> None:
-    """End-to-end freeze-rooting parity on a real ``Task.model.model`` nesting.
+def test_legacy_freeze_delegation_freezes_nested_submodules() -> None:
+    """End-to-end freeze-rooting on a real ``Task.model.model`` nesting.
 
-    The delegated ``FreezingModifierStage`` (names prefixed ``model.model.``) must
-    freeze the exact same parameters as the legacy ``freeze_submodule_by_name``
-    rooted at ``model.model.model``.
+    The delegated ``FreezingModifierStage`` resolves names from the Task root via
+    ``get_submodule``, so the ``model.model.`` prefix added by the delegation must
+    target the submodules of the inner ``model.model`` module.
     """
-    from anemoi.training.utils.checkpoint import freeze_submodule_by_name
-
     submodules = ["encoder", "processor.0"]
-
-    # Legacy path: freeze rooted at model.model.model.
-    legacy_model = _FreezeTask()
-    for name in submodules:
-        assert freeze_submodule_by_name(legacy_model.model.model, name)
 
     # Delegated path: legacy keys translated to a FreezingModifierStage and run
     # through the pipeline (freeze-only: no source, no loading stage).
@@ -890,12 +883,9 @@ def test_legacy_freeze_delegation_matches_legacy_on_nested_model() -> None:
         block = AnemoiTrainer._legacy_checkpoint_config(trainer)
     AnemoiTrainer._load_via_checkpoint_pipeline(trainer, delegated_model, checkpoint_config=block)
 
-    legacy_grads = {name: param.requires_grad for name, param in legacy_model.named_parameters()}
-    delegated_grads = {name: param.requires_grad for name, param in delegated_model.named_parameters()}
+    grads = {name: param.requires_grad for name, param in delegated_model.named_parameters()}
 
-    # Identical requires_grad map: the delegation froze exactly what legacy froze.
-    assert delegated_grads == legacy_grads
-    # Sanity: the targeted submodules are frozen, the others remain trainable.
-    assert not delegated_grads["model.model.encoder.weight"]
-    assert not delegated_grads["model.model.processor.0.weight"]
-    assert delegated_grads["model.model.decoder.weight"]
+    # The targeted submodules are frozen; the others remain trainable.
+    assert not grads["model.model.encoder.weight"]
+    assert not grads["model.model.processor.0.weight"]
+    assert grads["model.model.decoder.weight"]

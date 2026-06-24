@@ -4,7 +4,6 @@ import torch.nn as nn
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.base import PipelineStage
 from anemoi.training.checkpoint.modifiers.freezing import FreezingModifierStage
-from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 
 
 class SimpleModel(nn.Module):
@@ -33,9 +32,9 @@ class TwoBranchModel(nn.Module):
 class BranchModel(nn.Module):
     """A sub-model with a direct child and a nested ``Sequential``.
 
-    Used under a two-entry ``ModuleDict`` to mirror the legacy
-    ``freeze_submodule_by_name`` fixture from #1159, so the stage is exercised
-    on a deep dot-path (``a.sequential.0``) and a bare branch name (``a``).
+    Used under a two-entry ``ModuleDict`` to mirror the #1159 dot-path fixture,
+    so the stage is exercised on a deep dot-path (``a.sequential.0``) and a bare
+    branch name (``a``).
     """
 
     def __init__(self):
@@ -111,7 +110,7 @@ async def test_freezing_dot_notation_submodule() -> None:
 async def test_freezing_bare_name_does_not_match_nested() -> None:
     """A bare name resolves only a direct child, never nested submodules.
 
-    Same path semantics as ``freeze_submodule_by_name`` after #1159.
+    Same dot-path semantics introduced in #1159.
     """
     model = TwoBranchModel()
     adapter = FreezingModifierStage(submodules_to_freeze=["data"], strict=False)
@@ -145,28 +144,21 @@ async def test_freezing_already_frozen_module_is_not_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_freezing_stage_matches_legacy_helper() -> None:
-    """Stage and legacy helper produce identical requires_grad maps (#1159)."""
-    targets = ["encoder.data", "missing.path"]
+async def test_freezing_dot_path_into_branch_skips_missing() -> None:
+    """A dot-path into a ModuleDict branch freezes only that entry; a missing path is skipped (#1159)."""
+    model = TwoBranchModel()
+    adapter = FreezingModifierStage(submodules_to_freeze=["encoder.data", "missing.path"], strict=False)
+    await adapter.process(CheckpointContext(model=model))
 
-    legacy_model = TwoBranchModel()
-    for name in targets:
-        freeze_submodule_by_name(legacy_model, name)
-
-    stage_model = TwoBranchModel()
-    adapter = FreezingModifierStage(submodules_to_freeze=targets, strict=False)
-    await adapter.process(CheckpointContext(model=stage_model))
-
-    legacy_map = {name: param.requires_grad for name, param in legacy_model.named_parameters()}
-    stage_map = {name: param.requires_grad for name, param in stage_model.named_parameters()}
-    assert stage_map == legacy_map
+    assert model.encoder["data"].weight.requires_grad is False  # frozen via dot-path
+    assert model.decoder["data"].weight.requires_grad is True  # untouched sibling branch
 
 
 @pytest.mark.asyncio
 async def test_freezing_deep_dot_path_targets_single_branch() -> None:
     """A deep dot-path freezes only that submodule; siblings and the other branch stay trainable.
 
-    Ports the legacy ``freeze_submodule_by_name`` test for ``a.sequential.0`` (#1159).
+    Ports the #1159 dot-path test for ``a.sequential.0``.
     """
     model = nn.ModuleDict({"a": BranchModel(), "b": BranchModel()})
     adapter = FreezingModifierStage(submodules_to_freeze=["a.sequential.0"])
@@ -184,7 +176,7 @@ async def test_freezing_deep_dot_path_targets_single_branch() -> None:
 async def test_freezing_branch_name_freezes_whole_subtree() -> None:
     """A bare branch name freezes the entire branch, leaving the sibling branch trainable.
 
-    Ports the legacy ``freeze_submodule_by_name`` test for ``a`` (#1159).
+    Ports the #1159 dot-path test for ``a``.
     """
     model = nn.ModuleDict({"a": BranchModel(), "b": BranchModel()})
     adapter = FreezingModifierStage(submodules_to_freeze=["a"])
