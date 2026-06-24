@@ -73,9 +73,17 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Return tendency statistics from all training datasets."""
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
+        # If the task defines a fixed tendency_delta (e.g. TemporalDownscaler uses 1h
+        # per-step differences rather than cumulative offsets from t=0), use that
+        # delta for every lead time so all steps share the same tendency statistics.
+        tendency_delta = getattr(self.task, "tendency_delta", None)
+        tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
+
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
+            stats_by_lead = {
+                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
+            }
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
