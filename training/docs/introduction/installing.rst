@@ -45,6 +45,26 @@ functionality:
    python -m pip install "anemoi-training[profile]" # Install optional dependencies for profiling gpu usage
    python -m pip install "anemoi-training[docs]" # Install optional dependencies for generating docs
 
+.. warning::
+
+   After installation, verify that your PyTorch build has CUDA (or ROCm) support:
+
+   .. code:: bash
+      # Run on a GPU node
+      python -c 'import torch; print(torch.cuda.is_available())'
+
+   If this returns ``False``, GPU training will not work. A common cause is
+   installing the default ``torch`` wheel, which **on aarch64 systems does not
+   include CUDA support**. In that case, reinstall PyTorch with the
+   appropriate index URL, for example:
+
+   .. code:: bash
+
+      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+   
+   For full instructions on installing PyTorch with CUDA support, see the
+   `PyTorch installation guide <https://pytorch.org/get-started/locally/>`__.
+
 .. literalinclude:: ../../pyproject.toml
    :language: toml
    :start-at: [project.optional-dependencies.all]

@@ -560,7 +560,7 @@ class AnemoiTrainer(ABC):
             msg = (
                 "GPU accelerator requested but running on GPUs is not possible. "
                 "Possible reasons include no GPUs being available on the node,"
-                " or PyTorch not being installed with CUDA/ROCm support. "
+                "or PyTorch not being installed with CUDA/ROCm support. "
                 "*Note* on aarch64 systems, the default torch wheel does not have CUDA/ROCm support."
                 "To install PyTorch with CUDA support on aarch64, you should pass the index-url argument to pip install"
                 "e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`"
