@@ -785,8 +785,8 @@ def test_spectral_crps_projection_from_graph_config() -> None:
                         "latitudes": [0.0, 0.0, 1.0, 1.0],
                         "longitudes": [0.0, 1.0, 0.0, 1.0],
                     },
-                    "num_nearest_neighbours": 1,
-                    "sigma": 1.0,
+                    "num_nearest_neighbours": 3,
+                    "sigma": 0.01,
                     "row_normalize": False,
                 },
                 "scalers": [],
@@ -798,6 +798,11 @@ def test_spectral_crps_projection_from_graph_config() -> None:
 
     out = loss(pred, target, squash=False)
     assert out.shape == (nvars,)
+
+    # Target-grid mode applies the Gaussian (sigma-weighted) KNN weights by default; a
+    # uniform fallback (the regression) would make every non-zero edge weight identical.
+    weights = loss.projection_provider.get_edges().to_dense()
+    assert weights[weights != 0].std() > 1e-6
 
 
 def test_spectral_crps_projection_from_existing_edges() -> None:
