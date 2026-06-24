@@ -47,7 +47,7 @@ functionality:
 
 .. warning::
 
-   After installation, verify that your PyTorch build has CUDA (or ROCm) support:
+   After installation, verify that your PyTorch build has CUDA or ROCm support:
 
    .. code:: bash
       # Run on a GPU node
