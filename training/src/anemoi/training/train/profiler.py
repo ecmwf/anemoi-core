@@ -167,7 +167,13 @@ class AnemoiProfiler(AnemoiTrainer):
             self.to_wandb()
 
         elif self.logger and self.logger.logger_name == "mlflow":
-            self.to_mlflow()
+            if self.config.diagnostics.log.mlflow.offline:
+                # Offline mlflow writes to a throwaway local file store with no server backing it;
+                # logging the profiler reports there has no value and the offline FileStore is only
+                # partially initialised (e.g. missing the .trash folder that log_table scans).
+                LOGGER.info("MLflow is offline; skipping profiler report logging to the local store.")
+            else:
+                self.to_mlflow()
 
     def report(self) -> str:
         """Print report to console."""
@@ -200,10 +206,6 @@ class AnemoiProfiler(AnemoiTrainer):
     def to_mlflow(self) -> None:
         """Log report into MLFlow."""
         LOGGER.info("logging to MLFlow Profiler report")
-        # Ensure the (offline) MLflow store exists and the run is materialised before logging
-        if self.mlflow_logger.save_dir is not None:
-            Path(self.mlflow_logger.save_dir).mkdir(parents=True, exist_ok=True)
-        _ = self.mlflow_logger.experiment  # force-create the run in the tracking store
         self.write_benchmark_profiler_report()
         # check this https://stackoverflow.com/questions/71151054/how-to-log- d da-table-of-metrics-into-mlflow
 
