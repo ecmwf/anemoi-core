@@ -291,6 +291,7 @@ class TestPreparePayload:
 
         with MagicMock(wraps=copy.deepcopy) as mock_deepcopy:
             import anemoi.training.diagnostics.callbacks.plot_adapter as _mod
+
             original = _mod.copy.deepcopy
             _mod.copy.deepcopy = mock_deepcopy
             try:

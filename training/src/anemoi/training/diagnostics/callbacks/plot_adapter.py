@@ -217,8 +217,7 @@ class BasePlotAdapter(ABC):
                 for dataset_name in batch
             }
             feature_indices: dict[str, Any] = {
-                dataset_name: pl_module.data_indices[dataset_name].data.output.full
-                for dataset_name in batch
+                dataset_name: pl_module.data_indices[dataset_name].data.output.full for dataset_name in batch
             }
             self._cached_setup = PlotSetup(
                 post_processors=post_processors,
