@@ -61,7 +61,7 @@ functionality:
    .. code:: bash
 
       pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-   
+
    For full instructions on installing PyTorch with CUDA support, see the
    `PyTorch installation guide <https://pytorch.org/get-started/locally/>`__.
 
