@@ -10,8 +10,10 @@ loading workflows.
 
 .. note::
 
-   This documents Phase 1 (Pipeline Infrastructure). Sources, loaders,
-   and modifiers are implemented in subsequent phases.
+   The trainer builds and runs this pipeline via the opt-in
+   ``training.checkpoint`` configuration surface (sources, loaders, and
+   modifiers). See :ref:`checkpoint_pipeline_configuration` for the
+   configuration details.
 
 **************
  Core Classes
@@ -87,20 +89,13 @@ Orchestrates execution of multiple stages:
    context = CheckpointContext(model=my_model)
    result = await pipeline.execute(context)
 
-**From Hydra configuration:**
+**From configuration:**
 
-.. code:: python
-
-   from omegaconf import OmegaConf
-
-   config = OmegaConf.create({
-       "stages": [
-           {"_target_": "my_module.MyStage", "param": "value"},
-       ],
-       "async_execution": True,
-   })
-
-   pipeline = CheckpointPipeline.from_config(config)
+The trainer builds the pipeline from the ``training.checkpoint`` surface
+via :func:`anemoi.training.checkpoint.builder.build_checkpoint_pipeline`,
+which assembles stages in a fixed order (source, then loading, then
+modifiers). See :ref:`checkpoint_pipeline_configuration` for the
+configuration namespace.
 
 ****************
  Error Handling
@@ -208,49 +203,55 @@ components:
  Configuration YAML
 ********************
 
-Example pipeline configuration:
+The pipeline is configured under the ``training.checkpoint`` namespace
+with three optional blocks read by
+:func:`anemoi.training.checkpoint.builder.build_checkpoint_pipeline`.
+The builder assembles stages in a fixed order: source, then loading,
+then modifiers (list order). Any block may be absent; an absent block
+means no stage of that kind.
 
 .. code:: yaml
 
-   # config/training/checkpoint_pipeline.yaml
    training:
-     checkpoint_pipeline:
-       stages:
-         # Each stage uses Hydra _target_ pattern
-         - _target_: my_module.sources.LocalSource
-           path: /path/to/checkpoint.ckpt
+     checkpoint:
+       source: # OPTIONAL — a single Hydra _target_ (acquisition stage)
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
-         - _target_: my_module.loaders.WeightsOnlyLoader
+       loading: # OPTIONAL — a single Hydra _target_ (loading strategy)
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
+
+       modifiers: # OPTIONAL — a LIST of stages, applied in order after loading
+         - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+           submodules_to_freeze: [encoder, "processor.0"]
            strict: false
+           validate_gradients: true
 
-       async_execution: true
-       continue_on_error: false
+**Hydra group selection:**
 
-**Execution Patterns:**
+The source, loading, and modifier blocks are wired as opt-in default
+groups. The default is null (no pipeline). Select a group to opt in:
 
-The pipeline supports two execution approaches:
+.. code:: bash
 
-#. **Standalone (recommended)**: Execute during model initialization
+   anemoi-training train training/checkpoint/loading=weights_only
 
-   .. code:: python
+   anemoi-training train training/checkpoint/source=local \
+       training/checkpoint/loading=transfer_learning
 
-      pipeline = CheckpointPipeline.from_config(config)
-      context = CheckpointContext(model=model)
-      result = await pipeline.execute(context)
-      model = result.model
-
-#. **Lightning callback**: Integrate with PyTorch Lightning lifecycle
-   for coordinated checkpoint operations.
+See :ref:`checkpoint_pipeline_configuration` for the full list of group
+options and per-stage parameters.
 
 ************
  Next Steps
 ************
 
-This infrastructure enables subsequent phases:
+This infrastructure underpins the full checkpoint pipeline:
 
--  **Phase 2**: Loading strategies (weights-only, transfer learning,
-   warm/cold start)
--  **Phase 3**: Integration with model modifiers and legacy migration
+-  **Loading strategies**: weights-only, transfer learning, warm start,
+   cold start (under ``training.checkpoint.loading``)
+-  **Model modifiers**: post-loading transformations such as freezing
+   (under ``training.checkpoint.modifiers``)
 
 See :ref:`checkpoint_pipeline_configuration` for configuration details
 and :ref:`checkpoint_troubleshooting` for common issues.

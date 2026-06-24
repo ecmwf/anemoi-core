@@ -70,6 +70,18 @@ Once a checkpoint path is resolved, two loading modes are available:
 - **``load_weights_only: False``** — PyTorch Lightning restores the full
   training state (weights, optimizer, epoch counter) before validation.
 
+.. note::
+
+   ``training.load_weights_only`` is deprecated as a general checkpoint-loading
+   switch. For training runs, prefer the ``training.checkpoint`` surface
+   (see :ref:`checkpoint_pipeline_configuration`), e.g.
+   ``training/checkpoint/loading=weights_only``. The flag still works and now
+   emits a ``FutureWarning``; it remains the switch that requests the
+   evaluation behaviour above, where it also passes ``ckpt_path=None`` to
+   ``trainer.validate()``. The ``training.checkpoint`` surface configures weight
+   loading only and does not alter ``ckpt_path``, so evaluation continues to use
+   this flag.
+
 **************************
  Checkpointing and weight averaging
 **************************

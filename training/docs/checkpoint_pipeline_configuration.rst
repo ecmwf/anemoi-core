@@ -12,36 +12,72 @@ This guide covers configuration of the checkpoint pipeline system.
 
 The checkpoint pipeline provides a composable system for:
 
+-  **Loading checkpoints** from various sources (local, HTTP, S3)
 -  **Applying loading strategies** (weights-only, transfer learning,
    warm/cold start)
--  **Loading checkpoints** from various sources (local, HTTP, S3)
--  **Modifying models** after loading (freezing, adapters) — planned
+-  **Modifying models** after loading (freezing, adapters)
+
+The trainer builds and runs this pipeline from the ``training.checkpoint``
+configuration via
+``anemoi.training.checkpoint.builder.build_checkpoint_pipeline``. Stage order
+is fixed by the builder: source, then loading, then modifiers (in list
+order). Every block is optional; an absent block contributes no stage.
 
 *****************
  Basic Structure
 *****************
 
+The blessed namespace is ``training.checkpoint``, with three optional
+blocks: ``source`` (a single Hydra ``_target_``), ``loading`` (a single
+Hydra ``_target_``), and ``modifiers`` (a *list* of Hydra ``_target_``
+stages applied in order after loading):
+
 .. code:: yaml
 
    training:
-     checkpoint_pipeline:
-       stages:
-         # Pipeline stages using Hydra _target_ pattern
-         - _target_: path.to.SourceStage
-           param: value
+     checkpoint:
+       source: # OPTIONAL — single _target_ (acquisition stage)
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
-         - _target_: path.to.LoaderStage
+       loading: # OPTIONAL — single _target_ (loading strategy)
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
+
+       modifiers: # OPTIONAL — list of _target_ stages, applied in order
+         - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+           submodules_to_freeze: [encoder, "processor.0"]
            strict: false
+           validate_gradients: true
 
-       # Pipeline settings
-       async_execution: true
-       continue_on_error: false
+**Key points:**
 
-**Key settings:**
+-  ``source``, ``loading`` and ``modifiers`` are each optional; an absent
+   block contributes no stage.
+-  Stage order is fixed by the builder: source, then loading, then
+   modifiers (in list order).
 
--  ``stages``: List of pipeline stages with Hydra ``_target_`` pattern
--  ``async_execution``: Use async I/O (default: true)
--  ``continue_on_error``: Continue on stage failures (default: false)
+Easy path — Hydra group selection
+==================================
+
+The ``source``, ``loading`` and ``modifiers`` blocks are wired as opt-in
+default groups in every shipped training preset. The default is ``null``
+(no pipeline — weight loading is governed by ``run_id`` / ``fork_run_id``
+/ ``system.input.warm_start``). Select a group to opt in:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/loading=weights_only
+
+   anemoi-training train \
+     training/checkpoint/source=local \
+     training/checkpoint/loading=transfer_learning
+
+Available group options:
+
+-  ``training/checkpoint/source`` = ``local`` | ``http`` | ``s3``
+-  ``training/checkpoint/loading`` = ``weights_only`` |
+   ``transfer_learning`` | ``warm_start`` | ``cold_start``
+-  ``training/checkpoint/modifiers`` = ``freezing``
 
 ************************
  Configuration Sections
@@ -50,43 +86,43 @@ The checkpoint pipeline provides a composable system for:
 Checkpoint Sources
 ==================
 
-Sources define where to fetch checkpoints.
-
-.. note::
-
-   Source implementations (LocalSource, S3Source, HTTPSource) are part
-   of this package (checkpoint acquisition layer, PR #464 / issue #458).
-   Wiring the pipeline into the trainer is the Phase 3 integration work
-   (issue #495).
+Sources define where to fetch checkpoints. Configure a single source as
+the ``training.checkpoint.source`` block.
 
 Local Files
 -----------
 
-``LocalSource`` reads its path from ``checkpoint_path`` on the pipeline
-context rather than from a stage argument:
+``LocalSource`` resolves its path from the run lineage / pipeline context
+rather than from a stage argument:
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.sources.LocalSource
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
 Amazon S3
 ---------
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.sources.S3Source
-       url: s3://my-models/checkpoints/model-v1.ckpt
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.s3.S3Source
+         url: s3://my-models/checkpoints/model-v1.ckpt
 
 HTTP/HTTPS
 ----------
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.sources.HTTPSource
-       url: https://models.example.com/checkpoint.ckpt
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.http.HTTPSource
+         url: https://models.example.com/checkpoint.ckpt
 
 Loading Strategies
 ==================
@@ -102,9 +138,11 @@ Load model weights, discard optimizer/scheduler state:
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
-       strict: false
+   training:
+     checkpoint:
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
 
 **Use cases:** Fine-tuning pretrained models, composing inside a larger
 pipeline where another stage owns training-progress state
@@ -117,9 +155,11 @@ with mismatched shapes are filtered out rather than raising:
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
-       skip_mismatched: true
+   training:
+     checkpoint:
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
+         skip_mismatched: true
 
 Set ``skip_mismatched: false`` to raise ``CheckpointIncompatibleError``
 on a shape mismatch instead of skipping it.
@@ -136,8 +176,10 @@ architecture match is expected:
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.loading.strategies.WarmStartLoader
+   training:
+     checkpoint:
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.WarmStartLoader
 
 **Use cases:** Resume interrupted training, continue from checkpoint
 
@@ -150,33 +192,41 @@ and records ``pretrained_from`` provenance in the context metadata:
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.loading.strategies.ColdStartLoader
-       strict: false
+   training:
+     checkpoint:
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.ColdStartLoader
+         strict: false
 
 **Use cases:** New task with pretrained backbone
 
 Model Modifiers
 ===============
 
-Modifiers transform the model after checkpoint loading.
+Modifiers transform the model after checkpoint loading. The
+``training.checkpoint.modifiers`` block is a *list* of stages, applied in
+order after the loading strategy.
 
-.. note::
+Parameter Freezing
+------------------
 
-   Modifiers are not yet wired into the checkpoint pipeline. The model
-   modifier system itself lives in ``anemoi.training.train.modify``
-   (e.g. ``FreezingModelModifier``, PR #410 / #442); integrating it as
-   pipeline stages is Phase 3 (issue #495). The ``_target_`` below is
-   illustrative.
-
-Parameter Freezing (Planned)
-----------------------------
+``FreezingModifierStage`` freezes the named submodules (dot-paths) by
+setting ``requires_grad=False``:
 
 .. code:: yaml
 
-   stages:
-     - _target_: anemoi.training.checkpoint.modifiers.FreezingModifier
-       layers: [encoder, processor.0]
+   training:
+     checkpoint:
+       modifiers:
+         - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+           submodules_to_freeze: [encoder, "processor.0"]
+           strict: false
+           validate_gradients: true
+
+-  ``submodules_to_freeze``: list of dot-paths to freeze.
+-  ``strict``: raise if a named submodule is not found (default: false).
+-  ``validate_gradients``: assert frozen parameters accumulate no
+   gradient.
 
 *******************
  Complete Examples
@@ -188,15 +238,13 @@ Simple Pipeline
 .. code:: yaml
 
    training:
-     checkpoint_pipeline:
-       stages:
-         - _target_: my_module.MySource
-           path: /pretrained/model.ckpt
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
-         - _target_: my_module.MyLoader
-           strict: false
-
-       async_execution: true
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
 
 Custom Stage Implementation
 ===========================
@@ -227,19 +275,25 @@ Custom Stage Implementation
    ``anemoi.training.checkpoint.formats`` to handle the various
    Lightning / PyTorch / raw ``state_dict`` shapes robustly.
 
-Then use in configuration:
+Then use it as the loading strategy in configuration:
 
 .. code:: yaml
 
-   stages:
-     - _target_: my_module.MyLoader
-       strict: false
+   training:
+     checkpoint:
+       loading:
+         _target_: my_module.MyLoader
+         strict: false
 
 *************************************
  Migration from Legacy Configuration
 *************************************
 
-The checkpoint pipeline replaces several legacy configuration options:
+The ``training.checkpoint`` surface supersedes several legacy
+configuration options. The legacy keys still work — they now default to
+off and have been removed from the shipped training presets, but they
+remain accepted for backward compatibility and emit a ``FutureWarning``
+when used. Prefer the ``training.checkpoint`` surface for new configs.
 
 .. list-table:: Legacy to Modern Migration
    :header-rows: 1
@@ -248,21 +302,27 @@ The checkpoint pipeline replaces several legacy configuration options:
       -  Modern Equivalent
       -  Notes
 
-   -  -  ``load_weights_only: true``
-      -  ``WeightsOnlyLoader`` stage
-      -  More flexible with strict parameter
+   -  -  ``training.load_weights_only: true``
+      -  ``training.checkpoint.loading`` with ``WeightsOnlyLoader``
+      -  Delegates to a ``WeightsOnlyLoader`` pipeline + ``FutureWarning``
 
-   -  -  ``transfer_learning: true``
-      -  ``TransferLearningLoader`` stage
-      -  Better mismatch handling
+   -  -  ``training.transfer_learning: true``
+      -  ``training.checkpoint.loading`` with ``TransferLearningLoader``
+      -  Delegates to a ``TransferLearningLoader`` pipeline +
+         ``FutureWarning``
 
-   -  -  ``resume_from_checkpoint: path``
-      -  Source + ``WarmStartLoader`` stages
-      -  Supports multiple sources
+   -  -  ``training.submodules_to_freeze: [...]``
+      -  ``training.checkpoint.modifiers`` with ``FreezingModifierStage``
+      -  Delegates to a ``FreezingModifierStage`` pipeline +
+         ``FutureWarning``
 
-   -  -  ``submodules_to_freeze: [...]``
-      -  ``FreezingModifier`` stage
-      -  More modifier types available
+.. note::
+
+   Resume / fork / warm-start is **unchanged and separate** from the
+   checkpoint pipeline. ``training.run_id``, ``training.fork_run_id`` and
+   ``system.input.warm_start`` drive run-lineage checkpoint resolution and
+   Lightning ``ckpt_path`` resume; do not fold these into
+   ``training.checkpoint`` examples.
 
 ****************
  Best Practices
@@ -270,7 +330,6 @@ The checkpoint pipeline replaces several legacy configuration options:
 
 **Performance:**
 
--  Use ``async_execution: true`` for better I/O performance
 -  Cache remote checkpoints locally when possible
 
 **Reliability:**
@@ -293,26 +352,31 @@ The checkpoint pipeline replaces several legacy configuration options:
  Pipeline Composition
 **********************
 
-**Recommended ordering** (a convention, not enforced by the pipeline):
-source stages first, then a loader stage, then any modifier stages.
+**Stage order** is fixed by the builder: the source runs first, then the
+loading strategy, then any modifiers (in list order). You only declare the
+blocks; the builder assembles the pipeline in this order.
 
 .. code:: yaml
 
-   stages:
-     # 1. Source - fetch checkpoint
-     - _target_: my_module.LocalSource
-       path: /checkpoint.ckpt
+   training:
+     checkpoint:
+       # 1. Source — fetch checkpoint
+       source:
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
-     # 2. Loader - apply to model
-     - _target_: my_module.WeightsOnlyLoader
-       strict: false
+       # 2. Loading — apply to model
+       loading:
+         _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+         strict: false
 
-     # 3. Modifier - transform model
-     - _target_: my_module.FreezingModifier
-       layers: [encoder]
+       # 3. Modifiers — transform model (applied in list order)
+       modifiers:
+         - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+           submodules_to_freeze: [encoder]
 
-**What the pipeline actually validates.** Stage ordering is not checked,
-but two validation hooks run automatically:
+**What the pipeline actually validates.** Stage order is set by the
+builder rather than validated, but two validation hooks run
+automatically:
 
 -  Before execution, ``CheckpointPipelineValidator`` checks the runtime
    environment (Python, PyTorch, optional dependencies) and the shape of

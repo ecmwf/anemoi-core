@@ -571,22 +571,48 @@ trained checkpoint. This is particularly useful when the new task is
 related to the old one, enabling faster convergence and often improving
 model performance.
 
-To enable transfer learning, set the config.training.transfer_learning
-flag to True in the configuration file.
+The recommended way to configure transfer learning is through the
+``training.checkpoint`` pipeline. Select the ``transfer_learning`` loading
+strategy via its Hydra group:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/loading=transfer_learning
+
+or configure it inline under ``training.checkpoint.loading``:
 
 .. code:: yaml
 
    training:
       # start the training from a checkpoint of a previous run
       fork_run_id: ...
-      load_weights_only: True
-      transfer_learning: True
 
-When this flag is active and a checkpoint path is specified in
-``config.system.input.warm_start`` or ``self.last_checkpoint``, the system loads
-the pre-trained weights using the `transfer_learning_loading()` function.
-This approach ensures only compatible weights are loaded and mismatched
-layers are handled appropriately.
+      checkpoint:
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
+          skip_mismatched: true
+
+The ``TransferLearningLoader`` filters key and shape mismatches so that only
+compatible weights are loaded and mismatched layers are handled
+appropriately. Set ``skip_mismatched: false`` to raise
+``CheckpointIncompatibleError`` instead of skipping mismatched weights.
+
+.. note::
+
+   The legacy keys ``training.transfer_learning`` and
+   ``training.load_weights_only`` are **deprecated** but still supported.
+   When set, they delegate to a ``TransferLearningLoader`` /
+   ``WeightsOnlyLoader`` pipeline and emit a ``FutureWarning``:
+
+   .. code:: yaml
+
+      training:
+         fork_run_id: ...
+         load_weights_only: True
+         transfer_learning: True
+
+   Prefer the ``training.checkpoint`` surface shown above for new
+   configurations.
 
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
@@ -652,11 +678,17 @@ model are excluded from training. This is useful when certain parts of
 the model have been sufficiently trained or should remain unchanged for
 the current task.
 
-To specify which submodules to freeze, use the
-``config.training.submodules_to_freeze`` field in the configuration. List
-the names of submodules to be frozen. During model initialization, these
-submodules will have their parameters frozen, ensuring they are not
-updated during training.
+The recommended way to freeze submodules is through the
+``training.checkpoint`` pipeline, which applies freezing as a modifier
+stage after the model weights have been loaded. Select the ``freezing``
+modifier group via Hydra:
+
+.. code:: bash
+
+   anemoi-training train training/checkpoint/modifiers=freezing
+
+or configure it inline as a list under ``training.checkpoint.modifiers``,
+listing the dot-paths of the submodules to freeze.
 
 For example, if you have a pre-trained model on a 'global' dataset and
 want to train a new decoder with the previous model's parameters frozen,
@@ -669,12 +701,36 @@ decoder.
    training:
       # start the training from a checkpoint of a previous run
       fork_run_id: ...
-      load_weights_only: True
 
-      submodules_to_freeze:
-         - encoder.global
-         - processor
-         - decoder.global
+      checkpoint:
+        modifiers:
+          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+            submodules_to_freeze:
+               - encoder.global
+               - processor
+               - decoder.global
+            strict: false
+            validate_gradients: true
+
+.. note::
+
+   The legacy key ``training.submodules_to_freeze`` is **deprecated** but
+   still supported. When set, it delegates to a ``FreezingModifierStage``
+   pipeline and emits a ``FutureWarning``:
+
+   .. code:: yaml
+
+      training:
+         fork_run_id: ...
+         load_weights_only: True
+
+         submodules_to_freeze:
+            - encoder.global
+            - processor
+            - decoder.global
+
+   Prefer the ``training.checkpoint`` surface shown above for new
+   configurations.
 
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to

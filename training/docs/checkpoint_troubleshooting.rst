@@ -73,10 +73,10 @@ Unknown checkpoint source type
 
    .. code:: yaml
 
-      checkpoint_pipeline:
-        stages:
-          - _target_: my_module.MySource
-            path: /path/to/checkpoint.ckpt
+      training:
+        checkpoint:
+          source:
+            _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
 Failed to instantiate stage
 ---------------------------
@@ -198,10 +198,10 @@ Checkpoint file does not exist
 
    .. code:: yaml
 
-      checkpoint_pipeline:
-        stages:
-          - _target_: my_module.LocalSource
-            path: /absolute/path/to/checkpoint.ckpt
+      training:
+        checkpoint:
+          source:
+            _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
 Loading and Compatibility Issues
 ================================
@@ -217,13 +217,15 @@ Shape mismatch during loading
 
 **Solutions:**
 
-#. Use non-strict loading (when using a custom loader):
+#. Use non-strict loading:
 
    .. code:: yaml
 
-      stages:
-        - _target_: my_module.WeightsOnlyLoader
-          strict: false
+      training:
+        checkpoint:
+          loading:
+            _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+            strict: false
 
 #. Compare checkpoint and model keys:
 
@@ -311,10 +313,10 @@ Failed to download checkpoint
 
    .. code:: yaml
 
-      checkpoint_pipeline:
-        stages:
-          - _target_: my_module.LocalSource
-            path: ./local_model.ckpt
+      training:
+        checkpoint:
+          source:
+            _target_: anemoi.training.checkpoint.sources.local.LocalSource
 
 AWS S3 authentication failed
 ----------------------------
