@@ -63,6 +63,10 @@ class DefinedModels(str, Enum):
     ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_DIS = (
+        "anemoi.models.models.disentangled_hierarchical_encprocdec.AnemoiModelDisentangledHierarchicalEncProcDec"
+    )
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_DIS_SHORT = "anemoi.models.models.AnemoiModelDisentangledHierarchicalEncProcDec"
 
 
 class Model(BaseModel):
@@ -79,6 +83,11 @@ class Model(BaseModel):
 class DiffusionModel(Model):
     diffusion: DiffusionSchema = Field(default=None)
     "Diffusion configuration for diffusion models"
+
+
+class DisentangledModel(Model):
+    latent_rollout: bool = Field(default=False)
+    "Enable latent-space rollout (advance the latent buffer) instead of re-encoding at every rollout step."
 
 
 class TrainableParameters(PydanticBaseModel):
@@ -332,6 +341,16 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Number of message passing steps at each level"
 
 
+class DisentangledHierarchicalModelSchema(HierarchicalModelSchema):
+    model: DisentangledModel = Field(default_factory=DisentangledModel)
+    "Disentangled hierarchical model schema with latent-rollout support."
+
+
 ModelSchema = Union[
-    BaseModelSchema, EnsModelSchema, HierarchicalModelSchema, DiffusionModelSchema, DiffusionTendModelSchema
+    BaseModelSchema,
+    EnsModelSchema,
+    HierarchicalModelSchema,
+    DisentangledHierarchicalModelSchema,
+    DiffusionModelSchema,
+    DiffusionTendModelSchema,
 ]

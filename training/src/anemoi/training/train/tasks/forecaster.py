@@ -93,3 +93,67 @@ class GraphForecaster(BaseRolloutGraphModule):
             x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
 
             yield loss, metrics_next, y_pred
+
+
+class LatentGraphForecaster(GraphForecaster):
+    """Forecaster that performs rollout in latent space.
+
+    Works with models that accept a ``rollout_step`` argument (e.g.
+    ``AnemoiModelDisentangledHierarchicalEncProcDec``). On the first step
+    (``rollout_step=0``) the model encodes all input timesteps and stores its
+    latent buffer; on subsequent steps it may advance the latent buffer without
+    re-encoding (when ``model.latent_rollout`` is enabled).
+
+    The only difference from :class:`GraphForecaster` is that ``rollout_step`` is
+    passed through to the model's ``forward`` (the base ``forward`` already
+    forwards ``**kwargs`` to ``self.model``).
+    """
+
+    task_type = "latent_forecaster"
+
+    def _rollout_step(
+        self,
+        batch: dict,
+        rollout: int | None = None,
+        validation_mode: bool = False,
+    ) -> Generator[tuple[torch.Tensor | None, dict, list]]:
+        """Rollout step for the latent forecaster (see :class:`GraphForecaster`)."""
+        rollout_steps = rollout or self.rollout
+        required_time_steps = rollout_steps * self.n_step_output + self.n_step_input
+        x = {}
+        for dataset_name, dataset_batch in batch.items():
+            x[dataset_name] = dataset_batch[
+                :,
+                0 : self.n_step_input,
+                ...,
+                self.data_indices[dataset_name].data.input.full,
+            ]  # (bs, n_step_input, latlon, nvar)
+            msg = (
+                f"Batch length not sufficient for requested n_step_input length for {dataset_name}!"
+                f", {dataset_batch.shape[1]} !>= {required_time_steps}"
+            )
+            assert dataset_batch.shape[1] >= required_time_steps, msg
+
+        for rollout_step in range(rollout_steps):
+            # Pass rollout_step so the model can do latent rollout instead of re-encoding.
+            y_pred = self(x, rollout_step=rollout_step)
+            y = {}
+            for dataset_name, dataset_batch in batch.items():
+                start = self.n_step_input + rollout_step * self.n_step_output
+                y_time = dataset_batch.narrow(1, start, self.n_step_output)
+                var_idx = self.data_indices[dataset_name].data.output.full.to(device=dataset_batch.device)
+                y[dataset_name] = y_time.index_select(-1, var_idx)
+
+            loss, metrics_next, y_pred = checkpoint(
+                self.compute_loss_metrics,
+                y_pred,
+                y,
+                step=rollout_step,
+                validation_mode=validation_mode,
+                use_reentrant=False,
+            )
+
+            # Advance input state for each dataset
+            x = self._advance_input(x, y_pred, batch, rollout_step=rollout_step)
+
+            yield loss, metrics_next, y_pred
