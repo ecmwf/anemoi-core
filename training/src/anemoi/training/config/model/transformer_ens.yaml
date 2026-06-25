@@ -156,6 +156,9 @@ compile:
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
     options:
       dynamic: false
+  - module: anemoi.training.losses.CRPS
+    options:
+      dynamic: false
 
 # Bounding configuration
 bounding: #These are applied in order
