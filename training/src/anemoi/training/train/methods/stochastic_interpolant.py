@@ -67,7 +67,6 @@ class StochasticInterpolantTransportObjective(TransportObjective):
             conditioned_target,
             condition,
             model_comm_group=self.module.model_comm_group,
-            grid_shard_sizes=self.module.grid_shard_sizes,
         )
 
     def reconstruct_endpoint(
@@ -106,11 +105,10 @@ class StochasticInterpolantTransportObjective(TransportObjective):
             bridge_noise = 0.0
             drift_noise = 0.0
             if noise_scale != 0.0:
-                grid_shard_sizes = getattr(self.module, "grid_shard_sizes", None)
                 noise = randn_like_with_grid_sharding(
                     clean_dataset,
                     model_comm_group=getattr(self.module, "model_comm_group", None),
-                    grid_shard_sizes=grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None,
+                    grid_shard_sizes=self.module._grid_shard_sizes(clean_dataset),
                 )
                 sigma = stochastic_interpolant_sigma(
                     time_dataset,

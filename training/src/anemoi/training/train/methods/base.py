@@ -27,10 +27,9 @@ from timm.scheduler.scheduler import Scheduler as TimmScheduler
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.data import Batch
+from anemoi.models.data.views import TabularSourceView
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -338,9 +337,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
-        self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
-        self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
-
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
@@ -425,7 +421,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return self.model(
             batch,
             model_comm_group=self.model_comm_group,
-            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 
@@ -556,6 +551,29 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
+    def _grid_shard_sizes(self, source: SourceView) -> Any:
+        if isinstance(source, TabularSourceView):
+            return None
+        return getattr(source, "shard_sizes", None)
+
+    def _grid_shard_slice(self, source: SourceView) -> slice | None:
+        """Local grid shard slice for ``source``, derived from its shard sizes.
+
+        Returns ``None`` when the source is replicated (not sharded).
+        """
+        # no per-grid scalers/masks for TabularSourceView that would need to be sliced
+        if isinstance(source, TabularSourceView):
+            return None
+
+        shard_sizes = getattr(source, "shard_sizes", None)
+        if not shard_sizes:
+            return None
+        assert isinstance(shard_sizes, list) and all(
+            isinstance(s, int) for s in shard_sizes
+        ), "shard_sizes must be a list of integers"
+        start, end = get_partition_range(shard_sizes, self.model_comm_group_rank)
+        return slice(start, end)
+
     def _prepare_tensors_for_loss(
         self,
         y_pred: SourceView,
@@ -579,10 +597,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         tuple[SourceView, SourceView, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
-        # Handle multi-dataset case for grid shard slice and sizes
-        grid_shard_slice = self.grid_shard_slice[dataset_name]
-        grid_shard_sizes = self.grid_shard_sizes[dataset_name]
-
+        # Sharding metadata now lives on the source views (None when replicated).
+        grid_shard_slice = self._grid_shard_slice(y)
         is_sharded = grid_shard_slice is not None
 
         sharding_supported = (self.loss_supports_sharding) and (  # loss calculated in training and validation mode
@@ -590,8 +606,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_sizes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_sizes, self.model_comm_group)
+            y_pred_full = y_pred.allgather(self.model_comm_group)
+            y_full = y.allgather(self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
@@ -645,7 +661,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+                grid_shard_sizes=self._grid_shard_sizes(y),
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -834,7 +850,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         assert isinstance(batch, Batch), "batch must be a Batch instance"
         # Gathering/sharding of batch
-        batch = self._setup_batch_sharding(batch)
+        if not self.keep_batch_sharded:
+            batch = self.allgather_batch(batch)
 
         # Batch normalization (the underlying ``batch.data`` dict should be mutated in-place)
         batch = self.preprocess_batch(batch)
@@ -845,36 +862,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Prepare scalers, e.g. init delayed scalers and update scalers
         self._prepare_loss_scalers()
-
-        return batch
-
-    def _setup_batch_sharding(self, batch: Batch) -> Batch:
-        """Setup batch sharding before every step.
-
-        If the batch is sharded, it will be setup with the grid shard sizes and slice.
-        Otherwise, the batch will be allgathered.
-
-        Parameters
-        ----------
-        batch : Batch
-            Batch to setup
-
-        Returns
-        -------
-        Batch
-            Batch after setup (the underlying ``batch.data`` dict is mutated
-            in-place; the :class:`Batch` envelope itself is returned
-            unchanged for chaining).
-        """
-        assert isinstance(batch, Batch), "batch must be a Batch instance"
-        # TEMPORARY FIX: always gather, TODO(Jan): support keep-batch-sharded
-        self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None) 
-        self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
-
-        #if not self.keep_batch_sharded:
-        #    batch = self.allgather_batch(batch)
-
-        batch = self.allgather_batch(batch)
 
         return batch
 
@@ -1049,7 +1036,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
-                        grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+                        grid_shard_sizes=self._grid_shard_sizes(y),
                     )
 
                 metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)

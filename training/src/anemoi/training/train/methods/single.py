@@ -62,7 +62,6 @@ class SingleTraining(BaseTrainingModule):
                 **task_kwargs,
                 data_indices=self.data_indices,
                 output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
             )
 
             loss = loss + loss_next

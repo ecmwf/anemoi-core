@@ -145,7 +145,6 @@ class Forecaster(BaseTask):
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
-        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
 
@@ -177,7 +176,6 @@ class Forecaster(BaseTask):
                 x[:, -(i + 1)],
                 true_state,
                 data_indices,
-                grid_shard_slice=grid_shard_slice,
             )
 
             # get new "constants" needed for time-varying fields
@@ -197,7 +195,6 @@ class Forecaster(BaseTask):
         rollout_step: int = 0,
         data_indices: dict[str, IndexCollection] | None = None,
         output_mask: dict[str, object] | None = None,
-        grid_shard_slice: dict[str, slice | None] | None = None,
     ) -> "Batch":
         """Advance the input state for the next rollout step, preserving coords and metadata.
 
@@ -219,7 +216,6 @@ class Forecaster(BaseTask):
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],
-                grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice[dataset_name],
             )
         return x.with_data(new_data)
 

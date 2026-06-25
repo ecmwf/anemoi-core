@@ -562,8 +562,8 @@ class ScaleTensor(nn.Module):
         out = x_subset.clone()
 
         for dims, scaler in self.tensors.values():
-            if TensorDim.GRID in dims and grid_shard_slice is not None:
-                grid_index = layout.grid
+            if "grid" in dims and grid_shard_slice is not None:
+                grid_index = dims.index("grid")
                 if scaler.shape[grid_index] >= grid_shard_slice.stop:
                     slices = [slice(None)] * len(dims)
                     slices[grid_index] = grid_shard_slice

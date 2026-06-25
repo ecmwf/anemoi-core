@@ -225,7 +225,6 @@ class EnsembleTraining(BaseTrainingModule):
         return self.model(
             batch,
             model_comm_group=self.model_comm_group,
-            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 
@@ -267,7 +266,6 @@ class EnsembleTraining(BaseTrainingModule):
                 **task_step_kwargs,
                 data_indices=self.data_indices,
                 output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
             )
 
             loss = loss + loss_next

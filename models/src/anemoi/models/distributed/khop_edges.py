@@ -177,7 +177,7 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
 
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
     degree_per_dst = degree(edge_index[1], num_nodes=n_dst, dtype=torch.long)
-    # use torch.split with dst_splits to match the balanced partitioning exactly
+    # use torch.split with dst_splits to match the balanced partitioning
     edge_splits = [chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)]
 
     return GraphPartition(

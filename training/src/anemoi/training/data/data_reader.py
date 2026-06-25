@@ -148,7 +148,7 @@ def _to_local_window_shard_data(
     coord_parts: list[torch.Tensor] = []
     td_parts: list[torch.Tensor] = []
     boundaries_local: list[slice] = []
-    window_shard_sizes_all: list[ShardSizes] = []
+    window_shard_sizes_all: list[ShardSizes] = [] if reader_group_size > 1 else None
 
     offset = 0
     for boundary in boundaries:
@@ -162,7 +162,8 @@ def _to_local_window_shard_data(
         coord_parts.append(coordinates[local_slice])
         td_parts.append(timedeltas[local_slice])
         boundaries_local.append(slice(offset, offset + local_size))
-        window_shard_sizes_all.append(window_shard_sizes)
+        if window_shard_sizes_all is not None:
+            window_shard_sizes_all.append(window_shard_sizes)
         offset += local_size
 
     if data_parts:
@@ -309,7 +310,7 @@ class BaseAnemoiReader(ABC):
             "Reader group info set for %s: rank %d / %d",
             self.__class__.__name__,
             self.reader_group_rank,
-            self.reader_group_size-1,
+            self.reader_group_size - 1,
         )
 
     @abstractmethod
@@ -406,15 +407,18 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
         super().set_reader_group_info(reader_group_rank, reader_group_size)
 
-        self.grid_shard_sizes = get_balanced_partition_sizes(self.grid_size, self.reader_group_size)
-        start, end = get_partition_range(self.grid_shard_sizes, self.reader_group_rank)
-        self.grid_shard_slice = slice(start, end)
+        if reader_group_size <= 1:
+            self.grid_shard_slice = None
+            self.grid_shard_sizes = None
+        else:
+            self.grid_shard_sizes = get_balanced_partition_sizes(self.grid_size, self.reader_group_size)
+            start, end = get_partition_range(self.grid_shard_sizes, self.reader_group_rank)
+            self.grid_shard_slice = slice(start, end)
 
         LOGGER.info(
-            "Gridded reader shard sizes: %s, assigned shard: [%d:%d]",
+            "Gridded reader shard sizes: %s, assigned shard: %s",
             self.grid_shard_sizes,
-            start,
-            end,
+            self.grid_shard_slice,
         )
 
     def get_data(
@@ -456,7 +460,10 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         del time_indices  # unused for static grids
         lats = self.latitudes
         lons = self.longitudes
-        # TODO(Jan): sort out coordinate sharding
+
+        if self.grid_shard_slice is not None:
+            lats = lats[self.grid_shard_slice]
+            lons = lons[self.grid_shard_slice]
 
         coords = np.stack(
             [np.ascontiguousarray(lats), np.ascontiguousarray(lons)],

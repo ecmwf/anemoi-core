@@ -410,7 +410,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges, separated for checkpointing."""
-        # Build graph from coordinates
+        # TODO(Jan): shard graph creation, gather edges, sort, shard
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
         edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
         edge_attr = edge_attr.index_select(0, perm)

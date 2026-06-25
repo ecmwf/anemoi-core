@@ -61,7 +61,6 @@ class EDMDiffusionTransportObjective(TransportObjective):
             conditioned_target,
             condition,
             model_comm_group=self.module.model_comm_group,
-            grid_shard_sizes=self.module.grid_shard_sizes,
         )
 
     def compute_loss(
@@ -91,7 +90,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.module.grid_dim,
-                grid_shard_sizes=self.module.grid_shard_sizes[dataset_name],
+                grid_shard_sizes=self.module._grid_shard_sizes(y),
             )
 
         return loss(y_pred, y, **loss_kwargs)

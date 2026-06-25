@@ -54,28 +54,26 @@ from anemoi.training.utils.index_space import IndexSpace
 LOGGER = logging.getLogger(__name__)
 
 
-def _allgather_dataset_tensor(
+def _allgather_view(
     pl_module: pl.LightningModule,
-    tensor: torch.Tensor,
+    prediction: SourceView,
     dataset_name: str,
-) -> torch.Tensor:
-    """All-gather a grid-sharded tensor for one dataset."""
-    shard_shapes = getattr(pl_module, "grid_shard_sizes", {}).get(dataset_name)
-    if shard_shapes is None:
-        return tensor
-    grid_size = int(sum(shard_shapes))
-    return pl_module.allgather_batch(tensor, grid_size, shard_shapes)
+) -> SourceView:
+    """All-gather a per-dataset prediction :class:`SourceView`.
 
-
-def _allgather_prediction(
-    pl_module: pl.LightningModule,
-    prediction: SourceView | torch.Tensor,
-    dataset_name: str,
-) -> SourceView | torch.Tensor:
-    """All-gather a per-dataset prediction, accepting either a SourceView or a raw tensor."""
-    if isinstance(prediction, SourceView):
-        return prediction.apply_func(lambda d, **_: _allgather_dataset_tensor(pl_module, d, dataset_name))
-    return _allgather_dataset_tensor(pl_module, prediction, dataset_name)
+    Grid-shard metadata now lives on the :class:`SourceView`, so the view gathers
+    itself given the model communication group (idempotent when already
+    full-grid). A bare tensor carries no shard metadata and therefore cannot be
+    gathered here - scream loudly so the producer is fixed to hand over a view.
+    """
+    if not isinstance(prediction, SourceView):
+        msg = (
+            f"Prediction for dataset {dataset_name!r} is a raw {type(prediction).__name__}, "
+            "not a SourceView. Grid-shard metadata now lives on the Batch/SourceView, "
+            "so a bare tensor cannot be all-gathered. Produce a SourceView prediction."
+        )
+        raise TypeError(msg)
+    return prediction.allgather(pl_module.model_comm_group)
 
 
 def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
@@ -419,25 +417,29 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
             # Gather grid-sharded tensors while preserving the Batch envelope
             # (layouts / statistics / coordinates) so downstream view-based access
-            # (Batch.__getitem__ / task.get_targets) keeps working.
+            # (Batch.__getitem__ / task.get_targets) keeps working. Shard metadata
+            # lives on the Batch / SourceViews, so the batch gathers itself given
+            # the model communication group (idempotent when the batch was already
+            # all-gathered in ``on_after_batch_transfer``).
             if isinstance(batch, Batch):
-                gathered_data = {
-                    dataset_name: _allgather_dataset_tensor(pl_module, payload, dataset_name)
-                    for dataset_name, payload in batch.data.items()
-                }
-                batch = batch.with_data(gathered_data)
+                batch = batch.allgather(pl_module.model_comm_group)
             else:
-                batch = {
-                    dataset_name: _allgather_dataset_tensor(pl_module, dataset_tensor, dataset_name)
-                    for dataset_name, dataset_tensor in batch.items()
-                }
+                # A bare dict of tensors carries no grid-shard metadata, which now
+                # lives exclusively on the Batch / SourceView. Scream loudly rather
+                # than silently mis-gathering.
+                msg = (
+                    "PlotCallback received a raw dict of tensors instead of a Batch. "
+                    "Grid-shard metadata now lives on the Batch/SourceView, so a bare "
+                    "tensor cannot be all-gathered - pass a Batch instead."
+                )
+                raise TypeError(msg)
             preds = output.predictions
             if not isinstance(preds, list):
 
                 raise TypeError(preds)
             gathered_predictions = [
                 {
-                    dataset_name: _allgather_prediction(pl_module, dataset_pred, dataset_name)
+                    dataset_name: _allgather_view(pl_module, dataset_pred, dataset_name)
                     for dataset_name, dataset_pred in pred.items()
                 }
                 for pred in preds
@@ -794,12 +796,11 @@ class PlotLoss(BasePerBatchPlotCallback):
     ) -> None:
         logger = trainer.logger
         _ = batch_idx
+        data_indices = pl_module.data_indices
 
         for dataset_name in dataset_names:
-
-            data_indices = pl_module.data_indices[dataset_name]
-            parameter_names = list[str](data_indices.model.output.name_to_index.keys())
-            parameter_positions = list[int](data_indices.model.output.name_to_index.values())
+            parameter_names = list[str](data_indices[dataset_name].model.output.name_to_index.keys())
+            parameter_positions = list[int](data_indices[dataset_name].model.output.name_to_index.values())
             # reorder parameter_names by position
             parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
             metadata = pl_module.model.metadata
@@ -821,7 +822,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 y_hat = outputs.predictions[i][dataset_name]
                 # Pass the full target batch; index the per-dataset SourceView afterwards.
                 batch_obj = batch if isinstance(batch, Batch) else Batch(data=batch)
-                y_true_batch, _ = pl_module.task.get_targets(batch_obj, **task_kwargs)
+                y_true_batch, _ = pl_module.task.get_targets(batch_obj, data_indices, **task_kwargs)
                 y_true = y_true_batch[dataset_name]
                 loss = reduce_to_last_dim(
                     self.loss[dataset_name](
@@ -1000,7 +1001,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         def _post_process(prediction: SourceView) -> torch.Tensor:
             assert isinstance(
-                prediction, SourceView
+                prediction, SourceView,
             ), f"Expected a prediction of type SourceView, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
             processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data
@@ -1189,9 +1190,23 @@ class PlotSample(BasePlotAdditionalMetrics):
         if auxiliary_output is None:
             return {}
 
+        # ``auxiliary_output`` arrives as a dict of raw, detached tensors (see
+        # TransportForecaster._step -> plot_kwargs["auxiliary_output"]). Grid-shard
+        # metadata now lives exclusively on the Batch / SourceView, so a bare tensor
+        # cannot be all-gathered here. Scream loudly until the producer hands over a
+        # SourceView / Batch instead of detached tensors.
+        if any(not isinstance(value, (Batch, SourceView)) for value in auxiliary_output.values()):
+            msg = (
+                "auxiliary_output is a dict of raw tensors without shard metadata; "
+                "cannot all-gather. Grid-shard info now lives on the Batch/SourceView - "
+                "have the step output carry a SourceView/Batch for auxiliary_output "
+                "instead of detached tensors."
+            )
+            raise TypeError(msg)
+
         auxiliary_output = {
-            dataset_name: _allgather_dataset_tensor(pl_module, dataset_tensor, dataset_name)
-            for dataset_name, dataset_tensor in auxiliary_output.items()
+            dataset_name: value.allgather(pl_module.model_comm_group)
+            for dataset_name, value in auxiliary_output.items()
         }
         return {"auxiliary_output": auxiliary_output}
 

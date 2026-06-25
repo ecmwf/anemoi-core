@@ -104,7 +104,7 @@ class PerTimestepMetrics(Callback):
             post_processor = pl_module.model.post_processors[dataset_name]
             metrics_dict = pl_module.metrics[dataset_name]
             val_metric_ranges = pl_module.val_metric_ranges[dataset_name]
-            grid_shard_slice = pl_module.grid_shard_slice.get(dataset_name)
+            grid_shard_slice = pl_module._grid_shard_slice(target)
 
             for t in range(n_timesteps):
                 # Slice single timestep: remove time dim
@@ -132,7 +132,7 @@ class PerTimestepMetrics(Callback):
                         if getattr(metric, "needs_shard_layout_info", False):
                             metric_kwargs.update(
                                 grid_dim=pl_module.grid_dim,
-                                grid_shard_sizes=pl_module.grid_shard_sizes[dataset_name],
+                                grid_shard_sizes=pl_module._grid_shard_sizes(target),
                             )
 
                         value = metric(pred_t_post, target_t_post, **metric_kwargs)

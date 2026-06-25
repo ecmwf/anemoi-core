@@ -283,19 +283,14 @@ class BaseGraphModel(nn.Module):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
-    def _resolve_in_out_sharded(
-        self,
-        dataset_names: list[str],
-        grid_shard_sizes: DatasetShardSizes | None,
-    ) -> dict[str, bool]:
-        in_out_sharded: dict[str, bool] = {}
-        for dataset_name in dataset_names:
-            if grid_shard_sizes is None:
-                in_out_sharded[dataset_name] = False
-            else:
-                in_out_sharded[dataset_name] = grid_shard_sizes[dataset_name] is not None
+    def _resolve_in_out_sharded(self, batch: Batch) -> dict[str, bool]:
+        """Per-dataset flag indicating whether the dataset is grid-sharded.
 
-        return in_out_sharded
+        Sharding metadata is carried by the batch itself (``batch.shard_sizes``),
+        which the per-dataset source views expose via ``flatten().shard_sizes``.
+        ``None`` means the corresponding dataset is replicated, not sharded.
+        """
+        return {dataset_name: batch.shard_sizes.get(dataset_name) is not None for dataset_name in batch.keys()}
 
     def _get_consistent_dim(self, x: dict[str, "Tensor | list[Tensor]"], dim: int) -> int:
         """Return a dimension size that is consistent across all datasets.
@@ -335,7 +330,6 @@ class BaseGraphModel(nn.Module):
         self,
         x,
         batch_size,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
     ):
         pass
@@ -368,7 +362,6 @@ class BaseGraphModel(nn.Module):
         batch: Batch,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass of the model.
@@ -379,12 +372,10 @@ class BaseGraphModel(nn.Module):
             Typed batch envelope carrying ``data`` (per-dataset input tensors)
             and ``coords`` (per-dataset coordinate tensors). Concrete model
             implementations unpack ``batch.data`` and ``batch.coordinates`` at the
-            top of the method.
+            top of the method. Per-dataset grid sharding is carried by the batch
+            (``batch.shard_sizes``) and read through the source views.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.
-        grid_shard_sizes : DatasetShardSizes, optional
-            Per-dataset shard sizes for the grid dimension. ``None`` means the
-            corresponding dataset is replicated, not sharded.
         **kwargs
             Additional model-specific arguments.
 
@@ -452,7 +443,7 @@ class BaseGraphModel(nn.Module):
             grid_shard_sizes: DatasetShardSizes | None = None
             if model_comm_group is not None:
                 grid_shard_sizes = {}
-                for dataset_name in dataset_names:
+                for dataset_name in dataset_names:  # TODO: make this compatible with tabular
                     grid_shard_sizes[dataset_name] = get_shard_sizes(
                         x[dataset_name], -2, model_comm_group=model_comm_group
                     )
@@ -465,12 +456,11 @@ class BaseGraphModel(nn.Module):
 
             # Wrap into a Batch (no coords available at inference today; the
             # static-grid path inside the model uses the node-attribute buffers).
-            forward_batch = Batch(data=x)
+            # Sharding is carried by the batch so the model can read it off the views.
+            forward_batch = Batch(data=x, shard_sizes=grid_shard_sizes or {})
 
             # Perform forward pass
-            y_hat = self.forward(
-                forward_batch, model_comm_group=model_comm_group, grid_shard_sizes=grid_shard_sizes, **kwargs
-            )
+            y_hat = self.forward(forward_batch, model_comm_group=model_comm_group, **kwargs)
 
             # Apply post-processing
             for dataset_name in dataset_names:

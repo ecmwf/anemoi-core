@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import default_collate
 from torch.distributed import ProcessGroup
+from torch.utils.data import default_collate
 
 from anemoi.models.data.views import SourceView
 from anemoi.models.data.views import TensorLayout
@@ -189,7 +189,8 @@ class Batch:
                 shape_repr = f"shape={tuple(payload.shape)}"
             layout_repr = repr(self.layouts[name]) if name in self.layouts else "<no layout>"
             static_repr = " static_coords" if self.is_static_coords(name) else ""
-            lines.append(f"  {name}: {shape_repr} layout={layout_repr}{static_repr}")
+            shard_repr = f" shard_sizes={self.shard_sizes[name]}" if name in self.shard_sizes else ""
+            lines.append(f"  {name}: {shape_repr} layout={layout_repr}{static_repr}{shard_repr}")
         lines.append(")")
         return "\n".join(lines)
 
@@ -386,13 +387,16 @@ class Batch:
             per_dataset_meta[BOUNDARIES_META_KEY] = source_view.boundaries
             new_metadata[source_name] = per_dataset_meta
 
+        new_shard_sizes = dict(self.shard_sizes)
+        new_shard_sizes[source_name] = source_view.shard_sizes
+
         return Batch(
             data=new_data,
             coordinates=new_coordinates,
             metadata=new_metadata,
             grid_sizes=self.grid_sizes,
             timedeltas=new_timedeltas,
-            shard_sizes=self.shard_sizes,
+            shard_sizes=new_shard_sizes,
             layouts=self.layouts,
             variables=new_variables,
             statistics=self.statistics,

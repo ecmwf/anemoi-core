@@ -19,9 +19,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.graphs.create import HeteroData
 from anemoi.models.data.batch import Batch
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -111,15 +111,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         x: "SourceView",
         batch_size: int,
-        grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, "SourceView", ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        grid_shard_sizes = x.grid_shard_indices
-        if grid_shard_sizes == slice(None):
-            grid_shard_sizes = None
+        x_flat: "FlattenView" = x.flatten()  # flatten data to (nodes, features)
+        grid_shard_sizes = x_flat.shard_sizes
 
         if dataset_name in self.residual:
             x_skip = self.residual[dataset_name](
@@ -131,13 +129,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         else:
             x_skip = None
 
-        node_features: "FlattenView" = x.flatten()  # flatten data to (nodes, features)
-        inputs = [node_features.data, latlons_to_sincos(node_features.coordinates)]
+        inputs = [x_flat.data, latlons_to_sincos(x_flat.coordinates)]
 
         if dataset_name in self.node_attributes:
-            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(
-                node_features.data.device
-            )
+            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x_flat.data.device)
             if grid_shard_sizes is not None:
                 trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
 
@@ -145,40 +140,49 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         x_data_latent = torch.cat(inputs, dim=-1)
 
-        return node_features.coordinates, x_data_latent, x_skip, grid_shard_sizes
+        # gather full coordinates for correct graph building in the encoder
+        coordinates = x_flat.coordinates
+        if grid_shard_sizes is not None:
+            coordinates = gather_tensor(coordinates, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
+
+        return coordinates, x_data_latent, x_skip, grid_shard_sizes
 
     def _assemble_target(
         self,
         x: "SourceView",
         encoder_data_output: torch.Tensor | None,
         batch_size: int = 1,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ):
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        grid_shard_sizes = x.grid_shard_indices
-        if grid_shard_sizes == slice(None):
-            grid_shard_sizes = None
-
-        flat_view = x.flatten()
+        x_flat = x.flatten()
+        # Sharding of the flattened (single-tensor) node dimension is described by
+        # the view itself; ``None`` means the dataset is replicated, not sharded.
+        grid_shard_sizes = x_flat.shard_sizes
 
         if self.use_encoder_data_output[dataset_name]:
             assert encoder_data_output is not None
             target_decoder_data = encoder_data_output
         else:
-            target_decoder_data = latlons_to_sincos(flat_view.coordinates)
+            target_decoder_data = latlons_to_sincos(x_flat.coordinates)
 
             if dataset_name in self.node_attributes:
-                trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(flat_view.device)
+                trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x_flat.data.device)
                 if grid_shard_sizes is not None:
                     trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
 
                 target_decoder_data = torch.cat([target_decoder_data, trainable_parameters], dim=-1)
 
-        assert flat_view.coordinates.shape[0] == target_decoder_data.shape[0], "Coordinate and data sizes must match."
-        return flat_view.coordinates, target_decoder_data, grid_shard_sizes
+        assert x_flat.coordinates.shape[0] == target_decoder_data.shape[0], "Coordinate and data sizes must match."
+
+        # gather full coordinates for correct graph building in the decoder
+        coordinates = x_flat.coordinates
+        if grid_shard_sizes is not None:
+            coordinates = gather_tensor(coordinates, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
+
+        return coordinates, target_decoder_data, grid_shard_sizes
 
     def _assemble_output(
         self,
@@ -238,7 +242,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         target: Optional[Batch] = None,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass of the model.
@@ -248,12 +251,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch : Batch
             Typed batch envelope. ``batch.data`` carries the per-dataset input
             tensors; ``batch.coordinates`` carries the per-dataset coordinate
-            tensors used by dynamic graph providers / node attributes.
+            tensors used by dynamic graph providers / node attributes. Per-dataset
+            grid sharding is carried by the batch and read through the source
+            views (``view.flatten().shard_sizes``).
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
-        grid_shard_sizes : DatasetShardSizes, optional
-            Per-dataset shard sizes for the grid dimension. ``None`` means the
-            corresponding dataset is replicated, not sharded.
 
         Returns
         -------
@@ -266,10 +268,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size = self._get_consistent_dim(batch, 0)
         ensemble_size = self._get_consistent_dim(batch, 2)
 
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
-            grid_shard_sizes=grid_shard_sizes,
-        )
+        in_out_sharded = self._resolve_in_out_sharded(batch)
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
@@ -295,7 +294,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             data_coords, x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 batch[dataset_name],
                 batch_size=batch_size,
-                grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )
@@ -367,7 +365,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 target[dataset_name],
                 x_data_latent_dict.get(dataset_name, None),
                 batch_size=batch_size,
-                grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )

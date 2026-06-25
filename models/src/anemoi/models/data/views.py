@@ -23,8 +23,8 @@ import torch
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.tensor_layout import TensorLayout
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 
 LOGGER = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ class FlatView:
     data: torch.Tensor
     coordinates: torch.Tensor
     device: torch.device | None
+    shard_sizes: ShardSizes
 
     def to(self, device: torch.device) -> "FlatView":
         """Return a copy of this view with all tensors moved to the given device."""
@@ -56,6 +57,7 @@ class FlatView:
             data=self.data.to(device),
             coordinates=self.coordinates.to(device),
             device=device,
+            shard_sizes=self.shard_sizes,
         )
 
 
@@ -77,9 +79,8 @@ class SourceView(ABC):
     coordinates: torch.Tensor | list[torch.Tensor] | None
     layout: TensorLayout
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
-    grid_shard_indices: list[int] | None = None # TODO(Jan): remove this or derive from shard_sizes
     boundaries: list[tuple[slice, ...]] | None = None
-    shard_sizes: list[ShardSizes] | list[list[ShardSizes]] = None
+    shard_sizes: ShardSizes | list[ShardSizes] = None
 
     @cached_property
     def name_to_index(self) -> dict[str, int]:
@@ -216,6 +217,7 @@ class GriddedSourceView(SourceView):
             data=flattened_data,
             coordinates=coordinates.to(device),
             device=device,
+            shard_sizes=self.shard_sizes,
         )
 
     @property
@@ -288,7 +290,14 @@ class GriddedSourceView(SourceView):
             sizes=self.shard_sizes,
             mgroup=group,
         )
-        return self.clone(data=gathered_data, shard_sizes=None)
+        gathered_coords = gather_tensor(
+            self.coordinates.to(self.device),  # TODO(Jan): why are coords not on device?
+            dim=0,
+            sizes=self.shard_sizes,
+            mgroup=group,
+        )
+
+        return self.clone(data=gathered_data, coordinates=gathered_coords, shard_sizes=None)
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSourceView":
         """Return a new view restricted to the given variable indices.
@@ -378,12 +387,26 @@ class TabularSourceView(SourceView):
             data = self.data[0]
             coordinates = self.coordinates[0]
 
+        # flatten shard sizes to a single list of shard sizes for the locally concatenated data
+        # NOTE that this operation changes the order of observations when gathering data:
+        # GPU0  GPU1   GPU0  GPU1            GPU0        GPU1
+        # w1_0, w1_1 | w2_0, w2_1 becomes w1_0, w2_0, w1_1, w2_1
+        flat_shard_sizes = None
+        if self.shard_sizes is not None:
+            assert (
+                len(self.shard_sizes) == 1
+            ), f"TabularSourceView with multiple samples and shard_sizes is not supported; got {len(self.shard_sizes)} samples."
+            shard_sizes = self.shard_sizes[0]
+            # sum up per-rank shard sizes across all windows to get the total shard sizes for the concatenated data
+            flat_shard_sizes = [sum(sizes[i] for sizes in shard_sizes) for i in range(len(shard_sizes[0]))]
+
         device = data.device
 
         return FlatView(
             data=data,
             coordinates=coordinates.to(device),
             device=device,
+            shard_sizes=flat_shard_sizes,
         )
 
     def unflatten(self, data: torch.Tensor) -> "TabularSourceView":
@@ -460,14 +483,19 @@ class TabularSourceView(SourceView):
         TabularSourceView
             A new view with allgathered data and coordinates.
         """
-        if self.shard_sizes is None or not model_is_distributed(group):
-            return self  # nothing to gather, or not in a distributed setting
-            
+        if self.shard_sizes is None:
+            return self  # nothing to gather
+
+        if not model_is_distributed(group):
+            return self.clone(shard_sizes=None)
+
         gathered_data = []
         gathered_coords = []
         gathered_timedeltas = []
         gathered_boundaries = []
-        for data, coords, timedeltas, boundaries, shard_sizes in zip(self.data, self.coordinates, self.timedeltas, self.boundaries, self.shard_sizes):
+        for data, coords, timedeltas, boundaries, shard_sizes in zip(
+            self.data, self.coordinates, self.timedeltas, self.boundaries, self.shard_sizes
+        ):
             gathered_data.append([])
             gathered_coords.append([])
             gathered_timedeltas.append([])
@@ -508,7 +536,7 @@ class TabularSourceView(SourceView):
                 new_window_size = sum(window_shard_sizes)
                 gathered_boundaries[-1].append(slice(boundary_offset, boundary_offset + new_window_size))
                 boundary_offset += new_window_size
-            
+
             gathered_data[-1] = torch.cat(gathered_data[-1], dim=self.layout.grid)
             gathered_coords[-1] = torch.cat(gathered_coords[-1], dim=0)
             gathered_timedeltas[-1] = torch.cat(gathered_timedeltas[-1], dim=0)
@@ -519,8 +547,7 @@ class TabularSourceView(SourceView):
             timedeltas=gathered_timedeltas,
             boundaries=gathered_boundaries,
             shard_sizes=None,
-        )     
-
+        )
 
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":
         """Return a new view restricted to the given variable indices.
@@ -569,6 +596,7 @@ class TabularSourceView(SourceView):
         new_coords = []
         new_timedeltas = []
         new_boundaries = []
+        new_shard_sizes = [] if self.shard_sizes is not None else None
 
         for sample_idx, sample_bounds in enumerate(self.boundaries):
             selected_slices = [sample_bounds[t] for t in idx_list]
@@ -594,6 +622,10 @@ class TabularSourceView(SourceView):
                     torch.cat(td_pieces, dim=0) if td_pieces else sample_td[:0],
                 )
 
+            if new_shard_sizes is not None and self.shard_sizes is not None:
+                sample_shard_sizes = self.shard_sizes[sample_idx]
+                new_shard_sizes.append([sample_shard_sizes[t] for t in idx_list])
+
             offset = 0
             compact = []
             for s in selected_slices:
@@ -607,4 +639,5 @@ class TabularSourceView(SourceView):
             coordinates=new_coords if new_coords else self.coordinates,
             timedeltas=new_timedeltas if new_timedeltas else self.timedeltas,
             boundaries=new_boundaries,
+            shard_sizes=new_shard_sizes,
         )
