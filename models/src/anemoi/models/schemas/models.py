@@ -67,6 +67,10 @@ class DefinedModels(str, Enum):
     ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
     ANEMOI_MODEL_ENC_PROC_DEC_DIS = "anemoi.models.models.disentangled_encprocdec.AnemoiModelDisentangledEncProcDec"
     ANEMOI_MODEL_ENC_PROC_DEC_DIS_SHORT = "anemoi.models.models.AnemoiModelDisentangledEncProcDec"
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_DIS = (
+        "anemoi.models.models.disentangled_hierarchical_encprocdec.AnemoiModelDisentangledHierarchicalEncProcDec"
+    )
+    ANEMOI_MODEL_HIER_ENC_PROC_DEC_DIS_SHORT = "anemoi.models.models.AnemoiModelDisentangledHierarchicalEncProcDec"
 
 
 class Model(BaseModel):
@@ -353,11 +357,17 @@ class DisentangledModelSchema(BaseModelSchema):
     "Disentangled model schema with latent rollout support."
 
 
+class DisentangledHierarchicalModelSchema(HierarchicalModelSchema):
+    model: DisentangledModel = Field(default_factory=DisentangledModel)
+    "Disentangled hierarchical model schema with latent-rollout support."
+
+
 ModelSchema = Union[
     BaseModelSchema,
     EnsModelSchema,
     HierarchicalModelSchema,
     DisentangledModelSchema,
+    DisentangledHierarchicalModelSchema,
     DiffusionModelSchema,
     DiffusionTendModelSchema,
 ]

@@ -99,7 +99,8 @@ class LatentGraphForecaster(GraphForecaster):
     """Forecaster that performs rollout in latent space.
 
     Works with models that accept a ``rollout_step`` argument (e.g.
-    ``AnemoiModelDisentangledEncProcDec``) to accumulate encoded states and
+    ``AnemoiModelDisentangledEncProcDec`` or
+    ``AnemoiModelDisentangledHierarchicalEncProcDec``) to accumulate encoded states and
     advance the latent buffer instead of re-encoding at every step.
 
     """
