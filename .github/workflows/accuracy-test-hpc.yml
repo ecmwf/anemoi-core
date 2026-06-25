@@ -53,6 +53,12 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
+            # Build off /dev/shm: the default $TMPDIR is RAM-backed tmpfs and counts
+            # against the SLURM --mem cgroup, so installing torch + the nvidia CUDA
+            # stack into it stalls. Redirect to a disk-backed per-job scratch dir.
+            export TMPDIR="$SCRATCH/ci-tmp/$SLURM_JOB_ID"
+            mkdir -p "$TMPDIR"
+            trap 'rm -rf "$TMPDIR"' EXIT
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR

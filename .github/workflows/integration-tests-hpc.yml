@@ -28,13 +28,15 @@ jobs:
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: check_date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    env:
+      MLFLOW_TEST_URL: ${{ secrets.MLFLOW_TEST_URL }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - test_name: test_accuracy
             pip_extras: all,tests
-            pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
+            pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
             timeout_minutes: 120
             sbatch_options: |
               #SBATCH --job-name=anemoi_core_pytest_accuracy
@@ -58,7 +60,7 @@ jobs:
               #SBATCH --mem=0
           - test_name: test_training_cycle
             pip_extras: all,tests
-            pytest_cmd: python3 -m pytest -v training/tests/integration/test_training_cycle.py --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
+            pytest_cmd: python3 -m pytest -v training/tests/integration/test_training_cycle.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
             timeout_minutes: 120
             sbatch_options: |
               #SBATCH --job-name=anemoi_core_pytest_training_cycle
@@ -74,6 +76,12 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
+            # Build off /dev/shm: the default $TMPDIR is RAM-backed tmpfs and counts
+            # against the SLURM --mem cgroup, so installing torch + the nvidia CUDA
+            # stack into it stalls. Redirect to a disk-backed per-job scratch dir.
+            export TMPDIR="$SCRATCH/ci-tmp/$SLURM_JOB_ID"
+            mkdir -p "$TMPDIR"
+            trap 'rm -rf "$TMPDIR"' EXIT
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
             cd $TMPDIR
