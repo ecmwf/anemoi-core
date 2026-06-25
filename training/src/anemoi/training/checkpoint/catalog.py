@@ -158,8 +158,8 @@ class ComponentCatalog:
 
             # Scan all classes in the module
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                # Skip if it's not defined in this module
-                if obj.__module__ != module_name:
+                # Skip if it's not defined in this module (or its submodules)
+                if not obj.__module__.startswith(module_name):
                     continue
 
                 # Check if this class has the expected base class in its hierarchy
@@ -283,15 +283,30 @@ class ComponentCatalog:
 
     @classmethod
     def _get_loaders(cls) -> dict[str, str]:
-        """Get the registry of loaders, discovering if needed."""
+        """Get the registry of loaders, discovering if needed.
+
+        The ``anemoi.training.checkpoint.loading`` package ships the
+        ``LoadingStrategy`` base class but no concrete strategies in this
+        revision — concrete loaders (``WeightsOnlyLoader``, ``ColdStartLoader``,
+        ``TransferLearningLoader``, ``WarmStartLoader``) are introduced in
+        ``anemoi-core`` PR #998. Until that lands, this discovery returns an
+        empty registry; a discovery warning is therefore expected.
+        """
         if cls._loaders is None:
-            cls._loaders = cls._discover_components("anemoi.training.checkpoint.loaders", "LoadingStrategy")
+            cls._loaders = cls._discover_components("anemoi.training.checkpoint.loading", "LoadingStrategy")
             cls._warn_about_discovery_issues("loaders", cls._loaders)
         return cls._loaders
 
     @classmethod
     def _get_modifiers(cls) -> dict[str, str]:
-        """Get the registry of modifiers, discovering if needed."""
+        """Get the registry of modifiers, discovering if needed.
+
+        The ``anemoi.training.checkpoint.modifiers`` package is populated by
+        ``anemoi-core`` PR #442, which introduces ``FreezingModifierStage``
+        and the rest of the model-transformation layer. Until that lands,
+        this discovery returns an empty registry; a discovery warning is
+        therefore expected.
+        """
         if cls._modifiers is None:
             cls._modifiers = cls._discover_components("anemoi.training.checkpoint.modifiers", "ModelModifier")
             cls._warn_about_discovery_issues("modifiers", cls._modifiers)
