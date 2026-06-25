@@ -20,3 +20,12 @@ datasets:
       ignore_nans: False
       no_autocast: True
       alpha: 0.95
+
+      # # To remap predicted variables to different target variables (e.g. model output
+      # # 'tp' vs. observation 'imerg'), add predicted_variables / target_variables and,
+      # # if the dataset metadata is incorrect, suppress the compatibility check:
+      # predicted_variables: [tp]
+      # target_variables: [imerg]
+      # check_variables_compatibility:
+      #   ignore_units: False   # True, or list of variable names
+      #   ignore_processing_period: False  # True, or list of variable names
