@@ -159,6 +159,8 @@ compile:
   - module: anemoi.training.losses.CRPS
     options:
       dynamic: false
+      fullgraph: true
+      mode: max-autotune
 
 # Bounding configuration
 bounding: #These are applied in order
