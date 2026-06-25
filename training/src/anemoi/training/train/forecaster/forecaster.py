@@ -499,10 +499,7 @@ class GraphForecaster(pl.LightningModule):
                     self.loss, 
                     y_pred_p,
                     y_p,
-                    # rollout_step,
-                    # validation_mode,
                     use_reentrant=False,
-                )
                 ) if training_mode else None 
 
                 metrics_next = {}
@@ -517,10 +514,7 @@ class GraphForecaster(pl.LightningModule):
                     self.loss,
                     y_pred,
                     y,
-                    # rollout_step,
-                    # validation_mode,
                     use_reentrant=False,
-                )
                 ) if training_mode else None 
 
                 metrics_next = {}
@@ -530,17 +524,9 @@ class GraphForecaster(pl.LightningModule):
                         y,
                         rollout_step,
                     )
-            # loss = checkpoint(self.loss, y_pred, y, use_reentrant=False) if training_mode else None
 
             x = self.advance_input(x, y_pred, batch, rollout_step)
 
-            # metrics_next = {}
-            # if validation_mode:
-            #     metrics_next = self.calculate_val_metrics(
-            #         y_pred,
-            #         y,
-            #         rollout_step,
-            #     )
             yield loss, metrics_next, y_pred
 
     def _step(
@@ -562,6 +548,7 @@ class GraphForecaster(pl.LightningModule):
             training_mode=True,
             validation_mode=validation_mode,
         ):
+            print(f"{loss.shape=},  {loss_next.shape=}")
             loss += loss_next
             metrics.update(metrics_next)
             y_preds.extend(y_preds_next)
