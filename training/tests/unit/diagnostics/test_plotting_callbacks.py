@@ -408,14 +408,15 @@ def test_process_temporal_downscaler_multi_out_squeeze():
 # ---- process() cache ----
 
 
-def test_process_cache_returns_same_object_on_hit():
-    """process() with a shared cache returns the identical tuple on the second call without recomputing."""
-    callback = PlotSample(
-        sample_idx=0,
-        parameters=["a", "b", "c"],
-        accumulation_levels_plot=[0.5],
-        dataset_names=["data"],
-    )
+def test_process_cache_shared_across_callbacks():
+    """A shared processed_cache avoids redundant post-processing across PlotSample, PlotSpectrum, PlotHistogram.
+
+    Verifies:
+    - post-processor called once per (dataset, members) pair despite N callbacks
+    - cache hit returns the identical tuple object (not a copy)
+    - different members values get separate cache entries
+    - no cache (None) falls back to recomputing on every call
+    """
     batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
     pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
 
@@ -435,78 +436,52 @@ def test_process_cache_returns_same_object_on_hit():
         call_count += 1
         return real_processor(x, **kwargs)
 
-    callback.post_processors = {"data": counting_processor}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+    shared_post_processors = {"data": counting_processor}
+    shared_latlons = {"data": np.zeros((nlatlon, 2))}
+
+    plot_sample = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data"],
+    )
+    plot_spectrum = PlotSpectrum(sample_idx=0, parameters=["a", "b"], min_delta=0.0, dataset_names=["data"])
+    plot_histogram = PlotHistogram(
+        sample_idx=0,
+        parameters=["a", "b"],
+        precip_and_related_fields=[],
+        dataset_names=["data"],
+    )
+
+    for cb in (plot_sample, plot_spectrum, plot_histogram):
+        cb.post_processors = shared_post_processors
+        cb.latlons = shared_latlons
 
     cache: dict = {}
-    result_first = callback.process(pl_module, "data", outputs, batch, processed_cache=cache)
+
+    # --- shared cache: post-processor must fire only once across all three callbacks ---
+    result_sample = plot_sample.process(pl_module, "data", outputs, batch, processed_cache=cache)
     calls_after_first = call_count
 
-    result_second = callback.process(pl_module, "data", outputs, batch, processed_cache=cache)
+    result_spectrum = plot_spectrum.process(pl_module, "data", outputs, batch, processed_cache=cache)
+    result_histogram = plot_histogram.process(pl_module, "data", outputs, batch, processed_cache=cache)
 
-    # post-processor must not have been called again
-    assert call_count == calls_after_first, "post-processor called more than once despite cache hit"
-    # both calls must return the exact same tuple object
-    assert result_first is result_second, "cache hit did not return the same object"
+    assert (
+        call_count == calls_after_first
+    ), f"post-processor called {call_count - calls_after_first} extra time(s) on cache hits"
+    assert result_sample is result_spectrum is result_histogram, "cache hits must return the identical tuple object"
+    assert len(cache) == 1, f"expected 1 cache entry for (dataset, members=0), got {len(cache)}"
 
+    # --- different members value gets a separate entry, not a cache hit ---
+    result_all_members = plot_sample.process(pl_module, "data", outputs, batch, members=None, processed_cache=cache)
+    assert result_all_members is not result_sample, "different members must not share a cache entry"
+    assert len(cache) == 2, f"expected 2 cache entries after adding members=None, got {len(cache)}"
 
-def test_process_no_cache_recomputes():
-    """process() without a cache recomputes on every call."""
-    callback = PlotSample(
-        sample_idx=0,
-        parameters=["a", "b", "c"],
-        accumulation_levels_plot=[0.5],
-        dataset_names=["data"],
-    )
-    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
-    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
-
-    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
-    outputs = _step_output(
-        [{"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)}],
-    )
-
+    # --- no cache: recomputes on every call ---
     call_count = 0
-    real_processor = _identity_post_processor()
-
-    def counting_processor(x, **kwargs) -> torch.Tensor | Any:
-        nonlocal call_count
-        call_count += 1
-        return real_processor(x, **kwargs)
-
-    callback.post_processors = {"data": counting_processor}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
-
-    callback.process(pl_module, "data", outputs, batch)
-    callback.process(pl_module, "data", outputs, batch)
-
-    assert call_count >= 2, "expected post-processor to be called on each process() without a cache"
-
-
-def test_process_cache_isolated_per_members():
-    """process() caches results separately for different members values."""
-    callback = PlotSample(
-        sample_idx=0,
-        parameters=["a", "b", "c"],
-        accumulation_levels_plot=[0.5],
-        dataset_names=["data"],
-    )
-    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
-    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
-
-    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
-    outputs = _step_output(
-        [{"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)}],
-    )
-    callback.post_processors = {"data": _identity_post_processor()}
-    callback.latlons = {"data": np.zeros((nlatlon, 2))}
-
-    cache: dict = {}
-    result_m0 = callback.process(pl_module, "data", outputs, batch, members=0, processed_cache=cache)
-    result_m1 = callback.process(pl_module, "data", outputs, batch, members=None, processed_cache=cache)
-
-    assert result_m0 is not result_m1, "different members values must not share a cache entry"
-    assert len(cache) == 2, f"expected 2 cache entries, got {len(cache)}"
+    plot_sample.process(pl_module, "data", outputs, batch)
+    plot_sample.process(pl_module, "data", outputs, batch)
+    assert call_count >= 2, "expected post-processor to be called on each process() call without a cache"
 
 
 # ---- PlotLoss ----
