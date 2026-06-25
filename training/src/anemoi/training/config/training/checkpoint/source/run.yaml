@@ -1,0 +1,6 @@
+# Checkpoint source — resume or fork by run id. Resolves the run's
+# <checkpoints.root>.parent/<run_id>/last.ckpt and loads it. Set `fork: true` to
+# start a NEW run from run_id's weights; omit / `false` to resume the same run.
+_target_: anemoi.training.checkpoint.sources.run.RunSource
+run_id: null   # REQUIRED: set the run id to resume from / fork from (e.g. training/checkpoint/source=run +training.checkpoint.source.run_id=<id>)
+fork: false

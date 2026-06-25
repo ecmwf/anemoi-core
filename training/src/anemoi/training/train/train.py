@@ -86,6 +86,10 @@ class AnemoiTrainer(ABC):
 
         self.config = convert_to_omegaconf(self.config)
 
+        # Translate the training.checkpoint run-lineage source (RunSource) into the
+        # internal run-identity keys before they are read by the gate below.
+        self._derive_run_identity()
+
         # Optionally override the torch default BLAS backend.
         _blas_backend = self.config.training.get("preferred_blas_backend", None)
         if _blas_backend:
@@ -102,6 +106,7 @@ class AnemoiTrainer(ABC):
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
             or bool(self.config.system.input.warm_start)
+            or OmegaConf.select(self.config, "training.checkpoint.source", default=None) is not None
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
@@ -427,6 +432,16 @@ class AnemoiTrainer(ABC):
         context = CheckpointContext(model=model, config=self.config)
         pipeline = build_checkpoint_pipeline(pipeline_cfg)
 
+        # A RunSource resolves its own path but cannot receive the runtime,
+        # logger-derived server-to-server lineage through Hydra; inject it so a
+        # cross-server resume/fork resolves the same path the trainer would.
+        from anemoi.training.checkpoint.sources import RunSource
+
+        for stage in pipeline.stages:
+            if isinstance(stage, RunSource):
+                stage.parent_run_server2server = getattr(self, "parent_run_server2server", None)
+                stage.fork_run_server2server = getattr(self, "fork_run_server2server", None)
+
         async def _run() -> CheckpointContext:
             resolved = context
             # The run-lineage resolver only matters when a source stage will read
@@ -503,6 +518,44 @@ class AnemoiTrainer(ABC):
 
         return block or None
 
+    def _derive_run_identity(self) -> None:
+        """Map a ``training.checkpoint.source`` RunSource onto the internal run identity.
+
+        The MLflow logger (``_logger_kwargs``), the :attr:`run_id` resolution, the
+        output paths (``_update_paths``) and the dry-run gate share one internal
+        contract: ``training.run_id`` / ``training.fork_run_id``. A ``RunSource``
+        expresses *resume* (``fork=False``) or *fork* (``fork=True``) by run id;
+        this translates it onto that contract **before** the run identity is read,
+        so the logger and paths behave byte-identically:
+
+        - ``fork=False`` -> ``run_id`` set, ``fork_run_id`` None (resume the run);
+        - ``fork=True``  -> ``fork_run_id`` set, ``run_id`` None (a new MLflow run
+          started from the parent's weights — the run_id property then falls
+          through to a fresh MLflow id).
+
+        A ``LocalSource`` explicit ``path`` carries no run identity (a fresh run
+        loading an explicit checkpoint), so the identity keys are left untouched.
+        """
+        source = OmegaConf.select(self.config, "training.checkpoint.source", default=None)
+        if source is None:
+            return
+        target = OmegaConf.select(source, "_target_", default="") or ""
+        if not target.endswith("RunSource"):
+            return
+
+        run_id = OmegaConf.select(source, "run_id", default=None)
+        if run_id is None:
+            return
+
+        if bool(OmegaConf.select(source, "fork", default=False)):
+            # Fork: only fork_run_id is set; run_id MUST stay None so a fresh
+            # MLflow id is minted and the run is tagged as forked (not resumed).
+            self.config.training.run_id = None
+            self.config.training.fork_run_id = run_id
+        else:
+            self.config.training.run_id = run_id
+            self.config.training.fork_run_id = None
+
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
@@ -541,6 +594,15 @@ class AnemoiTrainer(ABC):
         """
         if not self.start_from_checkpoint:
             return None
+
+        # An explicit checkpoint file configured as a LocalSource carries no run
+        # lineage; resume from that path directly (warm-start semantics). A
+        # RunSource resolves via the run identity derived in ``_derive_run_identity``
+        # and is handled by the resolver below.
+        source = OmegaConf.select(self.config, "training.checkpoint.source", default=None)
+        if source is not None and (OmegaConf.select(source, "_target_", default="") or "").endswith("LocalSource"):
+            path = OmegaConf.select(source, "path", default=None)
+            return Path(path) if path is not None else None
 
         from anemoi.training.checkpoint.base import CheckpointContext
         from anemoi.training.checkpoint.sources import LineageResolver

@@ -889,3 +889,56 @@ def test_legacy_freeze_delegation_freezes_nested_submodules() -> None:
     assert not grads["model.model.encoder.weight"]
     assert not grads["model.model.processor.0.weight"]
     assert grads["model.model.decoder.weight"]
+
+
+# --- Run-lineage source: training.checkpoint.source -> internal run identity ---
+
+_RUNSOURCE = "anemoi.training.checkpoint.sources.run.RunSource"
+_LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_run_id", "expected_fork_run_id"),
+    [
+        # resume -> run_id only (same MLflow run continues)
+        ({"_target_": _RUNSOURCE, "run_id": "abc", "fork": False}, "abc", None),
+        # fork -> fork_run_id only, run_id None (fresh MLflow id via fork-solo branch)
+        ({"_target_": _RUNSOURCE, "run_id": "base999", "fork": True}, None, "base999"),
+        # RunSource with no run id -> no-op
+        ({"_target_": _RUNSOURCE, "run_id": None, "fork": False}, None, None),
+        # explicit path carries no run identity (fresh run loading an explicit ckpt)
+        ({"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}, None, None),
+    ],
+)
+def test_derive_run_identity_maps_source_to_internal_keys(
+    source: dict,
+    expected_run_id: str | None,
+    expected_fork_run_id: str | None,
+) -> None:
+    """The RunSource surface lowers to the same internal triplet the legacy keys produced."""
+    trainer = SimpleNamespace(
+        config=OmegaConf.create(
+            {"training": {"run_id": None, "fork_run_id": None, "checkpoint": {"source": source}}},
+        ),
+    )
+    AnemoiTrainer._derive_run_identity(trainer)
+    assert trainer.config.training.run_id == expected_run_id
+    assert trainer.config.training.fork_run_id == expected_fork_run_id
+
+
+def test_derive_run_identity_noop_without_checkpoint_source() -> None:
+    """With no training.checkpoint.source, the legacy keys are left untouched."""
+    trainer = SimpleNamespace(config=OmegaConf.create({"training": {"run_id": "keep", "fork_run_id": None}}))
+    AnemoiTrainer._derive_run_identity(trainer)
+    assert trainer.config.training.run_id == "keep"
+
+
+def test_last_checkpoint_localsource_path_short_circuits() -> None:
+    """An explicit LocalSource path resolves straight to that path (warm-start semantics)."""
+    trainer = SimpleNamespace(
+        start_from_checkpoint=True,
+        config=OmegaConf.create(
+            {"training": {"checkpoint": {"source": {"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}}}},
+        ),
+    )
+    assert AnemoiTrainer.last_checkpoint.func(trainer) == Path("/scratch/run/last.ckpt")
