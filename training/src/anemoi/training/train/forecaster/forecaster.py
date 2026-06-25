@@ -499,7 +499,7 @@ class GraphForecaster(pl.LightningModule):
                     self.loss, 
                     y_pred_p,
                     y_p,
-                    rollout_step,
+                    # rollout_step,
                     # validation_mode,
                     use_reentrant=False,
                 )
@@ -517,7 +517,7 @@ class GraphForecaster(pl.LightningModule):
                     self.loss,
                     y_pred,
                     y,
-                    rollout_step,
+                    # rollout_step,
                     # validation_mode,
                     use_reentrant=False,
                 )
