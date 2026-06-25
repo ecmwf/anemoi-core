@@ -503,12 +503,13 @@ class GraphForecaster(pl.LightningModule):
                     # validation_mode,
                     use_reentrant=False,
                 )
+                ) if training_mode else None 
 
                 metrics_next = {}
                 if validation_mode:
                     metrics_next = self.calculate_val_metrics(
                         y_pred_p,
-                        y,
+                        y_p,
                         rollout_step,
                     )
             else:
@@ -520,6 +521,7 @@ class GraphForecaster(pl.LightningModule):
                     # validation_mode,
                     use_reentrant=False,
                 )
+                ) if training_mode else None 
 
                 metrics_next = {}
                 if validation_mode:
