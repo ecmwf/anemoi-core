@@ -14,6 +14,7 @@ from typing import Final
 
 import numpy as np
 import pandas as pd
+from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.config import load_config
@@ -30,10 +31,16 @@ LOGGER = logging.getLogger(__name__)
 # @pytest.mark.slow
 def test_config_build(tmp_path: Path) -> None:
 
-    config = load_config("training/tests/integration/config/atmo_integration_test.yaml")
+    # Load without resolving: interpolations such as
+    # system.input.graph = ${system.output.root}/... depend on system.output.root,
+    # which is only set below. Resolving eagerly would collapse them to MISSING.
+    config = load_config(
+        "training/tests/integration/config/atmo_integration_test.yaml",
+        resolve=False,
+    )
 
-    # TODO(Oskar): double check
     config.system.output.root = str(tmp_path)
+    OmegaConf.resolve(config)
 
     assert config.diagnostics.log.interval == 50
 
