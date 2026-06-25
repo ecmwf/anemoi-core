@@ -29,8 +29,6 @@ jobs:
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: check_date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
-    env:
-      MLFLOW_TEST_URL: ${{ secrets.MLFLOW_TEST_URL }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +66,9 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[${{ matrix.pip_extras }}] -e ./models[all,tests] -e ./graphs[all,tests]
+            # Inject the MLflow URL here (not via job-level env:, which does not
+            # propagate to the sbatch job); secrets are valid inside this template.
+            export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
             ${{ matrix.pytest_cmd }}
             deactivate
             rm -rf $REPO_NAME
