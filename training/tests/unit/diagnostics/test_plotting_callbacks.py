@@ -405,6 +405,110 @@ def test_process_temporal_downscaler_multi_out_squeeze():
     assert output_tensor.shape == (pl_module.task.num_output_timesteps, 1, 1, nlatlon, nvar), output_tensor.shape
 
 
+# ---- process() cache ----
+
+
+def test_process_cache_returns_same_object_on_hit():
+    """process() with a shared cache returns the identical tuple on the second call without recomputing."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b", "c"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data"],
+    )
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
+    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
+
+    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
+    outputs = _step_output(
+        [
+            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
+            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
+        ],
+    )
+
+    call_count = 0
+    real_processor = _identity_post_processor()
+
+    def counting_processor(x, **kwargs) -> torch.Tensor | Any:
+        nonlocal call_count
+        call_count += 1
+        return real_processor(x, **kwargs)
+
+    callback.post_processors = {"data": counting_processor}
+    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+
+    cache: dict = {}
+    result_first = callback.process(pl_module, "data", outputs, batch, processed_cache=cache)
+    calls_after_first = call_count
+
+    result_second = callback.process(pl_module, "data", outputs, batch, processed_cache=cache)
+
+    # post-processor must not have been called again
+    assert call_count == calls_after_first, "post-processor called more than once despite cache hit"
+    # both calls must return the exact same tuple object
+    assert result_first is result_second, "cache hit did not return the same object"
+
+
+def test_process_no_cache_recomputes():
+    """process() without a cache recomputes on every call."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b", "c"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data"],
+    )
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
+    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
+
+    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
+    outputs = _step_output(
+        [{"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)}],
+    )
+
+    call_count = 0
+    real_processor = _identity_post_processor()
+
+    def counting_processor(x, **kwargs) -> torch.Tensor | Any:
+        nonlocal call_count
+        call_count += 1
+        return real_processor(x, **kwargs)
+
+    callback.post_processors = {"data": counting_processor}
+    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+
+    callback.process(pl_module, "data", outputs, batch)
+    callback.process(pl_module, "data", outputs, batch)
+
+    assert call_count >= 2, "expected post-processor to be called on each process() without a cache"
+
+
+def test_process_cache_isolated_per_members():
+    """process() caches results separately for different members values."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b", "c"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["data"],
+    )
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
+    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
+
+    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
+    outputs = _step_output(
+        [{"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)}],
+    )
+    callback.post_processors = {"data": _identity_post_processor()}
+    callback.latlons = {"data": np.zeros((nlatlon, 2))}
+
+    cache: dict = {}
+    result_m0 = callback.process(pl_module, "data", outputs, batch, members=0, processed_cache=cache)
+    result_m1 = callback.process(pl_module, "data", outputs, batch, members=None, processed_cache=cache)
+
+    assert result_m0 is not result_m1, "different members values must not share a cache entry"
+    assert len(cache) == 2, f"expected 2 cache entries, got {len(cache)}"
+
+
 # ---- PlotLoss ----
 
 _PLOT_LOSS_CONFIG = {
