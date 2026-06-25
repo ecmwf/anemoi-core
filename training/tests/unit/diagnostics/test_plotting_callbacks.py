@@ -484,6 +484,55 @@ def test_process_cache_shared_across_callbacks():
     assert call_count >= 2, "expected post-processor to be called on each process() call without a cache"
 
 
+def test_process_cache_ensemble_list_members():
+    """process() with members as a list (PlotEnsSample) hashes correctly and hits cache on repeat."""
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
+    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
+
+    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
+    outputs = _step_output(
+        [
+            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
+            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
+        ],
+    )
+
+    call_count = 0
+    real_processor = _identity_post_processor()
+
+    def counting_processor(x, **kwargs) -> torch.Tensor | Any:
+        nonlocal call_count
+        call_count += 1
+        return real_processor(x, **kwargs)
+
+    plot_ens = PlotEnsSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        members=[0, 1],
+        dataset_names=["data"],
+    )
+    plot_ens.post_processors = {"data": counting_processor}
+    plot_ens.latlons = {"data": np.zeros((nlatlon, 2))}
+
+    cache: dict = {}
+
+    # first call populates the cache
+    result_first = plot_ens.process(pl_module, "data", outputs, batch, members=[0, 1], processed_cache=cache)
+    assert len(cache) == 1, f"expected 1 cache entry for members=[0, 1], got {len(cache)}"
+    calls_after_first = call_count
+
+    # second call with the same list must hit the cache
+    result_second = plot_ens.process(pl_module, "data", outputs, batch, members=[0, 1], processed_cache=cache)
+    assert call_count == calls_after_first, "post-processor called again despite list-members cache hit"
+    assert result_first is result_second, "list-members cache hit must return the identical tuple"
+
+    # a different list gets a separate entry
+    result_other = plot_ens.process(pl_module, "data", outputs, batch, members=[0], processed_cache=cache)
+    assert result_other is not result_first, "different member lists must not share a cache entry"
+    assert len(cache) == 2, f"expected 2 cache entries after adding members=[0], got {len(cache)}"
+
+
 # ---- PlotLoss ----
 
 _PLOT_LOSS_CONFIG = {
