@@ -1,0 +1,15 @@
+data: ${oc.env:DATA_DIR}/
+grids: ${oc.env:GRID_DIR}/
+
+dataset_in_lres: downscaling-od-cf-eefh-0001-mars-o96-2003-2023-12h-v3
+dataset_in_hres: downscaling-od-cf-enfh-0001-mars-o320-2003-2023-12h-v3-forcings
+dataset_out_hres: downscaling-od-cf-enfh-0001-mars-o320-2003-2023-12h-v3
+
+residual_statistics: ${oc.env:RESIDUAL_STATISTICS_DIR}/o320_dict_0_72.npy
+truncation_inv: ${oc.env:INTER_MAT_DIR}/interpol_O320_to_O96_linear.mat.npz
+truncation: ${oc.env:INTER_MAT_DIR}/interpol_O96_to_O320_linear.mat.npz
+
+graph: ${oc.env:OUTPUT}/graphs/multi_o96_o320.pt
+
+loss_matrices_path: null
+warm_start: null

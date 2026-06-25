@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .diffusiondownscaler import GraphDiffusionDownscaler
 from .diffusionforecaster import GraphDiffusionForecaster
 from .diffusionforecaster import GraphDiffusionTendForecaster
 from .ensforecaster import GraphEnsForecaster
@@ -18,9 +19,9 @@ from .single_step import GraphDownscaler
 
 __all__ = [
     "GraphAutoEncoder",
+    "GraphDiffusionDownscaler",
     "GraphDiffusionForecaster",
     "GraphDiffusionTendForecaster",
-    "GraphDownscaler",
     "GraphEnsForecaster",
     "GraphForecaster",
     "GraphInterpolator",
