@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -39,13 +40,18 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+_chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
+_trainable_edge_perm_fix_migration = importlib.import_module(
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+).migrate
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -53,6 +59,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
+    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -269,6 +276,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_node_name=data_node_name,
             )
 
+            # Check unit compatibility between predicted and target variables
+            ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
+            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
+
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
@@ -452,13 +463,27 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if full_key.startswith(processor_prefixes):
                 state_dict[full_key] = value
 
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        checkpoint["task_state"] = self.task.training_runtime_state_dict()
+
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+        # Apply migrations to handle state_dict key changes from older checkpoints.
+        # These are idempotent: already-migrated checkpoints are unaffected.
+        _trainable_edge_perm_fix_migration(checkpoint, model=self)
         self._update_checkpoint_state_dict_for_load(checkpoint)
 
         self._ckpt_model_name_to_index = {
             dataset_name: data_indices.name_to_index
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
+
+        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+
+        # Extract variables_metadata for unit compatibility check
+        self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+            checkpoint,
+            self._ckpt_model_name_to_index,
+        )
 
     def _update_scaler_for_dataset(
         self,
@@ -890,7 +915,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+    ) -> TrainingStepOutput:
         pass
 
     def allgather_batch(self, batch: torch.Tensor, dataset_name: str) -> torch.Tensor:
@@ -930,6 +955,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         step: int | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        without_scalers: list[str] | list[int] | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -986,6 +1012,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     metric_kwargs["pred_layout"] = pred_layout
                 if target_layout is not None:
                     metric_kwargs["target_layout"] = target_layout
+                if without_scalers is not None:
+                    metric_kwargs["without_scalers"] = without_scalers
                 if getattr(metric, "needs_shard_layout_info", False):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
@@ -1002,8 +1030,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
 
-        train_loss, *_ = self._step(batch)
-        train_loss = train_loss.sum()
+        step_output = self._step(batch)
+        train_loss = step_output.loss.sum()
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -1020,15 +1048,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> TrainingStepOutput:
         """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Validation batch
+            Validation batch.
         batch_idx : int
-            Batch inces
+            Batch index.
+
+        Returns
+        -------
+        TrainingStepOutput
+            Output of the validation step.
         """
         del batch_idx
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
@@ -1037,7 +1070,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch_size = next(iter(batch.values())).shape[0]
 
         with torch.no_grad():
-            val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
+            step_output = self._step(batch, validation_mode=True)
+        val_loss_scales = step_output.loss
+        metrics = step_output.metrics
         val_loss = val_loss_scales.sum()
 
         self.log(
@@ -1084,7 +1119,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     sync_dist=True,
                 )
 
-        return val_loss, *args
+        return step_output
 
     def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
@@ -1109,6 +1144,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        self.trainer.datamodule.set_epoch(self.current_epoch + 1)
 
     def configure_optimizers(
         self,

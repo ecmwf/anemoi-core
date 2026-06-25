@@ -20,6 +20,151 @@ LOG = logging.getLogger(__name__)
 GROUP_SPEC = str | list[str] | bool
 
 
+def extract_variables_metadata_from_checkpoint(
+    checkpoint: dict,
+    dataset_names: dict[str, object],
+) -> dict[str, dict] | None:
+    """Extract per-dataset variables_metadata from a loaded checkpoint."""
+    dataset_metadata = checkpoint.get("hyper_parameters", {}).get("metadata", {}).get("dataset", {})
+    ckpt_variables_metadata = {}
+    for dataset_name in dataset_names:
+        ds_inference = dataset_metadata.get(dataset_name, {})
+        vm = ds_inference.get("variables_metadata")
+        if vm is not None:
+            ckpt_variables_metadata[dataset_name] = vm
+    return ckpt_variables_metadata or None
+
+
+def check_variables_metadata_compatibility(
+    ckpt_variables_metadata: dict[str, dict] | None,
+    dataset_metadata: dict[str, dict],
+    **options: object,
+) -> None:
+    """Check unit compatibility between checkpoint and dataset variables_metadata.
+
+    For each dataset present in the checkpoint's variables_metadata, compares the units
+    and other properties against the current dataset's variables_metadata using
+    ``Variable.check_compatibility``.
+
+    Parameters
+    ----------
+    ckpt_variables_metadata : dict[str, dict] | None
+        Per-dataset variables_metadata from the checkpoint.
+        Maps dataset names to dicts of {variable_name: {metadata...}}.
+    dataset_metadata : dict[str, dict]
+        Per-dataset metadata from the current datamodule. Each entry is expected to have
+        a ``"variables_metadata"`` key.
+    **options : object
+        Additional keyword arguments forwarded to ``Variable.check_compatibility``
+        (e.g. ``ignore_units``, ``ignore_processing_period``).
+
+    Raises
+    ------
+    ValueError
+        If variables have incompatible units between checkpoint and dataset.
+
+    Warns
+    -----
+    If variables_metadata is missing from either the checkpoint or the current dataset,
+    a warning is logged and the check is skipped.
+    """
+    if ckpt_variables_metadata is None:
+        LOG.warning(
+            "Checkpoint does not contain variables_metadata. Skipping unit compatibility check.",
+        )
+        return
+
+    for dataset_name, ckpt_var_meta in ckpt_variables_metadata.items():
+        ds_meta = dataset_metadata.get(dataset_name, {})
+        ds_var_meta = ds_meta.get("variables_metadata")
+
+        if ds_var_meta is None:
+            LOG.warning(
+                "Dataset '%s' does not contain variables_metadata. "
+                "Skipping unit compatibility check for this dataset.",
+                dataset_name,
+            )
+            continue
+
+        ckpt_vars = {name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items()}
+        ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
+
+        try:
+            Variable.check_compatibility(ckpt_vars, ds_vars, **options)
+        except ValueError as e:
+            msg = f"Variable compatibility check failed for dataset '{dataset_name}': {e}"
+            raise ValueError(msg) from e
+
+
+def check_loss_variable_units_compatibility(
+    predicted_variables: list[str],
+    target_variables: list[str],
+    variables_metadata: dict[str, dict] | None,
+    **options: object,
+) -> None:
+    """Check unit compatibility between paired predicted and target variables.
+
+    When a loss function maps predicted variables to different target variables
+    (e.g. model output ``tp`` compared against observation ``imerg``), this function
+    verifies that the units of each predicted/target pair are compatible.
+
+    Parameters
+    ----------
+    predicted_variables : list[str]
+        Names of the predicted (model output) variables.
+    target_variables : list[str]
+        Names of the target (observation) variables.
+    variables_metadata : dict[str, dict] | None
+        Per-variable metadata dict keyed by variable name.
+    **options : object
+        Additional keyword arguments forwarded to ``Variable.compatible``
+        (e.g. ``ignore_units``, ``ignore_processing_period``).
+    """
+    if variables_metadata is None:
+        LOG.warning(
+            "No variables_metadata available. Skipping loss variable unit compatibility check.",
+        )
+        return
+
+    for pred_var, target_var in zip(predicted_variables, target_variables, strict=True):
+
+        if pred_var == target_var:
+            continue
+
+        if pred_var not in variables_metadata:
+            LOG.warning(
+                "Predicted variable '%s' not found in variables_metadata. "
+                "Skipping unit check for pair ('%s', '%s').",
+                pred_var,
+                pred_var,
+                target_var,
+            )
+            continue
+
+        if target_var not in variables_metadata:
+            LOG.warning(
+                "Target variable '%s' not found in variables_metadata. Skipping unit check for pair ('%s', '%s').",
+                target_var,
+                pred_var,
+                target_var,
+            )
+            continue
+
+        pred_variable = Variable.from_dict(pred_var, variables_metadata[pred_var])
+        # Build the target variable under the predicted variable's name so that
+        # Variable.compatible()'s name assertion passes (we are comparing metadata
+        # properties, not variable identity).
+        target_variable = Variable.from_dict(pred_var, variables_metadata[target_var])
+
+        compatible, reason = pred_variable.compatible(target_variable, return_reason=True, **options)
+        if not compatible:
+            msg = (
+                f"Loss variable mismatch: predicted variable '{pred_var}' and "
+                f"target variable '{target_var}' are not compatible: {reason}"
+            )
+            raise ValueError(msg)
+
+
 @lru_cache
 def _crack_variable_name(variable_name: str) -> tuple[str, str | None]:
     """Attempt to crack the variable name into parameter name and level.

@@ -1,0 +1,47 @@
+# Minimal Hydra override file for `anemoi-training evaluate`.
+#
+# A checkpoint MUST be specified (Pattern A or B below) or the command will
+# raise a RuntimeError before evaluation starts.
+#
+# Usage:
+#   anemoi-training evaluate --config-dir /path/to/overrides --config-name config_evaluate
+#
+# Or pass individual keys as CLI overrides:
+#   anemoi-training evaluate training.run_id=<run_id>
+
+# ── Checkpoint (REQUIRED — choose one pattern) ───────────────────────────────
+
+# Pattern A: last.ckpt of a known run_id (most common)
+training:
+  run_id: ???               # run_id of the completed training run
+  load_weights_only: True   # only restore model weights; skips a redundant second
+                            # load by Lightning and avoids restoring optimiser state
+
+# Pattern B: point directly at a checkpoint file
+# warm_start takes precedence over run_id when both are set.
+# system:
+#   input:
+#     warm_start: /path/to/epoch=10-step=5000.ckpt
+# training:
+#   load_weights_only: True
+
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+diagnostics:
+  # Checkpointing and weight averaging are automatically disabled by the
+  # evaluator — evaluation is a read-only operation on a trained model.
+  enable_checkpointing: False  # listed here for clarity; always overridden
+  enable_progress_bar: True
+  print_memory_summary: False
+
+  plot:
+    enabled: True            # generate diagnostic plots during validation
+    asynchronous: True       # plot in a background thread
+
+  log:
+    mlflow:
+      enabled: True          # log metrics and plots to an existing MLflow experiment
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+dataloader:
+  limit_batches:
+    validation: null         # set to an integer to cap the number of batches

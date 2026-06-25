@@ -93,44 +93,43 @@ async def download_with_retry(
 
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    for attempt in range(max_retries):
-        try:
-            result = await _attempt_download(url, dest, timeout, chunk_size, attempt + 1, max_retries)
-            if result:
-                return result
-        except (TimeoutError, asyncio.TimeoutError) as e:  # noqa: UP041 (Python 3.10 compatibility)
-            _handle_timeout_error(e, attempt, max_retries, url, timeout)
-        except aiohttp.ClientError as e:
-            _handle_client_error(e, attempt, max_retries, url)
-        except Exception as e:
-            LOGGER.exception("Unexpected error during download")
-            msg = "http"
-            raise CheckpointSourceError(msg, url, e, {"attempts": attempt + 1}) from e
+    timeout_config = aiohttp.ClientTimeout(total=timeout)
+    async with aiohttp.ClientSession(timeout=timeout_config) as session:
+        for attempt in range(max_retries):
+            try:
+                return await _attempt_download(session, url, dest, chunk_size, attempt + 1, max_retries)
+            except (TimeoutError, asyncio.TimeoutError) as e:  # noqa: UP041 (Python 3.10 compatibility)
+                _handle_timeout_error(e, attempt, max_retries, url, timeout)
+            except aiohttp.ClientError as e:
+                _handle_client_error(e, attempt, max_retries, url)
+            except Exception as e:
+                LOGGER.exception("Unexpected error during download")
+                msg = f"Unexpected error downloading checkpoint from {url}"
+                raise CheckpointSourceError(msg, url, e, {"attempts": attempt + 1}) from e
 
-        # Exponential backoff
-        if attempt < max_retries - 1:
-            wait_time = 2**attempt
-            LOGGER.info("Waiting %ds before retry", wait_time)
-            await asyncio.sleep(wait_time)
+            # Exponential backoff
+            if attempt < max_retries - 1:
+                wait_time = 2**attempt
+                LOGGER.info("Waiting %ds before retry", wait_time)
+                await asyncio.sleep(wait_time)
 
     # Should not reach here, but just in case
-    msg = "http"
+    msg = f"All {max_retries} download attempts exhausted for {url}"
     raise CheckpointSourceError(msg, url, None, {"attempts": max_retries, "reason": "All retries exhausted"})
 
 
 async def _attempt_download(
+    session: aiohttp.ClientSession,
     url: str,
     dest: Path,
-    timeout: int,
     chunk_size: int,
     attempt: int,
     max_retries: int,
-) -> Path | None:
-    """Attempt a single download."""
+) -> Path:
+    """Attempt a single download using an existing session."""
     LOGGER.info("Download attempt %d/%d for %s", attempt, max_retries, url)
 
-    timeout_config = aiohttp.ClientTimeout(total=timeout)
-    async with aiohttp.ClientSession(timeout=timeout_config) as session, session.get(url) as response:
+    async with session.get(url) as response:
         response.raise_for_status()
 
         total_size = int(response.headers.get("content-length", 0))
@@ -163,14 +162,24 @@ def _handle_timeout_error(e: asyncio.TimeoutError, attempt: int, max_retries: in
 
 
 def _handle_client_error(e: aiohttp.ClientError, attempt: int, max_retries: int, url: str) -> None:
-    """Handle client errors during download."""
+    """Handle client errors during download.
+
+    Raises immediately for 4xx client errors (non-retryable).
+    Only retries on 5xx server errors or connection failures.
+    """
     LOGGER.warning("Download failed on attempt %d/%d: %s", attempt + 1, max_retries, e)
+
+    # Don't retry 4xx client errors — they are permanent failures
+    if isinstance(e, aiohttp.ClientResponseError) and e.status < 500:
+        msg = f"HTTP {e.status} client error downloading checkpoint from {url}"
+        raise CheckpointSourceError(msg, url, e, {"attempts": attempt + 1, "status": e.status}) from e
+
     if attempt == max_retries - 1:
-        msg = "http"
+        msg = f"HTTP error downloading checkpoint from {url}"
         raise CheckpointSourceError(msg, url, e, {"attempts": max_retries}) from e
 
 
-def validate_checkpoint(checkpoint_data: dict[str, Any]) -> bool:
+def validate_checkpoint(checkpoint_data: dict[str, Any], *, check_tensors: bool = False) -> bool:
     """Validate checkpoint structure and contents.
 
     Performs validation checks on a loaded checkpoint to ensure
@@ -180,6 +189,10 @@ def validate_checkpoint(checkpoint_data: dict[str, Any]) -> bool:
     ----------
     checkpoint_data : dict
         Checkpoint data dictionary to validate
+    check_tensors : bool, optional
+        Whether to check tensors for NaN/Inf values (default: False).
+        Set to True to enable expensive tensor validation for large
+        checkpoints. When False, only structural validation is performed.
 
     Returns
     -------
@@ -195,6 +208,8 @@ def validate_checkpoint(checkpoint_data: dict[str, Any]) -> bool:
     --------
     >>> checkpoint = torch.load('model.ckpt')
     >>> is_valid = validate_checkpoint(checkpoint)
+    >>> # Skip expensive tensor checks for large checkpoints
+    >>> is_valid = validate_checkpoint(checkpoint, check_tensors=False)
     """
     validation_errors = []
 
@@ -205,8 +220,9 @@ def validate_checkpoint(checkpoint_data: dict[str, Any]) -> bool:
     # Check if at least one model key exists
     _validate_model_keys(checkpoint_data, validation_errors)
 
-    # Check for corrupt tensors
-    _validate_tensors(checkpoint_data, validation_errors)
+    # Check for corrupt tensors (optional, can be expensive for large checkpoints)
+    if check_tensors:
+        _validate_tensors(checkpoint_data, validation_errors)
 
     if validation_errors:
         msg = "Checkpoint validation failed"
@@ -244,22 +260,49 @@ def _check_tensor_validity(name: str, tensor: torch.Tensor, validation_errors: l
         validation_errors.append(f"Tensor '{name}' contains infinite values")
 
 
-def _validate_nested_tensors(parent_key: str, nested_dict: dict, validation_errors: list[str]) -> None:
-    """Validate tensors in nested dictionaries (recursive)."""
+def _validate_nested_tensors(
+    parent_key: str,
+    nested_dict: dict,
+    validation_errors: list[str],
+    *,
+    _depth: int = 0,
+    max_depth: int = 20,
+) -> None:
+    """Validate tensors in nested dictionaries (recursive).
+
+    Parameters
+    ----------
+    parent_key : str
+        Dot-separated key prefix for error messages
+    nested_dict : dict
+        Dictionary to recurse into
+    validation_errors : list[str]
+        Accumulator for validation error messages
+    _depth : int
+        Current recursion depth (internal use)
+    max_depth : int
+        Maximum recursion depth to prevent unbounded recursion (default: 20)
+    """
+    if _depth >= max_depth:
+        LOGGER.debug("Max validation depth (%d) reached at key '%s', skipping deeper nesting", max_depth, parent_key)
+        return
+
     for sub_key, sub_value in nested_dict.items():
         full_key = f"{parent_key}.{sub_key}"
         if isinstance(sub_value, torch.Tensor):
             _check_tensor_validity(full_key, sub_value, validation_errors)
         elif isinstance(sub_value, dict):
-            # Recurse into nested dictionaries
-            _validate_nested_tensors(full_key, sub_value, validation_errors)
+            _validate_nested_tensors(full_key, sub_value, validation_errors, _depth=_depth + 1, max_depth=max_depth)
 
 
 def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
-    """Extract metadata without loading full checkpoint.
+    """Extract metadata from a checkpoint file.
 
-    Loads only the metadata from a checkpoint file without loading
-    the full model weights, which can save memory for large models.
+    Notes
+    -----
+    This loads the **entire** checkpoint into CPU memory via
+    ``torch.load`` because PyTorch does not support partial loading.
+    For very large checkpoints this may consume significant RAM.
 
     Parameters
     ----------
@@ -275,6 +318,8 @@ def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
     ------
     CheckpointLoadError
         If checkpoint cannot be loaded
+    CheckpointValidationError
+        If metadata cannot be extracted from the loaded data
 
     Examples
     --------
@@ -288,16 +333,20 @@ def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
             {"exists": False},
         )
 
+    import pickle
+
     try:
-        # Load checkpoint with weights on CPU to save GPU memory
         checkpoint = torch.load(
             checkpoint_path,
             map_location="cpu",
-            weights_only=False,  # Need to load optimizer states etc.
+            weights_only=False,
         )
+    except (OSError, RuntimeError, pickle.UnpicklingError, EOFError, ValueError) as e:
+        raise CheckpointLoadError(checkpoint_path, e, {"operation": "extract_metadata"}) from e
 
+    try:
         # Extract metadata (non-tensor data)
-        metadata = {}
+        metadata: dict[str, Any] = {}
         for key, value in checkpoint.items():
             if not isinstance(value, torch.Tensor | dict) or key in [
                 "epoch",
@@ -319,11 +368,11 @@ def get_checkpoint_metadata(checkpoint_path: Path) -> dict[str, Any]:
         elif "model_state_dict" in checkpoint:
             metadata["num_parameters"] = len(checkpoint["model_state_dict"])
 
-        return metadata  # noqa: TRY300
+    except (KeyError, TypeError, AttributeError) as e:
+        msg = f"Failed to extract metadata from checkpoint {checkpoint_path}: {e}"
+        raise CheckpointValidationError(msg) from e
 
-    except Exception as e:
-        # Catch all torch.load failures including UnpicklingError, RuntimeError, etc.
-        raise CheckpointLoadError(checkpoint_path, e, {"operation": "extract_metadata"}) from e
+    return metadata
 
 
 def calculate_checksum(file_path: Path, algorithm: str = "sha256") -> str:
@@ -392,6 +441,8 @@ def compare_state_dicts(
 
     shape_mismatches = {}
     for key in source_keys.intersection(target_keys):
+        if not isinstance(source[key], torch.Tensor) or not isinstance(target[key], torch.Tensor):
+            continue  # Skip non-tensor entries (e.g., num_batches_tracked)
         source_shape = source[key].shape
         target_shape = target[key].shape
 
