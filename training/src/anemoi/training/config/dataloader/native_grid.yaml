@@ -44,9 +44,8 @@ limit_batches:
 # See https://anemoi-datasets.readthedocs.io
 # ============
 
-# Pointers to datasets and model run info
+# Pointer to dataset
 dataset: ${system.input.dataset}
-model_run_info: null  # Add for non-analysis training
 
 training:
   datasets:
@@ -54,10 +53,8 @@ training:
       dataset_config:
         dataset: ${dataloader.dataset}
         frequency: ${data.frequency}
-        drop: []
       start: null
       end: 2020
-      trajectory: ${dataloader.model_run_info}
 
 validation:
   datasets:
@@ -65,10 +62,8 @@ validation:
       dataset_config:
         dataset: ${dataloader.dataset}
         frequency: ${data.frequency}
-        drop: []
       start: 2021
       end: 2021
-      trajectory: ${dataloader.model_run_info}
 
 test:
   datasets:
@@ -76,7 +71,5 @@ test:
       dataset_config:
         dataset: ${dataloader.dataset}
         frequency: ${data.frequency}
-        drop: []
       start: 2022
       end: null
-      trajectory: ${dataloader.model_run_info}

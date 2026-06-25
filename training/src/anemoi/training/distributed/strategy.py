@@ -140,7 +140,10 @@ class BaseDDPStrategy(DDPStrategy):
         dict
             A dictionary containing the shard sizes for each dataset.
         """
-        shard_sizes = trainer.model.module.shard_sizes
+        # For training, the model is wrapped in DDP and the LightningModule is accessible via trainer.model.module
+        # For evaluation, the model is not wrapped in DDP and the LightningModule is accessible via trainer.model
+        model = getattr(trainer.model, "module", trainer.model)
+        shard_sizes = model.shard_sizes
         assert shard_sizes is not None, "Shard shapes should be set after setup"
         return shard_sizes
 

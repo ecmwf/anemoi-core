@@ -28,9 +28,9 @@ class MSELoss(FunctionalLoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, n_outputs, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, n_outputs, lat*lon, n_outputs)
 
         Returns
         -------
