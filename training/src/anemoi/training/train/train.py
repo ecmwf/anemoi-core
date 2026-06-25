@@ -332,7 +332,11 @@ class AnemoiTrainer(ABC):
         from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
         ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
-        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
+        compat_cfg = self.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
 
     @cached_property
     def model(self) -> pl.LightningModule:
@@ -365,12 +369,16 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu,
+                # The model will be sent to GPU when trainer.fit() is called
                 with use_synced_torch_rng():
                     model = training_method_cls.load_from_checkpoint(
                         self.last_checkpoint,
                         **kwargs,
                         strict=False,
                         weights_only=False,  # required for Pytorch Lightning 2.6
+                        map_location="cpu",
                     )
 
             model.data_indices = self.data_indices
@@ -383,8 +391,11 @@ class AnemoiTrainer(ABC):
             # Freeze the chosen model weights
             LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
             for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
-                LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                is_found = freeze_submodule_by_name(model.model.model, submodule_name)
+                if is_found:
+                    LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                else:
+                    LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
 
         return model
 
@@ -545,6 +556,22 @@ class AnemoiTrainer(ABC):
 
         if self.config.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
+        # For GPU, check if 'cuda' is available
+        # For historical reasons, on AMD GPUs the API is still called 'cuda' even though ROCm is used.
+        if (
+            self.config.system.hardware.accelerator == "gpu" or self.config.system.hardware.accelerator == "cuda"
+        ) and not torch.cuda.is_available():
+            msg = (
+                "GPU accelerator requested but running on GPUs is not possible. "
+                "Possible reasons include no GPUs being available on the node,"
+                "or PyTorch not being installed with CUDA/ROCm support. "
+                "*Note* on aarch64 systems, the default torch wheel does not have CUDA/ROCm support."
+                "To install PyTorch with CUDA support on aarch64, you should pass the index-url argument to pip install"
+                "e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`"
+                "Please check your setup and run "
+                "`python -c 'import torch; print(torch.cuda.is_available())'` to confirm GPU support.",
+            )
+            raise RuntimeError(msg)
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:

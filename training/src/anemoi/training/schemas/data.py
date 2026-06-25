@@ -56,8 +56,8 @@ class DataSchema(PydanticBaseModel):
 
     format: str = Field(example=None)
     "Format of the data."
-    frequency: str = Field(example=None)
-    "Time frequency requested from the dataset."
+    frequency: str | None = Field(default=None)
+    "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
     num_features: int | None
