@@ -492,24 +492,23 @@ iterations is used.
 Rollout training is when the model is iterated within the training
 process, producing forecasts for many future time steps. The loss is
 calculated on every step in the rollout period and averaged, and
-gradients backprogogated through the iteration process.
+gradients backpropagated through the iteration process.
 
-For example, if using ``rollout=3`` and a model with a 6 hour prediction
-step-size, when training the model predicts for time t+1, this is used
-as inputs to predict time t+2, and this used to predict time t+3. The
-loss is calculated as ``1/3 * ( (loss at t+1) + (loss at t+2) + (loss at
-t+3) )`` Rollout training has been shown to improve stability for long
-auto-regressive inference runs, by making the training objective is
-closer to the use case of forecasting arbitrary lead timestep through
-autoreggresive iteration of the model.
+For example, with ``rollout=3`` and a 6-hour model timestep, the model
+autoregressively predicts t+6 h, then uses that prediction as input to
+predict t+12 h, and again to predict t+18 h. The loss is averaged across
+all three steps: ``(loss(t+6h) + loss(t+12h) + loss(t+18h)) / 3``.
+Training with rollout has been shown to improve stability in long
+autoregressive inference runs, because the training objective more closely
+resembles the multi-step forecasting use case.
 
 In most cases, in the first stage of training, the model is trained for
-many epochs to perdict only one step (i.e. rollout.max = 1). Once this
+many epochs to predict only one step (i.e. rollout.max = 1). Once this
 is completed, there is a second stage of training, which uses *rollout*
 to fine-tune the model error at longer leadtimes. The model begins with
 a rollout loss defined by ``rollout.start``, usually 1, and then every n
 epochs (defined by rollout.epoch_increment) the rollout value increases
-up till ``rollout.max``.
+up until ``rollout.max``.
 
 .. code:: yaml
 
@@ -521,15 +520,49 @@ up till ``rollout.max``.
       max: 12
 
 This two stage approach requires the model training to be restarted
-after stage one, see instructions below. The user should make sure to
-set ``config.training.run_id`` equal to the run-id of the first stage of
-training.
+after stage one, see :ref:`restart target` below. The user should make
+sure to set ``config.training.run_id`` equal to the run-id of the first
+stage of training.
 
 Note, for many purposes, it may make sense for the rollout stage (stage
-two) to performed at the minimum learning rate throughout and for the
+two) to be performed at the minimum learning rate throughout and for the
 number of batches to be reduced (using
-``config.dataloader.training.limit_batches``) to prevent overfit to
+``config.dataloader.training.limit_batches``) to prevent overfitting to
 specific timesteps.
+
+Restarting rollout training
+===========================
+
+When restarting an interrupted rollout run, the rollout state
+(the current ``rollout.step`` and the last epoch that triggered an
+increment) is automatically saved in every Lightning checkpoint and
+restored on resume. No manual adjustment of ``rollout.start`` is needed.
+
+When using rollout training with epoch_increment > 0, extra care is 
+required when restarting an interrupted run. 
+
+Anemoi currently does not track how many samples remain in the dataloader 
+at the point where a checkpoint is written. For this reason, only end-of-epoch 
+checkpoints should be used for reproducible restart workflows.
+
+The recommended restart recipe is:
+
+1. Restart from an *end-of-epoch checkpoint*.
+2. Keep ``rollout.start``, ``epoch_increment``, and ``max``
+   **unchanged** in your configuration.
+3. Ensure that the ``training.run_id`` is set to the run ID of the interrupted job.
+
+On resume, Anemoi reads the saved rollout state from the checkpoint and
+continues the schedule from exactly where it left off. A double-increment
+guard ensures that if the checkpoint was written at an epoch boundary the
+rollout is not incremented twice for that epoch.
+
+.. note::
+
+   Checkpoints written before PR #1109 have no stored rollout state.
+   Resuming from such a checkpoint falls back to ``rollout.start``, so
+   you would need to set ``start`` to the rollout value that was active
+   when that checkpoint was saved.
 
 ***************************
  Restarting a training run
