@@ -750,6 +750,59 @@ def test_plot_loss_forecaster():
         assert mock_output_figure.call_count == output_times
 
 
+def test_plot_loss_accepts_processed_cache_kwarg():
+    """PlotLoss._plot accepts and ignores processed_cache without error and still produces figures."""
+    from unittest.mock import patch
+
+    from anemoi.training.losses.mse import MSELoss
+
+    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback.latlons = {}
+
+    nvar = 3
+    output_times = 2
+    n_step_input, n_step_output = 1, 1
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+    pl_module = MagicMock()
+    pl_module.n_step_input = n_step_input
+    pl_module.n_step_output = n_step_output
+    pl_module.local_rank = 0
+    pl_module.data_indices = {"data": MagicMock()}
+    pl_module.data_indices["data"].model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
+    pl_module.data_indices["data"].data.output.full = torch.arange(nvar)
+    pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
+    batch_size, nlatlon = 2, 10
+    batch = {"data": torch.randn(batch_size, n_step_input + output_times * n_step_output + 1, 1, nlatlon, nvar)}
+    outputs = _step_output(
+        [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
+    )
+    callback.loss = {"data": MSELoss()}
+    pl_module.task.steps.return_value = [{"rollout_step": i} for i in range(output_times)]
+    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
+    pl_module.task.get_metric_name.return_value = ""
+
+    with (
+        patch.object(callback, "_output_figure") as mock_output_figure,
+        patch(
+            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            return_value=np.arange(nvar),
+        ),
+        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()),
+    ):
+        callback._plot(
+            trainer,
+            pl_module,
+            ["data"],
+            outputs,
+            batch,
+            batch_idx=0,
+            epoch=0,
+            processed_cache={},
+        )
+        assert mock_output_figure.call_count == output_times
+
+
 # ---- PlotSpectrum ----
 
 
