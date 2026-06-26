@@ -56,6 +56,25 @@ LOGGER = logging.getLogger(__name__)
 PL_VERSION = version.parse(pl.__version__)
 
 
+def _write_run_identity(config: DictConfig, run_id: str | None, fork_run_id: str | None) -> None:
+    """Write the internal run-identity keys onto the live config.
+
+    ``training.run_id`` / ``training.fork_run_id`` were removed from the schema,
+    so the validated config carries no slot for them; the MLflow logger, the
+    ``run_id`` resolution, ``_update_paths`` and the flattened config params all
+    still read this internal contract. The write runs under a temporary struct
+    unlock so the keys can be (re)created even when the config is struct-locked,
+    restoring the prior struct flag afterwards.
+    """
+    prior_struct = OmegaConf.is_struct(config)
+    OmegaConf.set_struct(config, False)
+    try:
+        config.training.run_id = run_id
+        config.training.fork_run_id = fork_run_id
+    finally:
+        OmegaConf.set_struct(config, prior_struct)
+
+
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -102,11 +121,12 @@ class AnemoiTrainer(ABC):
                     _blas_backend,
                 )
 
+        # A configured ``training.checkpoint.source`` is the single trigger. The
+        # removed ``run_id`` / ``fork_run_id`` / ``system.input.warm_start`` keys
+        # are now expressed as a ``RunSource`` (resume/fork) or ``LocalSource``
+        # (explicit file) under that block.
         self.start_from_checkpoint = (
-            bool(self.config.training.run_id)
-            or bool(self.config.training.fork_run_id)
-            or bool(self.config.system.input.warm_start)
-            or OmegaConf.select(self.config, "training.checkpoint.source", default=None) is not None
+            OmegaConf.select(self.config, "training.checkpoint.source", default=None) is not None
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
@@ -117,7 +137,16 @@ class AnemoiTrainer(ABC):
         self.load_weights_only = OmegaConf.select(self.config, "training.load_weights_only", default=False)
         self.parent_uuid = None
 
-        self.config.training.run_id = self.run_id
+        # Resolve and seed the internal run-identity keys. ``run_id`` /
+        # ``fork_run_id`` were removed from the schema, but the MLflow logger, the
+        # output paths and the flattened config params (mlflow-sync indexes
+        # ``config.training.run_id`` / ``config.training.fork_run_id`` by literal
+        # key) still read them — so write both, keeping any fork id derived above.
+        _write_run_identity(
+            self.config,
+            run_id=self.run_id,
+            fork_run_id=OmegaConf.select(self.config, "training.fork_run_id", default=None),
+        )
         LOGGER.info("Run id: %s", self.config.training.run_id)
 
         # Get the server2server lineage
@@ -419,43 +448,28 @@ class AnemoiTrainer(ABC):
         """
         from anemoi.training.checkpoint import build_checkpoint_pipeline
         from anemoi.training.checkpoint.base import CheckpointContext
-        from anemoi.training.checkpoint.sources import LineageResolver
+        from anemoi.training.checkpoint.sources import RunSource
 
         pipeline_cfg = (
             self.config
             if checkpoint_config is None
             else OmegaConf.create({"training": {"checkpoint": checkpoint_config}})
         )
-        has_source = OmegaConf.select(pipeline_cfg, "training.checkpoint.source", default=None) is not None
         has_loading = OmegaConf.select(pipeline_cfg, "training.checkpoint.loading", default=None) is not None
 
         context = CheckpointContext(model=model, config=self.config)
         pipeline = build_checkpoint_pipeline(pipeline_cfg)
 
-        # A RunSource resolves its own path but cannot receive the runtime,
-        # logger-derived server-to-server lineage through Hydra; inject it so a
-        # cross-server resume/fork resolves the same path the trainer would.
-        from anemoi.training.checkpoint.sources import RunSource
-
+        # A RunSource resolves its own checkpoint path (as the acquisition stage)
+        # but cannot receive the runtime, logger-derived server-to-server lineage
+        # through Hydra; inject it so a cross-server resume/fork resolves the same
+        # path the trainer would.
         for stage in pipeline.stages:
             if isinstance(stage, RunSource):
                 stage.parent_run_server2server = getattr(self, "parent_run_server2server", None)
                 stage.fork_run_server2server = getattr(self, "fork_run_server2server", None)
 
-        async def _run() -> CheckpointContext:
-            resolved = context
-            # The run-lineage resolver only matters when a source stage will read
-            # the resolved path; a modifier-only pipeline (e.g. legacy
-            # submodules_to_freeze with no load) needs no checkpoint acquisition.
-            if has_source:
-                resolver = LineageResolver(
-                    parent_run_server2server=getattr(self, "parent_run_server2server", None),
-                    fork_run_server2server=getattr(self, "fork_run_server2server", None),
-                )
-                resolved = await resolver.process(resolved)
-            return await pipeline.execute(resolved)
-
-        loaded_model = asyncio.run(_run()).model
+        loaded_model = asyncio.run(pipeline.execute(context)).model
 
         # Trainer-side parity until the dataset/units validators move into the
         # pipeline: when weights were loaded, keep the current config's data
@@ -467,56 +481,53 @@ class AnemoiTrainer(ABC):
         return loaded_model
 
     def _legacy_checkpoint_config(self) -> dict | None:
-        """Translate deprecated checkpoint keys into a ``training.checkpoint`` block.
+        """Translate the deprecated submodule-freezing key into a ``training.checkpoint`` block.
 
-        Returns ``None`` when no legacy checkpoint key is set. Emits one
-        ``FutureWarning`` per deprecated configuration, each naming the
-        ``training.checkpoint.*`` replacement, so that legacy runs delegate to the
-        same pipeline as new-style configs.
+        Returns ``None`` when no legacy key is set. ``training.submodules_to_freeze``
+        is translated to a modifier stage (with one ``FutureWarning``) so legacy
+        freezing delegates to the same pipeline.
+
+        ``training.load_weights_only`` / ``training.transfer_learning`` no longer
+        carry a checkpoint to load from — that path moved to
+        ``training.checkpoint.source`` — so using them raises a hard error naming
+        the replacement surface rather than silently loading nothing.
         """
-        loaders = "anemoi.training.checkpoint.loading.strategies"
-        block: dict[str, Any] = {}
-
-        if self.load_weights_only:
-            if OmegaConf.select(self.config, "training.transfer_learning", default=False):
-                warnings.warn(
-                    "training.transfer_learning is deprecated; set training.checkpoint.loading to "
-                    f"{{_target_: {loaders}.TransferLearningLoader}}.",
-                    FutureWarning,
-                    stacklevel=2,
-                )
-                block["loading"] = {"_target_": f"{loaders}.TransferLearningLoader", "skip_mismatched": True}
-            else:
-                warnings.warn(
-                    "training.load_weights_only is deprecated; set training.checkpoint.loading to "
-                    f"{{_target_: {loaders}.WeightsOnlyLoader}}.",
-                    FutureWarning,
-                    stacklevel=2,
-                )
-                block["loading"] = {"_target_": f"{loaders}.WeightsOnlyLoader"}
-            block["source"] = {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource"}
+        if self.load_weights_only or OmegaConf.select(self.config, "training.transfer_learning", default=False):
+            loaders = "anemoi.training.checkpoint.loading.strategies"
+            msg = (
+                "training.load_weights_only / training.transfer_learning no longer carry a "
+                "checkpoint to load from. Set training.checkpoint.source to the run or file to "
+                "load (e.g. {_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>} "
+                "or {_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) "
+                f"and training.checkpoint.loading to {{_target_: {loaders}.WeightsOnlyLoader}} "
+                f"(or {{_target_: {loaders}.TransferLearningLoader, skip_mismatched: true}} for "
+                "transfer learning)."
+            )
+            raise ValueError(msg)
 
         submodules = OmegaConf.select(self.config, "training.submodules_to_freeze", default=None)
-        if submodules:
-            freezing = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
-            warnings.warn(
-                f"training.submodules_to_freeze is deprecated; set training.checkpoint.modifiers to "
-                f"[{{_target_: {freezing}}}].",
-                FutureWarning,
-                stacklevel=2,
-            )
-            # The legacy path froze submodules of ``model.model.model``; the modifier
-            # resolves names from the Task root via ``get_submodule``, so prefix the
-            # ``model.model.`` path to target the identical submodules.
-            block["modifiers"] = [
+        if not submodules:
+            return None
+
+        freezing = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+        warnings.warn(
+            f"training.submodules_to_freeze is deprecated; set training.checkpoint.modifiers to "
+            f"[{{_target_: {freezing}}}].",
+            FutureWarning,
+            stacklevel=2,
+        )
+        # The legacy path froze submodules of ``model.model.model``; the modifier
+        # resolves names from the Task root via ``get_submodule``, so prefix the
+        # ``model.model.`` path to target the identical submodules.
+        return {
+            "modifiers": [
                 {
                     "_target_": freezing,
                     "submodules_to_freeze": [f"model.model.{name}" for name in submodules],
                     "strict": False,
                 },
-            ]
-
-        return block or None
+            ],
+        }
 
     def _derive_run_identity(self) -> None:
         """Map a ``training.checkpoint.source`` RunSource onto the internal run identity.
@@ -550,23 +561,27 @@ class AnemoiTrainer(ABC):
         if bool(OmegaConf.select(source, "fork", default=False)):
             # Fork: only fork_run_id is set; run_id MUST stay None so a fresh
             # MLflow id is minted and the run is tagged as forked (not resumed).
-            self.config.training.run_id = None
-            self.config.training.fork_run_id = run_id
+            _write_run_identity(self.config, run_id=None, fork_run_id=run_id)
         else:
-            self.config.training.run_id = run_id
-            self.config.training.fork_run_id = None
+            _write_run_identity(self.config, run_id=run_id, fork_run_id=None)
 
     @cached_property
     def run_id(self) -> str:
         """Unique identifier for the current run."""
+        # Read defensively: run_id / fork_run_id were removed from the schema, so
+        # they may be absent until _derive_run_identity / the seed write below set
+        # them; an attribute read of an absent key would raise.
+        cfg_run_id = OmegaConf.select(self.config, "training.run_id", default=None)
+        cfg_fork_run_id = OmegaConf.select(self.config, "training.fork_run_id", default=None)
+
         # When a run ID is provided
-        if self.config.training.run_id and not self.config.training.fork_run_id:
+        if cfg_run_id and not cfg_fork_run_id:
             # Return the provided run ID - reuse run_id if resuming run
-            return self.config.training.run_id
+            return cfg_run_id
 
         # When a run ID has been created externally and we want to fork a run
-        if self.config.training.run_id and self.config.training.fork_run_id:
-            return self.config.training.run_id
+        if cfg_run_id and cfg_fork_run_id:
+            return cfg_run_id
 
         # When we rely on mlflow to create a new run ID
         if self.logger and self.logger.logger_name == "mlflow":
@@ -580,39 +595,68 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
-        """Path to the checkpoint to resume from, resolved by the run-lineage resolver.
+        """Path to the checkpoint to resume from, for Lightning's ``ckpt_path``.
 
-        Delegates to :class:`LineageResolver` so the checkpoint-path formula
-        (warm-start path > fork id > lineage run id, shape
-        ``<checkpoints.root.parent>/<fork id or lineage run>/last.ckpt``) lives in
-        one place — the acquisition layer. The K4 ``ckpt_path`` passthrough
-        consumes this for the exact-resume path.
+        A ``LocalSource`` carries an explicit file path (resume / warm-start
+        semantics); a ``RunSource`` resolves
+        ``<checkpoints.root.parent>/<id>/last.ckpt`` via
+        :meth:`RunSource.resolve_path`, using the run identity derived in
+        :meth:`_derive_run_identity` and the logger-derived server-to-server
+        lineage. The K4 ``ckpt_path`` passthrough consumes this for the
+        exact-resume path.
 
         Returns ``None`` when there is nothing to resume; raises
-        ``FileNotFoundError`` for a configured-but-missing warm-start file and
-        ``RuntimeError`` (rank 0) for a missing lineage checkpoint.
+        ``FileNotFoundError`` for a configured-but-missing explicit file and
+        ``RuntimeError`` (rank 0) for a missing run checkpoint.
         """
         if not self.start_from_checkpoint:
             return None
 
-        # An explicit checkpoint file configured as a LocalSource carries no run
-        # lineage; resume from that path directly (warm-start semantics). A
-        # RunSource resolves via the run identity derived in ``_derive_run_identity``
-        # and is handled by the resolver below.
         source = OmegaConf.select(self.config, "training.checkpoint.source", default=None)
-        if source is not None and (OmegaConf.select(source, "_target_", default="") or "").endswith("LocalSource"):
+        if source is None:
+            return None
+        target = OmegaConf.select(source, "_target_", default="") or ""
+
+        # An explicit checkpoint file (LocalSource) carries no run lineage; resume
+        # from that path directly (warm-start semantics).
+        if target.endswith("LocalSource"):
             path = OmegaConf.select(source, "path", default=None)
-            return Path(path) if path is not None else None
+            if path is None:
+                return None
+            checkpoint = Path(path)
+            if not checkpoint.is_file():
+                msg = f"Checkpoint file not found: {checkpoint}"
+                raise FileNotFoundError(msg)
+            return checkpoint
 
-        from anemoi.training.checkpoint.base import CheckpointContext
-        from anemoi.training.checkpoint.sources import LineageResolver
+        if not target.endswith("RunSource"):
+            return None
 
-        resolver = LineageResolver(
-            parent_run_server2server=getattr(self, "parent_run_server2server", None),
-            fork_run_server2server=getattr(self, "fork_run_server2server", None),
+        run_id = OmegaConf.select(source, "run_id", default=None)
+        if run_id is None:
+            return None
+
+        from anemoi.training.checkpoint.sources.run import RunSource
+        from anemoi.training.checkpoint.sources.run import _is_rank_zero
+
+        # The checkpoint-path formula lives in one place — the acquisition layer.
+        # ``_update_paths`` has already appended the lineage to ``checkpoints.root``,
+        # which ``resolve_path`` undoes via ``.parent``.
+        checkpoint = RunSource.resolve_path(
+            self.config,
+            run_id,
+            bool(OmegaConf.select(source, "fork", default=False)),
+            getattr(self, "parent_run_server2server", None),
+            getattr(self, "fork_run_server2server", None),
         )
-        context = CheckpointContext(config=self.config)
-        return asyncio.run(resolver.process(context)).checkpoint_path
+        if checkpoint.exists():
+            return checkpoint
+        # Rank 0 surfaces the missing-checkpoint error; other ranks defer to it.
+        if _is_rank_zero():
+            msg = f"Could not find last checkpoint: {checkpoint}"
+            raise RuntimeError(msg)
+        LOGGER.warning("Checkpoint not found at %s; deferring the error to rank 0.", checkpoint)
+        return None
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
@@ -667,8 +711,8 @@ class AnemoiTrainer(ABC):
     def _logger_kwargs(self) -> dict:
         """Shared keyword arguments for all loggers."""
         return {
-            "run_id": self.config.training.run_id,
-            "fork_run_id": self.config.training.fork_run_id,
+            "run_id": OmegaConf.select(self.config, "training.run_id", default=None),
+            "fork_run_id": OmegaConf.select(self.config, "training.fork_run_id", default=None),
             "paths": self.config.system.output,
             "logger_config": self.config.diagnostics.log,
         }
@@ -776,9 +820,13 @@ class AnemoiTrainer(ABC):
                 self.lineage_run,
             )
             self.config.system.output.plots = Path(self.config.system.output.plots, self.lineage_run)
-        elif self.config.training.fork_run_id:
+        elif OmegaConf.select(self.config, "training.fork_run_id", default=None):
             # WHEN USING MANY NODES/GPUS
-            self.lineage_run = self.parent_run_server2server or self.config.training.fork_run_id
+            self.lineage_run = self.parent_run_server2server or OmegaConf.select(
+                self.config,
+                "training.fork_run_id",
+                default=None,
+            )
             # Only rank non zero in the forked run will go here
             self.config.system.output.checkpoints.root = Path(
                 self.config.system.output.checkpoints.root,
@@ -801,9 +849,8 @@ class AnemoiTrainer(ABC):
             self.dry_run = (
                 self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
             )
-            self.start_from_checkpoint = (
-                False if (self.dry_run and not bool(self.config.training.fork_run_id)) else self.start_from_checkpoint
-            )
+            is_fork = bool(OmegaConf.select(self.config, "training.fork_run_id", default=None))
+            self.start_from_checkpoint = False if (self.dry_run and not is_fork) else self.start_from_checkpoint
             LOGGER.info("Dry run: %s", self.dry_run)
 
     def prepare_compilation(self) -> None:

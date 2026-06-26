@@ -18,6 +18,9 @@ from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 
+_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunSource"
+_LOCAL_SOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
+
 
 @pytest.fixture(scope="session")
 def tmp_checkpoint_factory(tmp_path_factory: pytest.TempPathFactory) -> (Path, Path):
@@ -38,23 +41,29 @@ def tmp_checkpoint_factory(tmp_path_factory: pytest.TempPathFactory) -> (Path, P
     return _create_checkpoint
 
 
+def _run_source(run_id: str, *, fork: bool = False) -> dict:
+    return {"_target_": _RUN_SOURCE, "run_id": run_id, "fork": fork}
+
+
+def _local_source(path: Path) -> dict:
+    return {"_target_": _LOCAL_SOURCE, "path": str(path)}
+
+
 def build_mock_config(
     *,
-    run_id: str | None = None,
-    fork_run_id: str | None = None,
-    warm_start: str | None = None,
+    source: dict | None = None,
     checkpoints_path: Path | None = None,
-    warm_start_path: Path | None = None,
 ) -> DictConfig:
-    # Build a nested dict that matches the expected structure
+    """Build a minimal trainer config on the ``training.checkpoint.source`` surface.
+
+    ``source`` is the ``training.checkpoint.source`` block (a ``RunSource`` or
+    ``LocalSource`` ``_target_`` dict), or ``None`` for a fresh run with nothing
+    to resume.
+    """
+    training = {"checkpoint": {"source": source}} if source is not None else {}
     config_dict = {
         "config_validation": False,
-        "training": {
-            "run_id": run_id,
-            "fork_run_id": fork_run_id,
-            "load_weights_only": False,
-            "transfer_learning": False,
-        },
+        "training": training,
         "system": {
             "output": {
                 "root": "",
@@ -68,7 +77,7 @@ def build_mock_config(
                     "tensorboard": "",
                 },
             },
-            "input": {"warm_start": warm_start_path / warm_start if warm_start_path and warm_start else None},
+            "input": {},
         },
         "diagnostics": {"log": {"mlflow": {"enabled": False}}},
         "data": {},
@@ -83,6 +92,10 @@ def build_mock_config(
 @pytest.fixture
 def trainer_factory() -> AnemoiTrainer:
     def _make_trainer(mock_config: MagicMock) -> AnemoiTrainer:
+        # ``Path.exists`` is patched True only for the duration of construction;
+        # ``last_checkpoint`` is a lazily-evaluated cached_property, so tests that
+        # assert a missing checkpoint access it after this context exits and see
+        # the real filesystem.
         with (
             patch(
                 "anemoi.training.train.train.LOGGER",
@@ -103,14 +116,11 @@ def trainer_factory() -> AnemoiTrainer:
     return _make_trainer
 
 
-def test_restart_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
+def test_resume_run_source(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
+    """RunSource (fork=False) resumes the same run and resolves <root.parent>/<run_id>/last.ckpt."""
     run_id = "run-id-123"
     expected_path, checkpoints_path = tmp_checkpoint_factory(rid=run_id, ckpt_path_name="mock_checkpoints")
-    config = build_mock_config(
-        run_id=run_id,
-        checkpoints_path=checkpoints_path,
-        warm_start_path=None,
-    )
+    config = build_mock_config(source=_run_source(run_id), checkpoints_path=checkpoints_path)
 
     trainer = trainer_factory(config)
 
@@ -119,104 +129,33 @@ def test_restart_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: 
     assert trainer.last_checkpoint == expected_path
 
 
-def test_restart_fork_run_id(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
-    fork_run_id = "fork-id-456"
-    # Forking assumes that the checkpoint is still stored in the same root path as where we
-    # will be writing new checkpoints in the training run
-    expected_path, checkpoints_path = tmp_checkpoint_factory(rid=fork_run_id, ckpt_path_name="mock_checkpoints")
+def test_fork_run_source(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
+    """RunSource (fork=True) mints a new run id but resolves the parent run's checkpoint.
 
-    config = build_mock_config(
-        fork_run_id=fork_run_id,
-        checkpoints_path=checkpoints_path,
-        warm_start_path=None,
-    )
-
-    trainer = trainer_factory(config)
-    assert trainer.start_from_checkpoint is True
-    assert trainer.run_id != fork_run_id
-    assert trainer.last_checkpoint == expected_path
-
-
-def test_restart_warm_start_path(
-    trainer_factory: AnemoiTrainer,
-    tmp_checkpoint_factory: pytest.TempPathFactory,
-) -> None:
-    """Test by assuming warm start is unlinked to run or fork run ids."""
-    warm_start = "checkpoint_10.ckpt"
-    warm_start_fork_run_id = "fork-id-446"
-    warm_start_path = "mock-pretrained-checkpoints"
-    expected_path, warm_start_path = tmp_checkpoint_factory(
-        rid=warm_start_fork_run_id,
-        ckpt_file_name=warm_start,
-        ckpt_path_name=warm_start_path,
-    )
-    _, checkpoints_path = tmp_checkpoint_factory()  # path where writing the checkpoints it's different
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start_path=warm_start_path / Path(warm_start_fork_run_id),  # needs to pass full path
-        warm_start=warm_start,
-    )
-
-    trainer = trainer_factory(config)
-
-    assert trainer.start_from_checkpoint is True
-    assert trainer.run_id != warm_start_fork_run_id
-    assert trainer.last_checkpoint == expected_path
-
-
-def test_restart_warm_start_fork_run_id(
-    trainer_factory: AnemoiTrainer,
-    tmp_checkpoint_factory: pytest.TempPathFactory,
-) -> None:
-    """Test by assuming warm start is linked to fork run id."""
-    warm_start = "checkpoint_10.ckpt"
-    fork_run_id = "fork-id-446"
-    warm_start_path = "mock-pretrained-checkpoints"
-    expected_path, warm_start_path = tmp_checkpoint_factory(
-        rid=fork_run_id,
-        ckpt_file_name=warm_start,
-        ckpt_path_name=warm_start_path,
-    )
-    _, checkpoints_path = tmp_checkpoint_factory()  # path where writing the checkpoints it's different
-
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start_path=warm_start_path / Path(fork_run_id),  #
-        fork_run_id=fork_run_id,
-        warm_start=warm_start,
-    )
-
-    trainer = trainer_factory(config)
-
-    assert trainer.start_from_checkpoint is True
-    assert trainer.run_id != fork_run_id
-    assert trainer.last_checkpoint == expected_path
-
-
-def test_restart_warm_start(
-    trainer_factory: AnemoiTrainer,
-    tmp_checkpoint_factory: pytest.TempPathFactory,
-) -> None:
-    """Test by assuming warm start is linked to run id.
-
-    This resembles the case where we want to resume run
-    using a checkpoint different from last.ckpt.
+    Forking assumes the parent checkpoint is stored under the same checkpoints
+    root where the new run will write its own checkpoints.
     """
-    warm_start = "checkpoint_10.ckpt"
-    warm_start_path = "mock-checkpoints"
-    expected_path, warm_start_path = tmp_checkpoint_factory(
-        ckpt_file_name=warm_start,
-        ckpt_path_name=warm_start_path,
-    )
-    _, checkpoints_path = tmp_checkpoint_factory(
-        ckpt_path_name=warm_start_path,
-    )  # path where writing the checkpoints it's different
+    parent_run_id = "fork-id-456"
+    expected_path, checkpoints_path = tmp_checkpoint_factory(rid=parent_run_id, ckpt_path_name="mock_checkpoints")
+    config = build_mock_config(source=_run_source(parent_run_id, fork=True), checkpoints_path=checkpoints_path)
 
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start_path=warm_start_path,
-        warm_start=warm_start,
+    trainer = trainer_factory(config)
+
+    assert trainer.start_from_checkpoint is True
+    assert trainer.run_id != parent_run_id
+    assert trainer.last_checkpoint == expected_path
+
+
+def test_local_source_explicit_path(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """LocalSource resolves an explicit checkpoint file directly (the warm-start replacement)."""
+    expected_path, checkpoints_path = tmp_checkpoint_factory(
+        ckpt_file_name="checkpoint_10.ckpt",
+        ckpt_path_name="mock-pretrained-checkpoints",
     )
+    config = build_mock_config(source=_local_source(expected_path), checkpoints_path=checkpoints_path)
 
     trainer = trainer_factory(config)
 
@@ -224,87 +163,47 @@ def test_restart_warm_start(
     assert trainer.last_checkpoint == expected_path
 
 
-def test_restart_warm_start_run_id(
+def test_no_source_is_fresh_run(
     trainer_factory: AnemoiTrainer,
     tmp_checkpoint_factory: pytest.TempPathFactory,
 ) -> None:
-    """Test by assuming warm start is linked to run id.
-
-    This resembles the case where we want to resume run
-    using a checkpoint different from last.ckpt.
-    """
-    warm_start = "checkpoint_10.ckpt"
-    run_id = "id-222"
-    warm_start_path = "mock-checkpoints"
-    expected_path, warm_start_path = tmp_checkpoint_factory(
-        rid=run_id,
-        ckpt_file_name=warm_start,
-        ckpt_path_name=warm_start_path,
-    )
-    _, checkpoints_path = tmp_checkpoint_factory(
-        ckpt_path_name=warm_start_path,
-    )  # path where writing the checkpoints it's different
-
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start_path=warm_start_path / Path(run_id),  #
-        warm_start=warm_start,
-        run_id=run_id,
-    )
+    """Without a training.checkpoint.source there is nothing to resume."""
+    _, checkpoints_path = tmp_checkpoint_factory()
+    config = build_mock_config(source=None, checkpoints_path=checkpoints_path)
 
     trainer = trainer_factory(config)
 
-    assert trainer.start_from_checkpoint is True
-    assert trainer.run_id == run_id
-    assert trainer.last_checkpoint == expected_path
+    assert trainer.start_from_checkpoint is False
+    assert trainer.last_checkpoint is None
 
 
-def test_warm_start_file_not_found(
+def test_local_source_file_not_found(
     trainer_factory: AnemoiTrainer,
     tmp_checkpoint_factory: pytest.TempPathFactory,
 ) -> None:
-    """Test to assert file not found for warm_start."""
-    warm_start = "checkpoint_10.ckpt"
-    run_id = "id-222"
-    warm_start_path = "mock-checkpoints"
-    _, warm_start_path = tmp_checkpoint_factory(
-        rid=run_id,
-        ckpt_file_name=warm_start,
-        ckpt_path_name=warm_start_path,
+    """A configured-but-missing LocalSource file raises FileNotFoundError."""
+    missing_path, checkpoints_path = tmp_checkpoint_factory(
+        ckpt_file_name="checkpoint_10.ckpt",
+        ckpt_path_name="mock-pretrained-checkpoints",
         skip_creation=True,
     )
-    _, checkpoints_path = tmp_checkpoint_factory(
-        ckpt_path_name=warm_start_path,
-    )  # path where writing the checkpoints it's different
-
-    config = build_mock_config(
-        checkpoints_path=checkpoints_path,
-        warm_start_path=warm_start_path / Path(run_id),  #
-        warm_start=warm_start,
-        run_id=run_id,
-    )
+    config = build_mock_config(source=_local_source(missing_path), checkpoints_path=checkpoints_path)
 
     trainer = trainer_factory(config)
 
     assert trainer.start_from_checkpoint is True
-    assert trainer.run_id == run_id
-    with pytest.raises(FileNotFoundError, match=r"Warm start checkpoint not found"):
+    with pytest.raises(FileNotFoundError, match=r"Checkpoint file not found"):
         _ = trainer.last_checkpoint
 
 
-def test_restart_run_id_file_not_found(
+def test_run_source_checkpoint_not_found(
     trainer_factory: AnemoiTrainer,
     tmp_checkpoint_factory: pytest.TempPathFactory,
 ) -> None:
-    """Test to assert file not found for resuming."""
+    """A RunSource resume with no checkpoint on disk raises RuntimeError on rank 0."""
     run_id = "run-id-123"
     _, checkpoints_path = tmp_checkpoint_factory(rid=run_id, ckpt_path_name="mock_checkpoints", skip_creation=True)
-
-    config = build_mock_config(
-        run_id=run_id,
-        checkpoints_path=checkpoints_path,
-        warm_start_path=None,
-    )
+    config = build_mock_config(source=_run_source(run_id), checkpoints_path=checkpoints_path)
 
     trainer = trainer_factory(config)
 
@@ -312,3 +211,18 @@ def test_restart_run_id_file_not_found(
     assert trainer.run_id == run_id
     with pytest.raises(RuntimeError, match=r"Could not find last checkpoint"):
         _ = trainer.last_checkpoint
+
+
+def test_legacy_weight_loading_keys_raise(
+    trainer_factory: AnemoiTrainer,
+    tmp_checkpoint_factory: pytest.TempPathFactory,
+) -> None:
+    """load_weights_only / transfer_learning raise a hard error naming the training.checkpoint surface."""
+    _, checkpoints_path = tmp_checkpoint_factory()
+    config = build_mock_config(source=None, checkpoints_path=checkpoints_path)
+    config.training.load_weights_only = True
+
+    trainer = trainer_factory(config)
+
+    with pytest.raises(ValueError, match=r"training\.checkpoint\.source"):
+        trainer._legacy_checkpoint_config()

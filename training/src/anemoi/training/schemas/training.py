@@ -591,10 +591,6 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    run_id: str | None = Field(example=None)
-    "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
-    fork_run_id: str | None = Field(example=None)
-    "Run ID to fork from, either last.ckpt or specified in system.input.warm_start."
     load_weights_only: bool = Field(default=False, example=False)
     "Load only the weights from the checkpoint, not the optimiser state."
     transfer_learning: bool = Field(default=False, example=False)

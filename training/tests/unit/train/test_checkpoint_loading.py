@@ -560,17 +560,17 @@ def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
     )
     assert AnemoiTrainer._checkpoint_pipeline_configured(configured) is True
 
-    absent = SimpleNamespace(config=OmegaConf.create({"training": {"run_id": "abc"}}))
+    absent = SimpleNamespace(config=OmegaConf.create({"training": {}}))
     assert AnemoiTrainer._checkpoint_pipeline_configured(absent) is False
 
 
 def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
-    """The opt-in pipeline path resolves the lineage checkpoint and fills the model in place.
+    """The opt-in pipeline path resolves the run checkpoint and fills the model in place.
 
-    Exercises the trainer-side wiring end to end: the run-lineage resolver turns
-    ``run_id`` into ``<root.parent>/<run_id>/last.ckpt``, the LocalSource loads it,
-    and the WeightsOnlyLoader fills the existing model's parameter slots
-    (fill-model semantics — same object, no re-instantiation).
+    Exercises the trainer-side wiring end to end: the RunSource resolves ``run_id``
+    into ``<root.parent>/<run_id>/last.ckpt`` and loads it, and the WeightsOnlyLoader
+    fills the existing model's parameter slots (fill-model semantics — same object,
+    no re-instantiation).
     """
     torch.manual_seed(0)
     model = torch.nn.Linear(4, 2)
@@ -584,10 +584,11 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
     cfg = OmegaConf.create(
         {
             "training": {
-                "run_id": run_id,
-                "fork_run_id": None,
                 "checkpoint": {
-                    "source": {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource"},
+                    "source": {
+                        "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                        "run_id": run_id,
+                    },
                     "loading": {
                         "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
                         "strict": False,
@@ -595,7 +596,6 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
                 },
             },
             "system": {
-                "input": {"warm_start": None},
                 "output": {"checkpoints": {"root": str(ckpt_dir)}},
             },
         },
@@ -648,32 +648,24 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 # --- Tests for legacy-key delegation + deprecation (K5) ---
 
 
-def test_legacy_weights_only_delegates_with_deprecation_warning() -> None:
-    """load_weights_only (no TL) translates to a WeightsOnlyLoader block + one warning."""
+def test_legacy_weights_only_raises_pointing_to_new_surface() -> None:
+    """load_weights_only no longer carries a path: it raises, naming training.checkpoint.source."""
     trainer = SimpleNamespace(
         load_weights_only=True,
         config=OmegaConf.create({"training": {"transfer_learning": False}}),
     )
-    with pytest.warns(FutureWarning, match="WeightsOnlyLoader") as record:
-        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
-
-    assert len(record) == 1
-    assert block["source"]["_target_"].endswith("LocalSource")
-    assert block["loading"]["_target_"].endswith("WeightsOnlyLoader")
-    assert "modifiers" not in block
+    with pytest.raises(ValueError, match=r"training\.checkpoint\.source"):
+        AnemoiTrainer._legacy_checkpoint_config(trainer)
 
 
-def test_legacy_transfer_learning_delegates_with_deprecation_warning() -> None:
-    """transfer_learning translates to a TransferLearningLoader block + one warning."""
+def test_legacy_transfer_learning_raises_pointing_to_new_surface() -> None:
+    """transfer_learning no longer carries a path: it raises, naming training.checkpoint.loading."""
     trainer = SimpleNamespace(
         load_weights_only=True,
         config=OmegaConf.create({"training": {"transfer_learning": True}}),
     )
-    with pytest.warns(FutureWarning, match="TransferLearningLoader"):
-        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
-
-    assert block["loading"]["_target_"].endswith("TransferLearningLoader")
-    assert block["loading"]["skip_mismatched"] is True
+    with pytest.raises(ValueError, match=r"training\.checkpoint\.loading"):
+        AnemoiTrainer._legacy_checkpoint_config(trainer)
 
 
 def test_legacy_submodules_to_freeze_prefixes_model_model_for_rooting_parity() -> None:
@@ -801,42 +793,6 @@ def test_skip_lightning_restore_matches_loading_strategy(
     assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
 
 
-def test_legacy_weights_only_delegation_loads_via_pipeline(tmp_path: Path) -> None:
-    """End to end: load_weights_only delegates through the pipeline and fills the model."""
-    torch.manual_seed(1)
-    model = torch.nn.Linear(4, 2)
-    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
-
-    run_id = "run_L"
-    ckpt_dir = tmp_path / run_id
-    ckpt_dir.mkdir(parents=True)
-    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
-
-    cfg = OmegaConf.create(
-        {
-            "training": {"run_id": run_id, "fork_run_id": None, "transfer_learning": False},
-            "system": {"input": {"warm_start": None}, "output": {"checkpoints": {"root": str(ckpt_dir)}}},
-        },
-    )
-    trainer = SimpleNamespace(
-        load_weights_only=True,
-        config=cfg,
-        data_indices={"data": DummyIndex()},
-        parent_run_server2server=None,
-        fork_run_server2server=None,
-        _validate_transfer_learning_datasets=lambda _model: None,
-        _validate_transfer_learning_units=lambda _model: None,
-    )
-
-    with pytest.warns(FutureWarning, match="WeightsOnlyLoader"):
-        block = AnemoiTrainer._legacy_checkpoint_config(trainer)
-    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model, checkpoint_config=block)
-
-    assert result is model
-    for key, value in new_state.items():
-        assert torch.equal(result.state_dict()[key], value)
-
-
 class _FreezeInner(torch.nn.Module):
     """The innermost nn model (``Task.model.model``) with named submodules."""
 
@@ -933,12 +889,14 @@ def test_derive_run_identity_noop_without_checkpoint_source() -> None:
     assert trainer.config.training.run_id == "keep"
 
 
-def test_last_checkpoint_localsource_path_short_circuits() -> None:
+def test_last_checkpoint_localsource_path_short_circuits(tmp_path: Path) -> None:
     """An explicit LocalSource path resolves straight to that path (warm-start semantics)."""
+    ckpt = tmp_path / "last.ckpt"
+    ckpt.write_text("fake checkpoint")
     trainer = SimpleNamespace(
         start_from_checkpoint=True,
         config=OmegaConf.create(
-            {"training": {"checkpoint": {"source": {"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}}}},
+            {"training": {"checkpoint": {"source": {"_target_": _LOCALSOURCE, "path": str(ckpt)}}}},
         ),
     )
-    assert AnemoiTrainer.last_checkpoint.func(trainer) == Path("/scratch/run/last.ckpt")
+    assert AnemoiTrainer.last_checkpoint.func(trainer) == ckpt
