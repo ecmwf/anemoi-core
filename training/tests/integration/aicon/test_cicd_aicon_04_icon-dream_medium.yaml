@@ -219,12 +219,9 @@ task:
 training:
   run_id: null
   fork_run_id: null
-  transfer_learning: False # activate to perform transfer learning
   method:
     _target_: anemoi.training.train.methods.SingleTraining
-  submodules_to_freeze: []
   num_sanity_val_steps: 2
-  load_weights_only: False
   deterministic: false
   precision: 16-mixed
   accum_grad_batches: 1

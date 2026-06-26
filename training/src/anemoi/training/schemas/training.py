@@ -588,25 +588,36 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild tendency pre/post-processing statistics from the current dataset."
 
 
+class CheckpointPipelineSchema(BaseModel):
+    """Declarative checkpoint pipeline consumed by ``build_checkpoint_pipeline``.
+
+    Each block is a Hydra ``_target_`` config: at most one acquisition ``source`` and
+    one ``loading`` strategy, plus an ordered list of ``modifiers`` applied after
+    loading. A ``None`` field configures no checkpoint pipeline (a fresh run).
+    """
+
+    source: GenericSchema | None = Field(default=None)
+    "Acquisition source stage (LocalSource / RunSource / S3Source / HTTPSource)."
+    loading: GenericSchema | None = Field(default=None)
+    "Loading strategy stage (WeightsOnlyLoader / TransferLearningLoader / WarmStartLoader / ColdStartLoader)."
+    modifiers: list[GenericSchema] | None = Field(default=None)
+    "Ordered model-modifier stages applied after loading (e.g. FreezingModifierStage)."
+
+
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    load_weights_only: bool = Field(default=False, example=False)
-    "Load only the weights from the checkpoint, not the optimiser state."
-    transfer_learning: bool = Field(default=False, example=False)
-    "Flag to activate transfer learning mode when loading a checkpoint."
     check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
-    submodules_to_freeze: list[str] = Field(default_factory=list, example=["processor"])
-    "List of submodules to freeze during transfer learning."
-    checkpoint: dict | None = Field(default=None)
+    checkpoint: CheckpointPipelineSchema | None = Field(default=None)
     "Checkpoint pipeline configuration consumed by build_checkpoint_pipeline: an"
-    " acquisition source under `source` and/or a loading strategy under `loading`,"
-    " each a Hydra `_target_` block. None leaves legacy checkpoint handling in place."
+    " acquisition source under `source`, a loading strategy under `loading`, and/or an"
+    " ordered list of model `modifiers`, each a Hydra `_target_` block. None configures"
+    " no checkpoint pipeline (a fresh run)."
     deterministic: bool = Field(default=False)
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."

@@ -171,6 +171,23 @@ _DEPRECATED_KEYS: dict[str, str] = {
         "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.local.LocalSource, "
         "path: <path>}."
     ),
+    "training.load_weights_only": (
+        "training.load_weights_only has been removed. Set training.checkpoint.source to the run or file to "
+        "load ({_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>} or "
+        "{_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) and "
+        "training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader}."
+    ),
+    "training.transfer_learning": (
+        "training.transfer_learning has been removed. Set training.checkpoint.source to the checkpoint to "
+        "load and training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader, skip_mismatched: true}."
+    ),
+    "training.submodules_to_freeze": (
+        "training.submodules_to_freeze has been removed. Set training.checkpoint.modifiers to a list of "
+        "modifier stages, e.g. [{_target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage, "
+        "submodules_to_freeze: [<submodule>, ...]}]."
+    ),
 }
 
 
