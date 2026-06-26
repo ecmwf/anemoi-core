@@ -403,18 +403,86 @@ class InverseRegularSHT(InverseSpectralTransform):
         return self._isht(data)
 
 
+class InverseReducedSHT(InverseSpectralTransform):
+    """Inverse SHT on a reduced Gaussian grid."""
+
+    def __init__(
+        self,
+        grid: str,
+        truncation: int | None = None,
+        use_graphed_irfft: bool = False,
+        **kwargs,
+    ) -> None:
+        """Inverse SHT on a reduced Gaussian grid.
+
+        Parameters
+        ----------
+        grid : str
+            Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
+        truncation : int | None
+            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_irfft : bool
+            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        """
+        super().__init__()
+
+        if grid not in ["n320", "N320"]:
+            raise ValueError("Only the N320 reduced Gaussian grid SHT is supported.")
+        else:
+            self.nlat = 2 * int(grid[1:])  # N320 has 640 latitudes from pole to pole
+
+        # Fetch regular grid data
+        try:
+            from anemoi.transform.grids.named import lookup
+        except ImportError:
+            raise ImportError(
+                "anemoi.transform is required for InverseReducedSHT transform. Install optional dependencies: pip install anemoi-models[spectra]"
+            )
+
+        # To generate a grid
+        # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
+
+        lats = lookup(grid)["latitudes"]
+
+        # Get latitudes of this grid
+        unique_lats = sorted(set(lats))
+
+        # Calculate longitudes per latitude
+        self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
+
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_irfft=use_graphed_irfft,
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)
+
+
 class InverseOctahedralSHT(InverseSpectralTransform):
-    """Inverse SHT on an octahedral reduced grid.
+    """Inverse SHT on an octahedral reduced grid."""
 
-    Parameters
-    ----------
-    nlat : int
-        Number of latitudes.
-    truncation : int | None
-        Spectral truncation. Defaults to nlat // 2 - 1.
-    """
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_graphed_irfft: bool = False,
+        **kwargs,
+    ) -> None:
+        """Inverse SHT on an octahedral reduced grid.
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to nlat // 2 - 1.
+        use_graphed_irfft : bool
+            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
@@ -422,6 +490,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_irfft=use_graphed_irfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
