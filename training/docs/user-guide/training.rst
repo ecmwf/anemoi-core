@@ -485,6 +485,37 @@ is set to 0, the learning rate will start at the maximum learning rate.
 If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
+***************
+Restarting a training run
+***************
+
+It may be necessary at certain points to restart the model training,
+i.e. because the training has exceeded the time limit on an HPC system
+or because the user wants to fine-tune the model from a specific point
+in the training.
+
+This can be done by setting ``config.training.run_id`` in the config
+file to be the *run_id* of the run that is being restarted. In this case
+the new checkpoints will go in the same folder as the old checkpoints.
+If the user does not want this then they can instead set
+``config.training.fork_run_id`` in the config file to the *run_id* of
+the run that is being restarted. In this case the old run will be
+unaffected and the new checkpoints will go in to a new folder with a new
+run_id. The user might want to do this if they want to start multiple
+new runs from 1 old run.
+
+The above will restart the model training from where the old run
+finished training. It's also possible to restart the model training from
+a specific checkpoint. This can either be a checkpoint from the same run
+or a checkpoint from a different run that you have run in the past or
+that you using for transfer learning. To do this, set
+``config.system.input.warm_start`` to be the path to the checkpoint they
+want to restart from.
+
+The above can be adapted depending on the use case and taking advantage
+of hydra, you can also reuse ``config.training.run_id`` or
+``config.training.fork_run_id`` to define the path to the checkpoint.
+
 *********
  Rollout
 *********
@@ -559,39 +590,9 @@ rollout is not incremented twice for that epoch.
 
 .. note::
 
-   When resuming from a rollout checkpoint, ``rollout.start`` is ignored unless it is higher than the rollout value saved in the checkpoint.
-   This is to ensure that the rollout schedule continues from where it left off, rather than restarting from the original ``rollout.start`` value.
-
-***************************
- Restarting a training run
-***************************
-
-It may be necessary at certain points to restart the model training,
-i.e. because the training has exceeded the time limit on an HPC system
-or because the user wants to fine-tune the model from a specific point
-in the training.
-
-This can be done by setting ``config.training.run_id`` in the config
-file to be the *run_id* of the run that is being restarted. In this case
-the new checkpoints will go in the same folder as the old checkpoints.
-If the user does not want this then they can instead set
-``config.training.fork_run_id`` in the config file to the *run_id* of
-the run that is being restarted. In this case the old run will be
-unaffected and the new checkpoints will go in to a new folder with a new
-run_id. The user might want to do this if they want to start multiple
-new runs from 1 old run.
-
-The above will restart the model training from where the old run
-finished training. It's also possible to restart the model training from
-a specific checkpoint. This can either be a checkpoint from the same run
-or a checkpoint from a different run that you have run in the past or
-that you using for transfer learning. To do this, set
-``config.system.input.warm_start`` to be the path to the checkpoint they
-want to restart from.
-
-The above can be adapted depending on the use case and taking advantage
-of hydra, you can also reuse ``config.training.run_id`` or
-``config.training.fork_run_id`` to define the path to the checkpoint.
+   When resuming from a checkpoint that contains saved rollout state,
+   ``rollout.start`` is ignored entirely — the rollout step is always
+   restored unconditionally from the checkpoint.
 
 *******************
  Transfer Learning
