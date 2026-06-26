@@ -71,6 +71,27 @@ async def test_warm_start_loads_without_optimizer_in_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_warm_start_surfaces_training_state_on_context() -> None:
+    """Warm start records the extracted training progress on ``context.metadata``.
+
+    Observational only: Lightning's ``ckpt_path`` owns the live restore, but the
+    extracted epoch/global_step are surfaced on the context for inspection/tooling.
+    """
+    model = SimpleModel()
+    checkpoint_data = {
+        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
+        "epoch": 42,
+        "global_step": 10000,
+    }
+
+    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
+    result = await WarmStartLoader().process(context)
+
+    assert result.metadata["epoch"] == 42
+    assert result.metadata["global_step"] == 10000
+
+
+@pytest.mark.asyncio
 async def test_warm_start_requires_exact_match() -> None:
     """Warm start expects the same architecture: a shape/key mismatch raises."""
     model = SimpleModel()

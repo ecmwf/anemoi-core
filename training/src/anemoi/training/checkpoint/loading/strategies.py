@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
+from anemoi.training.checkpoint.loading.state import TrainingState
 
 if TYPE_CHECKING:
     from anemoi.training.checkpoint.base import CheckpointContext
@@ -186,6 +187,11 @@ class WarmStartLoader(LoadingStrategy):
     is ``True`` so the trainer keeps ``ckpt_path`` for this strategy (and only this
     one); for the weights-only / transfer / cold-start strategies ``ckpt_path`` is
     suppressed, since they start fresh training state.
+
+    The extracted training progress (epoch, global step, best metric, metric
+    history) is also recorded on ``context.metadata`` via :class:`TrainingState`
+    for inspection and tooling. This is observational only — it does not drive the
+    live restore, which remains owned by Lightning's ``ckpt_path`` (see above).
     """
 
     restores_training_state = True
@@ -222,6 +228,12 @@ class WarmStartLoader(LoadingStrategy):
         self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
         context.metadata["loading_strategy"] = "warm_start"
+
+        # Surface the extracted training progress on the context for inspection
+        # and tooling. Observational only: Lightning's ckpt_path owns the live
+        # restore (see the class docstring), so nothing downstream consumes this
+        # to mutate the trainer.
+        TrainingState.from_checkpoint(context.checkpoint_data or {}).apply_to(context)
 
         LOGGER.info("Warm start: loaded weights; optimizer/epoch restore deferred to Lightning ckpt_path")
 
