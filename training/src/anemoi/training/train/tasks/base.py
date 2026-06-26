@@ -1042,7 +1042,29 @@ class BaseGraphModule(pl.LightningModule, ABC):
         self._set_schedule_free_optimizer_mode("train")
 
     def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
-        del checkpoint
+        # Certified-provenance stamp (certified-runtime-provenance epic): record the exact code that
+        # produced this checkpoint so it self-identifies its lineage at inference time. Best-effort:
+        # a provenance failure must NEVER break a checkpoint save.
+        try:
+            import datetime as _dt
+            import os as _os
+            import subprocess as _sp
+
+            import anemoi.models as _am
+
+            _root = _os.path.realpath(_am.__file__).split("/models/src/")[0]
+            _sha = _sp.run(["git", "-C", _root, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip()
+            _dirty = bool(_sp.run(["git", "-C", _root, "status", "--porcelain"], capture_output=True, text=True, timeout=5).stdout.strip())
+            checkpoint["provenance_certified"] = {
+                "anemoi_core_root": _root,
+                "anemoi_core_sha": _sha or "unknown",
+                "anemoi_core_dirty": _dirty,
+                "tier": _os.environ.get("ANEMOI_TIER", "uncertified"),
+                "certification_id": _os.environ.get("ANEMOI_CERTIFICATION_ID", ""),
+                "stamped_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            }
+        except Exception:  # noqa: BLE001  provenance is best-effort, never fatal
+            pass
         self._set_schedule_free_optimizer_mode("eval")
 
     def _set_schedule_free_optimizer_mode(self, mode: str) -> None:
