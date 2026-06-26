@@ -559,10 +559,8 @@ rollout is not incremented twice for that epoch.
 
 .. note::
 
-   Checkpoints written before PR #1109 have no stored rollout state.
-   Resuming from such a checkpoint falls back to ``rollout.start``, so
-   you would need to set ``start`` to the rollout value that was active
-   when that checkpoint was saved.
+   When resuming from a rollout checkpoint, ``rollout.start`` is ignored unless it is higher than the rollout value saved in the checkpoint. 
+   This is to ensure that the rollout schedule continues from where it left off, rather than restarting from the original ``rollout.start`` value.
 
 ***************************
  Restarting a training run
