@@ -41,7 +41,10 @@ def log_memory_usage(request: pytest.FixtureRequest) -> None:
     gc.collect()
     rss_after = process.memory_info().rss / 1024**3
     LOGGER.info(
-        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB)", request.node.name, rss_after, rss_after - rss_before,
+        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB)",
+        request.node.name,
+        rss_after,
+        rss_after - rss_before,
     )
 
 
