@@ -1,3 +1,12 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
@@ -10,6 +19,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -99,6 +109,7 @@ def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
 def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
+    module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.model = model
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
@@ -120,12 +131,7 @@ def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> No
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyTrainingModule.__new__(DummyTrainingModule)
-    torch.nn.Module.__init__(module)
-    module.model = new_model
-    module.config = SimpleNamespace(
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, True)),
-    )
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
@@ -153,12 +159,7 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
-    module = DummyTrainingModule.__new__(DummyTrainingModule)
-    torch.nn.Module.__init__(module)
-    module.model = new_model
-    module.config = SimpleNamespace(
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
-    )
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
@@ -398,6 +399,93 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     # Assert: compare_variables was called for ERA5
     assert len(era5_index.compare_called_with) == 1
     # Method completes without error (CERRA is silently ignored)
+
+
+# ── Rollout state persistence across checkpoint save / load ───────────────────
+
+
+def _make_module_with_forecaster_task(rollout_cfg: dict) -> tuple[DummyTrainingModule, Forecaster]:
+    """Build a minimal DummyTrainingModule whose task is a Forecaster."""
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
+    torch.nn.Module.__init__(module)
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
+    module.task = task
+    module.config = SimpleNamespace(  # type: ignore[assignment]
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
+    )
+    return module, task
+
+
+def test_on_save_checkpoint_persists_rollout_step() -> None:
+    """on_save_checkpoint writes the current rollout step and last_increased_epoch into the checkpoint."""
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+
+    checkpoint: dict = {}
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+
+    assert checkpoint["task_state"]["rollout"]["step"] == 3
+    assert checkpoint["task_state"]["rollout"]["last_increased_epoch"] == 1
+
+
+def test_on_load_checkpoint_restores_rollout_step() -> None:
+    """on_load_checkpoint recovers rollout.step so resume continues from the right value."""
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+
+    checkpoint = {
+        "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert task.rollout.step == 3
+    assert task.rollout._last_increased_epoch == 1
+
+
+def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
+    """PyTorch-Lightning fires on_train_epoch_end with the last completed epoch during restore."""
+    rollout_cfg = {"start": 1, "epoch_increment": 1, "maximum": 10}
+
+    # --- first job: two epochs ---
+    module, task = _make_module_with_forecaster_task(rollout_cfg)
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+
+    checkpoint: dict = {}
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+
+    # --- restore into a fresh module via on_load_checkpoint ---
+    resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
+    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
+    checkpoint["state_dict"] = {}
+    BaseTrainingModule.on_load_checkpoint(resumed_module, checkpoint)
+
+    # PL fires on_train_epoch_end with the last completed epoch during restore
+    resumed_task.on_train_epoch_end(1)
+    assert resumed_task.rollout.step == 3, "spurious on_train_epoch_end(1) on restore must not increment step"
+
+    # --- second job: two more epochs ---
+    resumed_task.on_train_epoch_end(2)
+    assert resumed_task.rollout.step == 4
+    resumed_task.on_train_epoch_end(3)
+    assert resumed_task.rollout.step == 5
+
+
+def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None:
+    """Checkpoints from before this fix (no task_state key) load without error."""
+    module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 1, "maximum": 5})
+
+    checkpoint = {
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert task.rollout.step == 2
 
 
 # --- Tests for _validate_transfer_learning_units ---
