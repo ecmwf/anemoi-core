@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -33,6 +32,10 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.checkpoint.loading.base import apply_trainable_edge_perm_migration
+from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
+from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
+from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processors
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -44,12 +47,6 @@ from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
-
-_chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
-_trainable_edge_perm_fix_migration = importlib.import_module(
-    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
-).migrate
 
 if TYPE_CHECKING:
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
@@ -434,51 +431,41 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
     def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
+        # Shared processor-refresh parity step (see checkpoint.loading.base). Guard
+        # before reading self.model so a no-op refresh (both flags off or no state
+        # dict) does not require the model to exist.
         update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
-        state_dict = checkpoint.get("state_dict")
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
+        if not (update_cfg.states or update_cfg.tendencies):
             return
-
-        processor_prefixes: tuple[str, ...] = ()
-        if update_states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_tendencies:
-            processor_prefixes += (
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            )
-
-        if not processor_prefixes:
+        if not isinstance(checkpoint.get("state_dict"), dict):
             return
-        for key in list(state_dict.keys()):
-            if key.startswith(processor_prefixes):
-                del state_dict[key]
-
-        model_state_dict = self.model.state_dict()
-        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
-        for key, value in model_state_dict.items():
-            full_key = f"model.{key}"
-            if full_key.startswith(processor_prefixes):
-                state_dict[full_key] = value
+        refresh_checkpoint_processors(
+            checkpoint,
+            self.model,
+            update_states=update_cfg.states,
+            update_tendencies=update_cfg.tendencies,
+        )
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
-        # Apply migrations to handle state_dict key changes from older checkpoints.
-        # These are idempotent: already-migrated checkpoints are unaffected.
-        _trainable_edge_perm_fix_migration(checkpoint, model=self)
+        # Warm start resumes via Lightning's ckpt_path, which calls this hook. The
+        # checkpoint pipeline has already applied weights + parity to this model at
+        # build time (it sets weights_initialized), so the parity steps below would
+        # be a redundant second pass — skip them. Lightning still restores the
+        # optimizer/scheduler/loop-progress state, which the pipeline cannot
+        # (those objects exist only at fit time); that is the single thing
+        # ckpt_path is retained for. The body remains as a fallback for a direct,
+        # non-pipeline Lightning load (where weights_initialized is unset).
+        if getattr(self, "weights_initialized", False):
+            return
+
+        # Migrations are idempotent and mutate the checkpoint dict in place (the
+        # return is discarded so Lightning loads from the migrated dict). Order:
+        # edge_perm before the processor refresh; chunking_fix is not applied here.
+        apply_trainable_edge_perm_migration(checkpoint, self)
         self._update_checkpoint_state_dict_for_load(checkpoint)
 
-        self._ckpt_model_name_to_index = {
-            dataset_name: data_indices.name_to_index
-            for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
-        }
-
-        # Extract variables_metadata for unit compatibility check
-        self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
-            checkpoint,
-            self._ckpt_model_name_to_index,
-        )
+        preserve_anemoi_metadata(self, checkpoint)
+        extract_checkpoint_variables_metadata(self, checkpoint)
 
     def _update_scaler_for_dataset(
         self,
@@ -993,8 +980,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
                 if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
-                        "Validation metrics cannot be scaled over the variable dimension"
-                        " in the post processed space."
+                        "Validation metrics cannot be scaled over the variable dimension in the post processed space."
                     )
                     raise ValueError(exception_msg)
 
@@ -1100,7 +1086,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         for mname, mvalue in metrics.items():
             for scale in range(mvalue.numel()):
-
                 log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
 
                 self.log(

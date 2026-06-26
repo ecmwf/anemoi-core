@@ -22,6 +22,7 @@ import anemoi.training
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 
 _FREEZING_TARGET = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
+_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunSource"
 
 
 def _checkpoint_template_dir() -> Path:
@@ -118,3 +119,32 @@ def test_no_checkpoint_config_builds_empty_pipeline() -> None:
     cfg = OmegaConf.create({"training": {}})
     pipeline = build_checkpoint_pipeline(cfg)
     assert len(pipeline.stages) == 0
+
+
+def test_builder_injects_server2server_into_run_source() -> None:
+    """Runtime server-to-server lineage is merged onto a RunSource source config."""
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
+    pipeline = build_checkpoint_pipeline(
+        cfg,
+        parent_run_server2server="remote-parent",
+        fork_run_server2server="remote-fork",
+    )
+    source = pipeline.stages[0]
+    assert source.parent_run_server2server == "remote-parent"
+    assert source.fork_run_server2server == "remote-fork"
+
+
+def test_builder_server2server_defaults_leave_run_source_untouched() -> None:
+    """Without runtime lineage, a config-provided RunSource is built verbatim."""
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
+    pipeline = build_checkpoint_pipeline(cfg)
+    source = pipeline.stages[0]
+    assert source.parent_run_server2server is None
+    assert source.fork_run_server2server is None
+
+
+def test_builder_server2server_ignored_for_local_source() -> None:
+    """Runtime lineage kwargs are a no-op for non-RunSource sources (no instantiation error)."""
+    cfg = compose_test_config(source="local")
+    pipeline = build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
+    assert type(pipeline.stages[0]).__name__.endswith("LocalSource")

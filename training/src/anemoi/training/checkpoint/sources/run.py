@@ -24,7 +24,7 @@ Server-to-server lineage overrides (``parent_run_server2server`` /
 ``fork_run_server2server``) are logger-derived at runtime, so the trainer injects
 them as constructor inputs — the acquisition layer must not import the
 trainer/MLflow logger. The path formula and the rank-0 missing-checkpoint
-behaviour are the same as the resolver this source replaces.
+behaviour match the legacy run-lineage resolution this source replaces.
 
 Example
 -------

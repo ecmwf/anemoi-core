@@ -81,10 +81,10 @@ class AnemoiEvaluator(AnemoiTrainer):
 
         LOGGER.debug("Starting evaluation..")
 
-        # When the model is already initialised with the checkpoint weights — via
-        # the legacy load_weights_only flag or a training.checkpoint loading
-        # strategy other than warm start — pass ckpt_path=None to avoid a second
-        # load. Otherwise let PL restore the full training state from the checkpoint.
+        # When the model is already initialised with the checkpoint weights — via a
+        # training.checkpoint loading strategy other than warm start — pass
+        # ckpt_path=None to avoid a second load. Otherwise let PL restore the full
+        # training state from the checkpoint.
         ckpt_path = None if self._skip_lightning_restore() else self.last_checkpoint
 
         trainer.validate(

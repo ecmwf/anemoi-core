@@ -38,7 +38,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
     for key, subschema in schema.items():
-
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:
@@ -452,7 +451,12 @@ def test_evaluator(
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
     checkpoint_dir = run_dirs[0]
 
-    cfg.training.run_id = checkpoint_dir.name
-    cfg.training.load_weights_only = True
+    cfg.training.checkpoint = {
+        "source": {
+            "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+            "run_id": checkpoint_dir.name,
+        },
+        "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+    }
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()

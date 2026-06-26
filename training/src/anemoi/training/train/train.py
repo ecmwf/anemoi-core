@@ -11,7 +11,6 @@
 import asyncio
 import datetime
 import logging
-import warnings
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
@@ -75,6 +74,44 @@ def _write_run_identity(config: DictConfig, run_id: str | None, fork_run_id: str
         OmegaConf.set_struct(config, prior_struct)
 
 
+def _reject_unsupported_warm_start(pipeline_cfg: DictConfig) -> None:
+    """Reject warm start configured with a source that has no local checkpoint.
+
+    Warm start restores optimizer and epoch state through Lightning's
+    ``ckpt_path``, which needs a checkpoint reachable as a local file. Only
+    ``LocalSource`` (an explicit path) and ``RunSource`` (a resolved ``last.ckpt``
+    on a shared filesystem) provide one. With an ``S3Source`` / ``HTTPSource`` —
+    or no source at all — the pipeline would still load the weights, but
+    :attr:`AnemoiTrainer.last_checkpoint` resolves to ``None`` for those sources,
+    so Lightning would silently start from step 0 with the optimizer and epoch
+    state dropped. Fail loudly here instead of degrading silently.
+    """
+    loading = OmegaConf.select(pipeline_cfg, "training.checkpoint.loading", default=None)
+    if loading is None:
+        return
+    loading_target = OmegaConf.select(loading, "_target_", default="") or ""
+    if not loading_target.endswith("WarmStartLoader"):
+        return
+
+    source = OmegaConf.select(pipeline_cfg, "training.checkpoint.source", default=None)
+    source_target = (OmegaConf.select(source, "_target_", default="") or "") if source is not None else ""
+    if source_target.endswith(("LocalSource", "RunSource")):
+        return
+
+    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+    described = source_target.rsplit(".", 1)[-1] if source_target else "no source"
+    msg = (
+        "Warm start restores optimizer and epoch state via Lightning's ckpt_path, "
+        "which requires a checkpoint reachable as a local file. The configured "
+        f"training.checkpoint.source ({described}) does not provide one, so the optimizer "
+        "and epoch state would be silently dropped. Use a LocalSource or RunSource for "
+        "warm start, or switch training.checkpoint.loading to WeightsOnlyLoader / "
+        "TransferLearningLoader if you only need the weights."
+    )
+    raise CheckpointConfigError(msg)
+
+
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -130,11 +167,6 @@ class AnemoiTrainer(ABC):
         )
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
-        # Read defensively: the schema supplies a False default, but the
-        # unvalidated config path (config_validation: false) types ``training``
-        # as ``Any`` and so does not fill it. ``select`` mirrors the falsy legacy
-        # default whether the key is present, absent, or omitted post-migration.
-        self.load_weights_only = OmegaConf.select(self.config, "training.load_weights_only", default=False)
         self.parent_uuid = None
 
         # Resolve and seed the internal run-identity keys. ``run_id`` /
@@ -392,53 +424,41 @@ class AnemoiTrainer(ABC):
 
         # Declarative checkpoint pipeline (opt-in via ``training.checkpoint``): when
         # configured, the source -> loading -> modifier pipeline owns weight loading
-        # and model modification. Runs without ``training.checkpoint`` fall through to
-        # the deprecated legacy keys, which are translated into the same pipeline below.
+        # and model modification. Without ``training.checkpoint`` this is a fresh run.
+        # The legacy load_weights_only / transfer_learning / submodules_to_freeze keys
+        # are rejected at config validation (schemas.base_schema._DEPRECATED_KEYS).
         if self._checkpoint_pipeline_configured():
             return self._load_via_checkpoint_pipeline(model)
-
-        # Legacy checkpoint keys delegate through the same pipeline (deprecated):
-        # load_weights_only / transfer_learning / submodules_to_freeze are translated
-        # into a ``training.checkpoint`` block, each with a deprecation warning naming
-        # its replacement, so there is a single load path.
-        legacy_checkpoint = self._legacy_checkpoint_config()
-        if legacy_checkpoint is not None:
-            return self._load_via_checkpoint_pipeline(model, checkpoint_config=legacy_checkpoint)
 
         return model
 
     def _checkpoint_pipeline_configured(self) -> bool:
         """Return whether a declarative checkpoint pipeline is configured.
 
-        ``True`` when ``training.checkpoint`` is present (a ``source`` and/or
-        ``loading`` block). When absent, :meth:`model` uses the legacy
-        ``load_weights_only`` / ``transfer_learning`` / ``submodules_to_freeze``
-        path unchanged.
+        ``True`` when ``training.checkpoint`` is present (a ``source``, ``loading``
+        and/or ``modifiers`` block). When absent, :meth:`model` is a fresh run; the
+        legacy ``load_weights_only`` / ``transfer_learning`` / ``submodules_to_freeze``
+        keys are rejected at config validation.
         """
         return OmegaConf.select(self.config, "training.checkpoint", default=None) is not None
 
     def _load_via_checkpoint_pipeline(
         self,
         model: pl.LightningModule,
-        checkpoint_config: DictConfig | dict | None = None,
     ) -> pl.LightningModule:
         """Load weights and apply modifiers through the checkpoint pipeline.
 
-        Resolves the checkpoint path from the run lineage (when a source stage is
-        present), then runs the configured ``source`` -> ``loading`` ->
-        ``modifiers`` stages. This is the single load path for both the
-        ``training.checkpoint`` config and the deprecated legacy keys.
+        Runs the configured ``training.checkpoint`` ``source`` -> ``loading`` ->
+        ``modifiers`` stages. This is the single checkpoint load path. The
+        resolved checkpoint path (set by the source stage) is cached on
+        ``self._resolved_ckpt_path`` so :attr:`last_checkpoint` can hand it to
+        Lightning's ``ckpt_path`` without re-resolving it.
 
         Parameters
         ----------
         model : pl.LightningModule
             The freshly instantiated training module whose parameter slots the
             loading stage fills in place (no re-instantiation).
-        checkpoint_config : DictConfig | dict, optional
-            A ``training.checkpoint`` block to use instead of the one on
-            ``self.config`` — used by the legacy-key delegation to run a
-            translated pipeline. When ``None`` the block on ``self.config`` is
-            used.
 
         Returns
         -------
@@ -448,28 +468,25 @@ class AnemoiTrainer(ABC):
         """
         from anemoi.training.checkpoint import build_checkpoint_pipeline
         from anemoi.training.checkpoint.base import CheckpointContext
-        from anemoi.training.checkpoint.sources import RunSource
 
-        pipeline_cfg = (
-            self.config
-            if checkpoint_config is None
-            else OmegaConf.create({"training": {"checkpoint": checkpoint_config}})
-        )
-        has_loading = OmegaConf.select(pipeline_cfg, "training.checkpoint.loading", default=None) is not None
+        has_loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None) is not None
+        _reject_unsupported_warm_start(self.config)
 
         context = CheckpointContext(model=model, config=self.config)
-        pipeline = build_checkpoint_pipeline(pipeline_cfg)
+        # Runtime, logger-derived server-to-server lineage cannot reach a RunSource
+        # through Hydra; the builder injects it into the source config before
+        # instantiation (a no-op for non-RunSource sources).
+        pipeline = build_checkpoint_pipeline(
+            self.config,
+            parent_run_server2server=getattr(self, "parent_run_server2server", None),
+            fork_run_server2server=getattr(self, "fork_run_server2server", None),
+        )
 
-        # A RunSource resolves its own checkpoint path (as the acquisition stage)
-        # but cannot receive the runtime, logger-derived server-to-server lineage
-        # through Hydra; inject it so a cross-server resume/fork resolves the same
-        # path the trainer would.
-        for stage in pipeline.stages:
-            if isinstance(stage, RunSource):
-                stage.parent_run_server2server = getattr(self, "parent_run_server2server", None)
-                stage.fork_run_server2server = getattr(self, "fork_run_server2server", None)
-
-        loaded_model = asyncio.run(pipeline.execute(context)).model
+        executed = asyncio.run(pipeline.execute(context))
+        # The source stage records the resolved checkpoint path; cache it for
+        # Lightning's ckpt_path resume (None for remote sources or fresh runs).
+        self._resolved_ckpt_path = executed.checkpoint_path
+        loaded_model = executed.model
 
         # Trainer-side parity until the dataset/units validators move into the
         # pipeline: when weights were loaded, keep the current config's data
@@ -479,55 +496,6 @@ class AnemoiTrainer(ABC):
             self._validate_transfer_learning_datasets(loaded_model)
             self._validate_transfer_learning_units(loaded_model)
         return loaded_model
-
-    def _legacy_checkpoint_config(self) -> dict | None:
-        """Translate the deprecated submodule-freezing key into a ``training.checkpoint`` block.
-
-        Returns ``None`` when no legacy key is set. ``training.submodules_to_freeze``
-        is translated to a modifier stage (with one ``FutureWarning``) so legacy
-        freezing delegates to the same pipeline.
-
-        ``training.load_weights_only`` / ``training.transfer_learning`` no longer
-        carry a checkpoint to load from — that path moved to
-        ``training.checkpoint.source`` — so using them raises a hard error naming
-        the replacement surface rather than silently loading nothing.
-        """
-        if self.load_weights_only or OmegaConf.select(self.config, "training.transfer_learning", default=False):
-            loaders = "anemoi.training.checkpoint.loading.strategies"
-            msg = (
-                "training.load_weights_only / training.transfer_learning no longer carry a "
-                "checkpoint to load from. Set training.checkpoint.source to the run or file to "
-                "load (e.g. {_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>} "
-                "or {_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) "
-                f"and training.checkpoint.loading to {{_target_: {loaders}.WeightsOnlyLoader}} "
-                f"(or {{_target_: {loaders}.TransferLearningLoader, skip_mismatched: true}} for "
-                "transfer learning)."
-            )
-            raise ValueError(msg)
-
-        submodules = OmegaConf.select(self.config, "training.submodules_to_freeze", default=None)
-        if not submodules:
-            return None
-
-        freezing = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
-        warnings.warn(
-            f"training.submodules_to_freeze is deprecated; set training.checkpoint.modifiers to "
-            f"[{{_target_: {freezing}}}].",
-            FutureWarning,
-            stacklevel=2,
-        )
-        # The legacy path froze submodules of ``model.model.model``; the modifier
-        # resolves names from the Task root via ``get_submodule``, so prefix the
-        # ``model.model.`` path to target the identical submodules.
-        return {
-            "modifiers": [
-                {
-                    "_target_": freezing,
-                    "submodules_to_freeze": [f"model.model.{name}" for name in submodules],
-                    "strict": False,
-                },
-            ],
-        }
 
     def _derive_run_identity(self) -> None:
         """Map a ``training.checkpoint.source`` RunSource onto the internal run identity.
@@ -597,66 +565,29 @@ class AnemoiTrainer(ABC):
     def last_checkpoint(self) -> Path | None:
         """Path to the checkpoint to resume from, for Lightning's ``ckpt_path``.
 
-        A ``LocalSource`` carries an explicit file path (resume / warm-start
-        semantics); a ``RunSource`` resolves
-        ``<checkpoints.root.parent>/<id>/last.ckpt`` via
-        :meth:`RunSource.resolve_path`, using the run identity derived in
-        :meth:`_derive_run_identity` and the logger-derived server-to-server
-        lineage. The K4 ``ckpt_path`` passthrough consumes this for the
-        exact-resume path.
+        The checkpoint source stage resolves and records the path during
+        :meth:`_load_via_checkpoint_pipeline` (run when :attr:`model` is built);
+        this returns that cached ``context.checkpoint_path``. ``LocalSource``
+        records its explicit file; ``RunSource`` records
+        ``<checkpoints.root.parent>/<id>/last.ckpt``. Remote sources (S3/HTTP) do
+        not record a local path, which is why warm start is restricted to
+        Local/Run sources (see :func:`_reject_unsupported_warm_start`).
 
-        Returns ``None`` when there is nothing to resume; raises
-        ``FileNotFoundError`` for a configured-but-missing explicit file and
-        ``RuntimeError`` (rank 0) for a missing run checkpoint.
+        Returns ``None`` when there is nothing to resume. A configured-but-missing
+        checkpoint surfaces from the source stage during model build:
+        ``CheckpointNotFoundError`` for an explicit local file and ``RuntimeError``
+        (rank 0) for a missing run checkpoint — the rank-0 policy lives solely in
+        the acquisition layer (``RunSource`` / ``LocalSource``).
         """
         if not self.start_from_checkpoint:
             return None
 
-        source = OmegaConf.select(self.config, "training.checkpoint.source", default=None)
-        if source is None:
-            return None
-        target = OmegaConf.select(source, "_target_", default="") or ""
-
-        # An explicit checkpoint file (LocalSource) carries no run lineage; resume
-        # from that path directly (warm-start semantics).
-        if target.endswith("LocalSource"):
-            path = OmegaConf.select(source, "path", default=None)
-            if path is None:
-                return None
-            checkpoint = Path(path)
-            if not checkpoint.is_file():
-                msg = f"Checkpoint file not found: {checkpoint}"
-                raise FileNotFoundError(msg)
-            return checkpoint
-
-        if not target.endswith("RunSource"):
-            return None
-
-        run_id = OmegaConf.select(source, "run_id", default=None)
-        if run_id is None:
-            return None
-
-        from anemoi.training.checkpoint.sources.run import RunSource
-        from anemoi.training.checkpoint.sources.run import _is_rank_zero
-
-        # The checkpoint-path formula lives in one place — the acquisition layer.
-        # ``_update_paths`` has already appended the lineage to ``checkpoints.root``,
-        # which ``resolve_path`` undoes via ``.parent``.
-        checkpoint = RunSource.resolve_path(
-            self.config,
-            run_id,
-            bool(OmegaConf.select(source, "fork", default=False)),
-            getattr(self, "parent_run_server2server", None),
-            getattr(self, "fork_run_server2server", None),
-        )
-        if checkpoint.exists():
-            return checkpoint
-        # Rank 0 surfaces the missing-checkpoint error; other ranks defer to it.
-        if _is_rank_zero():
-            msg = f"Could not find last checkpoint: {checkpoint}"
-            raise RuntimeError(msg)
-        LOGGER.warning("Checkpoint not found at %s; deferring the error to rank 0.", checkpoint)
-        return None
+        # Building the model runs the checkpoint pipeline, whose source stage sets
+        # the resolved path (cached property: in the real flow the model is already
+        # built before ckpt_path is read, so this is a cache hit).
+        _ = self.model
+        resolved = getattr(self, "_resolved_ckpt_path", None)
+        return Path(resolved) if resolved is not None else None
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
@@ -872,21 +803,30 @@ class AnemoiTrainer(ABC):
     def _skip_lightning_restore(self) -> bool:
         """Whether to skip Lightning's ``ckpt_path`` full-state restore.
 
-        The model already carries its checkpoint weights when either the legacy
-        ``load_weights_only`` flag is set or a ``training.checkpoint`` loading
-        strategy has run in :meth:`model`. In both cases Lightning must not also
-        restore the full training state from ``ckpt_path`` (which would re-apply
-        optimizer and epoch state on top of a weights-only load). Warm start is
-        the exception: it intends a full optimizer/epoch restore, which only
-        Lightning can perform once the optimizer exists, so it keeps ``ckpt_path``.
+        The checkpoint pipeline applies weights + parity to the model at build
+        (:meth:`model`), so Lightning must not redo that. ``ckpt_path`` is kept
+        only for a loading strategy that declares
+        :attr:`~anemoi.training.checkpoint.loading.base.LoadingStrategy.restores_training_state`
+        — i.e. warm start, where Lightning owns the optimizer/scheduler/loop
+        restore the pipeline cannot perform at build time. Every other strategy
+        (and a run with no loading configured) suppresses ``ckpt_path``.
         """
-        if self.load_weights_only:
-            return True
         loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None)
         if loading is None:
             return False
         target = OmegaConf.select(loading, "_target_", default="") or ""
-        return not target.endswith("WarmStartLoader")
+        if not target:
+            return False
+
+        from hydra.utils import get_class
+
+        try:
+            loader_cls = get_class(target)
+        except (ImportError, ValueError):
+            # An unresolvable loader fails the pipeline build elsewhere; do not
+            # suppress the resume here.
+            return False
+        return not getattr(loader_cls, "restores_training_state", False)
 
     @cached_property
     def fit_parameters(self) -> Any:

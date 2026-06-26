@@ -9,7 +9,7 @@
 
 """Loading-layer parity behaviours from the legacy load paths.
 
-Covers ``transfer_learning_loading`` and ``on_load_checkpoint`` parity:
+Covers the loading-strategy parity with ``on_load_checkpoint``:
 
 - weights-only loading is strict by default (missing keys fail);
 - a strict-load failure surfaces as ``CheckpointLoadError``;
@@ -22,7 +22,6 @@ Covers ``transfer_learning_loading`` and ``on_load_checkpoint`` parity:
 
 from __future__ import annotations
 
-import inspect
 import logging
 
 import pytest
@@ -32,8 +31,6 @@ from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
-from anemoi.training.checkpoint.loading import base as loading_base
-from anemoi.training.checkpoint.loading import strategies
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
@@ -95,12 +92,6 @@ async def test_hparams_divergence_warns(caplog: pytest.LogCaptureFixture) -> Non
         await WeightsOnlyLoader().process(context)
 
     assert any("hparam" in record.getMessage().lower() for record in caplog.records)
-
-
-def test_loading_layer_references_trainable_edge_perm() -> None:
-    """The loading layer references the runtime trainable_edge_perm migration."""
-    source = inspect.getsource(loading_base) + inspect.getsource(strategies)
-    assert "trainable_edge_perm" in source
 
 
 def test_model_output_idx_reinjected_during_refresh() -> None:

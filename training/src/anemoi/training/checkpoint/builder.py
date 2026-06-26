@@ -49,7 +49,42 @@ _LOADING = "loading"
 _MODIFIERS = "modifiers"
 
 
-def build_checkpoint_pipeline(cfg: DictConfig) -> CheckpointPipeline:
+def _inject_run_lineage(
+    source: Any,
+    parent_run_server2server: str | None,
+    fork_run_server2server: str | None,
+) -> Any:
+    """Merge runtime server-to-server lineage onto a ``RunSource`` config.
+
+    The lineage ids are logger-derived at runtime and cannot be expressed in the
+    static Hydra config, so the trainer passes them to the builder. Only a
+    ``RunSource`` target accepts them, and only non-``None`` values are merged, so
+    an explicitly-configured value is never clobbered and other source types are
+    left untouched (which would otherwise fail instantiation with an unknown
+    keyword argument).
+    """
+    target = OmegaConf.select(source, "_target_", default="") or ""
+    if not target.endswith("RunSource"):
+        return source
+    overrides = {
+        key: value
+        for key, value in (
+            ("parent_run_server2server", parent_run_server2server),
+            ("fork_run_server2server", fork_run_server2server),
+        )
+        if value is not None
+    }
+    if not overrides:
+        return source
+    return OmegaConf.merge(source, overrides)
+
+
+def build_checkpoint_pipeline(
+    cfg: DictConfig,
+    *,
+    parent_run_server2server: str | None = None,
+    fork_run_server2server: str | None = None,
+) -> CheckpointPipeline:
     """Assemble a :class:`CheckpointPipeline` from a training configuration.
 
     Parameters
@@ -66,6 +101,14 @@ def build_checkpoint_pipeline(cfg: DictConfig) -> CheckpointPipeline:
           ``_target_`` modifier stages, applied in list order after loading.
 
         Any of these blocks may be absent; an absent block contributes no stage.
+    parent_run_server2server : str, optional
+        Runtime server-to-server resume lineage id. When set and the source is a
+        ``RunSource``, it is merged into the source config before instantiation so
+        a cross-server resume resolves the same path the trainer would. Ignored
+        for other source types.
+    fork_run_server2server : str, optional
+        Runtime server-to-server fork lineage id, merged into a ``RunSource``
+        source config as above for the fork path.
 
     Returns
     -------
@@ -81,6 +124,7 @@ def build_checkpoint_pipeline(cfg: DictConfig) -> CheckpointPipeline:
 
     source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
     if source is not None:
+        source = _inject_run_lineage(source, parent_run_server2server, fork_run_server2server)
         stage_configs.append(source)
 
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)

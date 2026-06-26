@@ -7,13 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for WarmStartLoader."""
+"""Tests for WarmStartLoader.
+
+Warm start loads weights (strict) + parity at model-build, exactly like the
+other strategies. The optimizer / scheduler / loop-progress restore is owned by
+Lightning's ``ckpt_path`` resume at fit time (the pipeline runs before those
+objects exist), signalled by :attr:`WarmStartLoader.restores_training_state`.
+"""
 
 import pytest
 import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 
 
@@ -23,68 +30,53 @@ class SimpleModel(nn.Module):
         self.linear = nn.Linear(10, 5)
 
 
+def test_warm_start_declares_restores_training_state() -> None:
+    """Warm start is the strategy whose optimizer/loop restore is owned by Lightning ckpt_path."""
+    assert WarmStartLoader.restores_training_state is True
+
+
 @pytest.mark.asyncio
 async def test_warm_start_restores_model_weights() -> None:
     model = SimpleModel()
     saved_weight = torch.randn(5, 10)
     checkpoint_data = {"state_dict": {"linear.weight": saved_weight, "linear.bias": torch.randn(5)}}
 
-    loader = WarmStartLoader()
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await loader.process(context)
+    result = await WarmStartLoader().process(context)
 
     assert torch.equal(result.model.linear.weight, saved_weight)
+    assert result.model.weights_initialized is True
+    assert result.metadata["loading_strategy"] == "warm_start"
 
 
 @pytest.mark.asyncio
-async def test_warm_start_restores_optimizer_state() -> None:
-    model = SimpleModel()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+async def test_warm_start_loads_without_optimizer_in_context() -> None:
+    """At model-build the optimizer does not exist yet; warm start must still load weights.
 
-    # Simulate a checkpoint with optimizer state
-    optimizer_state = optimizer.state_dict()
-    checkpoint_data = {
-        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "optimizer_states": [optimizer_state],
-    }
-
-    loader = WarmStartLoader()
-    context = CheckpointContext(model=model, optimizer=optimizer, checkpoint_data=checkpoint_data)
-    result = await loader.process(context)
-
-    assert result.optimizer is not None
-
-
-@pytest.mark.asyncio
-async def test_warm_start_restores_epoch_and_step() -> None:
+    Optimizer / scheduler / loop-progress restore is deferred to Lightning's
+    ``ckpt_path``, so the loader neither requires nor touches an optimizer — even
+    when the checkpoint carries ``optimizer_states``.
+    """
     model = SimpleModel()
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "epoch": 42,
-        "global_step": 10000,
+        "optimizer_states": [{"irrelevant": True}],
     }
 
-    loader = WarmStartLoader()
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await loader.process(context)
+    result = await WarmStartLoader().process(context)  # no optimizer in context
 
-    assert result.metadata["epoch"] == 42
-    assert result.metadata["global_step"] == 10000
+    assert result.optimizer is None
+    assert result.model.weights_initialized is True
 
 
 @pytest.mark.asyncio
-async def test_warm_start_restores_scheduler_state() -> None:
+async def test_warm_start_requires_exact_match() -> None:
+    """Warm start expects the same architecture: a shape/key mismatch raises."""
     model = SimpleModel()
-    optimizer = torch.optim.Adam(model.parameters())
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
+    # Wrong shape and a missing key → strict load fails.
+    checkpoint_data = {"state_dict": {"linear.weight": torch.randn(3, 3)}}
 
-    checkpoint_data = {
-        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "lr_schedulers": [scheduler.state_dict()],
-    }
-
-    loader = WarmStartLoader()
-    context = CheckpointContext(model=model, optimizer=optimizer, scheduler=scheduler, checkpoint_data=checkpoint_data)
-    result = await loader.process(context)
-
-    assert result.scheduler is not None
+    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
+    with pytest.raises(CheckpointIncompatibleError):
+        await WarmStartLoader().process(context)
