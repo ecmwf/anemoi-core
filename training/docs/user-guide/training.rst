@@ -521,9 +521,10 @@ of hydra, you can also reuse ``config.training.run_id`` or
 *********
 
 Rollout training is when the model is iterated within the training
-process, producing forecasts for many future time steps. The loss is
-calculated on every step in the rollout period and averaged, and
-gradients backpropagated through the iteration process.
+process, producing forecasts for many future time steps from its own
+predictions. The loss is calculated on every step in the rollout period
+and averaged, and gradients flow through the whole forecast chain when
+backward is called.
 
 For example, with ``rollout=3`` and a 6-hour model timestep, the model
 autoregressively predicts t+6 h, then uses that prediction as input to
