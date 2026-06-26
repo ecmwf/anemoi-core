@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -224,6 +224,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        self._resolve_subgrid(loss_configs)
+
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
@@ -446,15 +448,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             update_tendencies=update_cfg.tendencies,
         )
 
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        checkpoint["task_state"] = self.task.training_runtime_state_dict()
+
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+        # The task's training runtime state (e.g. rollout step) is resume state the
+        # checkpoint pipeline does not apply, so restore it regardless of the
+        # parity-skip guard below.
+        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+
         # Warm start resumes via Lightning's ckpt_path, which calls this hook. The
         # checkpoint pipeline has already applied weights + parity to this model at
         # build time (it sets weights_initialized), so the parity steps below would
         # be a redundant second pass — skip them. Lightning still restores the
-        # optimizer/scheduler/loop-progress state, which the pipeline cannot
-        # (those objects exist only at fit time); that is the single thing
-        # ckpt_path is retained for. The body remains as a fallback for a direct,
-        # non-pipeline Lightning load (where weights_initialized is unset).
+        # optimizer/scheduler/loop-progress state, which the pipeline cannot (those
+        # objects exist only at fit time); that is what ckpt_path is retained for.
+        # The body remains a fallback for a direct, non-pipeline Lightning load.
         if getattr(self, "weights_initialized", False):
             return
 
@@ -630,9 +639,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
+            # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors were
+            # gathered to the full grid (grid_shard_slice is None), the loss must be told it is
+            # not sharded, otherwise it would re-shard an already-full tensor. See _prepare_tensors_for_loss.
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -996,9 +1008,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 if without_scalers is not None:
                     metric_kwargs["without_scalers"] = without_scalers
                 if getattr(metric, "needs_shard_layout_info", False):
+                    # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors
+                    # were gathered to the full grid (grid_shard_slice is None), the metric must be
+                    # told it is not sharded, otherwise it would re-shard an already-full tensor.
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
-                        grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+                        grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
                     )
 
                 metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
@@ -1154,3 +1169,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
+
+    def _resolve_subgrid(self, config: dict) -> None:
+        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
+            for k, v in per_dataset_config.items():
+                if isinstance(v, dict):
+                    per_dataset_resolve(v, dataset_name)
+                elif (k, v) == ("subgrid", "output_mask"):
+                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
+
+        for dataset_name, dataset_config in config.items():
+            if dataset_config is not None:
+                per_dataset_resolve(dataset_config, dataset_name)
