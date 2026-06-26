@@ -25,25 +25,18 @@ def config_generator() -> ConfigGenerator:
     return ConfigGenerator()
 
 
-def test_dump_config(config_generator: ConfigGenerator) -> None:
+def test_dump_config_composes_from_config_path_directory(config_generator: ConfigGenerator) -> None:
+    """`dump` composes the named config from a ``--config-path`` directory and writes the merged YAML."""
     with tempfile.TemporaryDirectory() as tmpdirname:
-        config_path = Path(tmpdirname) / "config"
-        config_path.mkdir(parents=True, exist_ok=True)
-        (config_path / "test.yaml").write_text("test: value")
+        config_dir = Path(tmpdirname) / "configs"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "mycfg.yaml").write_text("foo: bar")
 
         output_path = Path(tmpdirname) / "output.yaml"
-        with (
-            mock.patch("anemoi.training.commands.config.ConfigGenerator.copy_files") as mock_copy_files,
-            mock.patch(
-                "anemoi.training.commands.config.initialize",
-            ),
-            mock.patch("anemoi.training.commands.config.compose", return_value=OmegaConf.create({"test": "value"})),
-        ):
-            config_generator.dump_config(config_path, "test", output_path)
+        config_generator.dump_config(config_dir, "mycfg", output_path)
 
-            mock_copy_files.assert_called_once_with(config_path, mock.ANY)
-            assert output_path.exists()
-            assert OmegaConf.load(output_path) == {"test": "value"}
+        assert output_path.exists()
+        assert OmegaConf.load(output_path) == {"foo": "bar"}
 
 
 def test_validate_config_uses_package_path(config_generator: ConfigGenerator) -> None:
@@ -91,6 +84,18 @@ def test_validate_config_with_mask_env_vars(config_generator: ConfigGenerator) -
 
         # Verify that _mask_slurm_env_variables was called
         mock_mask.assert_called_once()
+
+
+def test_validate_config_composes_from_config_path_directory(config_generator: ConfigGenerator) -> None:
+    """`validate` can be pointed at a config that lives in an arbitrary directory."""
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        config_dir = Path(tmpdirname)
+        (config_dir / "standalone.yaml").write_text("foo: bar")
+
+        with mock.patch("anemoi.training.commands.config.BaseSchema") as mock_schema:
+            config_generator.validate_config("standalone", mask_env_vars=False, config_path=config_dir)
+
+        mock_schema.assert_called_once_with(foo="bar")
 
 
 def test_optimizer_config_group_can_be_overridden() -> None:
