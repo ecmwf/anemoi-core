@@ -735,9 +735,10 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
+        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
-        _ = batch_idx
+        _ = batch_idx, processed_cache
 
         if self.latlons is None:
             self.latlons = {}
