@@ -538,11 +538,11 @@ When restarting an interrupted rollout run, the rollout state
 increment) is automatically saved in every Lightning checkpoint and
 restored on resume. No manual adjustment of ``rollout.start`` is needed.
 
-When using rollout training with epoch_increment > 0, extra care is 
-required when restarting an interrupted run. 
+When using rollout training with epoch_increment > 0, extra care is
+required when restarting an interrupted run.
 
-Anemoi currently does not track how many samples remain in the dataloader 
-at the point where a checkpoint is written. For this reason, only end-of-epoch 
+Anemoi currently does not track how many samples remain in the dataloader
+at the point where a checkpoint is written. For this reason, only end-of-epoch
 checkpoints should be used for reproducible restart workflows.
 
 The recommended restart recipe is:
@@ -559,7 +559,7 @@ rollout is not incremented twice for that epoch.
 
 .. note::
 
-   When resuming from a rollout checkpoint, ``rollout.start`` is ignored unless it is higher than the rollout value saved in the checkpoint. 
+   When resuming from a rollout checkpoint, ``rollout.start`` is ignored unless it is higher than the rollout value saved in the checkpoint.
    This is to ensure that the rollout schedule continues from where it left off, rather than restarting from the original ``rollout.start`` value.
 
 ***************************
