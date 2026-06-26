@@ -20,7 +20,6 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
-from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -40,6 +39,11 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata.
 
     """
+    # Imported lazily: a module-level import of methods.base pulls the training
+    # stack (methods -> diagnostics.callbacks -> utils.checkpoint), forming a
+    # circular import that makes this utility module unsafe to import standalone.
+    from anemoi.training.train.methods.base import BaseTrainingModule
+
     module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 
