@@ -90,15 +90,6 @@ def test_inverse_reuses_converted_pct_buffer() -> None:
     assert inverse.pct is pct
 
 
-def test_reduced_grouped_rfft_matches_ring_loop() -> None:
-    direct = SphericalHarmonicTransform(lons_per_lat=[4, 6, 4, 8, 6], truncation=2)
-    x = torch.randn(2, direct.n_grid_points, dtype=torch.float32)
-
-    assert direct.rfft_rings.__name__ == "rfft_rings_reduced_auto"
-    torch.testing.assert_close(direct.rfft_rings(x), direct.rfft_rings_reduced_naive(x))
-    torch.testing.assert_close(direct.rfft_rings_reduced_grouped(x), direct.rfft_rings_reduced_naive(x))
-
-
 @pytest.fixture
 def sht_setup(request):
     # Choose GPUs if available
@@ -171,6 +162,17 @@ def test_idempotency_inverse_direct(sht_setup):
         maxdiff = max(maxdiff, torch.abs((ref - got) / ref).max().item())
 
     assert maxdiff < tolerance
+
+
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
+def test_optimised_rffts_match_naive(sht_setup):
+    dtype = sht_setup["dtype"]
+    direct = sht_setup["direct"]
+
+    x = torch.randn(2, direct.n_grid_points, dtype=dtype, device="cuda")
+
+    torch.testing.assert_close(direct.rfft_rings_reduced_cuda(x), direct.rfft_rings_reduced_naive(x))
+    torch.testing.assert_close(direct.rfft_rings_reduced_graphed(x), direct.rfft_rings_reduced_naive(x))
 
 
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
