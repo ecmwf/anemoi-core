@@ -1,31 +1,35 @@
 # Minimal Hydra override file for `anemoi-training evaluate`.
 #
-# A checkpoint MUST be specified (Pattern A or B below) or the command will
-# raise a RuntimeError before evaluation starts.
+# A checkpoint MUST be specified via training.checkpoint.source (Pattern A or B
+# below) — evaluating a randomly-initialised model is almost certainly an error.
 #
 # Usage:
 #   anemoi-training evaluate --config-dir /path/to/overrides --config-name config_evaluate
 #
 # Or pass individual keys as CLI overrides:
-#   anemoi-training evaluate training.run_id=<run_id>
+#   anemoi-training evaluate training/checkpoint/source=run +training.checkpoint.source.run_id=<run_id>
 
 # ── Checkpoint (REQUIRED — choose one pattern) ───────────────────────────────
 
 # Pattern A: last.ckpt of a known run_id (most common)
 training:
-  run_id: ???               # run_id of the completed training run
-  load_weights_only: True   # only restore model weights; skips a redundant second
-                            # load by Lightning and avoids restoring optimiser state.
-                            # Deprecated - prefer the training.checkpoint surface (e.g.
-                            # training/checkpoint/loading=weights_only); see the Evaluation guide.
+  checkpoint:
+    source:
+      _target_: anemoi.training.checkpoint.sources.run.RunSource
+      run_id: ???             # run_id of the completed training run
+    loading:
+      # weights-only load: skips a redundant second load by Lightning and
+      # avoids restoring optimiser state — recommended for evaluation.
+      _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
 
 # Pattern B: point directly at a checkpoint file
-# warm_start takes precedence over run_id when both are set.
-# system:
-#   input:
-#     warm_start: /path/to/epoch=10-step=5000.ckpt
 # training:
-#   load_weights_only: True
+#   checkpoint:
+#     source:
+#       _target_: anemoi.training.checkpoint.sources.local.LocalSource
+#       path: /path/to/epoch=10-step=5000.ckpt
+#     loading:
+#       _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
 
 # ── Diagnostics ───────────────────────────────────────────────────────────────
 diagnostics:

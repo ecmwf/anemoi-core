@@ -540,27 +540,35 @@ i.e. because the training has exceeded the time limit on an HPC system
 or because the user wants to fine-tune the model from a specific point
 in the training.
 
-This can be done by setting ``config.training.run_id`` in the config
-file to be the *run_id* of the run that is being restarted. In this case
-the new checkpoints will go in the same folder as the old checkpoints.
-If the user does not want this then they can instead set
-``config.training.fork_run_id`` in the config file to the *run_id* of
-the run that is being restarted. In this case the old run will be
-unaffected and the new checkpoints will go in to a new folder with a new
-run_id. The user might want to do this if they want to start multiple
-new runs from 1 old run.
+This is done by setting ``training.checkpoint.source`` to a ``RunSource``
+with the *run_id* of the run to restart. With ``fork: false`` (resume) the new
+checkpoints go in the same folder as the old ones:
 
-The above will restart the model training from where the old run
-finished training. It's also possible to restart the model training from
-a specific checkpoint. This can either be a checkpoint from the same run
-or a checkpoint from a different run that you have run in the past or
-that you using for transfer learning. To do this, set
-``config.system.input.warm_start`` to be the path to the checkpoint they
-want to restart from.
+.. code:: yaml
 
-The above can be adapted depending on the use case and taking advantage
-of hydra, you can also reuse ``config.training.run_id`` or
-``config.training.fork_run_id`` to define the path to the checkpoint.
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.run.RunSource
+         run_id: <run_id>
+         fork: false   # resume; set true to fork into a new run
+
+With ``fork: true`` the old run is unaffected and the new checkpoints go to a
+new folder with a fresh run_id — useful for starting multiple new runs from a
+single old run. The same can be selected on the command line with the Hydra
+group ``training/checkpoint/source=run +training.checkpoint.source.run_id=<run_id>``.
+
+To restart from a specific checkpoint *file* instead of a run's ``last.ckpt`` —
+e.g. a checkpoint from a different run, or one used for transfer learning — use
+a ``LocalSource`` with an explicit ``path``:
+
+.. code:: yaml
+
+   training:
+     checkpoint:
+       source:
+         _target_: anemoi.training.checkpoint.sources.local.LocalSource
+         path: /path/to/checkpoint.ckpt
 
 *******************
  Transfer Learning
@@ -584,10 +592,12 @@ or configure it inline under ``training.checkpoint.loading``:
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-
       checkpoint:
+        # the checkpoint to transfer-learn from (a run, or a LocalSource path)
+        source:
+          _target_: anemoi.training.checkpoint.sources.run.RunSource
+          run_id: <run_id>
+          fork: true
         loading:
           _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
           skip_mismatched: true
@@ -600,19 +610,13 @@ appropriately. Set ``skip_mismatched: false`` to raise
 .. note::
 
    The legacy keys ``training.transfer_learning`` and
-   ``training.load_weights_only`` are **deprecated** but still supported.
-   When set, they delegate to a ``TransferLearningLoader`` /
-   ``WeightsOnlyLoader`` pipeline and emit a ``FutureWarning``:
-
-   .. code:: yaml
-
-      training:
-         fork_run_id: ...
-         load_weights_only: True
-         transfer_learning: True
-
-   Prefer the ``training.checkpoint`` surface shown above for new
-   configurations.
+   ``training.load_weights_only`` have been **removed**. They are rejected at
+   config validation with an error naming the replacement: set
+   ``training.checkpoint.source`` to the run or file to load and
+   ``training.checkpoint.loading`` to a ``WeightsOnlyLoader`` (or a
+   ``TransferLearningLoader`` with ``skip_mismatched: true``), as shown above.
+   The removed run-lineage keys ``training.run_id`` / ``training.fork_run_id``
+   are likewise expressed as a ``RunSource`` under ``training.checkpoint.source``.
 
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
@@ -699,10 +703,14 @@ decoder.
 .. code:: yaml
 
    training:
-      # start the training from a checkpoint of a previous run
-      fork_run_id: ...
-
       checkpoint:
+        # the checkpoint to start from (a run, or a LocalSource path)
+        source:
+          _target_: anemoi.training.checkpoint.sources.run.RunSource
+          run_id: <run_id>
+          fork: true
+        loading:
+          _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
         modifiers:
           - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
             submodules_to_freeze:
@@ -714,23 +722,10 @@ decoder.
 
 .. note::
 
-   The legacy key ``training.submodules_to_freeze`` is **deprecated** but
-   still supported. When set, it delegates to a ``FreezingModifierStage``
-   pipeline and emits a ``FutureWarning``:
-
-   .. code:: yaml
-
-      training:
-         fork_run_id: ...
-         load_weights_only: True
-
-         submodules_to_freeze:
-            - encoder.global
-            - processor
-            - decoder.global
-
-   Prefer the ``training.checkpoint`` surface shown above for new
-   configurations.
+   The legacy key ``training.submodules_to_freeze`` has been **removed**. It is
+   rejected at config validation with an error naming the replacement: set
+   ``training.checkpoint.modifiers`` to a list with a ``FreezingModifierStage``,
+   as shown above.
 
 Freezing can be particularly beneficial in scenarios such as fine-tuning
 when only specific components (e.g., the encoder, the decoder) need to

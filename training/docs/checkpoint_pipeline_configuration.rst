@@ -61,8 +61,7 @@ Easy path — Hydra group selection
 
 The ``source``, ``loading`` and ``modifiers`` blocks are wired as opt-in
 default groups in every shipped training preset. The default is ``null``
-(no pipeline — weight loading is governed by ``run_id`` / ``fork_run_id``
-/ ``system.input.warm_start``). Select a group to opt in:
+(no pipeline — a fresh run with no checkpoint loaded). Select a group to opt in:
 
 .. code:: bash
 
@@ -289,40 +288,48 @@ Then use it as the loading strategy in configuration:
  Migration from Legacy Configuration
 *************************************
 
-The ``training.checkpoint`` surface supersedes several legacy
-configuration options. The legacy keys still work — they now default to
-off and have been removed from the shipped training presets, but they
-remain accepted for backward compatibility and emit a ``FutureWarning``
-when used. Prefer the ``training.checkpoint`` surface for new configs.
+The ``training.checkpoint`` surface replaces several legacy configuration
+options. The legacy keys have been **removed**: each is rejected at config
+validation with an error naming its replacement. Use the
+``training.checkpoint`` surface for all checkpoint acquisition, loading and
+model modification.
 
 .. list-table:: Legacy to Modern Migration
    :header-rows: 1
 
-   -  -  Legacy Setting
+   -  -  Removed Setting
       -  Modern Equivalent
       -  Notes
 
    -  -  ``training.load_weights_only: true``
-      -  ``training.checkpoint.loading`` with ``WeightsOnlyLoader``
-      -  Delegates to a ``WeightsOnlyLoader`` pipeline + ``FutureWarning``
+      -  ``training.checkpoint.source`` + ``training.checkpoint.loading`` with
+         ``WeightsOnlyLoader``
+      -  Rejected at config validation; set the source to the run/file to load.
 
    -  -  ``training.transfer_learning: true``
-      -  ``training.checkpoint.loading`` with ``TransferLearningLoader``
-      -  Delegates to a ``TransferLearningLoader`` pipeline +
-         ``FutureWarning``
+      -  ``training.checkpoint.source`` + ``training.checkpoint.loading`` with
+         ``TransferLearningLoader``
+      -  Rejected at config validation (use ``skip_mismatched: true``).
 
    -  -  ``training.submodules_to_freeze: [...]``
       -  ``training.checkpoint.modifiers`` with ``FreezingModifierStage``
-      -  Delegates to a ``FreezingModifierStage`` pipeline +
-         ``FutureWarning``
+      -  Rejected at config validation.
+
+   -  -  ``training.run_id`` / ``training.fork_run_id``
+      -  ``training.checkpoint.source`` with ``RunSource`` (``fork: true`` to fork)
+      -  Rejected at config validation.
+
+   -  -  ``system.input.warm_start``
+      -  ``training.checkpoint.source`` with ``LocalSource`` (explicit file)
+      -  Rejected at config validation.
 
 .. note::
 
-   Resume / fork / warm-start is **unchanged and separate** from the
-   checkpoint pipeline. ``training.run_id``, ``training.fork_run_id`` and
-   ``system.input.warm_start`` drive run-lineage checkpoint resolution and
-   Lightning ``ckpt_path`` resume; do not fold these into
-   ``training.checkpoint`` examples.
+   Resume / fork / warm-start are now expressed through the same
+   ``training.checkpoint.source`` surface: a ``RunSource`` (``fork: false`` to
+   resume, ``fork: true`` to fork) or a ``LocalSource`` (an explicit file). The
+   source stage records the resolved checkpoint path, which the trainer hands to
+   Lightning's ``ckpt_path`` for the warm-start full-state resume.
 
 ****************
  Best Practices

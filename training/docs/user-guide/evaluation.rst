@@ -17,9 +17,8 @@ identically. No optimizer state is created and no gradients are computed.
 
 .. warning::
 
-   A checkpoint **must** be specified via ``training.run_id``,
-   ``training.fork_run_id``, or ``system.input.warm_start``. Omitting
-   all three raises a :exc:`RuntimeError` immediately — evaluation on a
+   A checkpoint **must** be specified via ``training.checkpoint.source`` (a
+   ``RunSource`` by ``run_id``, or a ``LocalSource`` by ``path``). Evaluating a
    randomly-initialised model is almost certainly a user error.
 
 ***********************
@@ -46,39 +45,39 @@ strategy), but replaces the final ``trainer.fit()`` call with
  Checkpoint loading
 **************************
 
-A checkpoint source must be configured before evaluation starts. Three
-cases are recognised, in priority order:
+A checkpoint source must be configured on ``training.checkpoint.source``
+before evaluation starts:
 
-1. **``system.input.warm_start``** — load from an explicit file path.
-   Raises :exc:`FileNotFoundError` if the file does not exist. Takes
-   precedence over ``run_id`` / ``fork_run_id`` when both are set.
+1. **``RunSource``** (``training/checkpoint/source=run`` with a ``run_id``) —
+   resolve the last checkpoint of a run as
+   ``<checkpoints.root>/<run_id>/last.ckpt``. Raises :exc:`RuntimeError` on
+   rank 0 if the file is not found.
 
-2. **``training.run_id`` or ``training.fork_run_id``** — resolve the
-   last checkpoint automatically as
-   ``<checkpoints.root>/<run_id>/last.ckpt``.  Raises
-   :exc:`RuntimeError` if the file is not found.
+2. **``LocalSource``** (``training/checkpoint/source=local`` with a ``path``) —
+   load from an explicit file. Raises
+   :exc:`~anemoi.training.checkpoint.exceptions.CheckpointNotFoundError` if the
+   file does not exist.
 
-3. **Neither set** — raises :exc:`RuntimeError` immediately with a
-   descriptive message (unlike training, where a fresh start is valid).
+Evaluation expects a source to be configured; without one the model is left at
+its initial weights (unlike training, where a fresh start is valid).
 
-Once a checkpoint path is resolved, two loading modes are available:
+The loading strategy on ``training.checkpoint.loading`` controls how the
+resolved checkpoint is applied:
 
-- **``load_weights_only: True``** (recommended for evaluation) — model
-  weights are loaded once during model initialisation; ``ckpt_path=None``
-  is passed to ``trainer.validate()`` to avoid a redundant second load
-  and to skip restoring optimizer/scheduler state.
-- **``load_weights_only: False``** — PyTorch Lightning restores the full
-  training state (weights, optimizer, epoch counter) before validation.
+- **Any non-warm-start strategy** (e.g. ``weights_only``, recommended for
+  evaluation) — model weights are loaded once during model initialisation;
+  ``ckpt_path=None`` is passed to ``trainer.validate()`` to avoid a redundant
+  second load and to skip restoring optimizer/scheduler state.
+- **``warm_start``** — PyTorch Lightning restores the full training state
+  (weights, optimizer, epoch counter) from ``ckpt_path`` before validation.
 
 .. note::
 
-   ``training.load_weights_only`` is deprecated; prefer the ``training.checkpoint``
-   surface (see :ref:`checkpoint_pipeline_configuration`), e.g.
-   ``training/checkpoint/source=local training/checkpoint/loading=weights_only``.
-   Any non-warm-start loading strategy on that surface also passes
-   ``ckpt_path=None`` to ``trainer.validate()`` — the same weights-only behaviour
-   described above — so it fully covers evaluation. The legacy flag still works
-   and emits a ``FutureWarning``.
+   The legacy ``training.run_id`` / ``training.fork_run_id`` /
+   ``system.input.warm_start`` / ``training.load_weights_only`` keys have been
+   **removed** and are rejected at config validation. Use the
+   ``training.checkpoint`` surface above (see
+   :ref:`checkpoint_pipeline_configuration`).
 
 **************************
  Checkpointing and weight averaging
@@ -102,7 +101,8 @@ a config file and any Hydra overrides as positional arguments:
 
    anemoi-training evaluate \
        --config-name evaluate_ana_short \
-       training.run_id=<run_id>
+       training/checkpoint/source=run \
+       +training.checkpoint.source.run_id=<run_id>
 
 You can also override individual keys without a dedicated config file:
 
@@ -110,8 +110,9 @@ You can also override individual keys without a dedicated config file:
 
    anemoi-training evaluate \
        --config-name debug_ana_short \
-       training.run_id=<run_id> \
-       training.load_weights_only=true \
+       training/checkpoint/source=run \
+       +training.checkpoint.source.run_id=<run_id> \
+       training/checkpoint/loading=weights_only \
        dataloader.limit_batches.validation=10 \
        diagnostics.plot.enabled=true
 
