@@ -407,6 +407,11 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
             artifact_location=artifact_location,
         )
 
+        if self.offline:
+            # SQLite is not a supported model registry store; replace the client with one
+            # that has registry_uri="" (disabled) to avoid UnsupportedModelRegistryStoreURIException.
+            self._mlflow_client = MlflowClient(tracking_uri=self.tracking_uri, registry_uri="")
+
         # Track logged metrics to prevent duplicate logs
         # 2000 has been chosen as this should contain metrics form many steps
         self._logged_metrics = FixedLengthSet(maxlen=2000)  # Track (key, step)

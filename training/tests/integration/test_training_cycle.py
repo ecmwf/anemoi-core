@@ -125,6 +125,11 @@ def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None
         )
         assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
+        if logger_cfg.offline:
+            expected_sqlite_uri = "sqlite:///" + str(Path(logger_config.mlflow.save_dir).resolve() / "mlflow.db")
+            assert logger.tracking_uri == expected_sqlite_uri, (
+                f"Offline logger should use SQLite backend, got: {logger.tracking_uri}"
+            )
 
 
 @skip_if_offline

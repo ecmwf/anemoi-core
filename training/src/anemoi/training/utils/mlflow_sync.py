@@ -417,27 +417,27 @@ class MlFlowSync:
             },
         }
 
-        src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
+        # src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
 
-        if self.log_model:
-            from mlflow_export_import.logged_model.import_logged_model import import_logged_model
+        # if self.log_model:
+        #     from mlflow_export_import.logged_model.import_logged_model import import_logged_model
 
-            for model in src_run_dct["inputs"]["model_inputs"]:
-                model_path = (
-                    run.data.params["config.diagnostics.log.mlflow.save_dir"]
-                    + "/"
-                    + run.info.run_id
-                    + "/"
-                    + model["model_id"]
-                )
-                import_logged_model(
-                    input_dir=model_path,
-                    experiment_name="test",
-                    run_id=run.info_run_id,
-                    mlflow_client=src_mlflow_client,
-                    model_type="input",
-                    step=model["step"],
-                )
+        #     for model in src_run_dct["inputs"]["model_inputs"]:
+        #         model_path = (
+        #             run.data.params["config.diagnostics.log.mlflow.save_dir"]
+        #             + "/"
+        #             + run.info.run_id
+        #             + "/"
+        #             + model["model_id"]
+        #         )
+        #         import_logged_model(
+        #             input_dir=model_path,
+        #             experiment_name="test",
+        #             run_id=run.info_run_id,
+        #             mlflow_client=src_mlflow_client,
+        #             model_type="input",
+        #             step=model["step"],
+        #         )
 
         try:
             LOGGER.info("Starting to export run data")
