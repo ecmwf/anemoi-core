@@ -548,7 +548,6 @@ class GraphForecaster(pl.LightningModule):
             training_mode=True,
             validation_mode=validation_mode,
         ):
-            print(f"{loss.shape=},  {loss_next.shape=}")
             loss += loss_next
             metrics.update(metrics_next)
             y_preds.extend(y_preds_next)
