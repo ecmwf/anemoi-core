@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import copy
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -508,6 +509,23 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 graph is not None and edges_name is not None
             ), "Must provide graph and edges_name if file_path not given"
             self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
+
+    def __deepcopy__(self, memo: dict) -> "ProjectionGraphProvider":
+        """Deepcopy that shares the static projection matrix by reference.
+
+        ``projection_matrix`` holds a sparse CSR tensor. Sparse CSR tensors cannot
+        be deepcopied (``NotImplementedError: Cannot access storage of
+        SparseCsrTensorImpl``), which breaks ``copy.deepcopy(pl_module.loss)``
+        during validation/plotting. It is a constant lookup table, so sharing it
+        by reference is safe and avoids the copy.
+        """
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        memo[id(self.projection_matrix)] = self.projection_matrix
+        for key, value in self.__dict__.items():
+            new.__dict__[key] = copy.deepcopy(value, memo)
+        return new
 
     def _build_from_file(self, file_path: str | Path, row_normalize: bool) -> None:
         """Load projection matrix from file."""
