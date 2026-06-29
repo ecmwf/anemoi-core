@@ -227,6 +227,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        self._resolve_subgrid(loss_configs)
+
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
@@ -648,9 +650,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
+            # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors were
+            # gathered to the full grid (grid_shard_slice is None), the loss must be told it is
+            # not sharded, otherwise it would re-shard an already-full tensor. See _prepare_tensors_for_loss.
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -1015,9 +1020,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 if without_scalers is not None:
                     metric_kwargs["without_scalers"] = without_scalers
                 if getattr(metric, "needs_shard_layout_info", False):
+                    # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors
+                    # were gathered to the full grid (grid_shard_slice is None), the metric must be
+                    # told it is not sharded, otherwise it would re-shard an already-full tensor.
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
-                        grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+                        grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
                     )
 
                 metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
@@ -1174,3 +1182,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
+
+    def _resolve_subgrid(self, config: dict) -> None:
+        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
+            for k, v in per_dataset_config.items():
+                if isinstance(v, dict):
+                    per_dataset_resolve(v, dataset_name)
+                elif (k, v) == ("subgrid", "output_mask"):
+                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
+
+        for dataset_name, dataset_config in config.items():
+            if dataset_config is not None:
+                per_dataset_resolve(dataset_config, dataset_name)
