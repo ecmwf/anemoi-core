@@ -21,6 +21,8 @@ diagnostics:
       authentication: True
       experiment_name: 'aifs-convergence'
       run_name: "reference2020"
+      # Overridden by the test from --mlflow-server ($MLFLOW_TEST_URL) so CI logs to
+      # the MLflow instance the runner is authenticated against, not production.
       tracking_uri: "https://mlflow.ecmwf.int"
       enabled: True
       offline: False

@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,6 +14,7 @@ from typing import Final
 
 import numpy as np
 import pandas as pd
+import pytest
 from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
@@ -26,10 +27,9 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 LOGGER = logging.getLogger(__name__)
 
 
-# @skip_if_offline
-# @pytest.mark.mlflow
-# @pytest.mark.slow
-def test_config_build(tmp_path: Path) -> None:
+@pytest.mark.mlflow
+@pytest.mark.slow
+def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
 
     # Load without resolving: interpolations such as
     # system.input.graph = ${system.output.root}/... depend on system.output.root,
@@ -40,6 +40,10 @@ def test_config_build(tmp_path: Path) -> None:
     )
 
     config.system.output.root = str(tmp_path)
+    # Log to the CI MLflow instance (--mlflow-server) the runner is logged into,
+    # rather than the production server hardcoded in the config. tracking_uri is a
+    # literal string, so it is safe to override before resolving interpolations.
+    config.diagnostics.log.mlflow.tracking_uri = mlflow_server
     OmegaConf.resolve(config)
 
     assert config.diagnostics.log.interval == 50
@@ -49,7 +53,7 @@ def test_config_build(tmp_path: Path) -> None:
 
     trainer.train()
 
-    client = AnemoiMlflowClient("https://mlflow.ecmwf.int/", authentication=True)
+    client = AnemoiMlflowClient(mlflow_server, authentication=True)
     experiment = client.get_experiment_by_name("aifs-convergence")
     runs = client.search_runs(
         experiment_ids=[experiment.experiment_id],
