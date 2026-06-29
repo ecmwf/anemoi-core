@@ -110,12 +110,10 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 cfg.setdefault("loss_matrices_path", loss_matrices_path)
             multiscale_config = cfg
 
-        self.smoothing_matrices = self._prepare_smoothing_matrices(
-            self._load_smoothing_matrices(
-                multiscale_config,
-                graph_data,
-                data_node_name,
-            ),
+        self.smoothing_matrices = self._load_smoothing_matrices(
+            multiscale_config,
+            graph_data,
+            data_node_name,
         )
         self.num_scales = len(self.smoothing_matrices)
         assert (
@@ -129,12 +127,12 @@ class MultiscaleLossWrapper(BaseLossWrapper):
     def __deepcopy__(self, memo: dict) -> "MultiscaleLossWrapper":
         """Deepcopy that shares the static smoothing matrices by reference.
 
-        ``smoothing_matrices`` hold sparse CSR projection tensors (created by
-        ``_prepare_smoothing_matrices`` for faster matmuls). Sparse CSR tensors
-        cannot be deepcopied (``NotImplementedError: Cannot access storage of
-        SparseCsrTensorImpl``), which breaks ``copy.deepcopy(pl_module.loss)``
-        during validation/plotting. They are constant lookup tables, so sharing
-        them by reference is safe and avoids the copy.
+        ``smoothing_matrices`` hold sparse CSR projection tensors. Sparse CSR
+        tensors cannot be deepcopied (``NotImplementedError: Cannot access
+        storage of SparseCsrTensorImpl``), which breaks
+        ``copy.deepcopy(pl_module.loss)`` during validation/plotting. They are
+        constant lookup tables, so sharing them by reference is safe and avoids
+        the copy.
         """
         cls = self.__class__
         new = cls.__new__(cls)
@@ -193,28 +191,6 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
         assert graph_data is not None, "graph_data must be provided for on-the-fly multiscale_config."
         return self._build_graph_smoothing_matrices(cfg, graph_data, data_node_name)
-
-    @staticmethod
-    def _prepare_smoothing_matrices(
-        smoothing_matrices: list[ProjectionGraphProvider | None],
-    ) -> list[ProjectionGraphProvider | None]:
-        """Convert smoothing projection matrices once for faster repeated sparse matmuls."""
-        for provider in smoothing_matrices:
-            if provider is not None:
-                provider.projection_matrix = MultiscaleLossWrapper._as_coalesced_csr(provider.projection_matrix)
-        return smoothing_matrices
-
-    @staticmethod
-    def _as_coalesced_csr(projection_matrix: torch.Tensor) -> torch.Tensor:
-        """Return *projection_matrix* in canonical CSR layout."""
-        if projection_matrix.layout == torch.sparse_csr:
-            return projection_matrix
-
-        if projection_matrix.layout != torch.sparse_coo:
-            msg = f"Expected a sparse COO/CSR projection matrix, got layout {projection_matrix.layout}."
-            raise TypeError(msg)
-
-        return projection_matrix.coalesce().to_sparse_csr()
 
     def _build_graph_smoothing_matrices(
         self,
