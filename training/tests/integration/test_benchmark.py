@@ -151,6 +151,20 @@ def test_benchmark_training_cycle(
     # Run model with profiler
     AnemoiProfiler(cfg).profile()
 
+    # Ensure we are actually running the number of ranks, we expect.
+    import torch.distributed as dist
+
+    expected_world_size = int(os.environ.get("SLURM_NTASKS", "1"))
+    if expected_world_size > 1:
+        assert dist.is_available() and dist.is_initialized(), (
+            "Expected a distributed process group across the SLURM tasks, "
+            "but torch.distributed is not initialised; the ranks did not rendezvous."
+        )
+        assert dist.get_world_size() == expected_world_size, (
+            f"Expected world_size={expected_world_size} (SLURM_NTASKS), "
+            f"but got {dist.get_world_size()}; the ranks did not form one DDP group."
+        )
+
     # determine store from benchmark config
     config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
     user, hostname, path = parse_benchmark_config(config_path)
