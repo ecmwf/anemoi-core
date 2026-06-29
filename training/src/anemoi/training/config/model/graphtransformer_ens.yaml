@@ -160,6 +160,11 @@ attributes:
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+  - module: anemoi.training.losses.CRPS
+    options:
+      dynamic: false
+      fullgraph: true
+      mode: max-autotune
 
 # Bounding configuration
 bounding: #These are applied in order

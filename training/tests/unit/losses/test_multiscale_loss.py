@@ -69,7 +69,7 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     pred = torch.zeros(tensor_shape)
     pred[0, 0, :, 0] = torch.tensor([1.0, 0.0])
-    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], 1, tensor_shape[3], tensor_shape[4]])
 
     # With only one "grid point" differing by 1 in all
     # variables, the loss should be 1.0
@@ -155,7 +155,7 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
 
     pred = torch.zeros(tensor_shape)
     pred[0, 0, :, 0] = torch.tensor([1.0])
-    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], 1, tensor_shape[3], tensor_shape[4]])
 
     per_scale_loss = CRPS()
     multiscale_loss = MultiscaleLossWrapper(
@@ -207,7 +207,7 @@ def test_multiscale_loss_forwards_scaler_indices() -> None:
     pred = torch.zeros((1, 1, 1, 2, 2))
     pred[0, 0, 0, 0, 0] = 10.0
     pred[0, 0, 0, 0, 1] = 1.0
-    target = torch.zeros((1, 1, 2, 2))
+    target = torch.zeros((1, 1, 1, 2, 2))
 
     per_scale_loss = MSELoss()
     per_scale_loss.add_scaler(TensorDim.GRID, torch.ones(2), name="grid_weights")
@@ -231,7 +231,7 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     )
 
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
     sentinel_group = FakeGroup(size=1)
 
     multiscale_loss(
@@ -264,7 +264,7 @@ def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(mocker: MockerFixtur
     channel_shard_sizes_pred = [1, 1]
     channel_shard_sizes_y = [1, 1]
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
 
     prepare = mocker.patch.object(
         multiscale_loss,
@@ -296,7 +296,7 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
     )
 
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
     sentinel = object()
 
     multiscale_loss(

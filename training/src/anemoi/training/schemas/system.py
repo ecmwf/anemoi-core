@@ -25,7 +25,7 @@ class HardwareSchema(BaseModel):
     accelerator: Annotated[
         str,
         AfterValidator(partial(allowed_values, values=["cpu", "gpu", "auto", "cuda", "tpu"])),
-    ] = "auto"
+    ] = "cuda"
     "Accelerator to use for training."
     num_gpus_per_node: NonNegativeInt = 1
     "Number of GPUs per node."
