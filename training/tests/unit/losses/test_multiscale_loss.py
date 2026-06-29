@@ -329,11 +329,15 @@ def test_as_coalesced_csr_converts_coo() -> None:
 
 def test_as_coalesced_csr_is_idempotent() -> None:
     """_as_coalesced_csr returns the same object unchanged when already CSR."""
-    csr = torch.sparse_coo_tensor(
-        torch.tensor([[0, 1], [1, 0]]),
-        torch.tensor([1.0, 1.0]),
-        (2, 2),
-    ).coalesce().to_sparse_csr()
+    csr = (
+        torch.sparse_coo_tensor(
+            torch.tensor([[0, 1], [1, 0]]),
+            torch.tensor([1.0, 1.0]),
+            (2, 2),
+        )
+        .coalesce()
+        .to_sparse_csr()
+    )
     result = MultiscaleLossWrapper._as_coalesced_csr(csr)
     assert result is csr
 

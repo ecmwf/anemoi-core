@@ -75,4 +75,3 @@ def test_project_handles_arbitrary_leading_dims(projector: SparseProjector, csr_
         for t in range(3):
             expected = projector(x[b, t : t + 1], csr_matrix)
             assert torch.allclose(out[b, t], expected[0], atol=1e-6)
-
