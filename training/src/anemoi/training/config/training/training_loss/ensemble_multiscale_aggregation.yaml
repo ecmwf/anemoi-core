@@ -35,4 +35,4 @@ datasets:
       #   target_variables: [imerg]
       #   check_variables_compatibility:
       #     ignore_units: False   # True, or list of variable names
-      #     ignore_period: False  # True, or list of variable names
+      #     ignore_processing_period: False  # True, or list of variable names

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -56,7 +56,7 @@ def check_variables_metadata_compatibility(
         a ``"variables_metadata"`` key.
     **options : object
         Additional keyword arguments forwarded to ``Variable.check_compatibility``
-        (e.g. ``ignore_units``, ``ignore_period``).
+        (e.g. ``ignore_units``, ``ignore_processing_period``).
 
     Raises
     ------
@@ -118,7 +118,7 @@ def check_loss_variable_units_compatibility(
         Per-variable metadata dict keyed by variable name.
     **options : object
         Additional keyword arguments forwarded to ``Variable.compatible``
-        (e.g. ``ignore_units``, ``ignore_period``).
+        (e.g. ``ignore_units``, ``ignore_processing_period``).
     """
     if variables_metadata is None:
         LOG.warning(
