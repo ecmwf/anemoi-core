@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import TYPE_CHECKING
 from typing import Literal
 
 import einops
@@ -18,6 +19,10 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from anemoi.models.data import TensorLayout
+    from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -160,8 +165,8 @@ class CRPS(BaseLoss):
 
     def forward(
         self,
-        y_pred: torch.Tensor,
-        y_target: torch.Tensor,
+        pred: "SourceView",
+        target: "SourceView",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -169,6 +174,32 @@ class CRPS(BaseLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "sum",
+        **kwargs,
+    ) -> torch.Tensor:
+        return pred.apply_loss(
+            target,
+            self._forward_impl,
+            squash=squash,
+            scaler_indices=scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+            group=group,
+            squash_mode=squash_mode,
+            **kwargs,
+        )
+
+    def _forward_impl(
+        self,
+        y_pred: torch.Tensor,
+        y_target: torch.Tensor,
+        layout: "TensorLayout",
+        squash: bool = True,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: Squash_mode = "sum",
+        **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 
@@ -185,9 +216,21 @@ class CRPS(BaseLoss):
             crps = self._kernel_crps(y_pred, y_target)
 
         crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
-        crps = self.scale(crps, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        crps = self.scale(
+            crps,
+            scaler_indices,
+            layout=layout,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
 
-        return self.reduce(crps, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
+        return self.reduce(
+            crps,
+            layout=layout,
+            squash=squash,
+            squash_mode=squash_mode,
+            group=group if is_sharded else None,
+        )
 
     @property
     def name(self) -> str:

@@ -44,6 +44,9 @@ from anemoi.training.utils.enums import TensorDim
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.models.data import TensorLayout
+    from anemoi.models.data.views import SourceView
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -133,6 +136,32 @@ class SpectralLoss(BaseLoss):
         spatial_start_dim = x.ndim - 2
         return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
 
+    def forward(
+        self,
+        pred: "SourceView",
+        target: "SourceView",
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: "ProcessGroup | None" = None,
+        squash_mode: Squash_mode = "avg",
+        **kwargs,
+    ) -> torch.Tensor:
+        """Dispatch to the tensor-level _forward_impl via the source view's layout."""
+        return pred.apply_loss(
+            target,
+            self._forward_impl,
+            squash=squash,
+            scaler_indices=scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+            group=group,
+            squash_mode=squash_mode,
+            **kwargs,
+        )
+
 
 class SpectralAMSELoss(SpectralLoss):
     r"""Adjusted Mean Squared Error (AMSE) loss in spectral domain.
@@ -183,20 +212,19 @@ class SpectralAMSELoss(SpectralLoss):
         ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
         self.eps = eps
 
-    def forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: "TensorLayout",
         squash: bool = True,
-        *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
+        group: "ProcessGroup | None" = None,
         squash_mode: str = "avg",
-        **kwargs,
+        **_kwargs,
     ) -> torch.Tensor:
-        del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
@@ -222,10 +250,11 @@ class SpectralAMSELoss(SpectralLoss):
         result = self.scale(
             amse_per_l,
             scaler_indices,
+            layout=layout,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(result, layout=layout, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class SpectralL2Loss(SpectralLoss):
@@ -235,20 +264,19 @@ class SpectralL2Loss(SpectralLoss):
         \lVert F - \hat F \rVert_2^2
     """
 
-    def forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: "TensorLayout",
         squash: bool = True,
-        *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
+        group: "ProcessGroup | None" = None,
         squash_mode: Squash_mode = "avg",
-        **kwargs,
+        **_kwargs,
     ) -> torch.Tensor:
-        del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
@@ -260,26 +288,28 @@ class SpectralL2Loss(SpectralLoss):
         result = self.scale(
             diff,
             scaler_indices,
+            layout=layout,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(result, layout=layout, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogSpectralDistance(SpectralLoss):
     r"""Log Spectral Distance (LSD)."""
 
-    def forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: "TensorLayout",
         squash: bool = True,
-        *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
+        group: "ProcessGroup | None" = None,
         squash_mode: Squash_mode = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -296,26 +326,28 @@ class LogSpectralDistance(SpectralLoss):
         result = self.scale(
             log_diff**2,
             scaler_indices,
+            layout=layout,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
+        return torch.sqrt(self.reduce(result, layout=layout, squash=squash, group=group, squash_mode=squash_mode) + eps)
 
 
 class FourierCorrelationLoss(SpectralLoss):
     r"""Fourier Correlation Loss (FCL)."""
 
-    def forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: "TensorLayout",
         squash: bool = True,
-        *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
+        group: "ProcessGroup | None" = None,
         squash_mode: Squash_mode = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -336,10 +368,11 @@ class FourierCorrelationLoss(SpectralLoss):
         result = self.scale(
             result,
             scaler_indices,
+            layout=layout,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(result, layout=layout, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogFFT2Distance(LogSpectralDistance):
@@ -404,17 +437,18 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         self.backend = backend
         self.no_autocast = no_autocast
 
-    def forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: "TensorLayout",
         squash: bool = True,
-        *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
-        group: ProcessGroup | None = None,
+        group: "ProcessGroup | None" = None,
         squash_mode: Squash_mode = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -434,10 +468,11 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         scaled = self.scale(
             crps,
             scaler_indices,
+            layout=layout,
             without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(scaled, layout=layout, squash=squash, group=group, squash_mode=squash_mode)
 
     @property
     def name(self) -> str:

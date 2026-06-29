@@ -379,7 +379,7 @@ class FunctionalLoss(BaseLoss):
     def calculate_difference(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calculate difference between prediction and target."""
 
-    def _forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
@@ -428,6 +428,7 @@ class FunctionalLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
+        Dispatches to the tensor-level _forward_impl via the source view's layout.
 
         Parameters
         ----------
@@ -458,7 +459,7 @@ class FunctionalLoss(BaseLoss):
         """
         return pred.apply_loss(
             target,
-            self._forward,
+            self._forward_impl,
             squash=squash,
             scaler_indices=scaler_indices,
             without_scalers=without_scalers,

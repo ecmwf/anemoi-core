@@ -462,7 +462,7 @@ class TabularSourceView(SourceView):
                 )
             )
 
-        return torch.mean(*tuple(losses))
+        return torch.mean(torch.stack(losses))
 
     def allgather(self, group: ProcessGroup | None) -> "TabularSourceView":
         """Allgather this view across the given process group.

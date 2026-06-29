@@ -13,6 +13,7 @@ import logging
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data import TensorLayout
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.mse import MSELoss
 
@@ -27,27 +28,30 @@ class WeightedMSELoss(MSELoss):
 
     name: str = "weighted_mse"
 
-    def forward(
+    def _forward_impl(
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        layout: TensorLayout,
         weights: torch.Tensor | None = None,
         squash: bool = True,
-        *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "avg",
+        **_kwargs,
     ) -> torch.Tensor:
         """Calculates the weighted MSE loss.
 
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs).
+            Prediction tensor, shape (bs, time, ensemble, lat*lon, n_outputs).
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs).
+            Target tensor, shape (bs, time, ensemble, lat*lon, n_outputs).
+        layout : TensorLayout
+            Layout describing the logical axes of pred / target.
         weights : torch.Tensor | None, optional
             Weights to apply to the MSE difference, by default None.
         squash : bool, optional
@@ -78,6 +82,18 @@ class WeightedMSELoss(MSELoss):
         if weights is not None:
             out = out * weights
 
-        out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        out = self.scale(
+            out,
+            scaler_indices,
+            layout=layout,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
 
-        return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
+        return self.reduce(
+            out,
+            layout=layout,
+            squash=squash,
+            group=group if is_sharded else None,
+            squash_mode=squash_mode,
+        )
