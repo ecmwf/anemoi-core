@@ -37,7 +37,7 @@ model:
     hidden2hidden: 0 # edge
 system:
   input:
-    dataset: "aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8" #o96 instead of n320 input/output grid
+    dataset: "${oc.env:DATASET_ROOT_PATH}/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr" #o96 instead of n320 input/output grid
 
     # ref data from Vera
     # dataset:
