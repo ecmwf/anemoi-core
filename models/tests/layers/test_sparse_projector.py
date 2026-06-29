@@ -59,16 +59,11 @@ def test_forward_is_linear_across_batch(projector: SparseProjector, csr_matrix: 
         assert torch.allclose(out[i], out_i[0], atol=1e-6)
 
 
-def test_project_handles_arbitrary_leading_dims(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
-    """project() correctly handles inputs with extra leading dimensions."""
-
-    class FakeProvider:
-        def get_edges(self, device):
-            return csr_matrix.to(device)
-
+def test_forward_handles_arbitrary_leading_dims(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
+    """forward correctly handles inputs with extra leading dimensions."""
     # Shape: [batch, timesteps, nodes, vars]
     x = torch.rand(2, 3, csr_matrix.shape[1], 5)
-    out = projector.project(x, FakeProvider())
+    out = projector(x, csr_matrix)
     assert out.shape == (2, 3, csr_matrix.shape[0], 5)
     # Verify values match per-sample forward
     for b in range(2):

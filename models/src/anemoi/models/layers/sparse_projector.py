@@ -38,63 +38,55 @@ class SparseProjector(torch.nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Input tensor
+            Input tensor with shape ``[..., input_nodes, channels]``.
         projection_matrix : torch.Tensor
             Sparse projection matrix (assumed to be on the correct device)
         num_chunks : int
-            Number of batch chunks to project with sparse matmul. ``1``
-            projects the full batch in one matmul.
+            Number of chunks to project with sparse matmul. ``1``
+            projects all in one matmul.
 
         Returns
         -------
         torch.Tensor
             Projected tensor
         """
+        input_shape = x.shape
+        x = x.reshape(-1, *input_shape[-2:])
+
         if num_chunks == 1:
-            return self._forward(x, projection_matrix)
+            out = self._project_flattened(x, projection_matrix)
+        else:
+            out = torch.cat(
+                [self._project_flattened(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
+                dim=0,
+            )
 
-        return torch.cat(
-            [self._forward(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
-            dim=0,
-        )
+        return out.reshape(*input_shape[:-2], *out.shape[-2:])
 
-    def _forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
-        """Apply sparse projection.
+    def _project_flattened(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
+        """Project an input whose leading dimensions have already been flattened.
 
-        Expected x shape: [batch, input_nodes, ...]
+        Expected x shape: [flat_batch, input_nodes, channels]
         projection_matrix shape: [output_nodes, input_nodes]
         """
         batch_size = x.shape[0]
         input_nodes = x.shape[1]
         trailing_shape = x.shape[2:]
 
+        # [B, N, ...] -> [B, N, C]
+        x_flat = x.reshape(batch_size, input_nodes, -1)
+
+        # Move batch/features into the dense RHS columns:
+        # [B, N, C] -> [N, B, C] -> [N, B*C]
+        x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, -1)
+
         with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
-            # [B, N, ...] -> [B, N, C]
-            x_flat = x.reshape(batch_size, input_nodes, -1)
-
-            # Move batch/features into the dense RHS columns:
-            # [B, N, C] -> [N, B, C] -> [N, B*C]
-            x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, -1)
-
             # One sparse matmul instead of B sparse matmuls:
             # [M, N] @ [N, B*C] -> [M, B*C]
             out = torch.sparse.mm(projection_matrix, x_rhs)
 
-            output_nodes = out.shape[0]
+        output_nodes = out.shape[0]
 
-            # [M, B*C] -> [M, B, C] -> [B, M, C] -> [B, M, ...]
-            out = out.reshape(output_nodes, batch_size, -1).permute(1, 0, 2)
-            out = out.reshape(batch_size, output_nodes, *trailing_shape)
-
-        return out
-
-    def project(self, batch: torch.Tensor, provider: object, num_chunks: int = 1) -> torch.Tensor:
-        """Project ``batch`` of shape ``[..., nodes, vars]`` through the *provider*'s matrix.
-
-        Handles arbitrary leading dimensions; the *provider* supplies the matrix via ``get_edges(device=...)``.
-        """
-        input_shape = batch.shape
-        batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = provider.get_edges(device=batch.device)
-        batch = self(batch, projection_matrix, num_chunks=num_chunks)
-        return batch.reshape(*input_shape[:-2], *batch.shape[-2:])
+        # [M, B*C] -> [M, B, C] -> [B, M, C] -> [B, M, ...]
+        out = out.reshape(output_nodes, batch_size, -1).permute(1, 0, 2)
+        return out.reshape(batch_size, output_nodes, *trailing_shape)
