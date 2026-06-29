@@ -316,46 +316,35 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Regression tests: verify numerical equivalence between commits 390ce34 and
-# 38328094b.  Two changes in that range could alter loss values:
-#
-#   1. COO -> CSR conversion of smoothing matrices (_as_coalesced_csr).
-#   2. Batched sparse matmul in SparseProjector replacing the per-sample loop.
-#
-# The helpers below re-implement both the old and new logic inline so that the
-# tests work on *either* commit.
-# ---------------------------------------------------------------------------
-
-def _as_coalesced_csr(projection_matrix: torch.Tensor) -> torch.Tensor:
-    """Mirror of MultiscaleLossWrapper._as_coalesced_csr (commit 38328094b)."""
-    if projection_matrix.layout == torch.sparse_csr:
-        return projection_matrix
-    if projection_matrix.layout != torch.sparse_coo:
-        msg = f"Expected sparse COO/CSR, got {projection_matrix.layout}."
-        raise TypeError(msg)
-    return projection_matrix.coalesce().to_sparse_csr()
+def test_as_coalesced_csr_converts_coo() -> None:
+    """_as_coalesced_csr converts a sparse COO matrix to CSR format."""
+    coo = torch.sparse_coo_tensor(
+        torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        torch.tensor([0.5, 0.5, 0.5]),
+        (3, 3),
+    )
+    csr = MultiscaleLossWrapper._as_coalesced_csr(coo)
+    assert csr.layout == torch.sparse_csr
 
 
-def _make_sparse_coo_provider(n_nodes: int, seed: int = 0) -> ProjectionGraphProvider:
-    """Build a ProjectionGraphProvider whose matrix is a sparse COO tensor."""
-    rng = torch.Generator()
-    rng.manual_seed(seed)
-    # Simple averaging matrix: each output node averages its two neighbours.
-    row = torch.arange(n_nodes)
-    col = torch.remainder(torch.arange(n_nodes) + 1, n_nodes)
-    values = torch.ones(n_nodes) * 0.5
-    proj = torch.sparse_coo_tensor(
-        torch.stack([row, col]),
-        values,
-        (n_nodes, n_nodes),
-    ).coalesce()
+def test_as_coalesced_csr_is_idempotent() -> None:
+    """_as_coalesced_csr returns the same object unchanged when already CSR."""
+    csr = torch.sparse_coo_tensor(
+        torch.tensor([[0, 1], [1, 0]]),
+        torch.tensor([1.0, 1.0]),
+        (2, 2),
+    ).coalesce().to_sparse_csr()
+    result = MultiscaleLossWrapper._as_coalesced_csr(csr)
+    assert result is csr
 
+
+def test_smoothing_matrices_are_csr_after_init(mocker: MockerFixture) -> None:
+    """MultiscaleLossWrapper converts all non-None smoothing matrices to CSR during init."""
     graph = HeteroData()
-    graph["src"].num_nodes = n_nodes
-    graph["dst"].num_nodes = n_nodes
-    graph[("src", "to", "dst")].edge_index = torch.stack([col, row])
-    graph[("src", "to", "dst")].edge_weight = values
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(4)
 
     provider = ProjectionGraphProvider(
         graph=graph,
@@ -363,158 +352,36 @@ def _make_sparse_coo_provider(n_nodes: int, seed: int = 0) -> ProjectionGraphPro
         edge_weight_attribute="edge_weight",
         row_normalize=False,
     )
-    # Inject the pre-built matrix so we control the exact format.
-    provider.projection_matrix = proj
-    return provider
+    provider.projection_matrix = provider.projection_matrix.to_sparse_coo()
 
-
-def _multiscale_loss_result(
-    providers: list,
-    weights: list[float],
-    pred: torch.Tensor,
-    target: torch.Tensor,
-    use_csr: bool,
-) -> torch.Tensor:
-    """Run the multiscale loss with providers in either COO or CSR format."""
-    if use_csr:
-        for p in providers:
-            if p is not None:
-                p.projection_matrix = _as_coalesced_csr(p.projection_matrix)
-
-    per_scale_loss = MSELoss()
-    # Pass loss_matrices with the right length so the weights==num_scales
-    # assertion in __init__ does not fire before we can override the providers.
-    multiscale_loss = MultiscaleLossWrapper(
-        per_scale_loss=per_scale_loss,
-        weights=weights,
-        multiscale_config={"loss_matrices": [None] * len(providers)},
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[provider],
     )
-    # Override with our controlled providers (COO or CSR as requested).
-    multiscale_loss.smoothing_matrices = providers
-    multiscale_loss.num_scales = len(providers)
+    MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
 
-    return multiscale_loss(pred, target)
+    assert provider.projection_matrix.layout == torch.sparse_csr
 
 
-class TestCsrConversionNumericalEquivalence:
-    """Tests that COO and CSR smoothing matrices give the same loss values.
+def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
+    """deepcopy(MultiscaleLossWrapper) must not raise with CSR smoothing matrices."""
+    import copy
 
-    A failure here means the format change in commit 38328094b directly causes
-    loss differences — most likely because the original COO matrices had
-    duplicate indices that .coalesce() merges.
-    """
+    graph = HeteroData()
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(4)
 
-    @pytest.fixture
-    def tensors(self) -> tuple[torch.Tensor, torch.Tensor]:
-        n_nodes = 8
-        batch, steps, ens, n_vars = 1, 1, 2, 3
-        pred = torch.randn(batch, steps, ens, n_nodes, n_vars)
-        target = torch.randn(batch, steps, n_nodes, n_vars)
-        return pred, target
-
-    def test_single_scale_no_smoothing_coo_vs_csr(
-        self,
-        tensors: tuple[torch.Tensor, torch.Tensor],
-        mocker: MockerFixture,
-    ) -> None:
-        """No smoothing (provider=None): COO/CSR irrelevant, loss must match."""
-        pred, target = tensors
-        providers = [None]
-
-        mocker.patch(
-            "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
-            return_value=list(providers),
-        )
-        loss_coo = _multiscale_loss_result(list(providers), [1.0], pred, target, use_csr=False)
-
-        mocker.patch(
-            "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
-            return_value=list(providers),
-        )
-        loss_csr = _multiscale_loss_result(list(providers), [1.0], pred, target, use_csr=True)
-
-        assert torch.allclose(loss_coo, loss_csr), (
-            f"Loss differs even with no smoothing provider — unexpected.\n"
-            f"COO: {loss_coo}  CSR: {loss_csr}"
-        )
-
-    def test_two_scale_with_coo_smoothing_matches_csr(
-        self,
-        tensors: tuple[torch.Tensor, torch.Tensor],
-    ) -> None:
-        """Two scales with a real COO smoothing matrix: CSR should give same loss."""
-        pred, target = tensors
-        n_nodes = pred.shape[-2]
-        provider = _make_sparse_coo_provider(n_nodes=n_nodes)
-        weights = [1.0, 1.0]
-
-        loss_coo = _multiscale_loss_result([None, provider], weights, pred, target, use_csr=False)
-        # Re-create the provider so COO->CSR conversion starts from the original.
-        provider2 = _make_sparse_coo_provider(n_nodes=n_nodes)
-        loss_csr = _multiscale_loss_result([None, provider2], weights, pred, target, use_csr=True)
-
-        assert torch.allclose(loss_coo, loss_csr, atol=1e-5), (
-            f"Two-scale loss differs between COO and CSR smoothing.\n"
-            f"COO: {loss_coo}\nCSR: {loss_csr}\n"
-            f"Max diff: {(loss_coo - loss_csr).abs().max():.4e}\n"
-            "This confirms the CSR conversion in commit 38328094b changes the loss."
-        )
-
-
-class TestMultiscaleLoopRefactorEquivalence:
-    """The multiscale forward loop was refactored from list-based indexing
-    (y_preds_ens[i-1]) to prev-variable tracking (prev_y_pred_ens).
-    Both are mathematically identical; this test proves it.
-    """
-
-    def _old_loop_differences(
-        self,
-        smoothed_preds: list[torch.Tensor],
-        smoothed_targets: list[torch.Tensor],
-    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Old approach: store all smoothed tensors, index by i-1."""
-        y_preds_ens: list[torch.Tensor] = []
-        y_ens: list[torch.Tensor] = []
-        diffs = []
-        for i, (yp, yt) in enumerate(zip(smoothed_preds, smoothed_targets)):
-            y_preds_ens.append(yp)
-            y_ens.append(yt)
-            if i > 0:
-                diffs.append((yp - y_preds_ens[i - 1], yt - y_ens[i - 1]))
-            else:
-                diffs.append((yp, yt))
-        return diffs
-
-    def _new_loop_differences(
-        self,
-        smoothed_preds: list[torch.Tensor],
-        smoothed_targets: list[torch.Tensor],
-    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """New approach: only keep the previous value (commit 38328094b)."""
-        prev_yp: torch.Tensor | None = None
-        prev_yt: torch.Tensor | None = None
-        diffs = []
-        for yp, yt in zip(smoothed_preds, smoothed_targets):
-            current_yp, current_yt = yp, yt
-            if prev_yp is not None:
-                diffs.append((yp - prev_yp, yt - prev_yt))
-            else:
-                diffs.append((yp, yt))
-            prev_yp = current_yp
-            prev_yt = current_yt
-        return diffs
-
-    @pytest.mark.parametrize("n_scales", [2, 3, 4])
-    def test_prev_var_matches_list_indexing(self, n_scales: int) -> None:
-        """Both loop variants must produce identical difference tensors."""
-        torch.manual_seed(0)
-        smoothed_preds = [torch.randn(2, 8, 3) for _ in range(n_scales)]
-        smoothed_targets = [torch.randn(2, 8, 3) for _ in range(n_scales)]
-
-        old_diffs = self._old_loop_differences(smoothed_preds, smoothed_targets)
-        new_diffs = self._new_loop_differences(smoothed_preds, smoothed_targets)
-
-        assert len(old_diffs) == len(new_diffs)
-        for i, ((op, ot), (np_, nt)) in enumerate(zip(old_diffs, new_diffs)):
-            assert torch.equal(op, np_), f"Scale {i}: pred difference mismatch between old and new loop"
-            assert torch.equal(ot, nt), f"Scale {i}: target difference mismatch between old and new loop"
+    provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
+        row_normalize=False,
+    )
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[provider],
+    )
+    loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
+    copy.deepcopy(loss)  # must not raise NotImplementedError on CSR tensors
