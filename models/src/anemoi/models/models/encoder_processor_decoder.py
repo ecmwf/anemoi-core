@@ -116,7 +116,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> tuple[torch.Tensor, torch.Tensor, "SourceView", ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_flat: "FlattenView" = x.flatten()  # flatten data to (nodes, features)
+        x_flat: "FlatView" = x.flatten()  # flatten data to (nodes, features)
         grid_shard_sizes = x_flat.shard_sizes
 
         if dataset_name in self.residual:
