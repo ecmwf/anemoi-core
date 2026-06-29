@@ -199,6 +199,15 @@ run using the following command:
 
    anemoi-training config validate --config-name debug.yaml
 
+By default the config is looked up on the search path described above (the
+current working directory and the packaged defaults). To validate a config
+that lives somewhere else without changing directory, point ``--config-path``
+at its directory, exactly as for ``anemoi-training train``:
+
+.. code:: bash
+
+   anemoi-training config validate --config-path /path/to/configs --config-name debug.yaml
+
 This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
 the command will show an output similar to:
