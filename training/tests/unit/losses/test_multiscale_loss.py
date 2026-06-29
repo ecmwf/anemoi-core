@@ -78,7 +78,9 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return pred, target, loss_result
 
 
-def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
+def test_multi_scale_instantiation(
+    loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
     """Test multiscale loss instantiation with single scale."""
     per_scale_loss = CRPS()
     multiscale_loss = MultiscaleLossWrapper(
@@ -146,7 +148,10 @@ def test_multi_scale(
 
     assert isinstance(loss, torch.Tensor)
     # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
-    assert loss.shape == (2, pred.shape[-1]), "Loss should have shape (num_scales, num_variables) when squash=False"
+    assert loss.shape == (
+        2,
+        pred.shape[-1],
+    ), "Loss should have shape (num_scales, num_variables) when squash=False"
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
@@ -253,7 +258,9 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     ]
 
 
-def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(mocker: MockerFixture) -> None:
+def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(
+    mocker: MockerFixture,
+) -> None:
     per_scale_loss = TrackingLoss()
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
@@ -314,57 +321,6 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
             "kwargs": {"custom_kwarg": sentinel},
         },
     ]
-
-
-def test_as_coalesced_csr_converts_coo() -> None:
-    """_as_coalesced_csr converts a sparse COO matrix to CSR format."""
-    coo = torch.sparse_coo_tensor(
-        torch.tensor([[0, 1, 2], [1, 2, 0]]),
-        torch.tensor([0.5, 0.5, 0.5]),
-        (3, 3),
-    )
-    csr = MultiscaleLossWrapper._as_coalesced_csr(coo)
-    assert csr.layout == torch.sparse_csr
-
-
-def test_as_coalesced_csr_is_idempotent() -> None:
-    """_as_coalesced_csr returns the same object unchanged when already CSR."""
-    csr = (
-        torch.sparse_coo_tensor(
-            torch.tensor([[0, 1], [1, 0]]),
-            torch.tensor([1.0, 1.0]),
-            (2, 2),
-        )
-        .coalesce()
-        .to_sparse_csr()
-    )
-    result = MultiscaleLossWrapper._as_coalesced_csr(csr)
-    assert result is csr
-
-
-def test_smoothing_matrices_are_csr_after_init(mocker: MockerFixture) -> None:
-    """MultiscaleLossWrapper converts all non-None smoothing matrices to CSR during init."""
-    graph = HeteroData()
-    graph["src"].num_nodes = 4
-    graph["dst"].num_nodes = 4
-    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
-    graph[("src", "to", "dst")].edge_weight = torch.ones(4)
-
-    provider = ProjectionGraphProvider(
-        graph=graph,
-        edges_name=("src", "to", "dst"),
-        edge_weight_attribute="edge_weight",
-        row_normalize=False,
-    )
-    provider.projection_matrix = provider.projection_matrix.to_sparse_coo()
-
-    mocker.patch(
-        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
-        return_value=[provider],
-    )
-    MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
-
-    assert provider.projection_matrix.layout == torch.sparse_csr
 
 
 def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:

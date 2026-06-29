@@ -27,10 +27,12 @@ class SparseProjector(torch.nn.Module):
         super().__init__()
         self.autocast = autocast
 
-    def forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
-        return self.new_forward(x, projection_matrix)
-
-    def old_forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        projection_matrix: torch.Tensor,
+        num_chunks: int = 1,
+    ) -> torch.Tensor:
         """Apply sparse projection.
 
         Parameters
@@ -39,19 +41,24 @@ class SparseProjector(torch.nn.Module):
             Input tensor
         projection_matrix : torch.Tensor
             Sparse projection matrix (assumed to be on the correct device)
+        num_chunks : int
+            Number of batch chunks to project with sparse matmul. ``1``
+            projects the full batch in one matmul.
 
         Returns
         -------
         torch.Tensor
             Projected tensor
         """
-        out = []
-        with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
-            for i in range(x.shape[0]):
-                out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
-        return torch.stack(out)
+        if num_chunks == 1:
+            return self._forward(x, projection_matrix)
 
-    def new_forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
+        return torch.cat(
+            [self._forward(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
+            dim=0,
+        )
+
+    def _forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
         """Apply sparse projection.
 
         Expected x shape: [batch, input_nodes, ...]
@@ -81,7 +88,7 @@ class SparseProjector(torch.nn.Module):
 
         return out
 
-    def project(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
+    def project(self, batch: torch.Tensor, provider: object, num_chunks: int = 1) -> torch.Tensor:
         """Project ``batch`` of shape ``[..., nodes, vars]`` through the *provider*'s matrix.
 
         Handles arbitrary leading dimensions; the *provider* supplies the matrix via ``get_edges(device=...)``.
@@ -89,5 +96,5 @@ class SparseProjector(torch.nn.Module):
         input_shape = batch.shape
         batch = batch.reshape(-1, *input_shape[-2:])
         projection_matrix = provider.get_edges(device=batch.device)
-        batch = self(batch, projection_matrix)
+        batch = self(batch, projection_matrix, num_chunks=num_chunks)
         return batch.reshape(*input_shape[:-2], *batch.shape[-2:])

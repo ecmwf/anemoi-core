@@ -365,6 +365,7 @@ class MultiScaleLossSchema(BaseModel):
     per_scale_loss: CRPSSchema | BaseLossSchema
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    sparse_projector_num_chunks: PositiveInt = 1
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None

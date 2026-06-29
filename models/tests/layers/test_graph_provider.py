@@ -93,10 +93,12 @@ def test_from_config_returns_none_for_empty_dict() -> None:
 
 def test_from_config_file_mode(mocker) -> None:
     import numpy as np
-    from scipy.sparse import csr_matrix
 
     # rows do not sum to 1, so row_normalize (forwarded to the file path) is observable.
-    mocker.patch("scipy.sparse.load_npz", return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])))
+    mocker.patch(
+        "anemoi.models.layers.graph_provider.load_npz",
+        return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])),
+    )
 
     normalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": True})
     assert isinstance(normalized, ProjectionGraphProvider)
@@ -111,7 +113,10 @@ def test_from_config_file_mode(mocker) -> None:
 def test_from_config_edges_mode() -> None:
     graph = _make_graph_with_edges()
     provider = ProjectionGraphProvider.from_config(
-        {"edges_name": ("data", "to", "target"), "edge_weight_attribute": "gauss_weight"},
+        {
+            "edges_name": ("data", "to", "target"),
+            "edge_weight_attribute": "gauss_weight",
+        },
         graph_data=graph,
     )
     assert isinstance(provider, ProjectionGraphProvider)
