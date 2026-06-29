@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -88,7 +88,16 @@ class PerTimestepMetrics(Callback):
         for dataset_name, y_pred in y_preds.items():
             y = y_targets[dataset_name]
             n_timesteps = y.shape[TensorDim.TIME]
-            grid_shard_slice = pl_module.grid_shard_slice.get(dataset_name)
+
+            # Gather the grid up front when any loss/metric does not support sharding, so non-sharding
+            # metrics (e.g. spectral) get the full grid; the gather commutes with the per-timestep
+            # slicing below. When sharding is supported this is a no-op and keeps the shard slice.
+            y_pred, y, grid_shard_slice = pl_module._prepare_tensors_for_loss(
+                y_pred,
+                y,
+                dataset_name=dataset_name,
+                validation_mode=True,
+            )
 
             for t in range(n_timesteps):
                 # Slice single timestep, keeping the time dimension
