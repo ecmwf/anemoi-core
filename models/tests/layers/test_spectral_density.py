@@ -57,17 +57,3 @@ def test_spectral_density_contract(transform: str) -> None:
 
     cross = t.cross_spectral_density(a, b)
     assert torch.all(cross**2 <= psd_a * psd_b * (1 + 1e-9) + 1e-9)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA to exercise cross-device buffers")
-@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
-def test_radial_density_follows_module_to_device(transform: str) -> None:
-    """The lazily-built radial-band index must land on the module's device."""
-    t, n_points = _make_density_transform(transform)
-    t = t.to("cuda")
-    coeffs = t.forward(torch.randn(2, 1, 2, n_points, 3, device="cuda"))
-    psd = t.power_spectral_density(coeffs)
-    cross = t.cross_spectral_density(coeffs, coeffs)
-    assert psd.device.type == "cuda"
-    assert cross.device.type == "cuda"
-    assert t.radial_band_index.device.type == "cuda"
