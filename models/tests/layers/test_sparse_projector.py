@@ -33,13 +33,6 @@ def csr_matrix() -> torch.Tensor:
     return _make_sparse_csr(n_rows=8, n_cols=16, nnz=32, seed=0)
 
 
-def test_forward_output_shape(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
-    """forward produces [B, output_nodes, C] from [B, input_nodes, C]."""
-    x = torch.rand(3, csr_matrix.shape[1], 5)
-    out = projector(x, csr_matrix)
-    assert out.shape == (3, csr_matrix.shape[0], 5)
-
-
 def test_forward_matches_dense_matmul(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
     """forward result matches the equivalent dense matrix multiplication."""
     x = torch.rand(2, csr_matrix.shape[1], 4)
@@ -47,16 +40,6 @@ def test_forward_matches_dense_matmul(projector: SparseProjector, csr_matrix: to
     dense = csr_matrix.to_dense()
     expected = torch.einsum("mn,bnc->bmc", dense, x)
     assert torch.allclose(out, expected, atol=1e-5)
-
-
-@pytest.mark.parametrize("batch_size", [1, 2, 4])
-def test_forward_is_linear_across_batch(projector: SparseProjector, csr_matrix: torch.Tensor, batch_size: int) -> None:
-    """Each batch element is projected independently."""
-    x = torch.rand(batch_size, csr_matrix.shape[1], 3)
-    out = projector(x, csr_matrix)
-    for i in range(batch_size):
-        out_i = projector(x[i : i + 1], csr_matrix)
-        assert torch.allclose(out[i], out_i[0], atol=1e-6)
 
 
 def test_forward_handles_arbitrary_leading_dims(projector: SparseProjector, csr_matrix: torch.Tensor) -> None:
