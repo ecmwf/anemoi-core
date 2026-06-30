@@ -573,6 +573,77 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
     assert trainer._resolved_ckpt_path == ckpt_dir / "last.ckpt"
 
 
+def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint(tmp_path: Path) -> None:
+    """``data_indices`` after a load is the CURRENT config's, never the checkpoint's.
+
+    ``data_indices`` decides which physical variable each model channel maps to, so a
+    silent swap to the checkpoint's mapping would corrupt every downstream forecast
+    without any error. This guards the trainer-side assignment
+    (``loaded_model.data_indices = self.data_indices``): even when the checkpoint
+    carries a *different* ``data_indices``, the live run's indices must win, and the
+    checkpoint's are retained only as ``_ckpt_model_name_to_index`` for the
+    transfer-learning compatibility validators.
+    """
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 2)
+
+    run_id = "run_indices"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+
+    # The checkpoint carries a DIFFERENT variable -> index mapping than the live run.
+    checkpoint_index = DummyIndex()
+    checkpoint_index.name_to_index = {"t2m": 0, "u10": 1}
+    torch.save(
+        {
+            "state_dict": {key: torch.randn_like(value) for key, value in model.state_dict().items()},
+            "hyper_parameters": {"data_indices": {"data": checkpoint_index}},
+        },
+        ckpt_dir / "last.ckpt",
+    )
+
+    # The live run uses a different mapping; it must be the one that survives.
+    current_index = DummyIndex()
+    current_index.name_to_index = {"z500": 0, "msl": 1}
+    current_data_indices = {"data": current_index}
+
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {
+                        "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                        "run_id": run_id,
+                    },
+                    "loading": {
+                        "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
+                        "strict": False,
+                    },
+                },
+            },
+            "system": {"output": {"checkpoints": {"root": str(ckpt_dir)}}},
+        },
+    )
+
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices=current_data_indices,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    # The current config's indices win — not the checkpoint's.
+    assert result.data_indices is current_data_indices
+    assert result.data_indices["data"].name_to_index == {"z500": 0, "msl": 1}
+    # The checkpoint's mapping is quarantined for compatibility checks, never promoted
+    # to model.data_indices.
+    assert result._ckpt_model_name_to_index == {"data": {"t2m": 0, "u10": 1}}
+
+
 def test_validate_transfer_learning_units_ignore_units_option() -> None:
     """Test that ignore_units=True suppresses an otherwise-failing unit check."""
     ckpt_variables_metadata = {
