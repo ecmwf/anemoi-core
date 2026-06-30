@@ -66,9 +66,10 @@ jobs:
             source .venv/bin/activate
             pip install --upgrade pip
             pip install -e ./training[${{ matrix.pip_extras }}] -e ./models[all,tests] -e ./graphs[all,tests]
-            # Inject the MLflow URL here (not via job-level env:, which does not
+            # Inject the MLflow URL and dataset path here (not via job-level env:, which does not
             # propagate to the sbatch job); secrets are valid inside this template.
             export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
+            export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
             ${{ matrix.pytest_cmd }}
             deactivate
             rm -rf $REPO_NAME
