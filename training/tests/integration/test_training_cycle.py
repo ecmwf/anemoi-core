@@ -485,6 +485,42 @@ def test_restart_from_existing_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
+@pytest.mark.parametrize("loader", ["WeightsOnlyLoader", "ColdStartLoader", "TransferLearningLoader"])
+def test_loading_strategy_loads_real_checkpoint(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    loader: str,
+) -> None:
+    """weights-only / cold-start / transfer-learning load a real checkpoint into a real model.
+
+    Only warm start was integration-tested. The processor-refresh bug hit every loader:
+    warm start crashed loudly, but these three (strict=False) would *silently* drop the
+    re-injected ``model_output_idx`` buffers on a real model. This loads a real GNN
+    checkpoint via each strategy through the pipeline and trains, asserting the model is
+    marked initialised and the run completes — the synthetic unit tests cannot catch a
+    real-model load regression like that.
+    """
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+    with open_dict(cfg):
+        cfg.training.checkpoint.loading = {
+            "_target_": f"anemoi.training.checkpoint.loading.strategies.{loader}",
+        }
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    # The pipeline applies weights at model-build and marks the model; if the strategy
+    # had silently failed to load, this would be unset (or the run would have crashed).
+    assert (
+        getattr(trainer.model, "weights_initialized", False) is True
+    ), f"{loader} did not mark the model weights as initialised"
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_temporal_downscaler(
     temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
