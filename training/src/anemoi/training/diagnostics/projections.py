@@ -7,7 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import numpy as np
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseProjection:
@@ -45,12 +49,34 @@ class EquirectangularProjection(BaseProjection):
         return np.degrees(x), np.degrees(y)
 
 
-class Projection(BaseProjection):
-    """Single interface for projections: use in both maps (callable) and plots (.project(latlons)).
+class MapProjection(BaseProjection):
+    """Unified interface for map projections used in diagnostic plots.
 
-    Backend is either EquirectangularProjection or Cartopy's ccrs.LambertConformal
-    (or any Cartopy CRS with transform_points). Use Projection.equirectangular() or
-    Projection.lambert_conformal(latlon) to build.
+    Wraps either an :class:`EquirectangularProjection` or a Cartopy CRS
+    (``cartopy.crs.*``) and exposes a consistent API for both coordinate
+    transforms and Cartopy axes setup.
+
+    Coordinate concepts
+    -------------------
+    ``axes_crs``
+        The Cartopy CRS that defines how the *map axes* renders — e.g.
+        ``ccrs.Robinson()``.  Passed to
+        ``plt.subplots(subplot_kw={"projection": axes_crs})``.
+        ``None`` for equirectangular (plain matplotlib axes, no Cartopy).
+
+    ``data_crs``
+        The CRS that describes the *input data* coordinate system — always
+        ``ccrs.PlateCarree()`` for us, since data is in degrees lat/lon.
+        Passed to ``ax.scatter(..., transform=data_crs)`` so Cartopy knows
+        how to reproject the points into ``axes_crs`` before drawing.
+        ``None`` for equirectangular (no reprojection needed).
+
+    The rendering pipeline is::
+
+        rendered = axes_crs.reproject(data_points, from_crs=data_crs)
+
+    For equirectangular both are ``None`` because coordinates are handled
+    directly without Cartopy axes.
     """
 
     def __init__(
@@ -84,18 +110,18 @@ class Projection(BaseProjection):
         return self._backend.inverse(x, y)
 
     def project(self, latlons: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Project (N, 2) [lat, lon] in degrees to (proj0, proj1). Use in plots."""
+        """Project (N, 2) [lat, lon] in degrees to (x, y). Use in plots."""
         latlons = np.asanyarray(latlons)
         lat, lon = latlons[:, 0], latlons[:, 1]
         return self(lon, lat)
 
     @classmethod
-    def equirectangular(cls) -> "Projection":
+    def equirectangular(cls) -> "MapProjection":
         """Equirectangular projection (lon/lat in radians)."""
         return cls(EquirectangularProjection())
 
     @classmethod
-    def lambert_conformal(cls, latlon: np.ndarray) -> "Projection":
+    def lambert_conformal(cls, latlon: np.ndarray) -> "MapProjection":
         """Lambert Conformal using Cartopy's ccrs.LambertConformal fitted to the given points.
 
         Parameters
@@ -105,23 +131,73 @@ class Projection(BaseProjection):
 
         Returns
         -------
-        Projection
+        MapProjection
             Uses ccrs.LambertConformal; requires Cartopy.
         """
-        crs = lambert_conformal_from_latlon_points(latlon)
-        return cls(crs)
+        axes_crs = lambert_conformal_from_latlon_points(latlon)
+        return cls(axes_crs)
 
     @classmethod
-    def from_kind(cls, latlons: np.ndarray, kind: str = "equirectangular") -> "Projection":
-        """Build a Projection from a kind string (equirectangular or lambert_conformal)."""
+    def from_kind(cls, latlons: np.ndarray, kind: str = "equirectangular") -> "MapProjection":
+        """Build a MapProjection from a kind string.
+
+        Built-in kinds: ``'equirectangular'`` (no cartopy) and ``'lambert_conformal'``
+        (auto-fitted to the data domain).  Any other string is resolved as a
+        ``cartopy.crs`` class name in snake_case, e.g. ``'robinson'`` →
+        ``cartopy.crs.Robinson()``.  Requires cartopy for all non-equirectangular kinds.
+
+        Notes
+        -----
+        Dynamic Cartopy projections are instantiated with **default constructor
+        arguments**. For example, ``'orthographic'`` centres on (longitude=0,
+        latitude=0). If the defaults are unsuitable for your domain, use
+        ``'lambert_conformal'`` (auto-fitted) or subclass :class:`MapProjection`
+        to pass custom parameters.
+        """
         if kind == "equirectangular":
             return cls.equirectangular()
         if kind == "lambert_conformal":
+            latlons = np.asanyarray(latlons)
+            lat_span = latlons[:, 0].max() - latlons[:, 0].min()
+            lon_span = latlons[:, 1].max() - latlons[:, 1].min()
+            if lat_span > 60 or lon_span > 180:
+                LOGGER.warning(
+                    "Lambert Conformal is designed for regional domains. "
+                    "The current domain spans %.1f° latitude and %.1f° longitude — "
+                    "falling back to equirectangular.",
+                    lat_span,
+                    lon_span,
+                )
+                return cls.equirectangular()
             return cls.lambert_conformal(latlons)
-        raise ValueError(kind)
+        # Fall back to dynamic cartopy CRS lookup: snake_case → CamelCase class name
+        try:
+            import cartopy.crs as ccrs
+        except ModuleNotFoundError as e:
+            msg = f"projection_kind='{kind}' requires cartopy. Install with: pip install anemoi-training[plotting]"
+            raise ModuleNotFoundError(msg) from e
+        crs_name = "".join(part.capitalize() for part in kind.split("_"))
+        crs_cls = getattr(ccrs, crs_name, None)
+        if crs_cls is None:
+            msg = (
+                f"Unknown projection_kind='{kind}'. "
+                f"Use 'equirectangular', 'lambert_conformal', or any cartopy.crs class name in snake_case "
+                f"(e.g. 'robinson', 'mollweide', 'orthographic')."
+            )
+            raise ValueError(msg)
+        LOGGER.info(
+            "Instantiating cartopy.crs.%s() with default constructor arguments. "
+            "To use non-default parameters (e.g. a different central longitude), "
+            "use 'lambert_conformal' (auto-fitted) or subclass MapProjection.",
+            crs_name,
+        )
+        return cls(crs_cls())
 
-    def crs_for_axes(self) -> object | None:
-        """CRS for plt.subplots(subplot_kw={"projection": ...}). None for equirectangular."""
+    def axes_crs(self) -> object | None:
+        """Cartopy CRS for ``plt.subplots(subplot_kw={"projection": axes_crs})``.
+
+        Returns ``None`` for equirectangular (plain matplotlib axes, no Cartopy).
+        """
         return self._backend if self._is_cartopy else None
 
     @classmethod
@@ -130,53 +206,42 @@ class Projection(BaseProjection):
         latlons: np.ndarray,
         kind: str = "equirectangular",
     ) -> tuple[tuple[np.ndarray, np.ndarray], object | None, object | None]:
-        """Projection data for plotting: (pc_lon, pc_lat), proj for axes, transform for scatter.
+        """Return everything needed to set up a projected plot.
+
+        Parameters
+        ----------
+        latlons : np.ndarray
+            Shape (N, 2) with columns [latitude, longitude] in degrees.
+        kind : str
+            Projection kind string (see :meth:`from_kind`).
 
         Returns
         -------
-        (pc_lon, pc_lat), proj, transform
-            Use proj in subplot_kw={"projection": proj} when proj is not None.
-            Pass transform to scatter. Reuse this in all plot functions.
+        (pc_lon, pc_lat), axes_crs, data_crs
+            ``axes_crs`` — pass to ``plt.subplots(subplot_kw={"projection": axes_crs})``.
+            ``data_crs`` — pass to ``ax.scatter(..., transform=data_crs)`` and
+            ``ax.set_extent(..., crs=data_crs)``. Always ``ccrs.PlateCarree()`` when
+            not None (data lives in degrees lat/lon).
+            Both are ``None`` for equirectangular (plain matplotlib, no Cartopy).
         """
         projection = cls.from_kind(latlons, kind)
+        _axes_crs = projection.axes_crs()
+        if _axes_crs is not None:
+            # Cartopy axes: keep data in degrees and pass PlateCarree as data_crs.
+            # Cartopy reprojects from data_crs into axes_crs internally before drawing.
+            import cartopy.crs as ccrs
+
+            latlons = np.asanyarray(latlons)
+            pc_lon, pc_lat = latlons[:, 1], latlons[:, 0]
+            return (pc_lon, pc_lat), _axes_crs, ccrs.PlateCarree()
         pc_lon, pc_lat = projection.project(latlons)
-        proj = projection.crs_for_axes()
-        return (pc_lon, pc_lat), proj, proj
+        return (pc_lon, pc_lat), None, None
 
 
 def equirectangular_projection(latlons: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Project (N, 2) [lat, lon] in degrees to (pc_lat, pc_lon). Backward-compat wrapper."""
-    x, y = Projection.equirectangular().project(latlons)
+    x, y = MapProjection.equirectangular().project(latlons)
     return y, x  # pc_lat, pc_lon
-
-
-def projection_crs_for_axes(
-    latlons: np.ndarray,
-    kind: str = "equirectangular",
-) -> object | None:
-    """Return projection for map axes: None for equirectangular, Cartopy Lambert for lambert_conformal.
-
-    For equirectangular we use our own projection for coordinates only; no Cartopy axes CRS.
-    For lambert_conformal we return ccrs.LambertConformal for subplot_kw={"projection": proj}.
-
-    Parameters
-    ----------
-    latlons : np.ndarray
-        Shape (N, 2) with columns [latitude, longitude] in degrees.
-    kind : str
-        "equirectangular" (no axes CRS; use Projection.equirectangular() for coords only)
-        or "lambert_conformal" (ccrs.LambertConformal fitted to latlons).
-
-    Returns
-    -------
-    None or cartopy.crs.LambertConformal
-        None for equirectangular (regular axes). Lambert CRS for lambert_conformal (requires Cartopy).
-    """
-    if kind == "equirectangular":
-        return None
-    if kind == "lambert_conformal":
-        return lambert_conformal_from_latlon_points(latlons)
-    raise ValueError(kind)
 
 
 def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
@@ -247,6 +312,13 @@ def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
 
     std_parallel_1 = central_latitude - lat_span * 0.25
     std_parallel_2 = central_latitude + lat_span * 0.25
+
+    # LCC requires |lat_1 + lat_2| > 0 (parallels must not cancel).
+    # When the domain straddles the equator symmetrically, nudge both parallels
+    # slightly northward to satisfy the constraint.
+    if abs(std_parallel_1 + std_parallel_2) < 1e-6:
+        std_parallel_1 += 1e-3
+        std_parallel_2 += 1e-3
 
     return ccrs.LambertConformal(
         central_latitude=central_latitude,
