@@ -56,6 +56,22 @@ class NoiseScheduler(ABC):
         pass
 
 
+def _append_terminal_zero(
+    sigmas: torch.Tensor,
+    device: torch.device = None,
+    dtype_compute: torch.dtype = torch.float64,
+) -> torch.Tensor:
+    """Append a terminal sigma=0 to a descending schedule.
+
+    The samplers run ``len(sigmas) - 1`` steps from ``sigmas[i]`` to
+    ``sigmas[i + 1]``, and special-case the final step into ``sigma=0`` as a
+    plain denoise (Euler-to-clean). Without the terminal zero that last step
+    never runs and the sample is left at ``sigma_min`` noise. This matches the
+    EDM/GenCast convention of ``np.append(noise_levels, 0.)``.
+    """
+    return torch.cat([sigmas, torch.zeros(1, device=device, dtype=dtype_compute)])
+
+
 def _karras_segment(
     sigma_start: float,
     sigma_end: float,
@@ -157,7 +173,7 @@ class KarrasScheduler(NoiseScheduler):
             * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
         ) ** self.rho
 
-        return sigmas
+        return _append_terminal_zero(sigmas, device, dtype_compute)
 
 
 class LinearScheduler(NoiseScheduler):
@@ -180,7 +196,7 @@ class LinearScheduler(NoiseScheduler):
             dtype=dtype_compute,
         )
 
-        return sigmas
+        return _append_terminal_zero(sigmas, device, dtype_compute)
 
 
 class CosineScheduler(NoiseScheduler):
@@ -208,7 +224,7 @@ class CosineScheduler(NoiseScheduler):
         sigmas = torch.sqrt((1 - alpha_bar) / alpha_bar) * self.sigma_max
         sigmas = torch.clamp(sigmas, min=self.sigma_min, max=self.sigma_max)
 
-        return sigmas
+        return _append_terminal_zero(sigmas, device, dtype_compute)
 
 
 class ExponentialScheduler(NoiseScheduler):
@@ -232,9 +248,15 @@ class ExponentialScheduler(NoiseScheduler):
         )
         sigmas = torch.exp(log_sigmas)
 
-        return sigmas
+        return _append_terminal_zero(sigmas, device, dtype_compute)
+
+
 class ManualScheduler(NoiseScheduler):
-    """Manual scheduler."""
+    """User-supplied sigma schedule.
+
+    ``sigmas`` is the list of (descending) noise levels to visit; the
+    terminal ``sigma=0`` is appended automatically, so do not include it.
+    """
 
     def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, sigmas: list[float], **kwargs):
         super().__init__(sigma_max, sigma_min, num_steps)
@@ -249,7 +271,7 @@ class ManualScheduler(NoiseScheduler):
         **kwargs,
     ) -> torch.Tensor:
         sigmas = torch.tensor(self.sigmas, device=device, dtype=dtype_compute)
-        return sigmas
+        return _append_terminal_zero(sigmas, device, dtype_compute)
 
 class ExperimentalSamplerScheduler(NoiseScheduler):
     """Piecewise scheduler for aggressive high-sigma collapse and denser low-sigma refinement.
@@ -332,8 +354,8 @@ class ExperimentalSamplerScheduler(NoiseScheduler):
             device=device,
             dtype_compute=dtype_compute,
         )
-        sigmas = torch.cat([high, low[1:], torch.zeros(1, device=device, dtype=dtype_compute)])
-        return sigmas
+        sigmas = torch.cat([high, low[1:]])
+        return _append_terminal_zero(sigmas, device, dtype_compute)
 
 
 class DiffusionSampler(ABC):
