@@ -21,6 +21,8 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.losses.scalers.spectral import LinearSpectralDimensionScaler
+from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -557,3 +559,43 @@ def test_lead_time_decay_loss_scaling(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
     assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
+
+
+# ---------------------------------------------------------------------------
+# Spectral dimension scaler tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
+def test_uniform_spectral_scaler(n_spectral_modes: int) -> None:
+    """SpectralDimensionScaler: scaler values should all be identical (uniform)."""
+    scaler = SpectralDimensionScaler(n_spectral_modes=n_spectral_modes)
+    n_spectral = n_spectral_modes
+    values = scaler.get_scaling_values()
+
+    assert values.shape == (n_spectral,), f"Expected scaler to have shape ({n_spectral},), got {values.shape}"
+    assert torch.allclose(values, values[0].expand_as(values)), f"Values are not uniform: {values}"
+    assert values[0] == 1.0 / n_spectral_modes, f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
+
+
+@pytest.mark.parametrize("n_spectral_modes", [4, 16, 64, 193])
+def test_linear_spectral_scaler_weight_formula(n_spectral_modes: int) -> None:
+    """LinearSpectralDimensionScaler: weight = slope * wavenumber + y_intercept."""
+    slope = 0.01
+    y_intercept = 0.1
+    scaler = LinearSpectralDimensionScaler(
+        n_spectral_modes=n_spectral_modes,
+        slope=slope,
+        y_intercept=y_intercept,
+    )
+    scaler = scaler.get_scaling_values()
+
+    wavenumbers = torch.arange(n_spectral_modes, dtype=torch.float32)
+    expected_per_wn = slope * wavenumbers + y_intercept
+
+    # Check first column (order 0) matches the expected per-wavenumber value.
+    assert torch.allclose(
+        scaler,
+        expected_per_wn,
+        atol=1e-6,
+    ), f"Per-wavenumber weights don't match formula.\n  Got: {scaler}\n  Expected: {expected_per_wn}"

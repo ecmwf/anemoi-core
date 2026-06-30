@@ -227,7 +227,8 @@ In Anemoi, spectral losses follow the same API as other losses (scalers/node wei
 etc.), but they additionally require a *spectral transform* configuration.
 
 Spectral transforms
--------------------
+===================
+
 
 Spectral losses rely on a transform that maps grid-point fields to spectral coefficients.
 
@@ -365,7 +366,7 @@ Gaussian-weighted nearest-neighbour weights.
            row_normalize: false
 
 Spectral kernel CRPS
---------------------
+====================
 
 ``SpectralCRPSLoss`` computes a CRPS-style probabilistic loss in spectral space.
 Conceptually, it applies a spectral transform to both forecast ensemble and target,
@@ -376,7 +377,7 @@ This loss is intended for *ensemble* training (``ensemble > 1``). For determinis
 training, consider spectral distance losses instead.
 
 Example configuration (FFT2D)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------------
 
 Use this for limited-area or other regular 2D fields that can be reshaped to
 ``[y_dim, x_dim]``:
@@ -393,9 +394,9 @@ Use this for limited-area or other regular 2D fields that can be reshaped to
          y_dim: 128
 
 Example configuration (reduced Gaussian grid SHT)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------------------------------
 
-Use this for global models on the reduced Gaussian grid (only N320 supported so far):
+Use this for global models on the reduced Gaussian grid (only N320 supported):
 
 .. code-block:: yaml
 
@@ -409,8 +410,57 @@ Use this for global models on the reduced Gaussian grid (only N320 supported so 
 Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
+Power Spectrum Loss
+===================
+
+``PowerSpectrumLoss`` (PSL) is a spectral loss that compares
+the *power spectrum* (energy per total wavenumber) of the prediction against
+that of the target, rather than comparing complex spectral coefficients
+directly. This emphasises that the model reproduces the correct distribution
+of variance across spatial scales.
+
+Given spectral coefficients :math:`\hat{F}_{lm}` (prediction) and
+:math:`F_{lm}` (target), with total wavenumber :math:`l` and zonal
+wavenumber :math:`m`, the loss is
+
+.. math::
+
+   \mathcal{L} = \sum_l \Bigl( \sum_m |\hat{F}_{lm}|^2
+                              - \sum_m |F_{lm}|^2 \Bigr)^{2}.
+
+The chosen spectral transform must provide a ``power_spectral_density``
+method, so ``PowerSpectrumLoss`` currently supports the SHT-based
+transforms (``reduced_sht``, ``octahedral_sht``). For these,
+:math:`l` is the total wavenumber and :math:`m` the zonal wavenumber.
+
+.. note::
+
+   Because the loss operates on power per wavenumber, any scaler registered
+   on the grid dimension must be a
+   :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler` (sized to
+   the spectral dimension), not a spatial weight such as ``node_weights``.
+
+Example configuration (octahedral SHT)
+--------------------------------------
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.PowerSpectrumLoss
+         transform: octahedral_sht
+         truncation: 192
+         nlat: 192
+         scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
+
+Since a power-spectrum-only loss does not constrain the *phase* of the
+field, ``PowerSpectrumLoss`` is most useful when combined with a
+grid-point loss (e.g. ``MSELoss``) via ``CombinedLoss``, where it acts as
+a spectral regulariser that discourages spectral blurring.
+
 Combining spectral and grid-point losses
-----------------------------------------
+========================================
 
 Spectral losses can be combined with standard grid-point losses through
 ``CombinedLoss``:
@@ -502,7 +552,7 @@ This will scale all variables in the `pl` group by max(0.2, 0.001 *
 level), where `level` is the pressure level of the variable.
 
 Variable Groups
-===============
+---------------
 
 Define a default group and a list of groups to be used in the variable
 level scalers.
@@ -584,6 +634,65 @@ and an error will be raised.
 If multiple groups are defined for a variable, the first group in the
 `variable_groups` is used. If the variable is not in any group, it is
 assigned to the default group.
+
+Spectral Loss Scalers
+=====================
+
+Spectral scalers weight the spectral dimension of spectral losses. They
+are required whenever using a
+spectral loss, because in spectral space that dimension holds spectral
+modes rather than grid points. Anemoi-training checks that every
+grid-dimension scaler attached to a spectral loss is sized to the
+spectral dimension.
+
+``n_spectral_modes`` is the number of spectral modes (for spherical
+harmonic transforms this is the number of total wavenumbers
+``L = truncation + 1``) considered by the loss.
+
+.. note::
+
+   You must know the size of the spectral dimension produced by your
+   loss before configuring these scalers. A mismatch between
+   the shape of the scaler and the loss tensor will be caught at
+   runtime by the spectral-loss compatibility check, but only after
+   model instantiation.
+
+The following spectral scalers are available:
+
+-  :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler`:
+   uniform scaling by ``1 / n_spectral_modes``. Equivalent to averaging
+   over the total-wavenumber dimension.
+-  :class:`~anemoi.training.losses.scalers.LinearSpectralDimensionScaler`:
+   linearly increasing weights with total wavenumber,
+   ``weight[i] = slope * i + y_intercept``. Useful to emphasise high
+   wavenumbers (small-scale structure). With default ``slope`` and
+   ``y_intercept`` (both ``1 / n_spectral_modes``) higher wavenumbers
+   receive larger weights.
+
+Example: averaging over total wavenumbers for an SHT-based loss that
+reduces over the zonal wavenumber (e.g. ``PowerSpectrumLoss`` or
+``SpectralAMSELoss``) with ``truncation = 192``
+(so :math:`L = 193`):
+
+.. code:: yaml
+
+   # config.training.scalers
+   spectral_dim_mean:
+      _target_: anemoi.training.losses.scalers.SpectralDimensionScaler
+      n_spectral_modes: 193
+
+Then reference it from the loss:
+
+.. code:: yaml
+
+   training_loss:
+      datasets:
+         your_dataset_name:
+            _target_: anemoi.training.losses.PowerSpectrumLoss
+            transform: octahedral_sht
+            truncation: 192
+            nlat: 192 # o96 grid
+            scalers: ['pressure_level', 'general_variable', 'spectral_dim_mean']
 
 Custom Scalers
 ==============

@@ -48,22 +48,38 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.training.losses.scaler_tensor import ScaleTensor
+
 LOGGER = logging.getLogger(__name__)
 
 
-def _ensure_without_scalers_has_grid_dimension(without_scalers: list[str] | list[int] | None) -> list[str] | list[int]:
-    """Temporary fix for https://github.com/ecmwf/anemoi-core/issues/725.
+def _assert_spectral_scalers_compatible(scaler_tensor: ScaleTensor, n_spectral: int) -> None:
+    """Assert that all grid-dimension scalers are spectral-compatible.
 
-    Some pipelines pass numeric scaler indices and rely on excluding scalers over grid dimension
-    by default. Ensure this exclusion is present for numeric lists.
+    In spectral losses the grid dimension holds spectral modes, not grid
+    points.  Any scaler registered on ``TensorDim.GRID`` must therefore
+    originate from a :class:`SpectralDimensionScaler` (i.e. be sized to the
+    flattened spectral dimension) rather than from a spatial scaler (e.g. area
+    weights sized to the number of grid points).
+
+    Parameters
+    ----------
+    scaler_tensor : ScaleTensor
+        The ``ScaleTensor`` attached to the loss.
+    n_spectral : int
+        Size of the flattened spectral dimension in the loss tensor.
     """
-    if without_scalers is None:
-        return [TensorDim.GRID.value]
-    if len(without_scalers) == 0:
-        return [TensorDim.GRID.value]
-    if not isinstance(without_scalers[0], str) and TensorDim.GRID.value not in without_scalers:
-        without_scalers.append(TensorDim.GRID.value)  # type: ignore[arg-type]
-    return without_scalers
+    for name, (dims, tensor) in scaler_tensor.tensors.items():
+        if TensorDim.GRID not in dims:
+            continue
+        grid_idx = list(dims).index(TensorDim.GRID)
+        scaler_grid_size = tensor.shape[grid_idx]
+        assert scaler_grid_size == n_spectral or scaler_grid_size == 1, (
+            f"Scaler '{name}' is registered on the grid dimension with size "
+            f"{scaler_grid_size}, but the spectral loss has a target with spectral "
+            f"dimension of size {n_spectral}. Grid-dimension scalers in "
+            f"spectral losses must be SpectralDimensionScalers with matching size."
+        )
 
 
 class SpectralLoss(BaseLoss):
@@ -273,21 +289,48 @@ class SpectralAMSELoss(SpectralLoss):
             # per-L AMSE: [B, T, E, L, vars]
             amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
 
+        _assert_spectral_scalers_compatible(self.scaler, amse_per_l.size(TensorDim.GRID))
         result = self.scale(
             amse_per_l,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
-class SpectralL2Loss(SpectralLoss):
-    r"""L2 loss in spectral domain.
+class PowerSpectrumLoss(SpectralLoss):
+    r"""PSL: L2 loss on power-per-wavenumber in spectral domain.
+
+    This loss compares the power spectrum
+    (energy per total wavenumber) of prediction and target.
+
+    **Steps:**
+
+    1. Apply the spectral transform to ``pred`` and ``target``.
+       The result has shape ``(..., L, M, variables)`` where ``L`` is the total
+       wavenumber and ``M`` is the zonal wavenumber.
+    2. Compute the power per total wavenumber by summing ``|coeff|²`` over the
+       zonal wavenumber dimension ``M``::
+
+           amp(x) = sum_m |X(l, m)|²      shape: (..., L, variables)
+
+    3. Compute the squared difference of the power spectra::
+
+           diff = (amp(pred) - amp(target))²
+
+    4. Apply scalers and reduce to produce the final scalar loss.
 
     .. math::
-        \lVert F - \hat F \rVert_2^2
+        \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
+                                   - \sum_m |F_{lm}|^2 \bigr)^2 .
     """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        assert hasattr(self.transform, "power_spectral_density") and callable(
+            self.transform.power_spectral_density,
+        ), "spectral transform used in PowerSpectrumLoss must contain a power_spectral_density method"
 
     def forward(
         self,
@@ -299,25 +342,26 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        pred_spectral = self._to_spectral_flat(pred)
-        target_spectral = self._to_spectral_flat(target)
+        sc_pred = self.transform.forward(pred)
+        sc_target = self.transform.forward(target)
+        pred_amp = self.transform.power_spectral_density(sc_pred)
+        target_amp = self.transform.power_spectral_density(sc_target)
+        diff = (pred_amp - target_amp) ** 2
 
-        diff = torch.abs(pred_spectral - target_spectral) ** 2
-
+        _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
         result = self.scale(
             diff,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
+        return self.reduce(result, squash=squash, group=group)
 
 
 class LogSpectralDistance(SpectralLoss):
@@ -347,10 +391,11 @@ class LogSpectralDistance(SpectralLoss):
 
         log_diff = torch.log(power_tgt + eps) - torch.log(power_pred + eps)
 
+        _assert_spectral_scalers_compatible(self.scaler, log_diff.size(TensorDim.GRID))
         result = self.scale(
             log_diff**2,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
@@ -377,7 +422,6 @@ class FourierCorrelationLoss(SpectralLoss):
 
         pred_spectral = self._to_spectral_flat(pred)
         target_spectral = self._to_spectral_flat(target)
-        n_modes = pred_spectral.size(dim=TensorDim.GRID.value)
 
         # compute correlation per mode before applying any external weighting
         # keeps the ratio bounded by Cauchy-Schwarz (up to numerical error)
@@ -385,12 +429,14 @@ class FourierCorrelationLoss(SpectralLoss):
         denom = torch.sqrt(torch.abs(pred_spectral) ** 2 * torch.abs(target_spectral) ** 2 + eps)
         correlation = torch.clamp(cross / denom, min=-1.0, max=1.0)
 
-        # apply weighting/scaling after correlation is computed
-        result = (1 - correlation) / n_modes
+        # compute correlation
+        result = 1 - correlation
+
+        _assert_spectral_scalers_compatible(self.scaler, result.size(TensorDim.GRID))
         result = self.scale(
             result,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
@@ -485,10 +531,11 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
 
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
+        _assert_spectral_scalers_compatible(self.scaler, crps.size(TensorDim.GRID))
         scaled = self.scale(
             crps,
             scaler_indices,
-            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
