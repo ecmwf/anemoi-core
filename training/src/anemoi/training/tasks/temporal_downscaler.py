@@ -48,8 +48,14 @@ class TemporalDownscaler(BaseSingleStepTask):
         if output_right_boundary:
             output_offsets = [*output_offsets, input_timedelta]
 
+        self.output_timedelta = output_timedelta
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
+
+    @property
+    def tendency_delta(self) -> datetime.timedelta:
+        """Delta used for tendency statistics: 1-step output increment rather than cumulative lead times."""
+        return self.output_timedelta
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
