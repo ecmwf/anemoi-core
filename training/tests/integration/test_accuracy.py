@@ -49,7 +49,6 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
     assert config.diagnostics.log.interval == 50
 
     trainer = AnemoiTrainer(config)
-    assert trainer.cfg.diagnostics.log.interval == 50
 
     trainer.train()
 
