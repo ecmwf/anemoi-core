@@ -1,0 +1,254 @@
+
+
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- datamodule: ens
+- hardware: slurm
+- graph: n320_2.5k
+- model: graphtransformer_ens
+- training: ensemble
+- override hydra/hydra_logging: disabled  
+- override hydra/job_logging: disabled 
+- _self_
+
+config_validation: False
+
+hydra:  
+  output_subdir: null  
+  run:  
+    dir: .
+
+data:
+  frequency: 1h
+  timestep: 1h
+  resolution: N320
+  forcing:
+    - lsm
+    - cos_julian_day
+    - cos_local_time
+    - cos_latitude
+    - cos_longitude
+    - sin_julian_day
+    - sin_local_time
+    - sin_latitude
+    - sin_longitude
+    - insolation
+    - z
+  diagnostic:
+    - tp
+    - ssrd
+    - strd
+  normalizer:
+    none:
+      - lsm
+      - cos_julian_day
+      - cos_local_time
+      - cos_latitude
+      - cos_longitude
+      - sin_julian_day
+      - sin_local_time
+      - sin_latitude
+      - sin_longitude
+      - insolation
+      - lcc
+      - mcc
+      - hcc
+      - tcc
+    max:
+      - z
+
+dataloader:
+  dataset:
+    dataset:
+      cutout:
+        - dataset: /leonardo_work/AIFAC_5C0_154/weathergen/data/meps-2p5km-2020-2025-1h-v2.zarr
+          trim_edge: 50
+          reorder: sort
+        - dataset: ${hardware.paths.data}/${hardware.files.dataset}
+          reorder: sort
+      min_distance_km: 0
+      adjust: all
+    select: ['10u', '10v', '2d', '2t', 'cos_julian_day', 'cos_latitude', 'cos_local_time', 'cos_longitude', 'hcc', 'insolation', 'lcc', 'lsm', 'mcc', 'msl', 'q_100', 'q_1000', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_50', 'q_500', 'q_700', 'q_850', 'q_925', 'sin_julian_day', 'sin_latitude', 'sin_local_time', 'sin_longitude', 'skt', 'sp', 'ssrd', 'strd', 't_100', 't_1000', 't_150', 't_200', 't_250', 't_300', 't_400', 't_50', 't_500', 't_700', 't_850', 't_925', 'tcc', 'tcw', 'tp', 'u_100', 'u_1000', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_50', 'u_500', 'u_700', 'u_850', 'u_925', 'v_100', 'v_1000', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_50', 'v_500', 'v_700', 'v_850', 'v_925', 'w_100', 'w_1000', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_50', 'w_500', 'w_700', 'w_850', 'w_925', 'z', 'z_100', 'z_1000', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_50', 'z_500', 'z_700', 'z_850', 'z_925']
+    reorder: sort
+
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  limit_batches:
+    training: null
+    validation: 10
+  training:
+    start: 2020-02-06
+    end: 2023-12-31
+  validation:
+    start: 2024-01-01
+    end: 2024-12-31
+  test:
+    start: 2024-01-01
+    end: 2024-12-31
+
+  prefetch_factor: 2
+  validation_rollout: 1
+
+  model_run_info: #Add for non-analysis training                                                                                                       
+    start: 2020-02-06T00:00:00                                                                                                                         
+    length: 18 #in number of dates (* frequency for actual time)
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    interval: 100
+    wandb:
+      entity: null
+    mlflow:
+      enabled: True
+      offline: True
+      authentication: True
+      experiment_name: ensemble-interpolator
+      tracking_uri: https://mlflow.ecmwf.int
+      run_name: n320_2.5k
+      system: True
+  checkpoint:
+    every_n_minutes:
+      save_frequency: null
+      num_models_saved: 1
+    every_n_epochs:
+      save_frequency: 1
+      num_models_saved: -1
+    every_n_train_steps:
+      save_frequency: 500
+      num_models_saved: 2
+
+hardware:
+  paths:
+    data: /leonardo_work/DestE_340_26/ai-ml/datasets/
+    output: /leonardo_work/EUHPC_R06_263/mingstad/experiments/ensinterp/
+    graph: /leonardo_scratch/fast/EUHPC_R04_079/mingstad/graphs/
+    warm_start: null
+  files:
+    graph: n320_2p5k_7p10.pt
+    dataset: aifs-od-fc-oper-0001-mars-n320-2016-2024-1h-v1.zarr
+    warm_start: null
+  num_gpus_per_ensemble: 8
+  num_gpus_per_model: 4
+
+model:
+  num_channels: 1024
+  keep_batch_sharded: False
+  bounding:
+    - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+      variables:
+        - tp
+    - _target_: anemoi.models.layers.bounding.HardtanhBounding #[min_val, max_val]
+      variables:
+        - tcc
+        - hcc
+        - mcc
+        - lcc
+      min_val: 0
+      max_val: 1
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  processor:
+   num_chunks: 8
+   num_layers: 16
+  encoder:
+   num_chunks: 8
+  decoder:
+   num_chunks: 8
+
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDecEnsInterpMulti
+  latent_skip: True
+  grid_skip: 1 # Which of the input indices to use as residual connection, null if none.
+
+graph:
+  overwrite: False
+
+training:
+  model_task: anemoi.training.train.tasks.GraphEnsInterpMulti
+
+  explicit_times:
+    input: [0,6]
+    target: [1,2,3,4,5,6]
+
+  ensemble_size_per_device: 1
+  max_epochs: null
+  max_steps: 50000
+  fork_run_id: n320_id
+  load_weights_only: True
+  transfer_learning: True
+
+  lr:
+    rate: 3.0e-5
+    min: 3e-7
+    warmup: 1000
+
+  training_loss:
+    _target_: anemoi.training.losses.CombinedLoss
+    losses:
+      - _target_: anemoi.training.losses.AlmostFairKernelCRPSLooped
+        alpha: 0.95
+        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        ignore_nans: False
+      - _target_: anemoi.training.losses.CRPSFFTLossLoopedLPF
+        alpha: 0.95
+        cutoff_ratio: 1.0
+        no_kweight: True
+        fft: True
+        xdim: 849
+        ydim: 969
+        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+        ignore_nans: False
+    scalers: ['*']
+    loss_weights: [1.0, 0.15]
+  validation_metrics:
+    fkcrps:
+      _target_: anemoi.training.losses.kcrps_looped.AlmostFairKernelCRPSLooped
+      scalers: ['node_weights']
+      ignore_nans: True
+    fkcrps_inside_lam:
+      _target_: anemoi.training.losses.kcrps_looped.AlmostFairKernelCRPSLooped
+      scalers: ['lam_node_weights']
+      ignore_nans: True
+    fftcrps:
+      _target_: anemoi.training.losses.CRPSFFTLossLoopedLPF
+      scalers: []
+      ignore_nans: True
+      cutoff_ratio: 1.0
+      no_kweight: True
+      fft: True
+      xdim: 849
+      ydim: 969
+      alpha: 0.95
+
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+
+  aggregate_outputs:
+    - mean
+    - max
+    - min
+    - diff
+
+  scalers: stretched
+
+  scalers:
+   node_weights:
+     weight_frac_of_total: 0.5
+
+
