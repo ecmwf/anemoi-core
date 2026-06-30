@@ -18,6 +18,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 
@@ -188,6 +189,20 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.pre_processors_tendencies[dataset_name] = pre_tend
                 self.post_processors_tendencies[dataset_name] = post_tend
 
+        # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
+        # Keyed by dataset name; empty by default so existing models are unaffected.
+        # Built from optional config.data.spatial_processors.<dataset_name> entries.
+        self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
+        spatial_configs = getattr(getattr(self.config, "data", None), "spatial_processors", {}) or {}
+        for dataset_name, sp_config in spatial_configs.items():
+            projector = instantiate(sp_config, graph=self.graph_data.get(dataset_name), _recursive_=False)
+            if not isinstance(projector, SpatialPreprocessor):
+                raise TypeError(
+                    f"spatial_processors.{dataset_name} must instantiate a SpatialPreprocessor, "
+                    f"got {type(projector)}"
+                )
+            self.spatial_pre_processors[dataset_name] = projector
+
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
         model_instantiate_config = {
@@ -247,6 +262,8 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+        if self.spatial_pre_processors:
+            predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)

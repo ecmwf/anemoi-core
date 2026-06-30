@@ -294,9 +294,114 @@ class TendencyPredictionMode(PredictionMode):
         }
 
 
+class ResidualPredictionMode(PredictionMode):
+    """Prediction mode for spatial downscaling: model predicts y - interp(x_lres).
+
+    Expects ``batch["in_lres"]`` to already be reprojected onto the hres grid by
+    ``DownscalerTransportTraining.on_after_batch_transfer`` (via ``spatial_pre_processors``).
+    Uses ``pre_processors_tendencies`` / ``post_processors_tendencies`` for residual
+    normalization, falling back to state processors when tendency stats are absent.
+
+    Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
+    """
+
+    def __init__(self, module: BaseTransportTraining) -> None:
+        super().__init__(module)
+        self._validate_objective()
+
+    def _validate_objective(self) -> None:
+        objective_kind = getattr(self.module.config.training, "transport", {}).get("objective", "")
+        if objective_kind == "stochastic_interpolant":
+            raise NotImplementedError(
+                "ResidualPredictionMode does not yet support the stochastic_interpolant objective."
+            )
+
+    def _residual_pre_processors(self) -> dict:
+        """Return tendency pre-processors if available, else state pre-processors."""
+        tend = getattr(self.module.model, "pre_processors_tendencies", None)
+        if tend and len(tend) > 0:
+            return tend
+        return self.module.model.pre_processors
+
+    def _residual_post_processors(self) -> dict:
+        """Return tendency post-processors if available, else state post-processors."""
+        tend = getattr(self.module.model, "post_processors_tendencies", None)
+        if tend and len(tend) > 0:
+            return tend
+        return self.module.model.post_processors
+
+    def prepare_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
+    ) -> PreparedPredictionTarget:
+        del x
+        # x_lres_on_hres is already reprojected onto the hres grid.
+        x_lres_on_hres = batch["in_lres"]
+
+        target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        target_data_output = self.module.get_data_output_target(target_full)
+
+        # Compute raw residual for output (hres target) datasets only.
+        residual_data_output: dict[str, torch.Tensor] = {}
+        for dataset_name, y_ds in target_data_output.items():
+            # Channel-match: select lres variables that exist in this output dataset.
+            lres_idx = self.module.data_indices[dataset_name].data.output.full.to(device=y_ds.device)
+            x_interp = x_lres_on_hres.index_select(-1, lres_idx)
+            residual_data_output[dataset_name] = y_ds - x_interp
+
+        # Normalize residuals using tendency/residual statistics.
+        pre_proc = self._residual_pre_processors()
+        model_residual = {}
+        for dataset_name, res_ds in residual_data_output.items():
+            model_residual[dataset_name] = pre_proc[dataset_name](res_ds, in_place=False)
+        model_residual = self.module.reduce_data_output_target_to_model_output(model_residual)
+
+        return PreparedPredictionTarget(
+            model_target=model_residual,
+            loss_target=residual_data_output,
+            loss_target_layout=IndexSpace.DATA_OUTPUT,
+            metric_target=target_full,
+            aux={
+                "x_lres_on_hres": x_lres_on_hres,
+                "transport_reference_source": self._reference_state_target_space(batch),
+            },
+        )
+
+    def _reference_state_target_space(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        reference: dict[str, torch.Tensor] = {}
+        for dataset_name, batch_dataset in batch.items():
+            if dataset_name == "in_lres":
+                continue
+            var_idx = self.module.data_indices[dataset_name].data.output.full.to(device=batch_dataset.device)
+            reference_step = batch_dataset.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, var_idx)
+            if self.module.n_step_output > 1:
+                reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
+            reference[dataset_name] = reference_step
+        return self.module.reduce_data_output_target_to_model_output(reference)
+
+    def reconstruct_prediction(
+        self,
+        prediction: dict[str, torch.Tensor],
+        prepared: PreparedPredictionTarget,
+    ) -> dict[str, torch.Tensor]:
+        x_lres_on_hres = prepared.aux["x_lres_on_hres"]
+        post_proc = self._residual_post_processors()
+        states: dict[str, torch.Tensor] = {}
+        for dataset_name, pred_ds in prediction.items():
+            # Denormalize residual prediction.
+            denormed = post_proc[dataset_name](pred_ds, in_place=False)
+            # Add back interpolated source (channel-matched).
+            lres_idx = self.module.data_indices[dataset_name].data.output.full.to(device=denormed.device)
+            x_interp = x_lres_on_hres.index_select(-1, lres_idx)
+            states[dataset_name] = denormed + x_interp
+        return states
+
+
 PREDICTION_MODE_CLASSES = {
     "state": StatePredictionMode,
     "tendency": TendencyPredictionMode,
+    "residual": ResidualPredictionMode,
 }
 
 
@@ -537,3 +642,49 @@ class TransportTraining(BaseTransportTraining):
         )
 
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=[y_pred], plot_kwargs=plot_kwargs)
+
+
+class DownscalerTransportTraining(TransportTraining):
+    """Transport training for probabilistic spatial downscaling.
+
+    Extends ``TransportTraining`` with two additions:
+
+    1. **Spatial preprocessing** — applies ``model.spatial_pre_processors`` in
+       ``on_after_batch_transfer`` to reproject ``batch["in_lres"]`` from the
+       low-resolution grid onto the high-resolution grid *before* any variable
+       normalization.  The reprojected tensor replaces ``batch["in_lres"]`` in-place
+       so the rest of the pipeline (including ``ResidualPredictionMode``) sees the
+       already-reprojected data.
+
+    2. **Deferred normalization** — skips ``_normalize_batch`` in
+       ``on_after_batch_transfer`` because ``ResidualPredictionMode.prepare_target``
+       needs raw (unnormalized) tensors to compute the spatial residual
+       ``y - interp(x_lres)`` before normalizing.
+
+    Everything else (forward pass, loss, metrics, sampling) is inherited unchanged
+    from ``TransportTraining``.
+
+    Configuration
+    -------------
+    Set ``training.transport.prediction_mode: residual`` and provide
+    ``data.spatial_processors.in_lres`` pointing to a ``CrossGridProjector`` config.
+    """
+
+    def on_after_batch_transfer(
+        self,
+        batch: dict[str, torch.Tensor],
+        dataloader_idx: int,
+    ) -> dict[str, torch.Tensor]:
+        batch = self._setup_batch_sharding(batch)
+
+        # Apply spatial preprocessing (CrossGridProjector: in_lres -> hres grid).
+        # Must run before variable normalization so the reprojected tensor is in
+        # physical units when ResidualPredictionMode computes the raw residual.
+        for ds_name, projector in self.model.spatial_pre_processors.items():
+            if ds_name in batch:
+                batch[ds_name] = projector(batch[ds_name])
+
+        # Intentionally skip _normalize_batch here.
+        # ResidualPredictionMode.prepare_target normalizes after computing residuals.
+        self._prepare_loss_scalers()
+        return batch

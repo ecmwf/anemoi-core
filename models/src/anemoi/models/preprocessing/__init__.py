@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from enum import Enum
 from typing import Optional
 
 import torch
@@ -17,6 +18,22 @@ from torch import nn
 from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ProcessorMode(str, Enum):
+    """Selects which statistics a processor chain should use.
+
+    STATE    -- normalize with state statistics (default; all existing models unaffected)
+    TENDENCY -- temporal tendency y_{t+1} - y_t (transport forecaster)
+    RESIDUAL -- spatial residual y - interp(x_lres) (downscaling)
+
+    TENDENCY and RESIDUAL both draw from ``statistics_tendencies``; the distinction is
+    semantic and recorded in the training task / prediction mode.
+    """
+
+    STATE = "state"
+    TENDENCY = "tendency"
+    RESIDUAL = "residual"
 
 
 class BasePreprocessor(nn.Module):
