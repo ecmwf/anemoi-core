@@ -66,3 +66,89 @@ def test_config_path_wins_and_home_env_paths_removed(monkeypatch: pytest.MonkeyP
     assert providers.index("main") < providers.index("anemoi-cwd-searchpath-plugin")
     # Packaged configs remain the lowest-priority fallback.
     assert providers[-1] == "anemoi-package-searchpath-plugin"
+
+
+def _make_search_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, config_path: str | None = None) -> list[str]:
+    """Helper: build a search path as the real code does and return the provider list.
+
+    Parameters
+    ----------
+    config_path:
+        Simulates ``--config-path``.  When *None* the entry point uses
+        ``config_path=None`` (our fix) so no primary path is pre-populated.
+    """
+    cwd = tmp_path / "cwd"
+    cwd.mkdir(exist_ok=True)
+    monkeypatch.chdir(cwd)
+
+    search_path = ConfigSearchPathImpl()
+    if config_path is not None:
+        # Mimic what Hydra does when the user passes --config-path.
+        search_path.append(provider="main", path=config_path)
+
+    AnemoiSearchPathPlugin().manipulate_search_path(search_path)
+    return [entry.provider for entry in search_path.get_path()]
+
+
+def test_cwd_beats_package_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Priority 2 > 3: CWD must come before the packaged defaults when no --config-path is given.
+
+    With ``config_path=None`` in ``@hydra.main`` there is no "main" entry in the
+    search path before the plugin runs, so the plugin is the sole authority on
+    ordering.
+    """
+    providers = _make_search_path(monkeypatch, tmp_path, config_path=None)
+
+    assert "anemoi-cwd-searchpath-plugin" in providers, "CWD was not added to the search path"
+    assert "anemoi-package-searchpath-plugin" in providers, "Package fallback was not added"
+    assert providers.index("anemoi-cwd-searchpath-plugin") < providers.index(
+        "anemoi-package-searchpath-plugin"
+    ), "CWD must come before package defaults (priority 2 > 3)"
+
+
+def test_config_path_beats_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Priority 1 > 2: an explicit --config-path must come before CWD."""
+    user_config = tmp_path / "my_configs"
+    user_config.mkdir()
+
+    providers = _make_search_path(monkeypatch, tmp_path, config_path=str(user_config))
+
+    assert "main" in providers, "--config-path (main) was not in the search path"
+    assert "anemoi-cwd-searchpath-plugin" in providers, "CWD was not added to the search path"
+    assert providers.index("main") < providers.index(
+        "anemoi-cwd-searchpath-plugin"
+    ), "--config-path must come before CWD (priority 1 > 2)"
+
+
+def test_config_path_beats_package(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Priority 1 > 3: an explicit --config-path must come before the packaged defaults."""
+    user_config = tmp_path / "my_configs"
+    user_config.mkdir()
+
+    providers = _make_search_path(monkeypatch, tmp_path, config_path=str(user_config))
+
+    assert "main" in providers, "--config-path (main) was not in the search path"
+    assert "anemoi-package-searchpath-plugin" in providers, "Package fallback was not added"
+    assert providers.index("main") < providers.index(
+        "anemoi-package-searchpath-plugin"
+    ), "--config-path must come before package defaults (priority 1 > 3)"
+
+
+def test_full_priority_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """End-to-end: config-path (1) > CWD (2) > package defaults (3)."""
+    user_config = tmp_path / "my_configs"
+    user_config.mkdir()
+
+    providers = _make_search_path(monkeypatch, tmp_path, config_path=str(user_config))
+
+    assert "main" in providers
+    assert "anemoi-cwd-searchpath-plugin" in providers
+    assert "anemoi-package-searchpath-plugin" in providers
+
+    pos_config_path = providers.index("main")
+    pos_cwd = providers.index("anemoi-cwd-searchpath-plugin")
+    pos_package = providers.index("anemoi-package-searchpath-plugin")
+
+    assert pos_config_path < pos_cwd < pos_package, (
+        f"Expected config-path ({pos_config_path}) < CWD ({pos_cwd}) < package ({pos_package})"
+    )
