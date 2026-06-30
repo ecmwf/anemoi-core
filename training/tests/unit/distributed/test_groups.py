@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.models.distributed.random import get_synced_torch_seed
 from anemoi.training.distributed.groups import build_ensemble_layout
 from anemoi.training.distributed.groups import build_model_layout
 from anemoi.training.distributed.groups import build_reader_layout
@@ -61,6 +62,25 @@ def test_build_model_layout_invalid_model_group_size() -> None:
             global_rank=0,
             model_comm_group_size=4,
         )
+
+
+def test_model_group_synced_seeds_do_not_collide() -> None:
+    base_seed = 2**32 - 1
+    world_size = 32
+    model_comm_group_size = 4
+
+    model_group_ids = {
+        build_model_layout(
+            world_size=world_size,
+            global_rank=global_rank,
+            model_comm_group_size=model_comm_group_size,
+        ).model_comm_group_id
+        for global_rank in range(world_size)
+    }
+    synced_seeds = [get_synced_torch_seed(base_seed, model_group_id) for model_group_id in model_group_ids]
+
+    assert len(model_group_ids) == world_size // model_comm_group_size
+    assert len(synced_seeds) == len(set(synced_seeds))
 
 
 def test_build_reader_layout_invalid_reader_group_size() -> None:
@@ -148,6 +168,46 @@ def test_get_my_ensemble_comm_group() -> None:
     assert ens_comm_group_id == 1
     assert ens_comm_group_rank == 2
     assert ens_comm_num_groups == 2
+
+
+def test_ensemble_strategy_model_group_synced_seeds_do_not_collide() -> None:
+    base_seed = 2**32 - 1
+    world_size = 16
+    model_comm_group_size = 4
+    ens_comm_group_size = 8
+    model_group_id_by_rank = {}
+
+    for global_rank in range(world_size):
+        model_layout = build_model_layout(
+            world_size=world_size,
+            global_rank=global_rank,
+            model_comm_group_size=model_comm_group_size,
+        )
+        build_ensemble_layout(
+            world_size=world_size,
+            global_rank=global_rank,
+            ens_comm_group_size=ens_comm_group_size,
+            model_comm_group_size=model_comm_group_size,
+            model_comm_group_rank=model_layout.model_comm_group_rank,
+        )
+        model_group_id_by_rank[global_rank] = model_layout.model_comm_group_id
+
+    synced_seeds = {
+        model_group_id: get_synced_torch_seed(base_seed, model_group_id)
+        for model_group_id in set(model_group_id_by_rank.values())
+    }
+    assert len(synced_seeds) == len(set(synced_seeds.values()))
+
+    reference_layout = build_ensemble_layout(
+        world_size=world_size,
+        global_rank=0,
+        ens_comm_group_size=ens_comm_group_size,
+        model_comm_group_size=model_comm_group_size,
+        model_comm_group_rank=0,
+    )
+    for subgroup_ranks in reference_layout.ens_comm_subgroup_ranks:
+        subgroup_seeds = {synced_seeds[model_group_id_by_rank[int(global_rank)]] for global_rank in subgroup_ranks}
+        assert len(subgroup_seeds) == len(subgroup_ranks)
 
 
 def test_build_ensemble_layout_invalid_ensemble_size() -> None:

@@ -22,6 +22,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -190,7 +191,8 @@ class NoiseConditioning(BaseNoiseInjector):
             self.noise_channels,
         )
 
-        noise = torch.randn(size=noise_shape, dtype=noise_dtype, device=x.device) * self.noise_std
+        with use_synced_torch_rng():
+            noise = torch.randn(size=noise_shape, dtype=noise_dtype, device=x.device) * self.noise_std
         noise.requires_grad = False
 
         if self.noise_graph_provider is not None:
