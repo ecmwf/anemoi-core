@@ -102,7 +102,7 @@ def test_cwd_beats_package_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert "anemoi-cwd-searchpath-plugin" in providers, "CWD was not added to the search path"
     assert "anemoi-package-searchpath-plugin" in providers, "Package fallback was not added"
     assert providers.index("anemoi-cwd-searchpath-plugin") < providers.index(
-        "anemoi-package-searchpath-plugin"
+        "anemoi-package-searchpath-plugin",
     ), "CWD must come before package defaults (priority 2 > 3)"
 
 
@@ -116,7 +116,7 @@ def test_config_path_beats_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert "main" in providers, "--config-path (main) was not in the search path"
     assert "anemoi-cwd-searchpath-plugin" in providers, "CWD was not added to the search path"
     assert providers.index("main") < providers.index(
-        "anemoi-cwd-searchpath-plugin"
+        "anemoi-cwd-searchpath-plugin",
     ), "--config-path must come before CWD (priority 1 > 2)"
 
 
@@ -130,7 +130,7 @@ def test_config_path_beats_package(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert "main" in providers, "--config-path (main) was not in the search path"
     assert "anemoi-package-searchpath-plugin" in providers, "Package fallback was not added"
     assert providers.index("main") < providers.index(
-        "anemoi-package-searchpath-plugin"
+        "anemoi-package-searchpath-plugin",
     ), "--config-path must come before package defaults (priority 1 > 3)"
 
 
@@ -149,6 +149,6 @@ def test_full_priority_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     pos_cwd = providers.index("anemoi-cwd-searchpath-plugin")
     pos_package = providers.index("anemoi-package-searchpath-plugin")
 
-    assert pos_config_path < pos_cwd < pos_package, (
-        f"Expected config-path ({pos_config_path}) < CWD ({pos_cwd}) < package ({pos_package})"
-    )
+    assert (
+        pos_config_path < pos_cwd < pos_package
+    ), f"Expected config-path ({pos_config_path}) < CWD ({pos_cwd}) < package ({pos_package})"
