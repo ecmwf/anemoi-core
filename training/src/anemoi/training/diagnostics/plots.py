@@ -27,7 +27,7 @@ from torch import Tensor
 
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.maps import map_features
-from anemoi.training.diagnostics.projections import Projection
+from anemoi.training.diagnostics.projections import MapProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -244,7 +244,7 @@ def plot_power_spectrum(
     if n_plots_x == 1:
         ax = [ax]
 
-    pc_lon, pc_lat = Projection.equirectangular().project(latlons)
+    pc_lon, pc_lat = MapProjection.equirectangular().project(latlons)
 
     # Calculate delta_lat on the projected grid
     delta_lat = abs(np.diff(pc_lat))
@@ -503,12 +503,12 @@ def _setup_figure_and_colormaps(
     Returns
     -------
     tuple
-        (fig, axs, pc_lon, pc_lat, transform, colormaps)
+        (fig, axs, pc_lon, pc_lat, data_crs, colormaps)
     """
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, projection_kind)
+    (pc_lon, pc_lat), axes_crs, data_crs = MapProjection.for_plot(latlons, projection_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
-    subplot_kw = {"projection": proj} if proj is not None else {}
+    subplot_kw = {"projection": axes_crs} if axes_crs is not None else {}
     fig, axs = plt.subplots(
         n_plots_x,
         n_plots_y,
@@ -517,7 +517,7 @@ def _setup_figure_and_colormaps(
         subplot_kw=subplot_kw,
     )
     colormaps = colormaps if colormaps is not None else {}
-    return fig, axs, pc_lon, pc_lat, transform, colormaps
+    return fig, axs, pc_lon, pc_lat, data_crs, colormaps
 
 
 def _resolve_variable_colormaps(
@@ -598,7 +598,7 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
-    fig, axs, pc_lon, pc_lat, transform, colormaps = _setup_figure_and_colormaps(
+    fig, axs, pc_lon, pc_lat, data_crs, colormaps = _setup_figure_and_colormaps(
         n_plots_x=len(parameters),
         n_plots_y=max(n_plots_per_sample, 7 if auxiliary is not None else 6),
         latlons=latlons,
@@ -635,7 +635,7 @@ def plot_predicted_multilevel_flat_sample(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
-            transform=transform,
+            data_crs=data_crs,
             prediction_label=prediction_label,
             auxiliary=ya,
             auxiliary_label=auxiliary_label,
@@ -743,7 +743,7 @@ def plot_flat_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
-    transform: object | None = None,
+    data_crs: object | None = None,
     prediction_label: str = "pred",
     auxiliary: np.ndarray | None = None,
     auxiliary_label: str = "corrupted targets",
@@ -871,7 +871,7 @@ def plot_flat_sample(
                 norm=norms[ii],
                 title=titles[ii],
                 datashader=datashader,
-                transform=transform,
+                data_crs=data_crs,
             )
         else:
             ax[ii].axis("off")
@@ -887,7 +887,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
-    transform: object | None = None,
+    data_crs: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -914,8 +914,9 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
-    transform:
-        Projection for the plot, by default None
+    data_crs:
+        CRS of the input data (``ccrs.PlateCarree()`` for Cartopy axes, ``None`` for
+        plain matplotlib axes), by default None
 
     Returns
     -------
@@ -925,8 +926,8 @@ def single_plot(
         cmap = "viridis"
     if not datashader:
         scatter_kwargs = {"c": data, "cmap": cmap, "s": 1, "alpha": 1.0, "norm": norm, "rasterized": False}
-        if transform is not None:
-            scatter_kwargs["transform"] = transform
+        if data_crs is not None:
+            scatter_kwargs["transform"] = data_crs
         psc = ax.scatter(lon, lat, **scatter_kwargs)
 
     else:
@@ -953,19 +954,19 @@ def single_plot(
     ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
     dy, dx = ymax - ymin, xmax - xmin
     ybuffer, xbuffer = dy * 0.05, dx * 0.05
-    if transform is not None:
+    if data_crs is not None:
         # For near-global data, set_extent with degree coords can produce NaN/Inf
         # in projected space (e.g. Robinson at ±90° lat). Skip it and let Cartopy
         # use the projection's natural global extent instead.
         is_global = dy > 150 or dx > 340
         if not is_global:
-            ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=transform)
+            ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=data_crs)
     else:
         ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
         ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
 
-    # Add map features; pass CRS so Cartopy axes get correctly projected lines
-    map_features.plot(ax, crs=transform)
+    # Add map features; pass data_crs so Cartopy axes get correctly projected lines
+    map_features.plot(ax, data_crs=data_crs)
 
     if title is not None:
         ax.set_title(title)
@@ -984,7 +985,7 @@ def get_scatter_frame(
     vmax: int | None = None,
 ) -> [plt.Axes, PathCollection]:
     """Create a scatter plot for a single frame of an animation."""
-    pc_lon, pc_lat = Projection.equirectangular().project(latlons)
+    pc_lon, pc_lat = MapProjection.equirectangular().project(latlons)
 
     scatter_frame = ax.scatter(
         pc_lon,
@@ -1099,7 +1100,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
-                transform=None,
+                data_crs=None,
             )
 
     return fig
@@ -1247,7 +1248,7 @@ def plot_predicted_ensemble(
     n_plots_y = nens + n_plots_per_sample
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
-    fig, axs, pc_lon, pc_lat, transform, colormaps = _setup_figure_and_colormaps(
+    fig, axs, pc_lon, pc_lat, data_crs, colormaps = _setup_figure_and_colormaps(
         n_plots_x=n_plots_x,
         n_plots_y=n_plots_y,
         latlons=latlons,
@@ -1278,7 +1279,7 @@ def plot_predicted_ensemble(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
-            transform=transform,
+            data_crs=data_crs,
         )
 
     return fig
@@ -1298,7 +1299,7 @@ def plot_ensemble_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
-    transform: object | None = None,
+    data_crs: object | None = None,
 ) -> None:
     """Use this when plotting ensembles.
 
@@ -1366,7 +1367,7 @@ def plot_ensemble_sample(
         norm=norm,
         title=f"{vname} target",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     # ensemble mean
     single_plot(
@@ -1379,7 +1380,7 @@ def plot_ensemble_sample(
         norm=norm,
         title=f"{vname} pred mean",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     # ensemble spread
     single_plot(
@@ -1392,7 +1393,7 @@ def plot_ensemble_sample(
         norm=TwoSlopeNorm(vcenter=0.0),
         title=f"{vname} ens mean err",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     # ensemble mean error
     single_plot(
@@ -1403,7 +1404,7 @@ def plot_ensemble_sample(
         ens_sd,
         title=f"{vname} ens sd",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
 
     # ensemble members (difference from mean)
@@ -1419,5 +1420,5 @@ def plot_ensemble_sample(
             norm=TwoSlopeNorm(vcenter=0.0),
             title=f"{vname}_{i_ens + 1} - mean",
             datashader=datashader,
-            transform=transform,
+            data_crs=data_crs,
         )
