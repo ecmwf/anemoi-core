@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from omegaconf import open_dict
 from pydantic import ValidationError
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
@@ -289,7 +290,18 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     checkpoint_dir = run_dirs[0]
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
-    cfg.training.run_id = checkpoint_dir.name
+    # Resume the run via the checkpoint pipeline surface (the legacy ``training.run_id``
+    # key was removed): a RunSource (fork=false) resolves the run's last.ckpt and a
+    # WarmStartLoader restores it so Lightning's ckpt_path continues the global step.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
     cfg.training.max_epochs = 3
     trainer = AnemoiTrainer(cfg)
     trainer.train()
@@ -300,6 +312,65 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.multigpu
+@pytest.mark.slow
+def test_restart_training_ddp(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    tmp_path: Path,
+) -> None:
+    """Warm-start resume under real multi-GPU DDP — the HPC deployment path.
+
+    Mirrors :func:`test_restart_training` but runs across the job's ranks (one task
+    per GPU), which the single-process tests never exercise: rank-0/rank-N
+    coordination on the resolved checkpoint, optimizer/loop restore across ranks, and
+    no deadlock. The output root is a shared, job-scoped directory so every rank
+    resolves the same ``last.ckpt`` — pytest's per-process ``tmp_path`` diverges across
+    ranks. Launch with ``srun ... python -m pytest ... --multigpu`` on a 2-GPU
+    allocation.
+    """
+    cfg, url = gnn_config
+    get_test_archive(url)
+
+    # Every rank must agree on the output location to resolve the same checkpoint on
+    # resume. SLURM_JOB_ID is identical across a job's ranks and $SCRATCH is shared;
+    # falls back to the per-process tmp_path when run outside SLURM.
+    job_id = os.environ.get("SLURM_JOB_ID", "local")
+    shared_root = Path(os.environ.get("SCRATCH", str(tmp_path))) / f"ddp_ckpt_resume_{job_id}"
+    with open_dict(cfg):
+        cfg.system.hardware.accelerator = "cuda"
+        cfg.system.hardware.num_gpus_per_node = 2
+        cfg.system.output.root = str(shared_root)
+
+    AnemoiTrainer(cfg).train()
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    # Resume across ranks via the checkpoint pipeline surface (RunSource resolves the
+    # same last.ckpt on every rank; WarmStartLoader hands its path to Lightning's
+    # ckpt_path so all ranks restore optimizer/loop state and the global step continues).
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"DDP resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
 
 @skip_if_offline

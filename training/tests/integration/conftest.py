@@ -22,6 +22,7 @@ from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
+from omegaconf import open_dict
 
 from anemoi.models.migrations import Migrator
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -582,7 +583,18 @@ def global_config_with_checkpoint(
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
-    cfg.training.run_id = "dummy_id"
+    # Resume the staged run via the checkpoint pipeline surface (the legacy
+    # ``training.run_id`` key was removed): a RunSource (fork=false) resolves the
+    # run's last.ckpt and a WarmStartLoader restores it.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": "dummy_id",
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
     cfg.training.max_epochs = 3
 
     cfg.diagnostics.plot.callbacks = []  # remove plotting callbacks as they are tested in global training cycle test
@@ -749,9 +761,7 @@ def multidatasets_edm_transport_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
 
-    cfg.diagnostics.plot.callbacks = (
-        []
-    )  # remove plotting callbacks as they are tested in multidatasets and EDM transport test cases
+    cfg.diagnostics.plot.callbacks = []  # tested in the multidatasets / EDM transport cases
     return cfg, [url_dataset, url_dataset_b]
 
 
