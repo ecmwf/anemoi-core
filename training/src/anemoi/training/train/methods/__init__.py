@@ -9,9 +9,11 @@
 
 from .ensemble import EnsembleTraining
 from .single import SingleTraining
+from .transport import DownscalerTransportTraining
 from .transport import TransportTraining
 
 __all__ = [
+    "DownscalerTransportTraining",
     "EnsembleTraining",
     "SingleTraining",
     "TransportTraining",
