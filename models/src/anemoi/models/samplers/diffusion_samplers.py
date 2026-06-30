@@ -233,7 +233,23 @@ class ExponentialScheduler(NoiseScheduler):
         sigmas = torch.exp(log_sigmas)
 
         return sigmas
+class ManualScheduler(NoiseScheduler):
+    """Manual scheduler."""
 
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, sigmas: list[float], **kwargs):
+        super().__init__(sigma_max, sigma_min, num_steps)
+        self.sigmas = sigmas
+        self.num_steps = len(sigmas)
+        
+        
+    def get_schedule(
+        self,
+        device: torch.device = None,
+        dtype_compute: torch.dtype = torch.float64,
+        **kwargs,
+    ) -> torch.Tensor:
+        sigmas = torch.tensor(self.sigmas, device=device, dtype=dtype_compute)
+        return sigmas
 
 class ExperimentalSamplerScheduler(NoiseScheduler):
     """Piecewise scheduler for aggressive high-sigma collapse and denser low-sigma refinement.
@@ -528,6 +544,7 @@ NOISE_SCHEDULERS = {
     "exponential": ExponentialScheduler,
     "experimental_sampler": ExperimentalSamplerScheduler,
     "experimental_piecewise": ExperimentalSamplerScheduler,
+    "manual": ManualScheduler,
 }
 
 DIFFUSION_SAMPLERS = {
