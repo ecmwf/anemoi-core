@@ -176,6 +176,11 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         torch.Tensor
             Edge index tensor of shape (2, num_edges).
         """
+        # guard against empty node sets (an obs dataset window with no points in this batch)
+        # short-circuit to an empty (2, 0) edge index
+        if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
+            return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
+
         if PYG_LIB_AVAILABLE:
             edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
         else:

@@ -179,6 +179,11 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         source_coords: torch.Tensor,
         target_coords: torch.Tensor,
     ) -> torch.Tensor:
+        # for an empty node set (an observation window with no points in this batch)
+        # there are no edges, return an empty edge index
+        if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
+            return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
+
         # recompute the radius from the current per-batch coords
         self.radius = self.get_cutoff_radius(target_coords)
 

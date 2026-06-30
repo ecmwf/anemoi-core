@@ -55,6 +55,9 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
         1,
     ), "Mask must have the same shape as the number of nodes."
 
+    if isinstance(coords_rad, torch.Tensor):
+        coords_rad = coords_rad.detach().cpu()
+
     nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
 
     nearest_neighbour.fit(coords_rad)
@@ -84,6 +87,8 @@ def get_grid_reference_distance(
         The reference distance of the grid.
     """
     points = latlon_rad_to_cartesian(coords_rad) if use_cartesian else coords_rad
+    if isinstance(points, torch.Tensor):
+        points = points.detach().cpu()
     nearest_neighbours = get_nearest_neighbour(points, mask)
     dists, _ = nearest_neighbours.kneighbors(points, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
