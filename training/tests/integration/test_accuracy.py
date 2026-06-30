@@ -60,7 +60,7 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
         max_results=10,
     )
 
-    reference_id: Final = "e00340e8cd5c41d2881afd2265677321"
+    reference_id: Final = "88f201457f1145ce96587c4192793c0e"
 
     def get_loss_df(run_id: str) -> pd.DataFrame:
         history = client.get_metric_history(
