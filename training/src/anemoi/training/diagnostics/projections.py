@@ -195,35 +195,6 @@ def equirectangular_projection(latlons: np.ndarray) -> tuple[np.ndarray, np.ndar
     return y, x  # pc_lat, pc_lon
 
 
-def projection_crs_for_axes(
-    latlons: np.ndarray,
-    kind: str = "equirectangular",
-) -> object | None:
-    """Return projection for map axes: None for equirectangular, Cartopy Lambert for lambert_conformal.
-
-    For equirectangular we use our own projection for coordinates only; no Cartopy axes CRS.
-    For lambert_conformal we return ccrs.LambertConformal for subplot_kw={"projection": proj}.
-
-    Parameters
-    ----------
-    latlons : np.ndarray
-        Shape (N, 2) with columns [latitude, longitude] in degrees.
-    kind : str
-        "equirectangular" (no axes CRS; use Projection.equirectangular() for coords only)
-        or "lambert_conformal" (ccrs.LambertConformal fitted to latlons).
-
-    Returns
-    -------
-    None or cartopy.crs.LambertConformal
-        None for equirectangular (regular axes). Lambert CRS for lambert_conformal (requires Cartopy).
-    """
-    if kind == "equirectangular":
-        return None
-    if kind == "lambert_conformal":
-        return lambert_conformal_from_latlon_points(latlons)
-    raise ValueError(kind)
-
-
 def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
     """Build a Cartopy Lambert Conformal projection suited to a given set of (lat, lon) points.
 
