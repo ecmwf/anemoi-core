@@ -142,8 +142,7 @@ def test_cwd_beats_package_without_config_path(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_package_as_main_beats_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Documents the bug: when config_path='../config' is used, the package is registered
-    as provider=main *before* the plugin runs, so it beats the CWD.
+    """Documents the bug: when config_path='../config' is used, package beats CWD.
 
     This test asserts the broken behaviour to make clear why config_path=None is required.
     If this test ever starts *failing* (i.e. the plugin somehow fixes it internally),
