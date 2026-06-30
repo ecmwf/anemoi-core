@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -54,19 +54,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
 
         if subschema is list:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
-
-
-@pytest.fixture(autouse=True)
-def _reset_dynamo() -> None:
-    """Reset torch compile state before and after each test.
-
-    This prevents 'recomputed metadata doesn't match checkpointed value' errors observed with torch 2.12.
-    """
-    import torch._dynamo
-
-    torch._dynamo.reset()
-    yield
-    torch._dynamo.reset()
 
 
 @skip_if_offline

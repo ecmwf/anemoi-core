@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,6 +9,7 @@
 
 
 import logging
+from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -21,6 +22,9 @@ from torch_geometric.nn import radius
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
+
+TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+
 
 LOGGER = logging.getLogger(__name__)
 

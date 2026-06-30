@@ -1,3 +1,12 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 """Gate sources-g4: S3Source.
 
 CANONICAL GATE TEST — DO NOT MODIFY.
@@ -22,6 +31,8 @@ from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 from anemoi.training.checkpoint.exceptions import CheckpointSourceError
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.s3 import S3Source
+from anemoi.utils.settings_schema.object_storage import ObjectStorageBucketConfig
+from anemoi.utils.settings_schema.object_storage import ObjectStorageConfig
 
 
 def _fake_anemoi_utils_s3(download_impl: object) -> ModuleType:
@@ -152,17 +163,16 @@ async def test_s3_source_downloads_from_real_public_bucket(
     # Non-secret options live in settings.toml; credential keys (even empty
     # reset values) must live in settings.secrets.toml per anemoi-utils
     # config policy.
-    bucket_section = '[object-storage."noaa-ghcn-pds"]'
-    settings_body = f'{bucket_section}\nendpoint_url = ""\nregion = "us-east-1"\nskip_signature = true\n'
-    secrets_body = f'{bucket_section}\naccess_key_id = ""\nsecret_access_key = ""\n'
-
-    config_dir = tmp_path / ".config" / "anemoi"
-    config_dir.mkdir(parents=True)
-    (config_dir / "settings.toml").write_text(settings_body)
-    secrets_path = config_dir / "settings.secrets.toml"
-    secrets_path.write_text(secrets_body)
-    secrets_path.chmod(0o600)  # anemoi-utils refuses to read a world-readable secrets file
-    monkeypatch.setenv("HOME", str(tmp_path))
+    object_storage = ObjectStorageConfig(type="s3", endpoint_url=None, access_key_id=None, secret_access_key=None)
+    bucket_config = ObjectStorageBucketConfig(
+        endpoint_url=None,
+        access_key_id="",  # type: ignore[reportArgumentType]
+        secret_access_key="",  # type: ignore[reportArgumentType]
+        skip_signature=True,
+        region="us-east-1",
+    )
+    setattr(object_storage, "noaa-ghcn-pds", bucket_config)
+    monkeypatch.setattr("anemoi.utils.settings.SETTINGS.object_storage", object_storage)
 
     # The NOAA file is a CSV, not a torch checkpoint - only exercise the
     # download path, not the torch.load step. Calling _download_from_s3
