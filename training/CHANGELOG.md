@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.15.0](https://github.com/ecmwf/anemoi-core/compare/training-0.14.0...training-0.15.0) (2026-06-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** make user-specified search path take precedence and simplify Hydra search paths hierarchy ([#1181](https://github.com/ecmwf/anemoi-core/issues/1181))
+* Forecast dataset dataloader ([#1133](https://github.com/ecmwf/anemoi-core/issues/1133))
+* **training:** parameter freezing ([#1159](https://github.com/ecmwf/anemoi-core/issues/1159))
+
+### Features
+
+* Add unit check for target variables ([#1155](https://github.com/ecmwf/anemoi-core/issues/1155)) ([8f98738](https://github.com/ecmwf/anemoi-core/commit/8f98738646cea115181fb2fc2be9126bd0d99e94))
+* Callback evaluate cli ([#1153](https://github.com/ecmwf/anemoi-core/issues/1153)) ([a6ed3f0](https://github.com/ecmwf/anemoi-core/commit/a6ed3f06cda5beb32a1313bf1a04b14d462008a0))
+* Forecast dataset dataloader ([#1133](https://github.com/ecmwf/anemoi-core/issues/1133)) ([7d4b5c8](https://github.com/ecmwf/anemoi-core/commit/7d4b5c82f17ecd9ec1f49d7c54fff5bc8217d4d5))
+* Model Transformation Layer — Native PipelineStage modifiers ([#410](https://github.com/ecmwf/anemoi-core/issues/410)) ([#442](https://github.com/ecmwf/anemoi-core/issues/442)) ([6dcc870](https://github.com/ecmwf/anemoi-core/commit/6dcc870e0f8984fc11840d970f14e6b78b926885))
+* Projections for spectral losses ([#1087](https://github.com/ecmwf/anemoi-core/issues/1087)) ([a4ea5df](https://github.com/ecmwf/anemoi-core/commit/a4ea5df2f6281e9a706c70d379ca88c36fe31b80))
+* Reuse processing callbacks ([#1213](https://github.com/ecmwf/anemoi-core/issues/1213)) ([2a72fd8](https://github.com/ecmwf/anemoi-core/commit/2a72fd81e9d78351100ed3aa783f427308d5d68c))
+* **training:** Add --config-path to config validate and unify config composition ([#1216](https://github.com/ecmwf/anemoi-core/issues/1216)) ([7af92b6](https://github.com/ecmwf/anemoi-core/commit/7af92b61650f4bded5df565f198a628ca8cb6d6f))
+
+
+### Bug Fixes
+
+* Checking variable argument name ([#1205](https://github.com/ecmwf/anemoi-core/issues/1205)) ([f0b946a](https://github.com/ecmwf/anemoi-core/commit/f0b946af876360cf913951905d87916f3654d1de))
+* Config precedence ([#1218](https://github.com/ecmwf/anemoi-core/issues/1218)) ([f0e8206](https://github.com/ecmwf/anemoi-core/commit/f0e8206038a827a48b771bc6813e5bf1e972cc5e))
+* Fix integration tests with torch &gt;= 2.11 ([#1187](https://github.com/ecmwf/anemoi-core/issues/1187)) ([f23c096](https://github.com/ecmwf/anemoi-core/commit/f23c096ec9091c0ec6f84c52404e84fbca8b99a4))
+* **graphs:** AICON hidden to hidden topology ([#1183](https://github.com/ecmwf/anemoi-core/issues/1183)) ([ea31de5](https://github.com/ecmwf/anemoi-core/commit/ea31de5c8df7ab4d8b99c22b303208046fd498a3))
+* Remove version limit ([#1178](https://github.com/ecmwf/anemoi-core/issues/1178)) ([821b1f0](https://github.com/ecmwf/anemoi-core/commit/821b1f0ee73d1fb4310d3f8a679001697e2331f0))
+* Replace matplotlib.get_cmap ([#1186](https://github.com/ecmwf/anemoi-core/issues/1186)) ([8b7f835](https://github.com/ecmwf/anemoi-core/commit/8b7f835c9df5a4df6e713cb3b64519bb5c81584d))
+* Revert torch limit ([#1204](https://github.com/ecmwf/anemoi-core/issues/1204)) ([8308654](https://github.com/ecmwf/anemoi-core/commit/8308654424a0dca1cc28274cace3e00c21fc5088))
+* Simplify per timestep metrics ([#1173](https://github.com/ecmwf/anemoi-core/issues/1173)) ([df59ece](https://github.com/ecmwf/anemoi-core/commit/df59ece54353ea52072101e7af2dbc0876079dfe))
+* **training/profilers:** Ensure dir on multi GPU is created ([#1208](https://github.com/ecmwf/anemoi-core/issues/1208)) ([68de090](https://github.com/ecmwf/anemoi-core/commit/68de090adff5644a6b234919907dcc1d11e6cecd))
+* **training:** Add anemoi weight averaging classes in order to work with Imputers and Scalers ([#1113](https://github.com/ecmwf/anemoi-core/issues/1113)) ([1a99ae0](https://github.com/ecmwf/anemoi-core/commit/1a99ae09313f3324608ab4918e0f88505c789e08))
+* **training:** Allow mlflow filesystem tracking backend in tests ([#1180](https://github.com/ecmwf/anemoi-core/issues/1180)) ([de91091](https://github.com/ecmwf/anemoi-core/commit/de91091063c3b1ba51f78e4cc70a4c4e74133319))
+* **training:** By default, explicitly run on gpu  ([#1209](https://github.com/ecmwf/anemoi-core/issues/1209)) ([5f0971a](https://github.com/ecmwf/anemoi-core/commit/5f0971a2422985b787d239843956c8ddd1c9adc9))
+* **training:** Load model on CPU to avoid GPU OOMs ([#1145](https://github.com/ecmwf/anemoi-core/issues/1145)) ([a1036ff](https://github.com/ecmwf/anemoi-core/commit/a1036ff6e9f242394d8fc67f0be12b342144ba41))
+* **training:** Make user-specified search path take precedence and simplify Hydra search paths hierarchy ([#1181](https://github.com/ecmwf/anemoi-core/issues/1181)) ([bfc10b1](https://github.com/ecmwf/anemoi-core/commit/bfc10b1677ce49309c8e6f90b5f603da5462f097))
+* **training:** Parameter freezing ([#1159](https://github.com/ecmwf/anemoi-core/issues/1159)) ([4135153](https://github.com/ecmwf/anemoi-core/commit/4135153b6dea3cc8626652c6c3724cbfeff6531f))
+* **training:** Persist rollout step across job resume ([#1109](https://github.com/ecmwf/anemoi-core/issues/1109)) ([46ae658](https://github.com/ecmwf/anemoi-core/commit/46ae6584d7341711c21f4179217a472d16c406d3))
+* Variable argument units change ([#1206](https://github.com/ecmwf/anemoi-core/issues/1206)) ([f2e3e82](https://github.com/ecmwf/anemoi-core/commit/f2e3e82be789bdbcd2bd49a4d6f1cc7aa71d9608))
+
+
+### Documentation
+
+* Update rollout documentation ([#1214](https://github.com/ecmwf/anemoi-core/issues/1214)) ([c3666b3](https://github.com/ecmwf/anemoi-core/commit/c3666b34133c049fb1b44aba2afafa1e3f45de2f))
+
 ## [0.14.0](https://github.com/ecmwf/anemoi-core/compare/training-0.13.0...training-0.14.0) (2026-06-08)
 
 

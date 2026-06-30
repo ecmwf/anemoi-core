@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.4...graphs-0.9.5) (2026-06-30)
+
+
+### Features
+
+* **graphs:** Add MutualKNNEdges edge builder ([#1137](https://github.com/ecmwf/anemoi-core/issues/1137)) ([e6b8acc](https://github.com/ecmwf/anemoi-core/commit/e6b8accd56c3ce4e18439d5e0b5f81b0b54cb711))
+* Projections for spectral losses ([#1087](https://github.com/ecmwf/anemoi-core/issues/1087)) ([a4ea5df](https://github.com/ecmwf/anemoi-core/commit/a4ea5df2f6281e9a706c70d379ca88c36fe31b80))
+
+
+### Bug Fixes
+
+* **graphs:** AICON hidden to hidden topology ([#1183](https://github.com/ecmwf/anemoi-core/issues/1183)) ([ea31de5](https://github.com/ecmwf/anemoi-core/commit/ea31de5c8df7ab4d8b99c22b303208046fd498a3))
+* Remove version limit ([#1178](https://github.com/ecmwf/anemoi-core/issues/1178)) ([821b1f0](https://github.com/ecmwf/anemoi-core/commit/821b1f0ee73d1fb4310d3f8a679001697e2331f0))
+* Revert torch limit ([#1204](https://github.com/ecmwf/anemoi-core/issues/1204)) ([8308654](https://github.com/ecmwf/anemoi-core/commit/8308654424a0dca1cc28274cace3e00c21fc5088))
+* Support pyg-lib for fast graph building when using pyg &gt;= 2.8 ([#1179](https://github.com/ecmwf/anemoi-core/issues/1179)) ([c147200](https://github.com/ecmwf/anemoi-core/commit/c147200dec04cacbb413998b95ef8641f3a023c2))
+
 ## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.3...graphs-0.9.4) (2026-05-14)
 
 
