@@ -86,7 +86,9 @@ def _get_hydra_main_config_path(source_file: Path) -> str | None:
                 continue
             for kw in decorator.keywords:
                 if kw.arg == "config_path":
-                    return None if isinstance(kw.value, ast.Constant) and kw.value.value is None else ast.unparse(kw.value)
+                    return (
+                        None if isinstance(kw.value, ast.Constant) and kw.value.value is None else ast.unparse(kw.value)
+                    )
     return "NOT_FOUND"
 
 
@@ -134,9 +136,9 @@ def test_cwd_beats_package_without_config_path(monkeypatch: pytest.MonkeyPatch, 
 
     assert "anemoi-cwd-searchpath-plugin" in providers, "CWD not added to search path"
     assert "anemoi-package-searchpath-plugin" in providers, "Package fallback not added"
-    assert providers.index("anemoi-cwd-searchpath-plugin") < providers.index("anemoi-package-searchpath-plugin"), (
-        "CWD must come before package defaults (priority 2 > 3)"
-    )
+    assert providers.index("anemoi-cwd-searchpath-plugin") < providers.index(
+        "anemoi-package-searchpath-plugin",
+    ), "CWD must come before package defaults (priority 2 > 3)"
 
 
 def test_package_as_main_beats_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
