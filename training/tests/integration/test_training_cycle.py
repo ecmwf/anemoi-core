@@ -374,6 +374,94 @@ def test_restart_training_ddp(
 
 
 @skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("config_fixture", ["lam_config", "ensemble_config", "multidatasets_config"])
+def test_restart_training_architectures(
+    config_fixture: str,
+    request: pytest.FixtureRequest,
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Warm-start resume on the architectures models actually use (LAM, ensemble, multi-dataset).
+
+    ``test_restart_training`` covers GNN only; these exercise the non-GNN paths — including
+    the multi-dataset metadata handling — through the same resume cycle: train, then
+    ``RunSource(fork=false)`` + ``WarmStartLoader``, and assert the global step continues.
+    A strict warm-start load that does not round-trip an architecture's state dict fails
+    here — this is how the tendency-processor regression was caught.
+    """
+    cfg, urls = request.getfixturevalue(config_fixture)
+    for url in urls if isinstance(urls, list) else [urls]:
+        get_test_archive(url)
+
+    # Drop plotting / rollout-eval callbacks: they are not part of the resume contract
+    # and pull optional plotting deps (datashader) — same as the checkpoint fixtures.
+    with open_dict(cfg):
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    AnemoiTrainer(cfg).train()
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_inference_checkpoint_round_trips(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """A training run's inference checkpoint loads back and carries the inference contract.
+
+    ``AnemoiCheckpoint`` writes an ``inference-*.ckpt`` next to each Lightning checkpoint;
+    it is what anemoi-inference consumes downstream, and the existing UUID test never loads
+    it back. Train, then assert the saved inference checkpoint ``torch.load``s into a model
+    that carries weights and that its metadata satisfies the inference schema — the
+    consumption contract — without taking a dependency on anemoi-inference.
+    """
+    import torch
+
+    from anemoi.utils.checkpoints import load_metadata
+
+    cfg, url = gnn_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dir = next(item for item in output_dir.iterdir() if item.is_dir())
+    inference_ckpts = sorted(run_dir.glob("inference-*.ckpt"))
+    assert inference_ckpts, f"No inference checkpoint was saved in {run_dir}"
+    inference_ckpt = inference_ckpts[0]
+
+    # Loads back as a usable model carrying weights.
+    model = torch.load(inference_ckpt, map_location="cpu", weights_only=False)
+    assert sum(p.numel() for p in model.parameters()) > 0, "Inference checkpoint model has no weights"
+
+    # Carries the metadata anemoi-inference consumes (the consumption contract).
+    metadata = load_metadata(inference_ckpt)
+    assert_keys_exist(metadata, PARTIAL_METADATA_SCHEMA)
+
+
+@skip_if_offline
 def test_loading_checkpoint(
     global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: callable,
