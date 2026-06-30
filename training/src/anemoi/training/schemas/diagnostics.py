@@ -215,7 +215,10 @@ class PlotSchema(PydanticBaseModel):
     ``'lambert_conformal'`` (auto-fitted to the data domain; requires cartopy).
     Any ``cartopy.crs`` class name in snake_case is also accepted
     (e.g. ``'robinson'``, ``'mollweide'``, ``'orthographic'``); these require
-    cartopy and are instantiated with default parameters.
+    cartopy and are instantiated with **default constructor arguments** (e.g.
+    ``'orthographic'`` centres on longitude/latitude 0). If you need non-default
+    parameters, use ``'lambert_conformal'`` (auto-fitted to the data domain) or
+    subclass ``MapProjection``.
     Must be ``'equirectangular'`` when ``datashader`` is ``True``.
     """
     callbacks: list[PlotCallbacks] = Field(example=[])

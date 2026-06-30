@@ -145,6 +145,14 @@ class MapProjection(BaseProjection):
         (auto-fitted to the data domain).  Any other string is resolved as a
         ``cartopy.crs`` class name in snake_case, e.g. ``'robinson'`` →
         ``cartopy.crs.Robinson()``.  Requires cartopy for all non-equirectangular kinds.
+
+        Notes
+        -----
+        Dynamic Cartopy projections are instantiated with **default constructor
+        arguments**. For example, ``'orthographic'`` centres on (longitude=0,
+        latitude=0). If the defaults are unsuitable for your domain, use
+        ``'lambert_conformal'`` (auto-fitted) or subclass :class:`MapProjection`
+        to pass custom parameters.
         """
         if kind == "equirectangular":
             return cls.equirectangular()
@@ -177,6 +185,12 @@ class MapProjection(BaseProjection):
                 f"(e.g. 'robinson', 'mollweide', 'orthographic')."
             )
             raise ValueError(msg)
+        LOGGER.info(
+            "Instantiating cartopy.crs.%s() with default constructor arguments. "
+            "To use non-default parameters (e.g. a different central longitude), "
+            "use 'lambert_conformal' (auto-fitted) or subclass MapProjection.",
+            crs_name,
+        )
         return cls(crs_cls())
 
     def axes_crs(self) -> object | None:
