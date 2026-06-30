@@ -61,12 +61,15 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
     )
 
     reference_id: Final = "88f201457f1145ce96587c4192793c0e"
+    metric: Final = "train_multi_dataset_loss_step"
+
+    new_run_id = runs[0].info.run_id
+    # Printed so a failing run's ID can be promoted to the new reference_id.
+    LOGGER.info("Most recent run ID read from MLflow: %s", new_run_id)
+    print(f"Most recent run ID read from MLflow: {new_run_id}")  # noqa: T201
 
     def get_loss_df(run_id: str) -> pd.DataFrame:
-        history = client.get_metric_history(
-            run_id,
-            "train_multi_dataset_loss_step",
-        )
+        history = client.get_metric_history(run_id, metric)
         return pd.DataFrame(
             {
                 "step": [m.step for m in history],
@@ -76,9 +79,21 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
 
     def is_similar(run_id1: str, run_id2: str) -> bool:
         df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
-        return np.allclose(df1.loc[:, "loss"], df2.loc[:, "loss"])
+        if df1.empty:
+            msg = f"Run {run_id1} has no '{metric}' history on {mlflow_server}"
+            raise ValueError(msg)
+        if df2.empty:
+            msg = f"Reference run {run_id2} has no '{metric}' history on {mlflow_server}"
+            raise ValueError(msg)
+        # Align on step before comparing: np.allclose compares positionally and
+        # would silently broadcast-error (or mismatch) if the step sets differ.
+        aligned = df1.join(df2, how="inner", lsuffix="_1", rsuffix="_2")
+        if aligned.empty:
+            msg = f"Runs {run_id1} and {run_id2} share no common steps"
+            raise ValueError(msg)
+        return np.allclose(aligned.loc[:, "loss_1"], aligned.loc[:, "loss_2"])
 
     assert is_similar(
-        runs[0].info.run_id,
+        new_run_id,
         reference_id,
-    ), f"Loss curve for run {runs[0].info.run_id} does not match reference"
+    ), f"Loss curve for run {new_run_id} does not match reference"
