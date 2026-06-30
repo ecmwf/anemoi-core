@@ -485,55 +485,9 @@ is set to 0, the learning rate will start at the maximum learning rate.
 If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
-*********
- Rollout
-*********
-
-Rollout training is when the model is iterated within the training
-process, producing forecasts for many future time steps. The loss is
-calculated on every step in the rollout period and averaged, and
-gradients backprogogated through the iteration process.
-
-For example, if using ``rollout=3`` and a model with a 6 hour prediction
-step-size, when training the model predicts for time t+1, this is used
-as inputs to predict time t+2, and this used to predict time t+3. The
-loss is calculated as ``1/3 * ( (loss at t+1) + (loss at t+2) + (loss at
-t+3) )`` Rollout training has been shown to improve stability for long
-auto-regressive inference runs, by making the training objective is
-closer to the use case of forecasting arbitrary lead timestep through
-autoreggresive iteration of the model.
-
-In most cases, in the first stage of training, the model is trained for
-many epochs to perdict only one step (i.e. rollout.max = 1). Once this
-is completed, there is a second stage of training, which uses *rollout*
-to fine-tune the model error at longer leadtimes. The model begins with
-a rollout loss defined by ``rollout.start``, usually 1, and then every n
-epochs (defined by rollout.epoch_increment) the rollout value increases
-up till ``rollout.max``.
-
-.. code:: yaml
-
-   rollout:
-      start: 1
-      # increase rollout every n epochs
-      epoch_increment: 1
-      # maximum rollout to use
-      max: 12
-
-This two stage approach requires the model training to be restarted
-after stage one, see instructions below. The user should make sure to
-set ``config.training.run_id`` equal to the run-id of the first stage of
-training.
-
-Note, for many purposes, it may make sense for the rollout stage (stage
-two) to performed at the minimum learning rate throughout and for the
-number of batches to be reduced (using
-``config.dataloader.training.limit_batches``) to prevent overfit to
-specific timesteps.
-
-***************************
- Restarting a training run
-***************************
+***************
+Restarting a training run
+***************
 
 It may be necessary at certain points to restart the model training,
 i.e. because the training has exceeded the time limit on an HPC system
@@ -561,6 +515,85 @@ want to restart from.
 The above can be adapted depending on the use case and taking advantage
 of hydra, you can also reuse ``config.training.run_id`` or
 ``config.training.fork_run_id`` to define the path to the checkpoint.
+
+*********
+ Rollout
+*********
+
+Rollout training is when the model is iterated within the training
+process, producing forecasts for many future time steps from its own
+predictions. The loss is calculated on every step in the rollout period
+and averaged, and gradients flow through the whole forecast chain when
+backward is called.
+
+For example, with ``rollout=3`` and a 6-hour model timestep, the model
+autoregressively predicts t+6 h, then uses that prediction as input to
+predict t+12 h, and again to predict t+18 h. The loss is averaged across
+all three steps: ``(loss(t+6h) + loss(t+12h) + loss(t+18h)) / 3``.
+Training with rollout has been shown to improve stability in long
+autoregressive inference runs, because the training objective more closely
+resembles the multi-step forecasting use case.
+
+In most cases, in the first stage of training, the model is trained for
+many epochs to predict only one step (i.e. rollout.max = 1). Once this
+is completed, there is a second stage of training, which uses *rollout*
+to fine-tune the model error at longer leadtimes. The model begins with
+a rollout loss defined by ``rollout.start``, usually 1, and then every n
+epochs (defined by rollout.epoch_increment) the rollout value increases
+up until ``rollout.max``.
+
+.. code:: yaml
+
+   rollout:
+      start: 1
+      # increase rollout every n epochs
+      epoch_increment: 1
+      # maximum rollout to use
+      max: 12
+
+This two stage approach requires the model training to be restarted
+after stage one, see :ref:`restart target` below. The user should make
+sure to set ``config.training.run_id`` equal to the run-id of the first
+stage of training.
+
+Note, for many purposes, it may make sense for the rollout stage (stage
+two) to be performed at the minimum learning rate throughout and for the
+number of batches to be reduced (using
+``config.dataloader.training.limit_batches``) to prevent overfitting to
+specific timesteps.
+
+Restarting rollout training
+===========================
+
+When restarting an interrupted rollout run, the rollout state
+(the current ``rollout.step`` and the last epoch that triggered an
+increment) is automatically saved in every Lightning checkpoint and
+restored on resume. No manual adjustment of ``rollout.start`` is needed.
+
+When using rollout training with epoch_increment > 0, extra care is
+required when restarting an interrupted run.
+
+Anemoi currently does not track how many samples remain in the dataloader
+at the point where a checkpoint is written. For this reason, only end-of-epoch
+checkpoints should be used for reproducible restart workflows.
+
+The recommended restart recipe is:
+
+1. Restart from an *end-of-epoch checkpoint*.
+2. Keep ``rollout.start``, ``epoch_increment``, and ``max``
+   **unchanged** in your configuration.
+3. Ensure that the ``training.run_id`` is set to the run ID of the interrupted job.
+
+On resume, Anemoi reads the saved rollout state from the checkpoint and
+continues the schedule from exactly where it left off. A double-increment
+guard ensures that if the checkpoint was written at an epoch boundary the
+rollout is not incremented twice for that epoch.
+
+.. note::
+
+   When resuming from a checkpoint that contains saved rollout state,
+   ``rollout.start`` is ignored entirely — the rollout step is always
+   restored unconditionally from the checkpoint.
 
 *******************
  Transfer Learning
@@ -591,6 +624,57 @@ layers are handled appropriately.
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
 with similar characteristics.
+
+.. _variable-compatibility-checks:
+
+*******************************
+ Variable Compatibility Checks
+*******************************
+
+When loading a checkpoint (for transfer learning, fine-tuning, or
+resuming a run), Anemoi checks that the variable metadata in the
+checkpoint matches the current dataset — for example that units have
+not changed. The same check is applied at training start between any
+predicted variable and its paired target variable in the loss function.
+
+Both checks respect a ``check_variables_compatibility`` configuration
+block. Each field can be set to ``true`` to suppress the check for all
+variables, or to a list of variable names to suppress it only for those
+variables.
+
+**Checkpoint vs. current dataset** (resuming / fine-tuning)
+
+Configure this at ``training.check_variables_compatibility``:
+
+.. code:: yaml
+
+   training:
+      check_variables_compatibility:
+        ignore_units: false           # true, or [var1, var2, ...]
+        ignore_period: false          # true, or [var1, var2, ...]
+        ignore_time_processing: false # true, or [var1, var2, ...]
+        ignore_type_of_level: false   # true, or [var1, var2, ...]
+
+**Predicted vs. target variables in the loss** (e.g. ``tp`` → ``imerg``)
+
+This check runs on every training run, not only when resuming from a
+checkpoint. Configure it directly on the loss entry that defines the
+pairing:
+
+.. code:: yaml
+
+   training:
+      training_loss:
+        datasets:
+          data:
+            _target_: anemoi.training.losses.MAELoss
+            scalers: [node_weights]
+            predicted_variables: [tp]
+            target_variables: [imerg]
+            check_variables_compatibility:
+              ignore_units: false   # true, or [tp]
+              ignore_period: false  # true, or [tp]
+
 
 ****************
  Model Freezing
@@ -650,8 +734,25 @@ default selection of PyTorch.
 ******************
 
 Weight averaging is a technique to improve model generalization by
-averaging model weights during training. Anemoi Training supports weight
-averaging methods through PyTorch Lightning callbacks:
+averaging model weights during training. Anemoi Training provides its own
+weight-averaging callbacks that wrap PyTorch Lightning's
+``WeightAveraging`` infrastructure with pair parameters and buffers
+*by name* rather than positionally.
+
+Using the stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes
+directly will crash or silently mis-pair tensors when used with:
+
+-  **Imputers** (e.g. ``ConstantImputer``), which register scratch
+   buffers whose shapes change on the first forward pass.
+-  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
+   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+   shuffling the buffer order in the live model relative to the averaged
+   model's snapshot.
+
+A warning will be logged if the stock PyTorch Lightning weight-averaging
+callbacks are used, recommending the anemoi variants instead.
+
+The supported methods are:
 
 -  **Exponential Moving Average (EMA)**: Maintains an exponential moving
       average of model weights, which can lead to smoother convergence
@@ -660,13 +761,12 @@ averaging methods through PyTorch Lightning callbacks:
       .. code:: yaml
 
          weight_averaging:
-            _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
             decay: 0.999
+            update_every_n_steps: 1
+            update_starting_at_step: null
+            update_starting_at_epoch: null
 
-      The ``decay`` parameter (typically between 0.99 and 0.9999)
-      controls the smoothing factor. Higher values give more weight to
-      historical weights, resulting in a more stable average. By
-      default, the decay is set to 0.999.
 
 -  **Stochastic Weight Averaging (SWA)**: Averages weights from multiple
       points along the training trajectory, typically resulting in wider
@@ -675,14 +775,11 @@ averaging methods through PyTorch Lightning callbacks:
       .. code:: yaml
 
          weight_averaging:
-            _target_: pytorch_lightning.callbacks.StochasticWeightAveraging
-            swa_lrs: 1.e-4
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.SWAWeightAveraging
+            update_every_n_steps: 1
+            update_starting_at_step: null
+            update_starting_at_epoch: null
 
-      The ``swa_lrs`` parameter specifies the learning rate to use
-      during the SWA phase. By default, the learning rate is set to
-      1e-4. Additional parameters can be configured as described in the
-      [PyTorch Lightning
-      documentation](https://lightning.ai/docs/pytorch/latest/api/lightning.pytorch.callbacks.StochasticWeightAveraging.html#lightning.pytorch.callbacks.StochasticWeightAveraging)
 
 By default, weight averaging is disabled. To explicitly disable it or to
 override a parent configuration, set ``weight_averaging`` to null.
