@@ -560,9 +560,9 @@ up until ``rollout.max``.
       max: 12
 
 This two stage approach requires the model training to be restarted
-after stage one, see :ref:`restart target` below. The user should make
-sure to set ``config.training.run_id`` equal to the run-id of the first
-stage of training.
+after stage one, see :ref:`restart target` below. The user should
+configure ``training.checkpoint.source`` as a ``RunSource`` with the
+``run_id`` of the first stage of training (and ``fork: false`` to resume it).
 
 Note, for many purposes, it may make sense for the rollout stage (stage
 two) to be performed at the minimum learning rate throughout and for the
@@ -590,7 +590,8 @@ The recommended restart recipe is:
 1. Restart from an *end-of-epoch checkpoint*.
 2. Keep ``rollout.start``, ``epoch_increment``, and ``max``
    **unchanged** in your configuration.
-3. Ensure that the ``training.run_id`` is set to the run ID of the interrupted job.
+3. Configure ``training.checkpoint.source`` as a ``RunSource`` with the
+   ``run_id`` of the interrupted job (and ``fork: false`` to resume it).
 
 On resume, Anemoi reads the saved rollout state from the checkpoint and
 continues the schedule from exactly where it left off. A double-increment
