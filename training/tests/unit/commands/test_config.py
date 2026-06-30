@@ -89,3 +89,27 @@ def test_validate_config_with_mask_env_vars(config_generator: ConfigGenerator) -
 
         # Verify that _mask_slurm_env_variables was called
         mock_mask.assert_called_once()
+
+
+def test_traverse_config_uses_anemoi_config_path(config_generator: ConfigGenerator, monkeypatch, tmp_path) -> None:
+    config_source = tmp_path / "anemoi-config"
+    config_source.mkdir()
+    (config_source / "config.yaml").write_text("defaults: []\nsource: external\n")
+    output_path = tmp_path / "generated"
+
+    monkeypatch.setenv("ANEMOI_CONFIG_PATH", str(config_source))
+    config_generator.overwrite = False
+
+    config_generator.traverse_config(output_path)
+
+    assert (output_path / "config.yaml").read_text() == "defaults: []\nsource: external\n"
+
+
+def test_traverse_config_rejects_invalid_anemoi_config_path(
+    config_generator: ConfigGenerator, monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("ANEMOI_CONFIG_PATH", str(tmp_path / "missing"))
+    config_generator.overwrite = False
+
+    with pytest.raises(FileNotFoundError, match="ANEMOI_CONFIG_PATH"):
+        config_generator.traverse_config(tmp_path / "generated")

@@ -1,5 +1,0 @@
----
-defaults:
-  - input: o48_o96
-  - output: diffusiondownscaling
-  - hardware: slurm

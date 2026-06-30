@@ -46,18 +46,25 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
                 LOGGER.info("Prepending Anemoi Home (%s) to the search path.", anemoi_home_path)
                 LOGGER.debug("Search path is now: %s", search_path)
 
-        for suffix in ("", "config"):
-            env_anemoi_config_path = os.getenv("ANEMOI_CONFIG_PATH")
-            if env_anemoi_config_path is None:
-                continue
-            anemoi_config_path = Path(env_anemoi_config_path, suffix)
-            if anemoi_config_path.exists() and not Path(anemoi_config_path, "config").exists():
-                search_path.prepend(
-                    provider="anemoi-env-searchpath-plugin",
-                    path=str(anemoi_config_path),
+        env_anemoi_config_path = os.getenv("ANEMOI_CONFIG_PATH")
+        env_config_path_added = False
+        if env_anemoi_config_path is not None:
+            for suffix in ("", "config"):
+                anemoi_config_path = Path(env_anemoi_config_path, suffix)
+                if anemoi_config_path.exists() and not Path(anemoi_config_path, "config").exists():
+                    search_path.prepend(
+                        provider="anemoi-env-searchpath-plugin",
+                        path=str(anemoi_config_path),
+                    )
+                    env_config_path_added = True
+                    LOGGER.info("Prepending Anemoi Config Env (%s) to the search path.", anemoi_config_path)
+                    LOGGER.debug("Search path is now: %s", search_path)
+
+            if not env_config_path_added:
+                LOGGER.warning(
+                    "ANEMOI_CONFIG_PATH is set but no flattened config directory was found at %s",
+                    env_anemoi_config_path,
                 )
-                LOGGER.info("Prepending Anemoi Config Env (%s) to the search path.", anemoi_config_path)
-                LOGGER.debug("Search path is now: %s", search_path)
 
         for suffix in ("", "config"):
             cwd_path = Path.cwd() / suffix
@@ -69,9 +76,9 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
                 LOGGER.info("Prepending current user directory (%s) to the search path.", cwd_path)
                 LOGGER.debug("Search path is now: %s", search_path)
 
-        # Add package config path as lowest priority fallback (issue #570)
-        # This enables discovery of default configs like 'training/default'
-        # Appended (not prepended) so user configs maintain higher priority
+        # Add package config path as lowest priority fallback (issue #570).
+        # External downscaling lanes own their lane-specific groups; the package fallback remains
+        # available for generic shared groups such as system/hardware/slurm.
         search_path.append(
             provider="anemoi-package-searchpath-plugin",
             path="pkg://anemoi.training/config",

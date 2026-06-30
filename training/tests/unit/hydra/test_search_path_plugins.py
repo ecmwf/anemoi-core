@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from unittest.mock import Mock
+
 from hydra import initialize
 from hydra.core.global_hydra import GlobalHydra
 from hydra.core.plugins import Plugins
@@ -24,3 +26,16 @@ def test_config_installed() -> None:
     with initialize(version_base=None):
         config_loader = GlobalHydra.instance().config_loader()
         assert "default" in config_loader.get_group_options("hydra/output")
+
+
+def test_env_config_path_keeps_package_fallback_for_generic_groups(monkeypatch, tmp_path) -> None:
+    (tmp_path / "config.yaml").write_text("defaults: []\n")
+    monkeypatch.setenv("ANEMOI_CONFIG_PATH", str(tmp_path))
+
+    search_path = Mock()
+    AnemoiSearchPathPlugin().manipulate_search_path(search_path)
+
+    prepended_paths = [call.kwargs["path"] for call in search_path.prepend.call_args_list]
+    appended_paths = [call.kwargs["path"] for call in search_path.append.call_args_list]
+    assert str(tmp_path) in prepended_paths
+    assert "pkg://anemoi.training/config" in appended_paths

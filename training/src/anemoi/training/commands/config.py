@@ -114,15 +114,50 @@ class ConfigGenerator(Command):
 
     def traverse_config(self, destination_dir: Path | str) -> None:
         """Writes the given configuration data to the specified file path."""
-        config_package = "anemoi.training.config"
 
-        # Ensure the destination directory exists
         destination_dir = Path(destination_dir)
         destination_dir.mkdir(parents=True, exist_ok=True)
 
-        # Traverse through the package's config directory
+        external_config_path = self.external_config_path()
+        if external_config_path is not None:
+            LOGGER.info("Generating configs from external Anemoi config directory %s", external_config_path)
+            self.copy_files(external_config_path, destination_dir)
+            return
+
+        config_package = "anemoi.training.config"
         with pkg_resources.as_file(pkg_resources.files(config_package)) as config_path:
+            LOGGER.info("Generating configs from package fallback %s", config_path)
             self.copy_files(config_path, destination_dir)
+
+    @staticmethod
+    def external_config_path() -> Path | None:
+        """Return the flattened external anemoi-config directory, if configured."""
+
+        env_config_path = os.getenv("ANEMOI_CONFIG_PATH")
+        if env_config_path is not None:
+            config_path = ConfigGenerator._resolve_config_root(Path(env_config_path))
+            if config_path is None:
+                msg = f"ANEMOI_CONFIG_PATH is set but does not contain a config directory: {env_config_path}"
+                raise FileNotFoundError(msg)
+            return config_path
+
+        runtime_root = Path(__file__).resolve().parents[6]
+        for name in ("anemoi-config", "anemoi-config-ds"):
+            config_path = ConfigGenerator._resolve_config_root(runtime_root / name)
+            if config_path is not None:
+                return config_path
+
+        return None
+
+    @staticmethod
+    def _resolve_config_root(path: Path) -> Path | None:
+        """Resolve both flattened and legacy nested config directory layouts."""
+
+        if (path / "config").is_dir():
+            return path / "config"
+        if path.is_dir():
+            return path
+        return None
 
     @staticmethod
     def copy_file(item: Path, file_path: Path) -> None:
