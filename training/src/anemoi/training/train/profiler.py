@@ -351,7 +351,7 @@ class AnemoiProfiler(AnemoiTrainer):
         self.export_to_logger()
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiProfiler(config).profile()
 

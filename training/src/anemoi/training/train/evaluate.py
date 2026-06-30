@@ -98,7 +98,7 @@ class AnemoiEvaluator(AnemoiTrainer):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def evaluate(config: DictConfig) -> None:
     AnemoiEvaluator(config).evaluate()
 
