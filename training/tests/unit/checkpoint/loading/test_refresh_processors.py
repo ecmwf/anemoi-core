@@ -25,8 +25,8 @@ from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 
-class _ModelWithProcessors(nn.Module):
-    """Fake top-level model wrapping pre/post processors and a body."""
+class _InnerModel(nn.Module):
+    """The AnemoiModelInterface-equivalent: processors live here, keyed without ``model.``."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -35,6 +35,20 @@ class _ModelWithProcessors(nn.Module):
         self.pre_processors_tendencies = nn.Linear(4, 4)
         self.post_processors_tendencies = nn.Linear(4, 4)
         self.body = nn.Linear(4, 4)
+
+
+class _ModelWithProcessors(nn.Module):
+    """LightningModule-shaped wrapper whose ``.model`` is the inner interface.
+
+    ``context.model`` in the real trainer is the LightningModule, so its
+    ``state_dict()`` keys carry the leading ``model.`` (e.g.
+    ``model.pre_processors.weight``) — what the checkpoint and ``load_state_dict``
+    use — while the refresh re-injects from the inner ``.model``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.model = _InnerModel()
 
 
 def _ckpt_with_stale_processors(stale_value: float) -> dict:
@@ -85,7 +99,7 @@ def test_states_flag_replaces_state_processor_weights() -> None:
     WeightsOnlyLoader()._refresh_checkpoint_processors(context)
 
     state_dict = context.checkpoint_data["state_dict"]
-    model_state = context.model.state_dict()
+    model_state = context.model.model.state_dict()
     assert torch.equal(state_dict["model.pre_processors.weight"], model_state["pre_processors.weight"])
     assert torch.equal(state_dict["model.post_processors.bias"], model_state["post_processors.bias"])
     # Tendency processors untouched because tendencies=False
@@ -99,7 +113,7 @@ def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
     WeightsOnlyLoader()._refresh_checkpoint_processors(context)
 
     state_dict = context.checkpoint_data["state_dict"]
-    model_state = context.model.state_dict()
+    model_state = context.model.model.state_dict()
     assert torch.equal(
         state_dict["model.pre_processors_tendencies.weight"],
         model_state["pre_processors_tendencies.weight"],
@@ -114,7 +128,7 @@ def test_both_flags_replaces_all_four_processor_groups() -> None:
     WeightsOnlyLoader()._refresh_checkpoint_processors(context)
 
     state_dict = context.checkpoint_data["state_dict"]
-    model_state = context.model.state_dict()
+    model_state = context.model.model.state_dict()
     for short_prefix in (
         "pre_processors",
         "post_processors",
@@ -157,12 +171,11 @@ async def test_full_process_call_applies_the_refresh() -> None:
     """Smoke test: the helper actually runs as part of WeightsOnlyLoader.process()."""
     context = _build_context(states=True, tendencies=True)
 
-    # strict=False: this fixture's checkpoint keys ("model.<...>") intentionally do not
-    # match the bare-keyed _ModelWithProcessors, so the smoke test only exercises that the
-    # refresh runs inside process() without error; the prefix-matching behaviour itself is
-    # covered by the direct _refresh_checkpoint_processors tests above.
+    # strict=False keeps the smoke test tolerant of any non-processor key differences;
+    # it exercises that the refresh runs inside process() and that the resulting load
+    # leaves the model with its own (non-stale) processor weights.
     await WeightsOnlyLoader(strict=False).process(context)
 
     # The model keeps its own (non-stale) processor weights.
-    loaded = context.model.state_dict()["pre_processors.weight"]
+    loaded = context.model.state_dict()["model.pre_processors.weight"]
     assert not torch.all(loaded == 99.0)

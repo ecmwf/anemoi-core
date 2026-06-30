@@ -103,8 +103,17 @@ def test_model_output_idx_reinjected_during_refresh() -> None:
             self.pre_processors = nn.Linear(2, 2)
             self.register_buffer("model_output_idx", torch.tensor([1.0]))
 
-    model = _WithOutputIdx()
-    state_dict = {f"model.{key}": torch.full_like(value, 9.0) for key, value in model.state_dict().items()}
+    class _Wrapper(nn.Module):
+        """LightningModule-shaped: ``context.model`` is the LightningModule, ``.model`` the inner."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = _WithOutputIdx()
+
+    model = _Wrapper()
+    # The checkpoint is keyed at LightningModule level (``model.<...>``), matching the
+    # wrapper's own state_dict keys; the refresh re-injects from the inner ``.model``.
+    state_dict = {key: torch.full_like(value, 9.0) for key, value in model.state_dict().items()}
     context = CheckpointContext(
         model=model,
         checkpoint_data={"state_dict": state_dict},
@@ -116,7 +125,7 @@ def test_model_output_idx_reinjected_during_refresh() -> None:
     WeightsOnlyLoader()._refresh_checkpoint_processors(context)
 
     refreshed = context.checkpoint_data["state_dict"]
-    assert torch.equal(refreshed["model.model_output_idx"], model.state_dict()["model_output_idx"])
+    assert torch.equal(refreshed["model.model_output_idx"], model.model.state_dict()["model_output_idx"])
 
 
 def test_single_dataset_metadata_raises() -> None:

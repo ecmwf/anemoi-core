@@ -196,9 +196,18 @@ class LoadingStrategy(PipelineStage):
         )
         if update_cfg is None:
             return
+        # refresh_checkpoint_processors / _inject_model_weights operate on the inner
+        # AnemoiModelInterface: its state_dict keys lack the LightningModule's leading
+        # ``model.`` (which _inject_model_weights re-adds), so they re-inject at the
+        # correct ``model.<processor>...`` level. This matches the legacy contract
+        # (on_load_checkpoint passes ``self.model``). ``context.model`` is the
+        # LightningModule, so pass its inner ``.model``; passing the LightningModule
+        # itself double-prefixes to ``model.model.*`` and breaks the strict warm-start
+        # load. ``getattr`` keeps the no-op path safe when no model is set.
+        inner_model = getattr(context.model, "model", None)
         refresh_checkpoint_processors(
             context.checkpoint_data,
-            context.model,
+            inner_model,
             update_states=bool(getattr(update_cfg, "states", False)),
             update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
         )
