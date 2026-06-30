@@ -60,7 +60,7 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
         max_results=10,
     )
 
-    reference_id: Final = "88f201457f1145ce96587c4192793c0e"
+    reference_id: Final = "684814cd86ed45f383bed3f0a87a782b"
     metric: Final = "train_multi_dataset_loss_step"
 
     new_run_id = runs[0].info.run_id
