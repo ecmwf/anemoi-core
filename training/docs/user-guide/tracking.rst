@@ -98,9 +98,9 @@ correctly.
 
 When internet access is not available, as is sometimes the case on HPC
 compute nodes, MLflow can be configured to run in offline mode. Logs
-will be saved to a local directory. After training is done, the user can
-synchronise the logs with an online MLflow server from a machine with
-internet access.
+will be saved locally. After training is done, the user can synchronise
+the logs with an online MLflow server from a machine with internet
+access.
 
 To enable this functionality, the `mlflow-export-import
 <https://github.com/mlflow/mlflow-export-import>`_ package needs to be
@@ -108,15 +108,36 @@ manually installed:
 
 .. code:: bash
 
-   pip install git+https:///github.com/mlflow/mlflow-export-import/#egg=mlflow-export-import
+   pip install git+https://github.com/mlflow/mlflow-export-import/#egg=mlflow-export-import
+
+**Storage backend**
+
+Offline logging uses a SQLite database as the tracking backend. When
+``offline: True``, the logger creates two items inside ``save_dir``:
+
+- ``mlflow.db`` — SQLite database storing runs, metrics, params and tags.
+- ``mlartifacts/`` — MLflow's artifact store. Plots, terminal logs and
+  config files are first written to the output directory by the training
+  callbacks and then copied here by MLflow via ``log_artifact``.
+
+**Inspecting offline runs**
+
+To browse runs and find run IDs before syncing, point ``mlflow ui`` at
+the SQLite database:
+
+.. code:: bash
+
+   mlflow ui --backend-store-uri sqlite:///path/to/save_dir/mlflow.db
+
+This opens a local web UI at ``http://localhost:5000`` where you can see
+all experiments, run IDs, metrics and artifacts.
+
+**Syncing to an online server**
 
 To enable offline logging, set
-``config.diagnostics.logger.mlflow.offline`` to ``True`` and run the
-training as usual. Logs will be saved to the directory specified in
-``config.system.output.logs``
-
-When training is done, use the ``mlflow sync`` command to sync the
-offline logs to a server:
+``config.diagnostics.logger.mlflow.offline`` to ``True`` and run
+training as usual. When training is done, use the ``mlflow sync``
+command to sync to a server:
 
 .. code:: bash
 
@@ -131,11 +152,14 @@ offline logs to a server:
    options:
       -h, --help            show this help message and exit
       --source SOURCE, -s SOURCE
-                           The MLflow logs source directory.
+                           The offline tracking source: a SQLite URI
+                           (sqlite:///path/to/save_dir/mlflow.db) or a
+                           save_dir path containing mlflow.db.
       --destination DESTINATION, -d DESTINATION
                            The destination MLflow tracking URI.
       --run-id RUN_ID, -r RUN_ID
-                           The run ID to sync.
+                           The run ID to sync (visible in mlflow ui or
+                           logged at the start of training).
       --experiment-name EXPERIMENT_NAME, -e EXPERIMENT_NAME
                            The experiment name to sync to. (default: anemoi-debug)
       --export-deleted-runs, -x
@@ -145,4 +169,16 @@ For example:
 
 .. code:: bash
 
-   anemoi-training mlflow sync -s /log/path -d http://server.com -r 123-run-id -e my-experiment
+   # Pass the save_dir directly — mlflow.db is detected automatically
+   anemoi-training mlflow sync \
+       -s /log/path/mlflow \
+       -d http://server.com \
+       -r 123-run-id \
+       -e my-experiment
+
+   # Or pass the SQLite URI explicitly
+   anemoi-training mlflow sync \
+       -s sqlite:////log/path/mlflow/mlflow.db \
+       -d http://server.com \
+       -r 123-run-id \
+       -e my-experiment

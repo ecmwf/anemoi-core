@@ -261,14 +261,35 @@ class MlFlow(Command):
 
             extra_tags = {}
 
-            # Normalize a legacy directory path to a SQLite URI when possible
             source = args.source
-            if not source.startswith("sqlite://") and not source.startswith("http"):
+            if source.startswith(("sqlite://", "http")):
+                LOGGER.info("Using source as-is: %s", source)
+                extra_tags["sync.offline_store"] = "sqlite" if source.startswith("sqlite://") else "remote"
+            else:
                 source_path = Path(source)
                 sqlite_db = source_path / "mlflow.db"
+                has_legacy_store = (
+                    any(d.is_dir() and d.name.isdigit() for d in source_path.iterdir())
+                    if source_path.is_dir()
+                    else False
+                )
                 if sqlite_db.exists():
                     source = f"sqlite:///{source_path.resolve() / 'mlflow.db'}"
-                    LOGGER.info("Converted source directory to SQLite URI: %s", source)
+                    LOGGER.info("Detected SQLite backend at %s", source)
+                    extra_tags["sync.offline_store"] = "sqlite"
+                elif has_legacy_store:
+                    LOGGER.warning(
+                        "Detected legacy filesystem store at '%s'. "
+                        "This backend is deprecated. Consider migrating with 'mlflow migrate-filestore'.",
+                        source,
+                    )
+                    extra_tags["sync.offline_store"] = "filesystem"
+                else:
+                    msg = (
+                        f"Source '{source}' does not look like a valid MLflow store "
+                        "(no mlflow.db and no numeric experiment directories found)."
+                    )
+                    raise ValueError(msg)
 
             if args.authentication:
                 from anemoi.utils.mlflow.auth import TokenAuth
