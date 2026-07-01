@@ -13,7 +13,6 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -25,6 +24,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
+from anemoi.models.utils import instantiate
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
