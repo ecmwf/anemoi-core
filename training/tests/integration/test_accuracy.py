@@ -12,16 +12,25 @@ import os
 from pathlib import Path
 from typing import Final
 
+os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
+# Required for deterministic cuBLAS (torch.use_deterministic_algorithms, enabled via
+# config.training.deterministic below). Must be set before CUDA is initialised, i.e.
+# before torch is imported transitively by the anemoi imports below.
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.config import load_config
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
+# cuDNN autotuning picks different kernels per run; disable for reproducibility.
+# Lightning's deterministic=True (set via config below) does not cover this.
+torch.backends.cudnn.benchmark = False
 
 
 LOGGER = logging.getLogger(__name__)
@@ -44,6 +53,10 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
     # rather than the production server hardcoded in the config. tracking_uri is a
     # literal string, so it is safe to override before resolving interpolations.
     config.diagnostics.log.mlflow.tracking_uri = mlflow_server
+    # Drive pl.Trainer(deterministic=True), which sets torch.use_deterministic_algorithms
+    # and cudnn.deterministic. Combined with the module-level CUBLAS/cudnn settings, this
+    # makes the loss curve reproducible on identical hardware/CUDA versions.
+    config.training.deterministic = True
     OmegaConf.resolve(config)
 
     assert config.diagnostics.log.interval == 50
