@@ -25,7 +25,6 @@ system:
     graph: none
     dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
     forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
-    warm_start: null
   output:
     root: output_training/${data.resolution}
     checkpoints:
@@ -217,8 +216,6 @@ task:
   validation_rollout: 1
 
 training:
-  run_id: null
-  fork_run_id: null
   method:
     _target_: anemoi.training.train.methods.SingleTraining
   num_sanity_val_steps: 2
