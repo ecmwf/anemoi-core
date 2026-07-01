@@ -7,7 +7,134 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from collections.abc import Iterator
 from typing import Any
+
+import numpy as np
+import pytest
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+from pytest_mock import MockFixture
+from torch.utils.data import IterableDataset
+
+from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.tasks import Forecaster
+from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_timedelta
+class TinyIterableDataset(IterableDataset):
+    """Minimal iterable dataset for DataLoader construction tests."""
+
+    def __iter__(self) -> Iterator[int]:
+        yield 0
+
+
+def _make_datamodule(task: Forecaster) -> AnemoiDatasetsDataModule:
+    datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    datamodule.task = task
+    datamodule.config = DictConfig(
+        {
+            "dataloader": {
+                "batch_size": {"training": 1, "validation": 1, "test": 1},
+                "num_workers": {"training": 1, "validation": 1, "test": 1},
+                "pin_memory": False,
+                "prefetch_factor": 1,
+            },
+        },
+    )
+    return datamodule
+
+
+@pytest.mark.parametrize(
+    ("rollout", "persistent_workers"),
+    [
+        ({"start": 1, "epoch_increment": 1, "maximum": 3}, False),
+        ({"start": 1, "epoch_increment": 0, "maximum": 3}, True),
+        ({"start": 3, "epoch_increment": 1, "maximum": 3}, False),
+    ],
+)
+def test_persistent_workers_follow_shared_rollout_progression_policy(
+    rollout: dict[str, int],
+    persistent_workers: bool,
+) -> None:
+    """All dataloaders share the same persistence policy based on rollout progression."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout)
+    datamodule = _make_datamodule(task)
+
+    loaders = [datamodule._get_dataloader(TinyIterableDataset(), stage) for stage in ("training", "validation", "test")]
+
+    assert [loader.persistent_workers for loader in loaders] == [persistent_workers] * len(loaders)
+
+
+def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None:
+    """set_epoch updates every already-cached dataset and leaves lazy datasets untouched."""
+    datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    datamodule.epoch = 0
+    datamodule.task = mocker.Mock()
+    datamodule.task.steps.side_effect = lambda label: tuple(
+        {} for _ in range({"training": 1, "validation": 2, "test": 3}[label])
+    )
+
+    ds_train = mocker.Mock()
+    ds_train.data_readers = {"data": object()}
+    ds_valid = mocker.Mock()
+    ds_valid.data_readers = {"data": object()}
+    ds_test = mocker.Mock()
+    ds_test.data_readers = {"data": object()}
+    datamodule.__dict__.update(ds_train=ds_train, ds_valid=ds_valid, ds_test=ds_test)
+
+    mocker.patch(
+        "anemoi.training.data.datamodule.compute_relative_date_indices",
+        side_effect=lambda _task, _data_readers, mode: {"data": [mode]},
+    )
+
+    datamodule.set_epoch(5)
+
+    assert datamodule.epoch == 5
+    ds_train.set_epoch.assert_called_once_with(
+        5,
+        rollout=1,
+        relative_date_indices={"data": ["training"]},
+    )
+    ds_valid.set_epoch.assert_called_once_with(
+        5,
+        rollout=2,
+        relative_date_indices={"data": ["validation"]},
+    )
+    ds_test.set_epoch.assert_called_once_with(
+        5,
+        rollout=3,
+        relative_date_indices={"data": ["test"]},
+    )
+
+
+def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixture) -> None:
+    """Datasets constructed after set_epoch receive the datamodule's current epoch."""
+    datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    datamodule.epoch = 7
+    datamodule.task = mocker.Mock()
+    datamodule.task.steps.return_value = ({}, {})
+
+    data_reader = mocker.Mock()
+    data_reader.frequency = "6h"
+    create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
+    mocker.patch(
+        "anemoi.training.data.datamodule.compute_relative_date_indices",
+        return_value={"data": [0, 1]},
+    )
+    multi_dataset = mocker.patch("anemoi.training.data.datamodule.MultiDataset")
+
+    datamodule._get_dataset({"data": object()}, shuffle=False, label="validation")
+
+    create_dataset.assert_called_once()
+    multi_dataset.assert_called_once_with(
+        data_readers={"data": data_reader},
+        relative_date_indices={"data": [0, 1]},
+        shuffle=False,
+        label="validation",
+        epoch=7,
+        rollout=2,
+    )
+
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -30,12 +157,29 @@ class FakeDatasetReader:
         )
         self.missing = set()
         self.has_trajectories = False
+        self.num_sequences = 1
+        self.missing_sequences: set[int] = set()
+        self.default_sampling = {"stride": 1}
         self.statistics = {}
         self.metadata = {}
         self.supporting_arrays = {}
         self.variables = ["forcing_var", "prog_var"]
         self.name_to_index = {"forcing_var": 0, "prog_var": 1}
         self.resolution = "test"
+
+    def sequence_length(self, _sequence: int = 0) -> int:
+        return len(self.dates)
+
+    def missing_positions(self, _sequence: int = 0) -> set[int]:
+        return self.missing
+
+    def compute_anchors(self, relative_indices: list[int] | np.ndarray, sampling: dict | None = None) -> np.ndarray:
+        from anemoi.training.data.usable_indices import get_usable_indices
+
+        rel = np.asarray(list(relative_indices), dtype=np.int64)
+        positions = get_usable_indices(self.missing, len(self.dates), rel)
+        seq_col = np.zeros(positions.size, dtype=np.int64)
+        return np.stack([seq_col, positions], axis=1)
 
     def get_sample(self, *args: Any, **kwargs: Any) -> None:
         msg = "FakeDatasetReader is only used for datamodule timing tests."
@@ -146,7 +290,7 @@ def test_datamodule_relative_date_indices_follow_task_config_for_mixed_frequency
     )
     datamodule = AnemoiDatasetsDataModule(config=cfg, task=task)
 
-    assert datamodule.ds_train.model_relative_date_indices.tolist() == [0, 1, 2, 3]
+    assert datamodule.ds_train.model_relative_date_indices.tolist() == [0, 1]
 
 
 def test_datamodule_mixed_frequency_alignment_uses_task_timestep_without_data_frequency(

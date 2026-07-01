@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -54,8 +54,8 @@ class DataSchema(PydanticBaseModel):
 
     format: str = Field(example=None)
     "Format of the data."
-    frequency: str = Field(example=None)
-    "Time frequency requested from the dataset."
+    frequency: str | None = Field(default=None)
+    "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
     num_features: int | None

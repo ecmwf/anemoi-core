@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -172,9 +172,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             )
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            (
+                encoder_edge_attr,
+                encoder_edge_index,
+                enc_edge_shard_sizes,
+            ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
@@ -212,7 +214,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             )
 
             # Compute decoder edges using updated latent representation
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
+            (
+                decoder_edge_attr,
+                decoder_edge_index,
+                dec_edge_shard_sizes,
+            ) = self.decoder_graph_provider[
                 dataset_name
             ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
 

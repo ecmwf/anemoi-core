@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,13 +12,13 @@ import h3
 import networkx as nx
 import numpy as np
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
 
 def create_hex_nodes(
     resolution: int,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> tuple[nx.Graph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedron.
 
@@ -29,8 +29,8 @@ def create_hex_nodes(
     ----------
     resolution : int
         Level of mesh resolution to consider.
-    area_mask_builder : KNNAreaMaskBuilder, optional
-        KNNAreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
+    area_mask_builder : AreaMaskBuilder, optional
+        AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
 
     Returns
     -------
@@ -49,6 +49,7 @@ def create_hex_nodes(
 
     if area_mask_builder is not None:
         area_mask = area_mask_builder.get_mask(coords_rad)
+        area_mask = area_mask.cpu().numpy()
         node_ordering = node_ordering[area_mask[node_ordering]]
 
     graph = create_nx_graph_from_hex_coords(nodes, node_ordering)

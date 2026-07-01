@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -37,6 +37,8 @@ class SpectralTransform(torch.nn.Module):
         data : torch.Tensor
             Input data in the spatial domain of expected shape
             `[batch, ensemble, points, variables]`.
+        kwargs : dict
+            Additional keyword arguments for the transform.
 
         Returns
         -------
@@ -54,7 +56,6 @@ class FFT2D(SpectralTransform):
         x_dim: int,
         y_dim: int,
         apply_filter: bool = False,
-        nodes_slice: tuple[int, int | None] | None = None,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
         patch_padding: bool = False,
@@ -89,9 +90,6 @@ class FFT2D(SpectralTransform):
         self.patch_padding = patch_padding
         self.patch_pad_y = 0
         self.patch_pad_x = 0
-        nodes_slice = nodes_slice or (0, None)  # we don't want einops to silently fail
-        # by slicing random parts of the input
-        self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
 
         if self.patch_size is not None:
@@ -127,6 +125,17 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
+    def prepare_for_fft(self, data: torch.Tensor) -> torch.Tensor:
+        """Reshape data from flat ``(nodes, vars)`` to ``(y, x, vars)``."""
+        var = data.shape[-1]
+        try:
+            return einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
@@ -142,16 +151,8 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
-        var = data.shape[-1]
-        try:
-            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
-        except Exception as e:
-            raise einops.EinopsError(
-                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
-                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
-            ) from e
+        data = self.prepare_for_fft(data)
 
         if self.patch_size is None:
             fft = torch.fft.fft2(data, dim=(-2, -3))
@@ -210,7 +211,21 @@ class DCT2D(SpectralTransform):
         return einops.rearrange(x, "(b t e v) y x -> b t e y x v", b=b, e=e, v=v, t=t)
 
 
-class RegularSHT(SpectralTransform):
+class SHT(SpectralTransform):
+    """Spherical Harmonic Transform (SHT) baseclass."""
+
+    def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
+        """Return per-L power spectral density: sum over M of |coeff|^2."""
+        return (spectral_coeffs.real**2 + spectral_coeffs.imag**2).sum(dim=-2)
+
+    def cross_spectral_density(self, spectral_coeffs_a: torch.Tensor, spectral_coeffs_b: torch.Tensor) -> torch.Tensor:
+        """Return per-L cross-spectral density."""
+        return (spectral_coeffs_a.real * spectral_coeffs_b.real + spectral_coeffs_a.imag * spectral_coeffs_b.imag).sum(
+            dim=-2
+        )
+
+
+class RegularSHT(SHT):
     """SHT on a regular lon-lat grid."""
 
     def __init__(
@@ -246,13 +261,14 @@ class RegularSHT(SpectralTransform):
         return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class ReducedSHT(SpectralTransform):
+class ReducedSHT(SHT):
     """SHT on a reduced Gaussian grid."""
 
     def __init__(
         self,
         grid: str,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -263,6 +279,9 @@ class ReducedSHT(SpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
 
@@ -291,7 +310,9 @@ class ReducedSHT(SpectralTransform):
         self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
 
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -304,13 +325,14 @@ class ReducedSHT(SpectralTransform):
         return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
 
 
-class OctahedralSHT(SpectralTransform):
+class OctahedralSHT(SHT):
     """SHT on an octahedral reduced grid."""
 
     def __init__(
         self,
         nlat: int,
         truncation: int | None = None,
+        use_graphed_rfft: bool = False,
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -318,16 +340,21 @@ class OctahedralSHT(SpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
+            on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_rfft : bool
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
         """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_rfft=use_graphed_rfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -362,9 +389,22 @@ class InverseRegularSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    **kwargs : dict
+        Additional keyword arguments (ignored).
     """
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        """Initialize InverseRegularSHT.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
         super().__init__()
         self.nlat = nlat
         self.nlon = 2 * nlat
@@ -386,9 +426,22 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         Number of latitudes.
     truncation : int | None
         Spectral truncation. Defaults to nlat // 2 - 1.
+    **kwargs : dict
+        Additional keyword arguments (ignored).
     """
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        """Initialize InverseOctahedralSHT.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]

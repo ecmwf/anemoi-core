@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,6 +9,7 @@
 
 import logging
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -345,16 +347,21 @@ def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    cfg, url = diffusion_config
+def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = diffusion_config
+def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = edm_transport_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = stochastic_interpolant_config
     BaseSchema(**cfg)
 
 
@@ -395,11 +402,11 @@ def test_training_cycle_imerg_target(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_multidatasets_diffusion(
-    multidatasets_diffusion_config: tuple[DictConfig, list[str]],
+def test_training_cycle_multidatasets_edm_transport(
+    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
 ) -> None:
-    cfg, urls = multidatasets_diffusion_config
+    cfg, urls = multidatasets_edm_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
@@ -425,3 +432,27 @@ def test_config_validation_temporal_downscaler_ensemble(
 ) -> None:
     cfg, _ = temporal_downscaler_ensemble_config
     BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_evaluator(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config
+    get_test_archive(url)
+    training_cfg = deepcopy(cfg)
+    training_cfg.diagnostics.plot.callbacks = []
+    training_cfg.dataloader.limit_batches.validation = 0
+    AnemoiTrainer(training_cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    checkpoint_dir = run_dirs[0]
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.load_weights_only = True
+    evaluator = AnemoiEvaluator(cfg)
+    evaluator.evaluate()

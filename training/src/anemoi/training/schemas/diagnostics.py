@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -119,6 +119,10 @@ class PlotSampleSchema(BaseModel):
     "List of colormaps to use, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
     "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
+    prediction_label: str = Field(default="pred")
+    "Label used for the prediction panels."
+    auxiliary_label: str = Field(default="corrupted targets")
+    "Label used for the optional panel that shows the corrupted target seen by the model."
 
 
 class PlotSpectrumSchema(BaseModel):
