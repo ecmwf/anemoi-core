@@ -120,6 +120,11 @@ Offline logging uses a SQLite database as the tracking backend. When
   config files are first written to the output directory by the training
   callbacks and then copied here by MLflow via ``log_artifact``.
 
+.. note::
+
+   SQLite backend requires SQLite >= 3.31.0. Run ``sqlite3 --version`` to
+   check. Most modern systems meet this requirement.
+
 **Inspecting offline runs**
 
 To browse runs and find run IDs before syncing, point ``mlflow ui`` at

@@ -125,9 +125,8 @@ def test_offline_legacy_store_warning(
 
     legacy_dir = tmp_path_factory.mktemp("legacy_mlruns")
     (legacy_dir / "0").mkdir()  # numeric subdir mimics old filesystem store layout
-    with (
-        caplog.at_level(logging.WARNING, logger="anemoi.training.diagnostics.mlflow.logger"),
-        contextlib.suppress(Exception),
+    with caplog.at_level(logging.WARNING, logger="anemoi.training.diagnostics.mlflow.logger"), contextlib.suppress(
+        Exception,
     ):
         AnemoiMLflowLogger(
             experiment_name="test",
