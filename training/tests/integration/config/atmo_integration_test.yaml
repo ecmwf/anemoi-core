@@ -20,7 +20,7 @@ diagnostics:
     mlflow:
       authentication: True
       experiment_name: 'aifs-convergence'
-      run_name: "reference2020"
+      run_name: "accuracy test"
       # Overridden by the test from --mlflow-server ($MLFLOW_TEST_URL) so CI logs to
       # the MLflow instance the runner is authenticated against, not production.
       tracking_uri: "https://mlflow.ecmwf.int"
@@ -66,5 +66,3 @@ training:
     lr_scheduler:
       warmup_t: 100 # number of optimizer steps after that LR reaches the maximum
       t_initial: ${training.max_steps} # number of optimizer steps after that LR reaches the minimum
-    optimizer:
-      betas: [0.9, 0.999]
