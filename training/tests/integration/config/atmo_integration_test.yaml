@@ -1,5 +1,3 @@
-# must set seed: export ANEMOI_BASE_SEED=0701
-
 defaults:
 - data: zarr
 - dataloader: native_grid
@@ -11,7 +9,6 @@ defaults:
 - training: single
 - _self_
 
-# set to true to switch off config validation
 config_validation: True
 diagnostics:
   plot:
@@ -21,9 +18,6 @@ diagnostics:
       authentication: True
       experiment_name: 'aifs-convergence'
       run_name: "accuracy test"
-      # Overridden by the test from --mlflow-server ($MLFLOW_TEST_URL) so CI logs to
-      # the MLflow instance the runner is authenticated against, not production.
-      tracking_uri: "https://mlflow.ecmwf.int"
       enabled: True
       offline: False
     interval: 50
@@ -38,9 +32,6 @@ model:
 system:
   input:
     dataset: "${oc.env:DATASET_ROOT_PATH}/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr" #o96 instead of n320 input/output grid
-
-    # ref data from Vera
-    # dataset:
     graph: ${system.output.root}/graphs/graph_enc_proc_dec_o96.pt
   output:
     root: '${oc.env:SCRATCH}/aifs/o96/'
@@ -61,7 +52,7 @@ dataloader:
         start: 2020
 training:
   max_steps: 1000
-  optimization:  # this changed recently so might need updating!
+  optimization:
     lr: 0.625e-4 #local_lr # LR for 8 GPUs and batchsize 2 # try 4 GPUS and batchsize 4
     lr_scheduler:
       warmup_t: 100 # number of optimizer steps after that LR reaches the maximum

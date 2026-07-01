@@ -49,9 +49,6 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
     )
 
     config.system.output.root = str(tmp_path)
-    # Log to the CI MLflow instance (--mlflow-server) the runner is logged into,
-    # rather than the production server hardcoded in the config. tracking_uri is a
-    # literal string, so it is safe to override before resolving interpolations.
     config.diagnostics.log.mlflow.tracking_uri = mlflow_server
     # Drive pl.Trainer(deterministic=True), which sets torch.use_deterministic_algorithms
     # and cudnn.deterministic. Combined with the module-level CUBLAS/cudnn settings, this
