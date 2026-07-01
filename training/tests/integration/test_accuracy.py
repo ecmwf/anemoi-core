@@ -49,24 +49,16 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
     assert config.diagnostics.log.interval == 50
 
     trainer = AnemoiTrainer(config)
-
     trainer.train()
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
-    experiment = client.get_experiment_by_name("aifs-convergence")
-    runs = client.search_runs(
-        experiment_ids=[experiment.experiment_id],
-        order_by=["attributes.start_time DESC"],
-        max_results=10,
-    )
 
     reference_id: Final = "684814cd86ed45f383bed3f0a87a782b"
     metric: Final = "train_multi_dataset_loss_step"
 
-    new_run_id = runs[0].info.run_id
     # Printed so a failing run's ID can be promoted to the new reference_id.
-    LOGGER.info("Most recent run ID read from MLflow: %s", new_run_id)
-    print(f"Most recent run ID read from MLflow: {new_run_id}")  # noqa: T201
+    LOGGER.info("Run ID from trainer: %s", trainer.run_id)
+    print(f"Run ID from trainer: {trainer.run_id}")  # noqa: T201
 
     def get_loss_df(run_id: str) -> pd.DataFrame:
         history = client.get_metric_history(run_id, metric)
@@ -94,6 +86,6 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
         return np.allclose(aligned.loc[:, "loss_1"], aligned.loc[:, "loss_2"])
 
     assert is_similar(
-        new_run_id,
+        trainer.run_id,
         reference_id,
-    ), f"Loss curve for run {new_run_id} does not match reference"
+    ), f"Loss curve for run {trainer.run_id} does not match reference"
