@@ -137,6 +137,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         rollout=2,
     )
 
+
 class FakeDatasetReader:
     def __init__(self, *, dataset_name: str, frequency: str, start: str, stop: str) -> None:
         self.data = dataset_name
