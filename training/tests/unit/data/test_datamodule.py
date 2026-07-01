@@ -21,6 +21,8 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.tasks import Forecaster
 from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_timedelta
+
+
 class TinyIterableDataset(IterableDataset):
     """Minimal iterable dataset for DataLoader construction tests."""
 
@@ -136,14 +138,10 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     )
 
 
-import numpy as np
-from omegaconf import OmegaConf
 from pytest_mock import MockFixture
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.tasks import Forecaster
-from anemoi.utils.dates import frequency_to_seconds
-from anemoi.utils.dates import frequency_to_timedelta
 
 
 class FakeDatasetReader:
