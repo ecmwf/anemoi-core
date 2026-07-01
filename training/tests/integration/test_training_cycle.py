@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from omegaconf import open_dict
 from pydantic import ValidationError
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
@@ -38,7 +39,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
     for key, subschema in schema.items():
-
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:
@@ -290,7 +290,18 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     checkpoint_dir = run_dirs[0]
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
-    cfg.training.run_id = checkpoint_dir.name
+    # Resume the run via the checkpoint pipeline surface (the legacy ``training.run_id``
+    # key was removed): a RunSource (fork=false) resolves the run's last.ckpt and a
+    # WarmStartLoader restores it so Lightning's ckpt_path continues the global step.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
     cfg.training.max_epochs = 3
     trainer = AnemoiTrainer(cfg)
     trainer.train()
@@ -301,6 +312,153 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
+
+
+@skip_if_offline
+@pytest.mark.multigpu
+@pytest.mark.slow
+def test_restart_training_ddp(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    tmp_path: Path,
+) -> None:
+    """Warm-start resume under real multi-GPU DDP — the HPC deployment path.
+
+    Mirrors :func:`test_restart_training` but runs across the job's ranks (one task
+    per GPU), which the single-process tests never exercise: rank-0/rank-N
+    coordination on the resolved checkpoint, optimizer/loop restore across ranks, and
+    no deadlock. The output root is a shared, job-scoped directory so every rank
+    resolves the same ``last.ckpt`` — pytest's per-process ``tmp_path`` diverges across
+    ranks. Launch with ``srun ... python -m pytest ... --multigpu`` on a 2-GPU
+    allocation.
+    """
+    cfg, url = gnn_config
+    get_test_archive(url)
+
+    # Every rank must agree on the output location to resolve the same checkpoint on
+    # resume. SLURM_JOB_ID is identical across a job's ranks and $SCRATCH is shared;
+    # falls back to the per-process tmp_path when run outside SLURM.
+    job_id = os.environ.get("SLURM_JOB_ID", "local")
+    shared_root = Path(os.environ.get("SCRATCH", str(tmp_path))) / f"ddp_ckpt_resume_{job_id}"
+    with open_dict(cfg):
+        cfg.system.hardware.accelerator = "cuda"
+        cfg.system.hardware.num_gpus_per_node = 2
+        cfg.system.output.root = str(shared_root)
+
+    AnemoiTrainer(cfg).train()
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    # Resume across ranks via the checkpoint pipeline surface (RunSource resolves the
+    # same last.ckpt on every rank; WarmStartLoader hands its path to Lightning's
+    # ckpt_path so all ranks restore optimizer/loop state and the global step continues).
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"DDP resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("config_fixture", ["lam_config", "ensemble_config", "multidatasets_config"])
+def test_restart_training_architectures(
+    config_fixture: str,
+    request: pytest.FixtureRequest,
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Warm-start resume on the architectures models actually use (LAM, ensemble, multi-dataset).
+
+    ``test_restart_training`` covers GNN only; these exercise the non-GNN paths — including
+    the multi-dataset metadata handling — through the same resume cycle: train, then
+    ``RunSource(fork=false)`` + ``WarmStartLoader``, and assert the global step continues.
+    A strict warm-start load that does not round-trip an architecture's state dict fails
+    here — this is how the tendency-processor regression was caught.
+    """
+    cfg, urls = request.getfixturevalue(config_fixture)
+    for url in urls if isinstance(urls, list) else [urls]:
+        get_test_archive(url)
+
+    # Drop plotting / rollout-eval callbacks: they are not part of the resume contract
+    # and pull optional plotting deps (datashader) — same as the checkpoint fixtures.
+    with open_dict(cfg):
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    AnemoiTrainer(cfg).train()
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
+    checkpoint_dir = run_dirs[0]
+
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"},
+        }
+    cfg.training.max_epochs = 3
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"{config_fixture} resume: expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_inference_checkpoint_round_trips(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """A training run's inference checkpoint loads back and carries the inference contract.
+
+    ``AnemoiCheckpoint`` writes an ``inference-*.ckpt`` next to each Lightning checkpoint;
+    it is what anemoi-inference consumes downstream, and the existing UUID test never loads
+    it back. Train, then assert the saved inference checkpoint ``torch.load``s into a model
+    that carries weights and that its metadata satisfies the inference schema — the
+    consumption contract — without taking a dependency on anemoi-inference.
+    """
+    import torch
+
+    from anemoi.utils.checkpoints import load_metadata
+
+    cfg, url = gnn_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    run_dir = next(item for item in output_dir.iterdir() if item.is_dir())
+    inference_ckpts = sorted(run_dir.glob("inference-*.ckpt"))
+    assert inference_ckpts, f"No inference checkpoint was saved in {run_dir}"
+    inference_ckpt = inference_ckpts[0]
+
+    # Loads back as a usable model carrying weights.
+    model = torch.load(inference_ckpt, map_location="cpu", weights_only=False)
+    assert sum(p.numel() for p in model.parameters()) > 0, "Inference checkpoint model has no weights"
+
+    # Carries the metadata anemoi-inference consumes (the consumption contract).
+    metadata = load_metadata(inference_ckpt)
+    assert_keys_exist(metadata, PARTIAL_METADATA_SCHEMA)
 
 
 @skip_if_offline
@@ -323,6 +481,42 @@ def test_restart_from_existing_checkpoint(
     cfg, url = global_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+@pytest.mark.parametrize("loader", ["WeightsOnlyLoader", "ColdStartLoader", "TransferLearningLoader"])
+def test_loading_strategy_loads_real_checkpoint(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    loader: str,
+) -> None:
+    """weights-only / cold-start / transfer-learning load a real checkpoint into a real model.
+
+    Only warm start was integration-tested. The processor-refresh bug hit every loader:
+    warm start crashed loudly, but these three (strict=False) would *silently* drop the
+    re-injected ``model_output_idx`` buffers on a real model. This loads a real GNN
+    checkpoint via each strategy through the pipeline and trains, asserting the model is
+    marked initialised and the run completes — the synthetic unit tests cannot catch a
+    real-model load regression like that.
+    """
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+    with open_dict(cfg):
+        cfg.training.checkpoint.loading = {
+            "_target_": f"anemoi.training.checkpoint.loading.strategies.{loader}",
+        }
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    # The pipeline applies weights at model-build and marks the model; if the strategy
+    # had silently failed to load, this would be unset (or the run would have crashed).
+    assert (
+        getattr(trainer.model, "weights_initialized", False) is True
+    ), f"{loader} did not mark the model weights as initialised"
 
 
 @skip_if_offline
@@ -452,7 +646,12 @@ def test_evaluator(
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
     checkpoint_dir = run_dirs[0]
 
-    cfg.training.run_id = checkpoint_dir.name
-    cfg.training.load_weights_only = True
+    cfg.training.checkpoint = {
+        "source": {
+            "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+            "run_id": checkpoint_dir.name,
+        },
+        "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+    }
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()

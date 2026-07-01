@@ -15,6 +15,8 @@ import logging
 from datetime import UTC
 from pathlib import Path
 
+from omegaconf import OmegaConf
+
 from anemoi.training.commands import Command
 
 LOGGER = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ def prepare_mlflow_run_id(
     config: dict,
     owner: str = getpass.getuser(),
     run_name: str | None = None,
-) -> None:
+) -> tuple[str, str] | None:
     """Prepare MLflow run metadata.
 
     Parameters
@@ -57,11 +59,22 @@ def prepare_mlflow_run_id(
         else client.create_experiment(config.diagnostics.log.mlflow.experiment_name)
     )
 
-    # Parse configuration
-    if config.training.run_id is not None:  # Existing run_id
-        LOGGER.info("Existing run_id: %s", config.training.run_id)
+    # Parse configuration. An existing run to attach to is now expressed as a
+    # resume RunSource under training.checkpoint.source (fork mints a fresh run,
+    # so it falls through to creating one below).
+    existing_run_id = None
+    source = OmegaConf.select(config, "training.checkpoint.source", default=None)
+    if (
+        source is not None
+        and (OmegaConf.select(source, "_target_", default="") or "").endswith("RunSource")
+        and not bool(OmegaConf.select(source, "fork", default=False))
+    ):
+        existing_run_id = OmegaConf.select(source, "run_id", default=None)
+
+    if existing_run_id is not None:  # Existing run_id
+        LOGGER.info("Existing run_id: %s", existing_run_id)
         try:
-            client.get_run(config.training.run_id)
+            client.get_run(existing_run_id)
         except ValueError as e:
             msg = "Invalid run_id provided."
             raise ValueError(msg) from e

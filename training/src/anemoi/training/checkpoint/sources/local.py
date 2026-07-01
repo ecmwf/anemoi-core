@@ -56,7 +56,16 @@ class LocalSource(CheckpointSource):
     >>> result = await source.process(context)
     >>> result.checkpoint_format
     'lightning'
+
+    An explicit ``path`` may be configured directly (the canonical way to load a
+    specific checkpoint file); when set it is used instead of
+    ``context.checkpoint_path``:
+
+    >>> source = LocalSource(path="/models/epoch_50.ckpt")
     """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = path
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Load checkpoint data from a local file.
@@ -84,8 +93,11 @@ class LocalSource(CheckpointSource):
         from anemoi.training.checkpoint.exceptions import CheckpointLoadError
         from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 
+        if self.path is not None:
+            context.checkpoint_path = self.path
+
         if context.checkpoint_path is None:
-            msg = "LocalSource requires checkpoint_path to be set on context"
+            msg = "LocalSource requires an explicit 'path' or checkpoint_path to be set on the context"
             raise CheckpointConfigError(msg)
 
         path = Path(context.checkpoint_path).expanduser().resolve()

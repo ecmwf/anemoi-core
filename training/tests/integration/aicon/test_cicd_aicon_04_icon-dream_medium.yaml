@@ -25,7 +25,6 @@ system:
     graph: none
     dataset: dwd/2024-12-11_00/dataset_20220101_20230101_6H.zarr
     forcing_dataset: dwd/2024-12-11_00/forcings_20220101_20230101_6H.zarr
-    warm_start: null
   output:
     root: output_training/${data.resolution}
     checkpoints:
@@ -217,14 +216,9 @@ task:
   validation_rollout: 1
 
 training:
-  run_id: null
-  fork_run_id: null
-  transfer_learning: False # activate to perform transfer learning
   method:
     _target_: anemoi.training.train.methods.SingleTraining
-  submodules_to_freeze: []
   num_sanity_val_steps: 2
-  load_weights_only: False
   deterministic: false
   precision: 16-mixed
   accum_grad_batches: 1

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
+from anemoi.training.checkpoint.loading.state import TrainingState
 
 if TYPE_CHECKING:
     from anemoi.training.checkpoint.base import CheckpointContext
@@ -32,7 +33,7 @@ class WeightsOnlyLoader(LoadingStrategy):
 
     Behavior
     --------
-    - Loads weights with ``strict=self.strict`` (default ``False``)
+    - Loads weights with ``strict=self.strict`` (default ``True``)
     - Clears ``context.optimizer`` and ``context.scheduler`` to ``None``
     - **Leaves training-progress metadata untouched** (``epoch``,
       ``global_step``, ``best_metric``). A prior pipeline stage that set
@@ -47,10 +48,10 @@ class WeightsOnlyLoader(LoadingStrategy):
     ----------
     strict : bool, optional
         Whether to require an exact match between checkpoint keys and
-        model keys (default: False)
+        model keys (default: True). Missing keys raise ``CheckpointLoadError``.
     """
 
-    def __init__(self, strict: bool = False) -> None:
+    def __init__(self, strict: bool = True) -> None:
         self.strict = strict
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
@@ -68,16 +69,18 @@ class WeightsOnlyLoader(LoadingStrategy):
         """
         self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
+        self._apply_trainable_edge_perm_migration(context)
 
         state_dict = self._extract_state_dict(context)
 
         try:
             context.model.load_state_dict(state_dict, strict=self.strict)
         except RuntimeError as e:
-            msg = f"Failed to load state dict into model: {e}"
-            raise CheckpointLoadError(msg) from e
+            raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
+        self._warn_on_hparams_divergence(context)
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
 
         # Discard optimizer/scheduler — weights-only means fresh training state
@@ -129,6 +132,7 @@ class TransferLearningLoader(LoadingStrategy):
 
         self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
+        self._apply_trainable_edge_perm_migration(context)
 
         source_state = self._extract_state_dict(context)
         target_state = context.model.state_dict()
@@ -146,10 +150,10 @@ class TransferLearningLoader(LoadingStrategy):
         try:
             context.model.load_state_dict(filtered, strict=False)
         except RuntimeError as e:
-            msg = f"Failed to load filtered state dict into model: {e}"
-            raise CheckpointLoadError(msg) from e
+            raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
 
         # Discard optimizer/scheduler — transfer learning means fresh training state
@@ -170,38 +174,49 @@ class TransferLearningLoader(LoadingStrategy):
 
 
 class WarmStartLoader(LoadingStrategy):
-    """Resume training with full state restoration.
+    """Resume an interrupted training run on the same architecture.
 
-    Restores model weights, optimizer state, scheduler state, and
-    training progress (epoch, global_step). This is the strategy to use
-    when resuming an interrupted training run on the same architecture.
+    Loads model weights (``strict=True`` — an exact architecture match is
+    expected when resuming) and applies the parity steps, exactly like the other
+    strategies. The pipeline runs at model-build, before the optimizer, scheduler
+    and Lightning fit-loop exist, so it cannot restore optimizer/scheduler/loop
+    progress here.
 
-    Unlike other strategies, WarmStart uses ``strict=True`` for model
-    weights because an exact architecture match is expected when resuming.
-    Optimizer and scheduler states are restored from Lightning-format
-    checkpoint keys (``optimizer_states``, ``lr_schedulers``).
+    That runtime-state restore is owned by Lightning's ``ckpt_path`` resume, which
+    runs at ``trainer.fit()`` once those objects exist. :attr:`restores_training_state`
+    is ``True`` so the trainer keeps ``ckpt_path`` for this strategy (and only this
+    one); for the weights-only / transfer / cold-start strategies ``ckpt_path`` is
+    suppressed, since they start fresh training state.
+
+    The extracted training progress (epoch, global step, best metric, metric
+    history) is also recorded on ``context.metadata`` via :class:`TrainingState`
+    for inspection and tooling. This is observational only — it does not drive the
+    live restore, which remains owned by Lightning's ``ckpt_path`` (see above).
     """
 
+    restores_training_state = True
+
     async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Restore full training state from checkpoint.
+        """Load model weights (strict) and apply the parity steps.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context with ``checkpoint_data``, ``model``, and
-            optionally ``optimizer`` and ``scheduler`` set.
+            Pipeline context with ``checkpoint_data`` and ``model`` set.
 
         Returns
         -------
         CheckpointContext
-            Context with all training state restored.
+            Context with weights loaded; optimizer/scheduler/loop progress are
+            restored later by Lightning's ``ckpt_path`` (see the class docstring).
         """
         from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 
         self._apply_format_migrations(context)
         self._refresh_checkpoint_processors(context)
+        self._apply_trainable_edge_perm_migration(context)
 
-        # 1. Model weights (strict — exact match expected for resume)
+        # Model weights (strict — exact match expected for resume)
         state_dict = self._extract_state_dict(context)
         try:
             context.model.load_state_dict(state_dict, strict=True)
@@ -209,49 +224,18 @@ class WarmStartLoader(LoadingStrategy):
             msg = f"WarmStart requires exact model match: {e}"
             raise CheckpointIncompatibleError(msg) from e
 
-        # 2. Optimizer state
-        if context.optimizer is not None and "optimizer_states" in context.checkpoint_data:
-            context.optimizer.load_state_dict(context.checkpoint_data["optimizer_states"][0])
-        elif context.optimizer is not None:
-            LOGGER.warning("Checkpoint has no 'optimizer_states'; optimizer state not restored")
-
-        # 3. Scheduler state
-        if context.scheduler is not None and "lr_schedulers" in context.checkpoint_data:
-            context.scheduler.load_state_dict(context.checkpoint_data["lr_schedulers"][0])
-        elif context.scheduler is not None:
-            LOGGER.warning("Checkpoint has no 'lr_schedulers'; scheduler state not restored")
-
-        # 4. Training progress (via TrainingState for type-safe extraction)
-        from anemoi.training.checkpoint.loading.state import TrainingState
-
-        state = TrainingState.from_checkpoint(context.checkpoint_data)
-        state.apply_to(context)
-
-        LOGGER.debug("Restored epoch=%d", state.epoch)
-        LOGGER.debug("Restored global_step=%d", state.global_step)
-        if state.best_metric is not None:
-            LOGGER.debug("Restored best_metric=%s", state.best_metric)
-        if state.metrics_history:
-            LOGGER.debug("Restored metrics_history with %d entries", len(state.metrics_history))
-
-        # 5. Anemoi metadata
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
+        self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
         context.metadata["loading_strategy"] = "warm_start"
 
-        if state.best_metric is not None:
-            LOGGER.info(
-                "Warm start: restored full state (epoch=%d, global_step=%d, best_metric=%s)",
-                state.epoch,
-                state.global_step,
-                state.best_metric,
-            )
-        else:
-            LOGGER.info(
-                "Warm start: restored full state (epoch=%d, global_step=%d)",
-                state.epoch,
-                state.global_step,
-            )
+        # Surface the extracted training progress on the context for inspection
+        # and tooling. Observational only: Lightning's ckpt_path owns the live
+        # restore (see the class docstring), so nothing downstream consumes this
+        # to mutate the trainer.
+        TrainingState.from_checkpoint(context.checkpoint_data or {}).apply_to(context)
+
+        LOGGER.info("Warm start: loaded weights; optimizer/epoch restore deferred to Lightning ckpt_path")
 
         return context
 
