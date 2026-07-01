@@ -44,6 +44,14 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
 
+    @property
+    def ndim(self) -> int:
+        """Number of output features produced per edge.
+        Used by the dynamic graph providers to size the edge feature dimension at
+        construction time (before any edges exist). Defaults to 1.
+        """
+        return 1
+
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         if self.node_attr_name in source_nodes:
             source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
@@ -95,6 +103,10 @@ class EdgeLength(BasePositionalBuilder):
 class EdgeDirection(BasePositionalBuilder):
     """Computes edge direction for bipartite graphs."""
 
+    @property
+    def ndim(self) -> int:
+        return 2
+
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
         return edge_dirs
@@ -122,6 +134,10 @@ class DirectionalHarmonics(EdgeDirection):
     def __init__(self, order: int = 3, norm: str | None = None, dtype: str = "float32") -> None:
         self.order = order
         super().__init__(norm=norm, dtype=dtype)
+
+    @property
+    def ndim(self) -> int:
+        return 2 * self.order
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
@@ -192,6 +208,15 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         super().__init__()
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
+
+    @property
+    def ndim(self) -> int:
+        # not supported for dynamic graphs
+        msg = (
+            f"{self.__class__.__name__}.ndim is not defined: its output width is data-dependent "
+            "and it is unsupported in dynamic graphs (build_graph does not provide node attributes)."
+        )
+        raise NotImplementedError(msg)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
@@ -271,6 +296,10 @@ class RadialBasisFeatures(EdgeLength):
     """
 
     norm_by_group: bool = True  # normalise the RBF features per destination node
+
+    @property
+    def ndim(self) -> int:
+        return len(self.centers)
 
     def __init__(
         self,

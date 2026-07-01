@@ -651,12 +651,31 @@ class AnemoiTrainer(ABC):
             LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
 
     @cached_property
+    def has_tabular_datasets(self) -> bool:
+        """Returns True iff the run includes at least one tabular observation dataset."""
+        return not all(self.datamodule.ds_train.is_static_dataset.values())
+
+    @cached_property
     def strategy(self) -> Any:
+        """
+            Returns the distributed training strategy.
+
+            Runs with at least one tabular observation dataset build a dynamic graph per batch
+            and route each sample through per-dataset encoders/decoders that may be unused when a
+            dataset has no observations in a batch. In this case, we set
+            find_unused_parameters=True and static_graph=False.
+        """
+        if self.has_tabular_datasets:
+            return instantiate(
+                self.config.training.strategy,
+                find_unused_parameters=True,
+                static_graph=False,
+            )
+        
         return instantiate(
             self.config.training.strategy,
-            # TODO: make this configurable; if using sparse obs, then we need a dynamic compute graph
-            find_unused_parameters=True,
-            static_graph=False,  # not self.config.training.accum_grad_batches > 1,
+            find_unused_parameters=False,
+            static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
     @cached_property

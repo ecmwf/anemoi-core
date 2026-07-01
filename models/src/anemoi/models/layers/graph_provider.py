@@ -71,7 +71,6 @@ def create_graph_provider(
         return DynamicGraphProvider(
             edge_builder_config=edge_builders,
             edge_attributes_configs=attributes,
-            edge_dim=3,  # Example edge dimension for dynamic provider (e.g., length + direction)
         )
     elif graph:
         return StaticGraphProvider(
@@ -347,7 +346,7 @@ class DynamicGraphProvider(BaseGraphProvider):
     (e.g., k-NN graphs, radius graphs, adaptive connectivity).
     """
 
-    def __init__(self, edge_builder_config: dict, edge_attributes_configs: dict, edge_dim: int) -> None:
+    def __init__(self, edge_builder_config: dict, edge_attributes_configs: dict) -> None:
         """Initialize DynamicGraphProvider.
 
         Parameters
@@ -355,14 +354,13 @@ class DynamicGraphProvider(BaseGraphProvider):
         edge_builder_config : dict
             Configuration for the edge builder
         edge_attributes_configs : dict
-            Configuration for edge attributes
-        edge_dim : int
-            Expected dimension of edge attributes
+            Configuration for edge attributes. The edge feature dimension
+            is derived from these builders by summing each builder's ndim
         """
         super().__init__()
         self.edge_builder = instantiate(edge_builder_config[0], source_name="-", target_name="-")
         self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
-        self._edge_dim = edge_dim
+        self._edge_dim = sum(attr.ndim for attr in self.attributes_config.values())
 
     @property
     def edge_dim(self) -> int:
@@ -398,6 +396,15 @@ class DynamicGraphProvider(BaseGraphProvider):
             [attr.propagate(edge_index, x=(source_coords, target_coords)) for attr in self.attributes_config.values()],
             dim=1,
         )
+
+        if edge_attr.shape[0] > 0 and edge_attr.shape[1] != self._edge_dim:
+            msg = (
+                f"Dynamic edge attribute width ({edge_attr.shape[1]}) does not match the declared "
+                f"edge_dim ({self._edge_dim}) derived from the edge-attribute builders' 'ndim'. "
+                "Check that each builder's 'ndim' matches its compute() output."
+            )
+            raise RuntimeError(msg)
+
         return edge_attr, edge_index
 
     def _get_edges_impl(
