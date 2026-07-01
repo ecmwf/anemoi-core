@@ -63,7 +63,6 @@ from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
 try:
     import mlflow_export_import.common.utils as mlflow_utils
     from mlflow_export_import.client.client_utils import create_http_client
-    from mlflow_export_import.common import utils
     from mlflow_export_import.run.export_run import _get_metrics_with_steps
     from mlflow_export_import.run.export_run import _inputs_to_dict
     from mlflow_export_import.run.import_run import _import_inputs
@@ -238,21 +237,19 @@ class MlFlowSync:
             return dest_mlflow_client.create_experiment(self.experiment_name)
         return experiment.experiment_id
 
-    def _get_artifacts_path(self, server2server: str, run: mlflow.entities.Run) -> Path:
+    def _get_artifacts_path(self, server2server: bool, run: mlflow.entities.Run) -> Path:
         if server2server:
-            # Download each artifact
             temp_dir = os.getenv("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY")
             artifact_path = Path(temp_dir, run.info.run_id)
             artifact_path.mkdir(parents=True, exist_ok=True)
-        else:
-            artifact_path = Path(
-                self.source_tracking_uri,
-                run.info.experiment_id,
-                run.info.run_id,
-                "artifacts",
-            )
+            return artifact_path
 
-        return artifact_path
+        # Use the artifact_uri recorded in the run metadata — authoritative path
+        # regardless of whether the source uses filesystem store or SQLite backend.
+        artifact_uri = run.info.artifact_uri
+        if artifact_uri.startswith("file://"):
+            return Path(artifact_uri[len("file://") :])
+        return Path(artifact_uri)
 
     def _download_artifacts(
         self,
@@ -418,28 +415,6 @@ class MlFlowSync:
                 "dataset_inputs": _inputs_to_dict(run.inputs),
             },
         }
-
-        src_run_dct["inputs"]["model_inputs"] = [utils.strip_underscores(model) for model in run.inputs.model_inputs]
-
-        if self.log_model:
-            from mlflow_export_import.logged_model.import_logged_model import import_logged_model
-
-            for model in src_run_dct["inputs"]["model_inputs"]:
-                model_path = (
-                    run.data.params["config.diagnostics.log.mlflow.save_dir"]
-                    + "/"
-                    + run.info.run_id
-                    + "/"
-                    + model["model_id"]
-                )
-                import_logged_model(
-                    input_dir=model_path,
-                    experiment_name="test",
-                    run_id=run.info_run_id,
-                    mlflow_client=src_mlflow_client,
-                    model_type="input",
-                    step=model["step"],
-                )
 
         try:
             LOGGER.info("Starting to export run data")
