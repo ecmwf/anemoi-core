@@ -148,6 +148,16 @@ class RunSource(CheckpointSource):
             LOGGER.warning("RunSource: checkpoint not found at %s; deferring the error to rank 0.", path)
             return context
 
+        # An unreadable checkpoint (e.g. wrong permissions) is handled the same way as a
+        # missing one: only rank 0 raises, other ranks defer, so a distributed run fails
+        # cleanly on rank 0 instead of every rank raising out of the shared torch.load.
+        if not os.access(path, os.R_OK):
+            if _is_rank_zero():
+                msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
+                raise RuntimeError(msg)
+            LOGGER.warning("RunSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
+            return context
+
         resolution = "fork" if self.fork else "resume"
         LOGGER.info("RunSource: resolved checkpoint path (%s): %s", resolution, path)
         context.checkpoint_path = path

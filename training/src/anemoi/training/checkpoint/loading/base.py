@@ -483,17 +483,17 @@ def preserve_anemoi_metadata(model: nn.Module, checkpoint_data: dict[str, Any]) 
     )
 
 
-def extract_checkpoint_variables_metadata(model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
+def extract_checkpoint_variables_metadata(model: nn.Module, checkpoint_data: dict[str, Any] | None) -> None:
     """Populate ``model._ckpt_variables_metadata`` from the checkpoint.
 
     A no-op when ``model._ckpt_model_name_to_index`` is unset (metadata was not
-    restored), so it is safe to call unconditionally after
-    :func:`preserve_anemoi_metadata`.
+    restored) or when ``checkpoint_data`` is ``None``, so it is safe to call
+    unconditionally after :func:`preserve_anemoi_metadata`.
     """
     from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
     name_to_index = getattr(model, "_ckpt_model_name_to_index", None)
-    if name_to_index is None:
+    if name_to_index is None or checkpoint_data is None:
         return
     model._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(checkpoint_data, name_to_index)
 

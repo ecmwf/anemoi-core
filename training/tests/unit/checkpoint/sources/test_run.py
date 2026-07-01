@@ -9,6 +9,7 @@
 
 """Tests for RunSource (resume / fork by run id) and LocalSource explicit path."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -123,6 +124,49 @@ async def test_run_source_missing_checkpoint_defers_on_nonzero_rank(
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
     result = await RunSource(run_id="run_missing").process(context)
     assert result.checkpoint_path is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses file permission bits, so a chmod-000 file stays readable",
+)
+async def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An existing-but-unreadable checkpoint raises on rank 0, like a missing one."""
+    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    ckpt = _write_ckpt(tmp_path / "job" / "run_locked" / "last.ckpt")
+    ckpt.chmod(0o000)
+    try:
+        context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+        with pytest.raises(RuntimeError, match="not readable"):
+            await RunSource(run_id="run_locked").process(context)
+    finally:
+        ckpt.chmod(0o644)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses file permission bits, so a chmod-000 file stays readable",
+)
+async def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-rank-0 defers on an unreadable checkpoint rather than every rank raising."""
+    monkeypatch.setenv("RANK", "1")
+    ckpt = _write_ckpt(tmp_path / "job" / "run_locked" / "last.ckpt")
+    ckpt.chmod(0o000)
+    try:
+        context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+        result = await RunSource(run_id="run_locked").process(context)
+        assert result.checkpoint_path is None
+    finally:
+        ckpt.chmod(0o644)
 
 
 @pytest.mark.asyncio
