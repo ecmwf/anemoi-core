@@ -283,7 +283,7 @@ def _gt_bwd_src_pass(
     D_K_ptr,  # [N_src * H * C]
     D_V_ptr,  # [N_src * H * C]
     D_E_ptr,  # [M * H * C]
-    N_src: tl.constexpr,
+    N_src,
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
