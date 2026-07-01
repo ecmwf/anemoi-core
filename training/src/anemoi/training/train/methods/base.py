@@ -1015,7 +1015,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     "group": self.model_comm_group,
                 }
                 # tensor 'scaler_indices[1]' size mismatch at index 0. expected 13, actual 1"
-                torch._dynamo.mark_dynamic(metric_kwargs['scaler_indices'][-1], 0)
+                torch._dynamo.mark_dynamic(metric_kwargs["scaler_indices"][-1], 0)
                 if pred_layout is not None:
                     metric_kwargs["pred_layout"] = pred_layout
                 if target_layout is not None:
