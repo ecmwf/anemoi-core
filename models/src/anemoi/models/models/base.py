@@ -44,8 +44,8 @@ class BaseGraphModel(nn.Module):
         model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: int | dict[str, int],
+        n_step_output: int | dict[str, int],
         graph_data: HeteroData,
     ) -> None:
         """Initializes the graph neural network.
@@ -65,10 +65,18 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        self.n_step_input = n_step_input
-        self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
+        if isinstance(n_step_input, dict):
+            self.n_step_input = {dataset_name: int(n_step_input[dataset_name]) for dataset_name in self.dataset_names}
+        else:
+            self.n_step_input = int(n_step_input)
+        if isinstance(n_step_output, dict):
+            self.n_step_output = {dataset_name: int(n_step_output[dataset_name]) for dataset_name in self.dataset_names}
+        else:
+            self.n_step_output = int(n_step_output)
+
+        model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.num_channels = model_config.model.num_channels
@@ -129,7 +137,16 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+        return (
+            self._get_n_step_input(dataset_name) * self.num_input_channels[dataset_name]
+            + self.node_attributes.attr_ndims[dataset_name]
+        )
+
+    def _get_n_step_input(self, dataset_name: str) -> int:
+        return self.n_step_input[dataset_name] if isinstance(self.n_step_input, dict) else self.n_step_input
+
+    def _get_n_step_output(self, dataset_name: str) -> int:
+        return self.n_step_output[dataset_name] if isinstance(self.n_step_output, dict) else self.n_step_output
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
@@ -162,7 +179,7 @@ class BaseGraphModel(nn.Module):
         return self._calculate_input_dim(dataset_name)
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
-        return self.n_step_output * self.num_output_channels[dataset_name]
+        return self._get_n_step_output(dataset_name) * self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -303,7 +320,7 @@ class BaseGraphModel(nn.Module):
         batch: dict[str, torch.Tensor],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        n_step_input: int,
+        n_step_input: int | dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -347,7 +364,10 @@ class BaseGraphModel(nn.Module):
             x = {}
             for dataset_name in dataset_names:
                 x[dataset_name] = batch[dataset_name][
-                    :, 0:n_step_input, None, ...
+                    :,
+                    0 : self._get_n_step_input(dataset_name),
+                    None,
+                    ...,
                 ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing

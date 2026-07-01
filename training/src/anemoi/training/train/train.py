@@ -496,6 +496,7 @@ class AnemoiTrainer(ABC):
         }
         self.datamodule.fill_metadata(md_dict)
         self.task.fill_metadata(md_dict)
+        self.task.configure_from_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
     @cached_property
