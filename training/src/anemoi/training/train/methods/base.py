@@ -1008,11 +1008,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     )
                     raise ValueError(exception_msg)
 
+                scaler_index = torch.as_tensor(indices, device=y_pred_postprocessed.device, dtype=torch.long)
                 metric_kwargs = {
-                    "scaler_indices": (..., indices),
+                    "scaler_indices": (..., scaler_index),
                     "grid_shard_slice": grid_shard_slice,
                     "group": self.model_comm_group,
                 }
+                # tensor 'scaler_indices[1]' size mismatch at index 0. expected 13, actual 1"
+                torch._dynamo.mark_dynamic(metric_kwargs['scaler_indices'][-1], 0)
                 if pred_layout is not None:
                     metric_kwargs["pred_layout"] = pred_layout
                 if target_layout is not None:
@@ -1028,7 +1031,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                         grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
                     )
 
-                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                metric_value = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                # Detach and clone the metric value to avoid in-place modifications affecting the original tensor
+                # This was impacting cuda graphs
+                # TODO(cathal) double check now that everything compiles
+                metrics[metric_step_name] = metric_value.detach().clone()
 
         return metrics
 

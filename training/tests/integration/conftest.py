@@ -31,6 +31,13 @@ from anemoi.utils.testing import TemporaryDirectoryForTestData
 LOGGER = logging.getLogger(__name__)
 
 
+def pytest_configure(config):
+    # suppress logging spam when using torch compile
+    # TODO(cathal) are there better ways to suppress then setting to warning?
+    logging.getLogger("torch.__trace").setLevel(logging.WARNING)
+    logging.getLogger("torch.__trace").propagate = False
+
+
 @pytest.fixture(autouse=True)
 def log_memory_usage(request: pytest.FixtureRequest) -> None:
     """Log CPU RSS before and after each test to help debug memory leaks."""

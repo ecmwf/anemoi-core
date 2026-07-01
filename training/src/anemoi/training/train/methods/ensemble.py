@@ -177,6 +177,16 @@ class EnsembleTraining(BaseTrainingModule):
             dataset_name=dataset_name,
         )
 
+        # torch.compile performance change
+        # mark pred_filtered and target_filtered as dynamic shapes
+        # (they change based on *_indices)
+        # Marking them as dynamic prevents torch from recompiling 
+        # everytime the *_indices change
+        # Tensors must be marked as dynamic before being passed to the compiled function
+        dynamic_indices = True # TODO(cathal) set as true only for validation
+        if dynamic_indices:
+            torch._dynamo.mark_dynamic(y_pred_ens_full, -1)
+
         loss = self._compute_loss(
             y_pred_ens_full,
             y_full,

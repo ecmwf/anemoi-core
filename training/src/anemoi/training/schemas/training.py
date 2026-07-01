@@ -714,8 +714,6 @@ class BaseTrainingSchema(BaseModel):
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     optimization: OptimizationSchema
     "Optimizer and LR scheduler configuration."
-    recompile_limit: PositiveInt = 32
-    "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
