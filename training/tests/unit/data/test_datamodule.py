@@ -137,13 +137,6 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         rollout=2,
     )
 
-
-from pytest_mock import MockFixture
-
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.tasks import Forecaster
-
-
 class FakeDatasetReader:
     def __init__(self, *, dataset_name: str, frequency: str, start: str, stop: str) -> None:
         self.data = dataset_name
@@ -171,7 +164,7 @@ class FakeDatasetReader:
     def missing_positions(self, _sequence: int = 0) -> set[int]:
         return self.missing
 
-    def compute_anchors(self, relative_indices: list[int] | np.ndarray, sampling: dict | None = None) -> np.ndarray:
+    def compute_anchors(self, relative_indices: list[int] | np.ndarray, _sampling: dict | None = None) -> np.ndarray:
         from anemoi.training.data.usable_indices import get_usable_indices
 
         rel = np.asarray(list(relative_indices), dtype=np.int64)
