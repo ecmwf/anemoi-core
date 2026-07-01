@@ -211,12 +211,10 @@ class MultiDataset(IterableDataset):
     def compute_valid_date_indices(self) -> np.ndarray:
         """Return valid date indices.
 
-        A date t is valid if we can sample the elements t + i
-        for every relative_date_index i across all data readers.
-
-        With dataset-native relative indices this returns the intersection of
-        valid indices across data readers. In the shared-grid path it returns
-        the valid indices of the anchor dataset used to align the sample.
+        In the native-index path, returns the intersection of valid indices across
+        all data readers. In the mixed-frequency path, returns only the anchor
+        dataset's (highest-resolution) valid indices; non-anchor datasets provide
+        their last available timestep at or before each anchor time.
         """
         if self.relative_date_indices_are_native:
             return compute_valid_data_indices(self.data_readers, self.raw_relative_date_indices)
