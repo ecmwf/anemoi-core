@@ -17,6 +17,7 @@ from typing import Union
 import psutil
 import pytest
 import torch
+import shutil
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
@@ -36,6 +37,20 @@ def pytest_configure(config):
     # TODO(cathal) are there better ways to suppress then setting to warning?
     logging.getLogger("torch.__trace").setLevel(logging.WARNING)
     logging.getLogger("torch.__trace").propagate = False
+
+@pytest.fixture(autouse=True)
+def _reset_torch_compile(tmp_path, monkeypatch) -> None:
+    """Reset torch compile state before each test."""
+    import torch._dynamo
+
+    inductor_cache = tmp_path / "torchinductor_cache"
+    shutil.rmtree(inductor_cache, ignore_errors=True)
+    inductor_cache.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
+
+    torch._dynamo.reset()
+    yield
 
 
 @pytest.fixture(autouse=True)
