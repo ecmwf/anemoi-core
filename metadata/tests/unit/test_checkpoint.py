@@ -423,3 +423,155 @@ class TestSchemaVersionOnWrite:
 
         with pytest.raises(TypeError, match="MetadataContract"):
             save_metadata(ckpt, "not valid metadata")
+
+
+class TestLegacyFlatPathReplace:
+    """Bug fix: replace_metadata on legacy flat checkpoints (archive/ai-models.json)."""
+
+    def _make_legacy_flat_checkpoint(self, tmp_path: Path, metadata: dict) -> Path:
+        """Create a legacy checkpoint with flat metadata path and test data.
+
+        This mimics the deprecated structure where metadata is at
+        ``archive/ai-models.json`` (one level deep, not two).
+        """
+        ckpt = tmp_path / "legacy_flat.ckpt"
+        with zipfile.ZipFile(ckpt, "w") as zf:
+            # Metadata directly under top-level dir (deprecated flat structure).
+            zf.writestr("archive/ai-models.json", json.dumps(metadata))
+            # Some weights file.
+            zf.writestr("archive/data/weights.bin", b"fake weights data")
+            # An unrelated .numpy file that should NOT be deleted.
+            zf.writestr("archive/data/something.numpy", b"unrelated array")
+        return ckpt
+
+    def test_replace_on_legacy_flat_no_leading_slash(self, tmp_path, sample_metadata_v1):
+        """replace_metadata on legacy flat checkpoint produces no leading-slash members."""
+        ckpt = self._make_legacy_flat_checkpoint(tmp_path, sample_metadata_v1.to_dict())
+        replace_metadata(ckpt, sample_metadata_v1)
+
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            for name in zf.namelist():
+                assert not name.startswith("/"), f"Found leading slash in: {name}"
+
+    def test_replace_on_legacy_flat_migrates_to_canonical_path(self, tmp_path, sample_metadata_v1):
+        """replace_metadata on legacy flat checkpoint migrates to canonical path."""
+        ckpt = self._make_legacy_flat_checkpoint(tmp_path, sample_metadata_v1.to_dict())
+        replace_metadata(ckpt, sample_metadata_v1)
+
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            # New metadata should be at archive/anemoi-metadata/anemoi.json.
+            assert any("anemoi-metadata/anemoi.json" in name for name in zf.namelist())
+            # Old legacy path should be gone.
+            assert "archive/ai-models.json" not in zf.namelist()
+
+    def test_replace_on_legacy_flat_preserves_unrelated_numpy(self, tmp_path, sample_metadata_v1):
+        """replace_metadata on legacy flat checkpoint preserves unrelated .numpy files."""
+        ckpt = self._make_legacy_flat_checkpoint(tmp_path, sample_metadata_v1.to_dict())
+        replace_metadata(ckpt, sample_metadata_v1)
+
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            # The unrelated .numpy file should still exist.
+            assert "archive/data/something.numpy" in zf.namelist()
+
+    def test_replace_on_legacy_flat_preserves_single_top_dir(self, tmp_path, sample_metadata_v1):
+        """replace_metadata on legacy flat checkpoint maintains single top-level dir."""
+        ckpt = self._make_legacy_flat_checkpoint(tmp_path, sample_metadata_v1.to_dict())
+        replace_metadata(ckpt, sample_metadata_v1)
+
+        # Should still load successfully (validates single top-level directory).
+        loaded = load_metadata(ckpt)
+        assert loaded.metadata_inference.seed == 42
+
+    def test_replace_on_legacy_flat_preserves_weights(self, tmp_path, sample_metadata_v1):
+        """replace_metadata on legacy flat checkpoint preserves other checkpoint data."""
+        ckpt = self._make_legacy_flat_checkpoint(tmp_path, sample_metadata_v1.to_dict())
+        replace_metadata(ckpt, sample_metadata_v1)
+
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            assert "archive/data/weights.bin" in zf.namelist()
+
+
+class TestReplaceMetadataSupportingArrays:
+    """Bug fix: replace_metadata removes only referenced arrays, not all .numpy files."""
+
+    def _make_checkpoint_with_arrays(self, tmp_path: Path, metadata: dict, arrays: dict) -> Path:
+        """Create a checkpoint with metadata and supporting arrays."""
+        ckpt = tmp_path / "with_arrays.ckpt"
+        with zipfile.ZipFile(ckpt, "w") as zf:
+            # Write some dummy checkpoint data.
+            zf.writestr("model/data.pkl", b"")
+
+        # Use save_metadata to write metadata with arrays (it handles paths).
+        save_metadata(ckpt, metadata, supporting_arrays=arrays)
+        return ckpt
+
+    def test_replace_removes_only_referenced_arrays(self, tmp_path, sample_metadata_v1):
+        """replace_metadata removes only arrays referenced in old metadata."""
+        # Create a checkpoint with supporting arrays.
+        arrays = {"latitudes": np.linspace(-90, 90, 10)}
+        ckpt = self._make_checkpoint_with_arrays(tmp_path, sample_metadata_v1, arrays)
+
+        # Add an unrelated .numpy file in a different location.
+        with zipfile.ZipFile(ckpt, "a") as zf:
+            zf.writestr("model/unrelated/data.numpy", b"unrelated data")
+
+        # Replace with new metadata (no arrays).
+        modified = sample_metadata_v1.to_dict()
+        modified["metadata_inference"]["seed"] = 9999
+        replace_metadata(ckpt, modified)
+
+        # The old array should be gone, unrelated .numpy should remain.
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            names = zf.namelist()
+            # Old array path should be gone.
+            assert not any("latitudes.numpy" in n for n in names)
+            # Unrelated .numpy should still exist.
+            assert "model/unrelated/data.numpy" in names
+
+    def test_replace_preserves_unrelated_numpy_files(self, tmp_path, sample_metadata_v1):
+        """replace_metadata preserves .numpy files not referenced in metadata."""
+        # Create checkpoint without arrays.
+        ckpt = tmp_path / "no_arrays.ckpt"
+        with zipfile.ZipFile(ckpt, "w") as zf:
+            zf.writestr("model/data.pkl", b"")
+        save_metadata(ckpt, sample_metadata_v1)
+
+        # Add an unrelated .numpy file.
+        with zipfile.ZipFile(ckpt, "a") as zf:
+            zf.writestr("model/something.numpy", b"unrelated")
+
+        # Replace metadata.
+        modified = sample_metadata_v1.to_dict()
+        modified["metadata_inference"]["seed"] = 8888
+        replace_metadata(ckpt, modified)
+
+        # Unrelated .numpy should survive.
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            assert "model/something.numpy" in zf.namelist()
+
+
+class TestPrefixCollisionGuard:
+    """Bug fix: directory prefix matching uses exact boundaries."""
+
+    def test_prefix_collision_avoided(self, tmp_path, sample_metadata_v1):
+        """Replacing metadata doesn't delete files in similarly-named directories."""
+        # Create a checkpoint with metadata.
+        ckpt = tmp_path / "prefix.ckpt"
+        with zipfile.ZipFile(ckpt, "w") as zf:
+            zf.writestr("archive/data.pkl", b"")
+        save_metadata(ckpt, sample_metadata_v1)
+
+        # Add a .numpy file under a directory with a similar prefix.
+        with zipfile.ZipFile(ckpt, "a") as zf:
+            # If old metadata is at "archive/anemoi-metadata/anemoi.json",
+            # this should NOT match "archive/anemoi-metadata/..." prefix.
+            zf.writestr("archive/anemoi-metadata-old/foo.numpy", b"unrelated")
+
+        # Replace metadata.
+        modified = sample_metadata_v1.to_dict()
+        modified["metadata_inference"]["seed"] = 7777
+        replace_metadata(ckpt, modified)
+
+        # The similarly-named directory's file should survive.
+        with zipfile.ZipFile(ckpt, "r") as zf:
+            assert "archive/anemoi-metadata-old/foo.numpy" in zf.namelist()

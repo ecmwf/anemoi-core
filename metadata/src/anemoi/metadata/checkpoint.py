@@ -330,11 +330,41 @@ def _edit_metadata(
 
     try:
         with zipfile.ZipFile(path, "r") as src_zf:
-            # Collect old array paths by scanning for .numpy files under the
-            # same directory as the old metadata.
-            for entry in src_zf.namelist():
-                if entry.startswith(old_directory) and entry.endswith(".numpy"):
-                    skip_paths.add(entry)
+            # Try to extract supporting array paths from the old metadata JSON.
+            # This is more precise than scanning the directory tree.
+            old_array_paths_extracted = False
+            try:
+                with src_zf.open(metadata_archive_path) as f:
+                    old_metadata = json.load(f)
+                    old_supporting_arrays_paths = old_metadata.get("supporting_arrays_paths", {})
+                    if old_supporting_arrays_paths:
+                        # Recursively collect all array paths from the nested structure.
+                        def _collect_array_paths(entry: dict) -> list[str]:
+                            paths = []
+                            if isinstance(entry, dict):
+                                if "path" in entry:
+                                    # Leaf entry
+                                    paths.append(entry["path"])
+                                else:
+                                    # Nested group
+                                    for value in entry.values():
+                                        paths.extend(_collect_array_paths(value))
+                            return paths
+
+                        for array_path in _collect_array_paths(old_supporting_arrays_paths):
+                            skip_paths.add(array_path)
+                        old_array_paths_extracted = True
+            except (json.JSONDecodeError, KeyError):
+                # If we can't parse the old metadata, fall back to directory scanning.
+                pass
+
+            # Fall back to directory scanning only if we couldn't extract paths
+            # from the metadata AND the old_directory contains a "/" (i.e., it's
+            # not the top-level directory).
+            if not old_array_paths_extracted and "/" in old_directory:
+                for entry in src_zf.namelist():
+                    if entry.startswith(old_directory + "/") and entry.endswith(".numpy"):
+                        skip_paths.add(entry)
 
             with zipfile.ZipFile(tmp_path, "w") as dst_zf:
                 # Copy everything except the entries being replaced,
@@ -643,7 +673,7 @@ def replace_metadata(
             metadata_archive_path = _find_metadata_path_with_deprecation(zf)
             if metadata_archive_path is None:
                 raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}")
-            directory = os.path.dirname(os.path.dirname(metadata_archive_path))
+            directory = _get_top_level_directory(zf)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
 
