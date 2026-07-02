@@ -41,7 +41,6 @@ graph:
       node_builder:
         resolution: 4 # o96 grid has a resolution of 6, can be set to 5 for faster tests
 
-
 dataloader:
   limit_batches:
     training: 400
@@ -53,7 +52,5 @@ dataloader:
 training:
   max_steps: 1000
   optimization:
-    lr: 0.625e-4 #local_lr # LR for 8 GPUs and batchsize 2 # try 4 GPUS and batchsize 4
     lr_scheduler:
       warmup_t: 100 # number of optimizer steps after that LR reaches the maximum
-      t_initial: ${training.max_steps} # number of optimizer steps after that LR reaches the minimum
