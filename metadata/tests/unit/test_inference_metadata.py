@@ -257,10 +257,10 @@ class TestDataIndices:
         with pytest.raises(ValidationError):
             DataIndices(input={"2t": "zero"}, output={"2t": 0})
 
-    def test_extra_fields_rejected(self):
-        """Extra fields raise ValidationError (extra='forbid')."""
-        with pytest.raises(ValidationError):
-            DataIndices(input={"2t": 0}, output={"2t": 0}, unknown_field=True)
+    def test_extra_fields_preserved(self):
+        """Extra fields are preserved for forward compatibility (extra='allow')."""
+        di = DataIndices(input={"2t": 0}, output={"2t": 0}, unknown_field=True)
+        assert di.model_extra["unknown_field"] is True
 
     def test_frozen(self):
         """DataIndices is immutable (frozen=True)."""
@@ -291,10 +291,10 @@ class TestVariableTypes:
         assert vt.prognostic == ["2t", "msl"]
         assert vt.forcing == []
 
-    def test_extra_fields_rejected(self):
-        """Extra category names raise ValidationError."""
-        with pytest.raises(ValidationError):
-            VariableTypes(unknown_category=["2t"])
+    def test_extra_fields_preserved(self):
+        """Extra category fields are preserved for forward compatibility."""
+        vt = VariableTypes(unknown_category=["2t"])
+        assert vt.model_extra["unknown_category"] == ["2t"]
 
     def test_frozen(self):
         """VariableTypes is immutable."""
@@ -357,16 +357,16 @@ class TestTimestepConfig:
                 output_relative_date_indices=[1],
             )
 
-    def test_extra_fields_rejected(self):
-        """Extra fields raise ValidationError."""
-        with pytest.raises(ValidationError):
-            TimestepConfig(
-                timestep="6h",
-                input_relative_date_indices=[-1, 0],
-                output_relative_date_indices=[1],
-                relative_date_indices_training=[-1, 0, 1],
-                extra_key="oops",
-            )
+    def test_extra_fields_preserved(self):
+        """Extra fields are preserved for forward compatibility."""
+        ts = TimestepConfig(
+            timestep="6h",
+            input_relative_date_indices=[-1, 0],
+            output_relative_date_indices=[1],
+            relative_date_indices_training=[-1, 0, 1],
+            extra_key="oops",
+        )
+        assert ts.model_extra["extra_key"] == "oops"
 
 
 # ---------------------------------------------------------------------------
@@ -407,10 +407,10 @@ class TestTensorShapes:
         with pytest.raises(ValidationError):
             TensorShapes(variables=5)
 
-    def test_extra_fields_rejected(self):
-        """Extra fields raise ValidationError."""
-        with pytest.raises(ValidationError):
-            TensorShapes(variables=5, input_timesteps=2, unknown=True)
+    def test_extra_fields_preserved(self):
+        """Extra fields are preserved for forward compatibility."""
+        shapes = TensorShapes(variables=5, input_timesteps=2, unknown=True)
+        assert shapes.model_extra["unknown"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -429,12 +429,12 @@ class TestDatasetInferenceConfig:
         assert isinstance(cfg.timesteps, TimestepConfig)
         assert isinstance(cfg.shapes, TensorShapes)
 
-    def test_extra_fields_rejected(self):
-        """Extra fields at the DatasetInferenceConfig level are rejected."""
+    def test_extra_fields_preserved(self):
+        """Extra fields at the DatasetInferenceConfig level are preserved."""
         block = _minimal_dataset_block()
         block["unexpected_key"] = "value"
-        with pytest.raises(ValidationError):
-            DatasetInferenceConfig.model_validate(block)
+        cfg = DatasetInferenceConfig.model_validate(block)
+        assert cfg.model_extra["unexpected_key"] == "value"
 
     def test_missing_data_indices_raises(self):
         """Missing data_indices raises ValidationError."""
