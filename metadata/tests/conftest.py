@@ -219,3 +219,53 @@ def multi_dataset_inference_dict() -> dict:
         "era5_1deg": _make_dataset_block("era5_1deg", var_offset=0),
         "cerra_025deg": _make_dataset_block("cerra_025deg", var_offset=10),
     }
+
+
+@pytest.fixture()
+def sample_v0_dict() -> dict:
+    """Minimal valid V0 metadata dict for migration testing.
+
+    Returns
+    -------
+    dict
+        V0 metadata dict with the essential structure for v0_to_v1 migration.
+    """
+    return {
+        "schema_version": "0.0",
+        "config": {
+            "data": {
+                "timestep": "6h",
+                "forcing": ["lsm"],
+                "diagnostic": [],
+            },
+            "training": {
+                "multistep_input": 2,
+                "precision": "16-mixed",
+            },
+        },
+        "data_indices": {
+            "data": {
+                "input": {
+                    "full": [0, 1, 2, 3, 4],
+                },
+                "output": {
+                    "full": [0, 1, 2, 3],
+                },
+            },
+            "model": {
+                "output": {
+                    "full": [0, 1, 2, 3],
+                    "prognostic": [0, 1, 2, 3],
+                },
+            },
+        },
+        "dataset": {
+            "variables": ["2t", "msl", "10u", "10v", "lsm"],
+            "shape": [1000, 5, 1, 40320],
+            "frequency": "6h",
+        },
+        "provenance_training": {
+            "git_sha": "abc123",
+            "hostname": "train-node-01",
+        },
+    }

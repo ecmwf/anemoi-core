@@ -156,13 +156,16 @@ def migrate_v0_to_v1(old: MetadataV0) -> MetadataV1:
     # Build the V1 dict, carrying forward all permissive sections
     # ------------------------------------------------------------------
     # Use the original (non-nested) dataset dict for V1's permissive section.
+    # V0's `provenance_training` maps to V1's `provenance` field.
+    # V0's `data_indices` is intentionally NOT carried forward (superseded by
+    # the synthesised `metadata_inference` block above).
     v1_dict: dict[str, Any] = {
         "schema_version": "1.0",
         "original_schema_version": "0.0",
         "metadata_inference": metadata_inference,
         "config": dict(old.config),  # type: ignore[reportAttributeAccessIssue]
         "dataset": dict(old.dataset),  # type: ignore[reportAttributeAccessIssue]
-        "provenance_training": dict(old.provenance_training),  # type: ignore[reportAttributeAccessIssue]
+        "provenance": dict(old.provenance_training),  # type: ignore[reportAttributeAccessIssue]
     }
 
     # Carry forward any extra top-level keys from V0 (e.g. run_id, uuid,
