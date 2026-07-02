@@ -388,7 +388,28 @@ def _edit_metadata(
                         array_paths = metadata_dict.get("supporting_arrays_paths", {})
                         _write_array_to_bytes(supporting_arrays, "", array_paths, dst_zf)
 
+        # Flush the temp file's contents to stable storage before the rename,
+        # so a power loss cannot persist the rename while the data is still in
+        # the page cache (which would leave a truncated checkpoint behind).
+        fd = os.open(tmp_path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
         tmp_path.replace(path)
+
+        # Make the rename itself durable by syncing the containing directory.
+        # Not supported on Windows; best-effort elsewhere.
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:  # pragma: no cover - platform dependent
+            pass
+
         LOG.info("Updated metadata in %s", path)
     except Exception:
         if tmp_path.exists():
