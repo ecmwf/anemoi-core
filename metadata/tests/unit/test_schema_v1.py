@@ -226,6 +226,73 @@ class TestMetadataV1NullSectionRobustness:
         assert meta.get_dataloader_config() == {}
 
 
+class TestMetadataV1ForwardCompatibility:
+    """Unknown fields in nested inference models are preserved."""
+
+    def test_extra_field_in_timesteps_preserved(self, sample_v1_dict):
+        """Unknown field in per-dataset timesteps block is preserved."""
+        # Add an unknown field to the timesteps block
+        dataset_key = sample_v1_dict["metadata_inference"]["dataset_names"][0]
+        sample_v1_dict["metadata_inference"][dataset_key]["timesteps"]["window_size"] = "12h"
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        # Access the timesteps block
+        timesteps = meta.metadata_inference.datasets[dataset_key].timesteps
+        # The extra field should be in model_extra
+        assert timesteps.model_extra["window_size"] == "12h"
+
+    def test_extra_field_in_data_indices_preserved(self, sample_v1_dict):
+        """Unknown field in data_indices is preserved."""
+        dataset_key = sample_v1_dict["metadata_inference"]["dataset_names"][0]
+        sample_v1_dict["metadata_inference"][dataset_key]["data_indices"]["future_field"] = 42
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        data_indices = meta.metadata_inference.datasets[dataset_key].data_indices
+        assert data_indices.model_extra["future_field"] == 42
+
+    def test_extra_field_in_shapes_preserved(self, sample_v1_dict):
+        """Unknown field in shapes block is preserved."""
+        dataset_key = sample_v1_dict["metadata_inference"]["dataset_names"][0]
+        sample_v1_dict["metadata_inference"][dataset_key]["shapes"]["patch_size"] = [
+            16,
+            16,
+        ]
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        shapes = meta.metadata_inference.datasets[dataset_key].shapes
+        assert shapes.model_extra["patch_size"] == [16, 16]
+
+    def test_extra_preserved_on_round_trip(self, sample_v1_dict):
+        """Extra fields survive a round-trip through to_dict() / from_dict()."""
+        dataset_key = sample_v1_dict["metadata_inference"]["dataset_names"][0]
+        sample_v1_dict["metadata_inference"][dataset_key]["timesteps"]["custom_flag"] = "test"
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        dumped = meta.to_dict()
+
+        # The extra field should be in the dumped dict
+        assert dumped["metadata_inference"]["datasets"][dataset_key]["timesteps"]["custom_flag"] == "test"
+
+        # Round-trip through from_dict
+        restored = MetadataV1.from_dict(dumped)
+        restored_timesteps = restored.metadata_inference.datasets[dataset_key].timesteps
+        assert restored_timesteps.model_extra["custom_flag"] == "test"
+
+    def test_existing_accessors_unaffected_by_extras(self, sample_v1_dict):
+        """Extra fields do not affect existing accessor methods."""
+        dataset_key = sample_v1_dict["metadata_inference"]["dataset_names"][0]
+        sample_v1_dict["metadata_inference"][dataset_key]["timesteps"]["extra"] = "value"
+        sample_v1_dict["metadata_inference"][dataset_key]["data_indices"]["extra"] = "value"
+        sample_v1_dict["metadata_inference"][dataset_key]["shapes"]["extra"] = "value"
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+
+        # All existing accessors should work normally
+        assert meta.get_timestep() == "6h"
+        assert isinstance(meta.get_variable_indices(), dict)
+        assert isinstance(meta.get_tensor_shapes(), dict)
+
+
 class TestMetadataV1OutputTimestepPrecedence:
     """config.task.output_timestep takes precedence over dataset.frequency."""
 

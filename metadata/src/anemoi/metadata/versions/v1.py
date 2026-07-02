@@ -15,6 +15,12 @@ holds a strictly-typed :class:`InferenceMetadata` block alongside permissive
 ``dict`` sections for training, dataset, environment, and provenance data that
 do not need to be validated at this layer.
 
+The nested per-dataset models (:class:`DatasetInferenceConfig`,
+:class:`DataIndices`, :class:`VariableTypes`, :class:`TimestepConfig`,
+:class:`TensorShapes`) preserve unknown fields for forward compatibility. This
+allows newer checkpoint writers to add fields without breaking older readers.
+Strict validation will be enforced at write time from V2 onwards.
+
 V1 only handles checkpoints that already have a ``metadata_inference`` block.
 Legacy checkpoints (no ``metadata_inference``, no ``schema_version``) are
 handled by :class:`~anemoi.metadata.versions.v0.MetadataV0`.  A migration
@@ -40,6 +46,10 @@ class TimestepConfig(BaseModel):
     Captures the frequency string and the relative date index arrays that
     describe which input/output time-steps the model was trained with.
 
+    Unknown fields are preserved for forward compatibility; newer checkpoint
+    writers may add fields that older readers do not recognise. Strict
+    validation will be enforced at write time from V2 onwards.
+
     Attributes
     ----------
     timestep : str
@@ -52,7 +62,7 @@ class TimestepConfig(BaseModel):
         Full set of relative date indices seen during training.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
 
     timestep: str
     input_relative_date_indices: list[int]
@@ -63,6 +73,10 @@ class TimestepConfig(BaseModel):
 class DataIndices(BaseModel):
     """Mapping from variable names to tensor indices.
 
+    Unknown fields are preserved for forward compatibility; newer checkpoint
+    writers may add fields that older readers do not recognise. Strict
+    validation will be enforced at write time from V2 onwards.
+
     Attributes
     ----------
     input : dict[str, int]
@@ -71,7 +85,7 @@ class DataIndices(BaseModel):
         Mapping of variable name to its index in the output tensor.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
 
     input: dict[str, int]
     output: dict[str, int]
@@ -79,6 +93,10 @@ class DataIndices(BaseModel):
 
 class VariableTypes(BaseModel):
     """Categorisation of variables by their role in the model.
+
+    Unknown fields are preserved for forward compatibility; newer checkpoint
+    writers may add fields that older readers do not recognise. Strict
+    validation will be enforced at write time from V2 onwards.
 
     Attributes
     ----------
@@ -92,7 +110,7 @@ class VariableTypes(BaseModel):
         Variables that are output-only diagnostics (not fed back as input).
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
 
     forcing: list[str] = Field(default_factory=list)
     target: list[str] = Field(default_factory=list)
@@ -102,6 +120,10 @@ class VariableTypes(BaseModel):
 
 class TensorShapes(BaseModel):
     """Shape metadata for the model's input/output tensors.
+
+    Unknown fields are preserved for forward compatibility; newer checkpoint
+    writers may add fields that older readers do not recognise. Strict
+    validation will be enforced at write time from V2 onwards.
 
     Attributes
     ----------
@@ -115,7 +137,7 @@ class TensorShapes(BaseModel):
         Number of grid points, or ``None`` when not applicable.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
 
     variables: int
     input_timesteps: int
@@ -129,6 +151,10 @@ class DatasetInferenceConfig(BaseModel):
     Bundles together the index mappings, variable categorisation, temporal
     stepping, and tensor-shape information needed by inference for one dataset.
 
+    Unknown fields are preserved for forward compatibility; newer checkpoint
+    writers may add fields that older readers do not recognise. Strict
+    validation will be enforced at write time from V2 onwards.
+
     Attributes
     ----------
     data_indices : DataIndices
@@ -141,7 +167,7 @@ class DatasetInferenceConfig(BaseModel):
         Tensor shape metadata.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
 
     data_indices: DataIndices
     variable_types: VariableTypes

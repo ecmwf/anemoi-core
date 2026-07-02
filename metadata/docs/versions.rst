@@ -30,7 +30,10 @@ The initial metadata schema. Its design follows a two-section principle:
   :class:`~anemoi.metadata.versions.v1.InferenceMetadata` block that captures
   everything inference needs at runtime — dataset names, variable index mappings,
   variable categories, timestep configuration, and tensor shapes.  This section
-  is frozen and validated by Pydantic.
+  is frozen and validated by Pydantic. The nested per-dataset models preserve
+  unknown fields for forward compatibility, allowing newer checkpoint writers to
+  add fields without breaking older readers. Strict validation will be enforced
+  at write time from V2 onwards.
 
 - **Permissive dict sections** (``config``, ``training``, ``dataset``,
   ``environment``, ``provenance``): Plain ``dict`` fields that accept arbitrary
