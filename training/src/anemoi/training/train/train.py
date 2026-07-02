@@ -668,7 +668,11 @@ class AnemoiTrainer(ABC):
         if hasattr(self.config.model, "recompile_limit"):
             torch._dynamo.config.cache_size_limit = int(self.config.model.recompile_limit)
             torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.model.recompile_limit), 256)
-            LOGGER.info("Recompile limit set to %d per kernel, %d accumulated", torch._dynamo.config.cache_size_limit, torch._dynamo.config.accumulated_cache_size_limit)
+            LOGGER.info(
+                "Recompile limit set to %d per kernel, %d accumulated",
+                torch._dynamo.config.cache_size_limit,
+                torch._dynamo.config.accumulated_cache_size_limit,
+            )
 
     @cached_property
     def strategy(self) -> Any:
