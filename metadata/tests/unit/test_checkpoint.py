@@ -575,3 +575,64 @@ class TestPrefixCollisionGuard:
         # The similarly-named directory's file should survive.
         with zipfile.ZipFile(ckpt, "r") as zf:
             assert "archive/anemoi-metadata-old/foo.numpy" in zf.namelist()
+
+
+class TestEditCommandFailure:
+    """Bug fix: edit command preserves user edits when editor exits non-zero."""
+
+    def test_editor_failure_preserves_edited_file(self, tmp_path, sample_v1_dict):
+        """When editor exits non-zero, edited file is preserved to a persistent location."""
+        import copy
+
+        from anemoi.metadata.commands.edit import _preserve_edited_file
+        from anemoi.metadata.commands.edit import _serialise_to_string
+
+        # Create a temporary file with edited content.
+        tmp_file = tmp_path / "edited.json"
+        edited_data = copy.deepcopy(sample_v1_dict)
+        edited_data["metadata_inference"]["seed"] = 12345
+
+        with open(tmp_file, "w") as f:
+            json.dump(edited_data, f, indent=4, sort_keys=True)
+
+        # Original serialised content (different from edited).
+        original = _serialise_to_string(sample_v1_dict, use_yaml=False)
+
+        # Preserve the edited file.
+        preserved = _preserve_edited_file(str(tmp_file), "json", original)
+
+        try:
+            assert preserved is not None
+            assert Path(preserved).exists()
+            assert "anemoi-metadata-edit-" in preserved
+
+            # Verify content was preserved.
+            with open(preserved) as f:
+                preserved_data = json.load(f)
+            assert preserved_data["metadata_inference"]["seed"] == 12345
+        finally:
+            # Clean up.
+            if preserved and Path(preserved).exists():
+                Path(preserved).unlink()
+
+    def test_editor_failure_no_preservation_if_unchanged(self, tmp_path, sample_v1_dict):
+        """Edited file is not preserved if content matches original."""
+        from anemoi.metadata.commands.edit import _preserve_edited_file
+        from anemoi.metadata.commands.edit import _serialise_to_string
+
+        tmp_file = tmp_path / "unchanged.json"
+        original = _serialise_to_string(sample_v1_dict, use_yaml=False)
+
+        with open(tmp_file, "w") as f:
+            f.write(original)
+
+        # Try to preserve (should return None because content is unchanged).
+        preserved = _preserve_edited_file(str(tmp_file), "json", original)
+        assert preserved is None
+
+    def test_editor_failure_no_preservation_if_file_missing(self, tmp_path):
+        """No preservation if temporary file doesn't exist."""
+        from anemoi.metadata.commands.edit import _preserve_edited_file
+
+        preserved = _preserve_edited_file(str(tmp_path / "nonexistent.json"), "json", "original content")
+        assert preserved is None
