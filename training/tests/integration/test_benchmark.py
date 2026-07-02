@@ -154,6 +154,9 @@ def test_benchmark_training_cycle(
     # determine store from benchmark config
     config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
     user, hostname, path = parse_benchmark_config(config_path)
-    store: str = f"ssh://{user}@{hostname}:{path}"
+    if any(value is None for value in (user, hostname, path)):
+        LOGGER.info("Skipping benchmark reporting: incomplete benchmark server config in %s", config_path)
+        return
 
+    store: str = f"ssh://{user}@{hostname}:{path}"
     benchmark(cfg, test_case, store)
