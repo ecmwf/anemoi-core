@@ -342,19 +342,9 @@ class LossVariableMapper(BaseLossWrapper):
         target_filtered = target[..., target_indices]
 
         # torch.compile performance change
-        # mark pred_filtered and target_filtered as dynamic shapes
-        # (they change based on *_indices)
-        # Marking them as dynamic prevents torch from recompiling
-        # everytime the *_indices change
-        # Tensors must be marked as dynamic before being passed to the compiled function
-        dynamic_indices = True  # TODO(cathal) set as true only for validation
-        if dynamic_indices:
-            torch._dynamo.mark_dynamic(pred_filtered, -1)
-            torch._dynamo.mark_dynamic(target_filtered, -1)
-
-            # prevent changing stride forcing specialisation
-            pred_filtered = pred_filtered.contiguous()
-            target_filtered = target_filtered.contiguous()
+        # Make contiguous to prevent a changing stride forcing specialisation
+        pred_filtered = pred_filtered.contiguous()
+        target_filtered = target_filtered.contiguous()
 
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(
