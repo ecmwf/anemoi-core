@@ -22,8 +22,15 @@ Writing a migration
 Minor version migrations
 ------------------------
 For minor versions (e.g. 1.0 -> 1.1) that share the same schema class,
-the migration typically just bumps the version and optionally populates
-new optional fields::
+register the minor version with::
+
+    MetadataRegistry.register_minor("1.1")
+
+The migrator automatically bridges schema-sharing versions with a no-op
+version bump (using ``copy_with(schema_version="1.1")``), so no explicit
+migration function is needed **unless** you need to populate or transform
+fields.  If you do need to transform fields, register a migration function
+as usual::
 
     @MetadataMigrator.register_migration("1.0", "1.1")
     def migrate_v1_0_to_v1_1(old: MetadataV1) -> MetadataV1:
@@ -31,11 +38,6 @@ new optional fields::
             schema_version="1.1",
             new_optional_field="default_value",  # populate new field
         )
-
-If a minor adds no mandatory transforms (just new optional fields that
-default correctly), you can skip registering a migration entirely --
-the system will use ``allow_stop=True`` at load time and the schema
-class already accepts the new fields via ``extra="allow"``.
 
 Tips
 ----

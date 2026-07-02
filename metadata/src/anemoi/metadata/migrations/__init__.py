@@ -29,6 +29,8 @@ How to add a migration
 The auto-import loop at the bottom of this file imports every module in
 the package when ``anemoi.metadata.migrations`` is first imported.  This
 mirrors the pattern used by ``versions/__init__.py`` for schema classes.
+Modules whose names start with an underscore (e.g. ``_example.py``) are
+skipped to allow for templates and private utilities.
 
 Notes
 -----
@@ -44,5 +46,7 @@ import pkgutil
 
 # Auto-import all modules in this package to trigger @register_migration
 # decorators.  New migration files are picked up without any changes here.
+# Skip underscore-prefixed modules (templates, examples, private utilities).
 for _importer, _name, _ispkg in pkgutil.iter_modules(__path__):
-    importlib.import_module(f".{_name}", __name__)
+    if not _name.startswith("_"):
+        importlib.import_module(f".{_name}", __name__)
