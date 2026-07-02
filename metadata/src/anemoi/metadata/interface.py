@@ -34,6 +34,287 @@ if TYPE_CHECKING:
     from .base import MetadataContract
 
 
+class DatasetView:
+    """Read-only per-dataset view over a :class:`Metadata` instance.
+
+    Provides convenient access to per-dataset properties and methods
+    without needing to pass the dataset name to each call. All properties
+    delegate to the underlying contract methods with the bound dataset name.
+
+    The underlying metadata model is frozen (immutable), so all properties
+    that do not require parameters are cached using :func:`functools.cached_property`.
+
+    Parameters
+    ----------
+    raw : MetadataContract
+        The underlying pydantic metadata instance.
+    name : str
+        The dataset name this view is bound to.
+
+    Examples
+    --------
+    >>> metadata = Metadata.from_checkpoint("model.ckpt")
+    >>> view = metadata.dataset("era5_1deg")
+    >>> print(view.timestep)
+    '6h'
+    >>> print(view.multi_step_input)
+    2
+    >>> print(view.variable_indices)
+    {'2t': 0, 'msl': 1, ...}
+    """
+
+    def __init__(self, raw: "MetadataContract", name: str) -> None:
+        """Initialise with a raw metadata instance and dataset name.
+
+        Parameters
+        ----------
+        raw : MetadataContract
+            The underlying pydantic metadata instance.
+        name : str
+            The dataset name this view is bound to.
+        """
+        self._raw = raw
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        """The dataset name this view is bound to.
+
+        Returns
+        -------
+        str
+            Dataset name.
+        """
+        return self._name
+
+    @cached_property
+    def timestep(self) -> str:
+        """Model timestep frequency string for this dataset.
+
+        Returns
+        -------
+        str
+            Frequency string (e.g. ``"6h"``).
+        """
+        return self._raw.get_timestep(self._name)
+
+    @cached_property
+    def input_relative_date_indices(self) -> list[int]:
+        """Input relative date indices for this dataset.
+
+        Returns
+        -------
+        list[int]
+            Relative date indices used as model inputs (e.g. ``[-1, 0]``).
+        """
+        return self._raw.get_input_relative_date_indices(self._name)
+
+    @cached_property
+    def output_relative_date_indices(self) -> list[int]:
+        """Output relative date indices for this dataset.
+
+        Returns
+        -------
+        list[int]
+            Relative date indices produced as model outputs (e.g. ``[1]``).
+        """
+        return self._raw.get_output_relative_date_indices(self._name)
+
+    @cached_property
+    def multi_step_input(self) -> int:
+        """Number of input time-steps the model consumes for this dataset.
+
+        Derived from the length of the input relative date indices.
+
+        Returns
+        -------
+        int
+            Count of input time-steps.
+        """
+        return len(self.input_relative_date_indices)
+
+    @cached_property
+    def multi_step_output(self) -> int:
+        """Number of output time-steps the model produces for this dataset.
+
+        Derived from the length of the output relative date indices.
+
+        Returns
+        -------
+        int
+            Count of output time-steps.
+        """
+        return len(self.output_relative_date_indices)
+
+    @cached_property
+    def variable_indices(self) -> dict[str, int]:
+        """Input variable name to tensor index mapping for this dataset.
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of variable name to its index in the input tensor.
+        """
+        return self._raw.get_variable_indices(self._name)
+
+    @cached_property
+    def output_variable_indices(self) -> dict[str, int]:
+        """Output variable name to tensor index mapping for this dataset.
+
+        Returns
+        -------
+        dict[str, int]
+            Mapping of variable name to its index in the output tensor.
+        """
+        return self._raw.get_output_variable_indices(self._name)
+
+    @cached_property
+    def variable_types(self) -> dict[str, list[str]]:
+        """Variable categories by role for this dataset.
+
+        Returns
+        -------
+        dict[str, list[str]]
+            Dictionary mapping category names (``"forcing"``, ``"prognostic"``,
+            ``"diagnostic"``, ``"target"``) to lists of variable names.
+        """
+        return self._raw.get_variable_types(self._name)
+
+    @cached_property
+    def tensor_shapes(self) -> dict[str, Any]:
+        """Tensor shape metadata for this dataset.
+
+        Returns
+        -------
+        dict[str, Any]
+            Shape metadata with keys ``"variables"``, ``"input_timesteps"``,
+            ``"ensemble"``, and ``"grid"``.
+        """
+        return self._raw.get_tensor_shapes(self._name)
+
+    @cached_property
+    def grid_points(self) -> int | None:
+        """Number of grid points for this dataset, or ``None`` if unknown.
+
+        Returns
+        -------
+        int or None
+            Number of grid points, or ``None`` if not recorded.
+        """
+        return self._raw.get_grid_points(self._name)
+
+    @cached_property
+    def variables_metadata(self) -> dict[str, dict[str, Any]]:
+        """Per-variable metadata (MARS keys, flags, units) for this dataset.
+
+        Returns
+        -------
+        dict[str, dict[str, Any]]
+            Mapping of variable names to their metadata dicts.
+            Returns an empty dict if not available.
+        """
+        return self._raw.get_variables_metadata(self._name)
+
+    @cached_property
+    def accumulations(self) -> list[str]:
+        """Variables that are accumulations (need de-accumulation) for this dataset.
+
+        Returns
+        -------
+        list[str]
+            Variable names that require de-accumulation at inference time.
+        """
+        return self._raw.get_accumulations(self._name)
+
+    @cached_property
+    def computed_forcings(self) -> list[str]:
+        """Variables computed at inference time (not retrieved from data) for this dataset.
+
+        Returns
+        -------
+        list[str]
+            Variable names that are computed on the fly during inference.
+        """
+        return self._raw.get_computed_forcings(self._name)
+
+    @cached_property
+    def data_request(self) -> dict[str, Any]:
+        """Data request parameters (grid, area, etc.) for this dataset.
+
+        Returns
+        -------
+        dict[str, Any]
+            Data request parameters.  Returns an empty dict if not available.
+        """
+        return self._raw.get_data_request(self._name)
+
+    @cached_property
+    def data_frequency(self) -> str | None:
+        """Data frequency string for this dataset, or ``None`` if not recorded.
+
+        Returns
+        -------
+        str or None
+            Frequency string (e.g. ``"6h"``), or ``None`` if not recorded.
+        """
+        return self._raw.get_data_frequency(self._name)
+
+    @cached_property
+    def sources(self) -> list[dict[str, Any]]:
+        """Source dataset configurations for this dataset.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            Source dataset configurations.  Returns an empty list if not
+            available.
+        """
+        return self._raw.get_sources(self._name)
+
+    @cached_property
+    def open_dataset_args(self) -> dict[str, Any]:
+        """Arguments for opening the training dataset for this dataset.
+
+        Returns
+        -------
+        dict[str, Any]
+            Arguments for opening the training dataset.  Returns an empty dict
+            if not available.
+        """
+        return self._raw.get_open_dataset_args(self._name)
+
+    def dataloader_config(self, partition: str = "training") -> dict[str, Any]:
+        """Dataloader dataset configuration for a given partition for this dataset.
+
+        Extracts the dataset configuration from
+        ``config.dataloader.<partition>``, handling multi-dataset nesting
+        and the ``dataset_config`` key used by newer checkpoints.
+
+        Parameters
+        ----------
+        partition : str, optional
+            The partition name (e.g. ``"training"``, ``"validation"``),
+            by default ``"training"``.
+
+        Returns
+        -------
+        dict[str, Any]
+            The dataloader dataset configuration.  Returns an empty dict
+            if the partition or config section is absent.
+        """
+        return self._raw.get_dataloader_config(partition, self._name)
+
+    def __repr__(self) -> str:
+        """String representation.
+
+        Returns
+        -------
+        str
+            Repr string showing the dataset name.
+        """
+        return f"DatasetView(name={self._name!r})"
+
+
 class Metadata(VariablesMixin, ValidationMixin):
     """User-facing metadata interface.
 
@@ -243,6 +524,76 @@ class Metadata(VariablesMixin, ValidationMixin):
             Dataset names as recorded in the inference metadata.
         """
         return self._raw.get_dataset_names()
+
+    def dataset(self, name: str | None = None) -> DatasetView:
+        """Return a per-dataset view for convenient access to dataset-specific properties.
+
+        When *name* is ``None`` the view is bound to the first dataset.
+        Multi-dataset consumers can use this method to access per-dataset
+        properties without needing to pass the dataset name to each call.
+
+        Parameters
+        ----------
+        name : str | None, optional
+            Dataset name to query.  If ``None`` (default), the first entry
+            in :attr:`dataset_names` is used.
+
+        Returns
+        -------
+        DatasetView
+            Read-only view over the metadata for the specified dataset.
+
+        Raises
+        ------
+        IndexError
+            If *name* is ``None`` and :attr:`dataset_names` is empty.
+        KeyError
+            If *name* is not in :attr:`dataset_names`.
+
+        Examples
+        --------
+        >>> metadata = Metadata.from_checkpoint("model.ckpt")
+        >>> view = metadata.dataset("era5_1deg")
+        >>> print(view.timestep)
+        '6h'
+        >>> print(view.multi_step_input)
+        2
+
+        >>> # Default to first dataset
+        >>> first = metadata.dataset()
+        >>> print(first.name)
+        'era5_1deg'
+        """
+        if name is None:
+            if not self.dataset_names:
+                msg = "Cannot get default dataset: dataset_names is empty"
+                raise IndexError(msg)
+            name = self.dataset_names[0]
+        elif name not in self.dataset_names:
+            msg = f"Dataset {name!r} not found. Available datasets: {self.dataset_names!r}"
+            raise KeyError(msg)
+        return DatasetView(self._raw, name)
+
+    @cached_property
+    def datasets(self) -> dict[str, DatasetView]:
+        """Mapping of all dataset names to their views.
+
+        Iteration order follows :attr:`dataset_names`.
+
+        Returns
+        -------
+        dict[str, DatasetView]
+            Dictionary mapping dataset names to their read-only views.
+
+        Examples
+        --------
+        >>> metadata = Metadata.from_checkpoint("multi_dataset.ckpt")
+        >>> for name, view in metadata.datasets.items():
+        ...     print(f"{name}: {view.timestep}")
+        era5_1deg: 6h
+        cerra_025deg: 1h
+        """
+        return {name: DatasetView(self._raw, name) for name in self.dataset_names}
 
     @cached_property
     def task(self) -> str | None:
