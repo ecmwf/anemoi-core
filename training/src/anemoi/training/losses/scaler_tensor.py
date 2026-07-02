@@ -533,11 +533,40 @@ class ScaleTensor(nn.Module):
         resolved_scalers: dict[str, TENSOR_SPEC] = {}
 
         for name, (dims, scaler) in self.tensors.items():
-            if any(d < 0 for d in dims):
-                dims = [d if d >= 0 else ndim + d for d in dims]
-            resolved_scalers[name] = (dims, scaler)
+            # Cast to plain int: dims may hold TensorDim (IntEnum) members, and
+            # torch.compile/Dynamo does not support the < / >= operators on enums.
+            int_dims = [int(d) for d in dims]
+            if any(d < 0 for d in int_dims):
+                int_dims = [d if d >= 0 else ndim + d for d in int_dims]
+            resolved_scalers[name] = (int_dims, scaler)
 
         return ScaleTensor(**resolved_scalers)
+
+    @staticmethod
+    def _subset_tensor(
+        x: torch.Tensor,
+        subset_indices: tuple[int, ...] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, int | None]:
+        if subset_indices is None or (len(subset_indices) == 1 and subset_indices[0] is Ellipsis):
+            return x, None, None
+
+        if subset_indices[0] is Ellipsis:
+            subset_dim = -1
+            subset_index = subset_indices[-1]
+        else:
+            subset_dim = 0
+            subset_index = subset_indices
+
+        if not isinstance(subset_index, torch.Tensor):
+            subset_index = torch.as_tensor(
+                subset_index,
+                device=x.device,
+                dtype=torch.long,
+            )
+        else:
+            subset_index = subset_index.to(device=x.device, dtype=torch.long)
+
+        return torch.index_select(x, dim=subset_dim, index=subset_index), subset_index, subset_dim
 
     def scale_iteratively(
         self,
@@ -560,7 +589,8 @@ class ScaleTensor(nn.Module):
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset = x[subset_indices] if subset_indices is not None else x
+        x_subset, subset_index, subset_dim = self._subset_tensor(x, subset_indices)
+
         out = x_subset.clone()
         ndim = x.ndim
         tensors = self.resolve(ndim).tensors
@@ -582,8 +612,8 @@ class ScaleTensor(nn.Module):
 
             reshaped_scaler = reshaped_scaler.expand_as(x)
 
-            if subset_indices is not None:
-                reshaped_scaler = reshaped_scaler[subset_indices]
+            if subset_index is not None:
+                reshaped_scaler = torch.index_select(reshaped_scaler, dim=subset_dim, index=subset_index)
 
             out = out * reshaped_scaler
 
@@ -611,12 +641,16 @@ class ScaleTensor(nn.Module):
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset = x[subset_indices] if subset_indices is not None else x
-        scaler = self.get_scaler(x_subset.ndim)
+        x_subset, subset_index, subset_dim = self._subset_tensor(x, subset_indices)
+        scaler = self.get_scaler(x.ndim)
         if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
-            slices = [slice(None)] * x_subset.ndim
+            slices = [slice(None)] * x.ndim
             slices[TensorDim.GRID] = grid_shard_slice
             scaler = scaler[tuple(slices)]
+
+        if subset_index is not None:
+            scaler = scaler.expand_as(x)
+            scaler = torch.index_select(scaler, dim=subset_dim, index=subset_index)
 
         return x_subset * scaler
 
