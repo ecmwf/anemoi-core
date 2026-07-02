@@ -176,6 +176,22 @@ def test_optimised_rffts_match_naive(sht_setup):
     torch.testing.assert_close(direct.rfft_rings_reduced_graphed(x), direct.rfft_rings_reduced_naive(x))
 
 
+@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
+def test_optimised_irffts_match_naive(sht_setup):
+    """Optimised FFT implementations should match the naive implementation."""
+    truncation = sht_setup["truncation"]
+    dtype = sht_setup["dtype"]
+    inverse = sht_setup["inverse"]
+
+    # (nfields, nlat, zonal wavenumber)
+    shape = (1, 2 * (truncation + 1), truncation + 1)
+    x = torch.complex(torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype))
+    x[0, :, 0].imag = 0.0  # m = 0 modes must be real
+
+    torch.testing.assert_close(inverse.irfft_rings_reduced_cuda(x), inverse.irfft_rings_reduced_naive(x))
+    torch.testing.assert_close(inverse.irfft_rings_reduced_graphed(x), inverse.irfft_rings_reduced_naive(x))
+
+
 @pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
