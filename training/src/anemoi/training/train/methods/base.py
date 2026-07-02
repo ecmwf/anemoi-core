@@ -1034,7 +1034,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metric_value = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
                 # Detach and clone the metric value to avoid in-place modifications affecting the original tensor
                 # This was impacting cuda graphs
-                # TODO(cathal) double check now that everything compiles
+                # TODO(cathal): double check now that everything compiles
                 metrics[metric_step_name] = metric_value.detach().clone()
 
         return metrics

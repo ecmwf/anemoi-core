@@ -32,15 +32,20 @@ from anemoi.utils.testing import TemporaryDirectoryForTestData
 LOGGER = logging.getLogger(__name__)
 
 
-def pytest_configure(config):
+# NOTE: Do not delete
+# It is not called explictly, but
+# is run by pytest during initalisation
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     # suppress logging spam when using torch compile
-    # TODO(cathal) are there better ways to suppress then setting to warning?
     logging.getLogger("torch.__trace").setLevel(logging.WARNING)
     logging.getLogger("torch.__trace").propagate = False
 
 
+# NOTE: Do not delete
+# It is not called explictly, but
+# it runs before every integration test
 @pytest.fixture(autouse=True)
-def _reset_torch_compile(tmp_path, monkeypatch) -> None:
+def _reset_torch_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset torch compile state before each test."""
     import torch._dynamo
 
