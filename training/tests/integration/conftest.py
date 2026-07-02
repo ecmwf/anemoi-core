@@ -11,13 +11,13 @@
 import gc
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Union
 
 import psutil
 import pytest
 import torch
-import shutil
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
@@ -38,6 +38,7 @@ def pytest_configure(config):
     logging.getLogger("torch.__trace").setLevel(logging.WARNING)
     logging.getLogger("torch.__trace").propagate = False
 
+
 @pytest.fixture(autouse=True)
 def _reset_torch_compile(tmp_path, monkeypatch) -> None:
     """Reset torch compile state before each test."""
@@ -50,7 +51,7 @@ def _reset_torch_compile(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
 
     torch._dynamo.reset()
-    yield
+    return
 
 
 @pytest.fixture(autouse=True)
