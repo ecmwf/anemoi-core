@@ -18,12 +18,20 @@ _DENSITY_TRANSFORMS = ["fft2d", "dct2d", "sht"]
 
 
 def _make_density_transform(kind: str):
-    """Return ``(transform, n_spatial_points)`` for the spectral-density contract."""
+    """Return ``(transform, n_spatial_points)`` for the spectral-density contract.
+
+    The Cartesian transforms only build their radial-band index on demand; call the
+    registrar here so the test mirrors what ``SpectralAMSELoss`` does at construction.
+    """
     if kind == "fft2d":
-        return FFT2D(x_dim=8, y_dim=6), 8 * 6
+        t = FFT2D(x_dim=8, y_dim=6)
+        t._register_radial_bands()
+        return t, 8 * 6
     if kind == "dct2d":
         pytest.importorskip("torch_dct")
-        return DCT2D(x_dim=8, y_dim=6), 8 * 6
+        t = DCT2D(x_dim=8, y_dim=6)
+        t._register_radial_bands()
+        return t, 8 * 6
     if kind == "sht":
         t = OctahedralSHT(nlat=8)
         return t, t._sht.n_grid_points
@@ -35,7 +43,7 @@ def test_radial_band_index() -> None:
     # 3x4 grid: |fftfreq*N| gives ky=[0,1,2,1], kx=[0,1,1]; band = round(sqrt(ky^2 + kx^2)),
     # flattened row-major (y outer, x inner).
     t = FFT2D(x_dim=3, y_dim=4)
-    t.power_spectral_density(t.forward(torch.zeros(1, 1, 1, 12, 1)))  # builds the index lazily
+    t._register_radial_bands()
     assert torch.equal(t.radial_band_index, torch.tensor([0, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1]))
     assert t.n_radial_bands == 3
 

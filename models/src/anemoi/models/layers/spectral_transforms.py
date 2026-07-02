@@ -58,12 +58,14 @@ class Cartesian2DTransform(SpectralTransform):
     # "fft": signed FFT wavenumbers (|k| in 0..N//2); "index": cosine indices 0..N-1.
     _radial_wavenumber_kind: str = "fft"
 
-    def _register_radial_geometry(self) -> None:
-        """Register the 1-D radial-wavenumber axes as non-persistent buffers.
+    def _register_radial_bands(self) -> None:
+        """Register the radial-band index buffer used by PSD/CSD.
 
-        These are very cheap so we do register them as buffers eagerly. It allows us
-        to avoid manual device placement later.
+        Opt-in (not called from ``__init__``) to avoid the cost when unused;
+        loss functions that call PSD/CSD (e.g. ``SpectralAMSELoss``) must call this. Idempotent.
         """
+        if hasattr(self, "_radial_band_index"):
+            return
         if self._radial_wavenumber_kind == "fft":
             ky = (torch.fft.fftfreq(self.y_dim) * self.y_dim).abs()
             kx = (torch.fft.fftfreq(self.x_dim) * self.x_dim).abs()
@@ -72,29 +74,20 @@ class Cartesian2DTransform(SpectralTransform):
             kx = torch.arange(self.x_dim, dtype=torch.float32)
         else:
             raise ValueError(f"Unknown radial wavenumber kind: {self._radial_wavenumber_kind}")
-        self.register_buffer("_radial_ky", ky, persistent=False)
-        self.register_buffer("_radial_kx", kx, persistent=False)
-
-    def _ensure_radial_bands(self) -> None:
-        """Build the ``(per-coefficient band index, number of bands)`` on first use."""
-        if "_radial_band_index" in self._buffers:
-            return
-        ky_grid, kx_grid = torch.meshgrid(self._radial_ky, self._radial_kx, indexing="ij")
+        ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing="ij")
         band = torch.sqrt(ky_grid**2 + kx_grid**2).round().long().reshape(-1)
         self.register_buffer("_radial_band_index", band, persistent=False)
-        self._n_radial_bands = int(band.max().item()) + 1
+        self.n_radial_bands = int(band.max().item()) + 1
 
     @property
     def radial_band_index(self) -> torch.Tensor:
         """Flattened ``(ky*kx,)`` radial-band id for each spectral coefficient."""
-        self._ensure_radial_bands()
+        if not hasattr(self, "_radial_band_index"):
+            raise RuntimeError(
+                f"{type(self).__name__}.radial_band_index accessed before _register_radial_bands(); "
+                "call it once on the transform (loss functions using PSD/CSD are expected to do this)."
+            )
         return self._radial_band_index
-
-    @property
-    def n_radial_bands(self) -> int:
-        """Number of radial-wavenumber bands the spectral plane collapses to."""
-        self._ensure_radial_bands()
-        return self._n_radial_bands
 
     def power_spectral_density(self, spectral_coeffs: torch.Tensor) -> torch.Tensor:
         """Return per-band power spectral density: sum of ``|coeff|^2`` within each band."""
@@ -107,7 +100,6 @@ class Cartesian2DTransform(SpectralTransform):
 
     def _sum_over_radial_bands(self, per_mode: torch.Tensor) -> torch.Tensor:
         """Collapse the two spectral dims ``[..., ky, kx, v] -> [..., L, v]``."""
-        self._ensure_radial_bands()
         *lead, ky, kx, v = per_mode.shape
         flat = per_mode.reshape(*lead, ky * kx, v)
         out = per_mode.new_zeros(*lead, self.n_radial_bands, v)
@@ -192,8 +184,6 @@ class FFT2D(Cartesian2DTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
-        self._register_radial_geometry()
-
     def prepare_for_fft(self, data: torch.Tensor) -> torch.Tensor:
         """Reshape data from flat ``(nodes, vars)`` to ``(y, x, vars)``."""
         var = data.shape[-1]
@@ -264,7 +254,6 @@ class DCT2D(Cartesian2DTransform):
         super().__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
-        self._register_radial_geometry()
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         try:

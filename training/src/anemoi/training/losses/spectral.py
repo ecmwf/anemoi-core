@@ -35,6 +35,7 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
+from anemoi.models.layers.spectral_transforms import Cartesian2DTransform
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
@@ -241,6 +242,9 @@ class SpectralAMSELoss(SpectralLoss):
         assert (
             getattr(self.transform, "patch_size", None) is None
         ), "SpectralAMSELoss does not support patch-wise FFT2D; set patch_size=None"
+        # AMSE uses the Cartesian PSD/CSD path, which needs the radial-band index.
+        if isinstance(self.transform, Cartesian2DTransform):
+            self.transform._register_radial_bands()
         self.eps = eps
 
     def forward(
