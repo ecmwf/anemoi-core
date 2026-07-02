@@ -1065,7 +1065,7 @@ torch::Tensor ring_rfft_forward_cuda(
     const int64_t lead = x.size(0);
     const int grid_points = checked_positive_int(x.size(1), "x grid dimension");
     const int nlat = checked_positive_int(lons.size(0), "latitude count");
-    const int nmodes = truncation_int + 1;
+    const int nmodes = max_nlon_int / 2 + 1;
     const auto complex_dtype = x.scalar_type() == at::kFloat ? at::kComplexFloat : at::kComplexDouble;
     auto output = torch::empty({lead, nlat, nmodes}, x.options().dtype(complex_dtype));
 
@@ -1143,9 +1143,9 @@ torch::Tensor ring_rfft_backward_cuda(
     check_backend(backend);
 
     const int nlat = checked_positive_int(lons.size(0), "latitude count");
-    const int nmodes = truncation_int + 1;
+    const int nmodes = max_nlon_int / 2 + 1;
     TORCH_CHECK(grad_output.size(1) == nlat, "grad_output latitude dimension must match metadata");
-    TORCH_CHECK(grad_output.size(2) == nmodes, "grad_output mode dimension must be truncation + 1");
+    TORCH_CHECK(grad_output.size(2) == nmodes, "grad_output mode dimension must be max_nlon / 2 + 1");
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(grad_output));
     const int64_t lead = grad_output.size(0);

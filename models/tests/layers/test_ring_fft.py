@@ -64,10 +64,11 @@ def _n320_lons_per_lat() -> list[int]:
 def _reference_ring_rfft(x: torch.Tensor, lons_per_lat: list[int], truncation: int) -> torch.Tensor:
     grid_points = sum(lons_per_lat)
     x_flat = x.reshape(-1, grid_points)
+    max_m = max(lons_per_lat) // 2 + 1
     out = torch.zeros(
         x_flat.shape[0],
         len(lons_per_lat),
-        truncation + 1,
+        max_m,
         device=x.device,
         dtype=torch.complex64 if x.dtype == torch.float32 else torch.complex128,
     )
@@ -83,10 +84,10 @@ def _reference_ring_rfft(x: torch.Tensor, lons_per_lat: list[int], truncation: i
     for nlon, (ring_indices, ring_offsets) in groups.items():
         batch = torch.stack([x_flat[:, offset : offset + nlon] for offset in ring_offsets], dim=-2)
         ring_fft = torch.fft.rfft(batch, norm="forward")
-        nmodes = min(truncation + 1, ring_fft.shape[-1])
-        out[:, ring_indices, :nmodes] = ring_fft[..., :nmodes]
+        nmodes = ring_fft.shape[-1]
+        out[:, ring_indices, :nmodes] = ring_fft
 
-    return out.reshape(*x.shape[:-1], len(lons_per_lat), truncation + 1)
+    return out.reshape(*x.shape[:-1], len(lons_per_lat), max_m)
 
 
 def _reference_ring_irfft(x: torch.Tensor, lons_per_lat: list[int]) -> torch.Tensor:

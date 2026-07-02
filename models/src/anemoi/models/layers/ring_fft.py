@@ -227,14 +227,14 @@ class _RingRFFT(torch.autograd.Function):
         ctx.grid_points = grid_points
         ctx.max_nlon = max_nlon
         ctx.save_for_backward(offsets, lons)
-        return out.reshape(*x.shape[:-1], len(lons_per_lat), truncation + 1)
+        return out.reshape(*x.shape[:-1], len(lons_per_lat), max_nlon // 2 + 1)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None, None, None]:
         truncation = ctx.truncation
         offsets, lons = ctx.saved_tensors
         nlat = lons.numel()
-        grad_flat = grad_output.contiguous().reshape(-1, nlat, truncation + 1)
+        grad_flat = grad_output.contiguous().reshape(-1, nlat, ctx.max_nlon // 2 + 1)
         grad_x = _load_ring_fft_extension().backward(
             grad_flat,
             offsets,
