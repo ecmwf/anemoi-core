@@ -409,6 +409,28 @@ Use this for global models on the reduced Gaussian grid (only N320 supported so 
 Truncation is by default set to 319 for n320 grids, but can be set to a higher or lower value in the config file.
 This truncation parameter defines how many wave numbers are included in the spectral representation.
 
+Spectral AMSE
+-------------
+
+``SpectralAMSELoss`` implements the Adjusted Mean Squared Error of Subich et al.
+(arXiv:2501.19374), which penalises per-wavenumber amplitude and phase-coherence
+errors. It works with every spectral transform: for the SHT family the wavenumber
+``L`` is the spherical-harmonic degree, while for ``fft2d`` and ``dct2d`` the
+``(ky, kx)`` plane is binned into radial wavenumber bands
+``L = round(sqrt(ky**2 + kx**2))``. This makes it usable on regular and
+limited-area grids; note that patch-wise ``fft2d`` (``patch_size`` set) is not
+supported.
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.spectral.SpectralAMSELoss
+         transform: fft2d
+         x_dim: 256
+         y_dim: 128
+
 Combining spectral and grid-point losses
 ----------------------------------------
 
