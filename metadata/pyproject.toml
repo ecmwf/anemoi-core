@@ -1,0 +1,75 @@
+# (C) Copyright 2026- Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [ "setuptools>=61", "setuptools-scm>=8" ]
+
+[project]
+name = "anemoi-metadata"
+description = "Definition of checkpoint metadata for anemoi"
+readme = "README.md"
+keywords = [ "ai", "metadata", "models" ]
+license = { file = "LICENSE" }
+authors = [
+  { name = "European Centre for Medium-Range Weather Forecasts (ECMWF)", email = "software.support@ecmwf.int" },
+]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "anemoi-utils>=0.4.43",
+  "numpy",
+  "packaging",
+  "pydantic>=2.12.5",
+  "pyyaml>=6.0.3",
+]
+optional-dependencies.dev = [
+  "anemoi-metadata[tests]",
+  "pre-commit>=3.3.3",
+]
+optional-dependencies.docs = [
+  "autodoc-pydantic>=2",
+  "nbsphinx",
+  "pandoc",
+  "rstfmt",
+  "sphinx>=8.2; python_version>='3.11'",
+  "sphinx-argparse<0.5",
+  "sphinx-rtd-theme",
+]
+optional-dependencies.tests = [ "pytest>=8" ]
+urls.Documentation = "https://anemoi.readthedocs.io/projects/metadata"
+urls.Homepage = "https://github.com/ecmwf/anemoi-core/"
+urls.Issues = "https://github.com/ecmwf/anemoi-core/issues"
+urls.Repository = "https://github.com/ecmwf/anemoi-core/"
+scripts.anemoi-metadata = "anemoi.metadata.__main__:main"
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.5.1",
+  "pytest>=9.0.2",
+]
+
+[tool.setuptools_scm]
+version_file = "src/anemoi/metadata/_version.py"
+version_scheme = "post-release"
+local_scheme = "no-local-version"
+root = ".."
+tag_regex = "^metadata-(?P<version>[vV]?[0-9]+[^-]*)"
+fallback_version = "0.0.0"
+git_describe_command = "git describe --dirty --tags --long --match 'metadata-*[0-9]*'"
