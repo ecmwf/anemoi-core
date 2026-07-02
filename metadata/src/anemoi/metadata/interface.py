@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
+from packaging.version import Version
+
 from .mixins import ValidationMixin
 from .mixins import VariablesMixin
 
@@ -146,24 +148,26 @@ class Metadata(VariablesMixin, ValidationMixin):
     # ------------------------------------------------------------------
 
     @property
-    def schema_version(self) -> str:
-        """The schema version string.
+    def schema_version(self) -> str | None:
+        """The schema version string, or ``None`` if not set.
 
         Returns
         -------
-        str
-            Semantic version string (e.g., ``"1.0"``).
+        str or None
+            Semantic version string (e.g., ``"1.0"``), or ``None`` if the
+            schema version is not set.
         """
         return self._raw.schema_version
 
     @property
-    def original_schema_version(self) -> str:
-        """The original schema version string.
+    def original_schema_version(self) -> str | None:
+        """The original schema version string, or ``None`` if not set.
 
         Returns
         -------
-        str
-            Semantic version string (e.g., ``"1.0"``).
+        str or None
+            Semantic version string (e.g., ``"1.0"``), or ``None`` if the
+            original schema version is not set.
         """
         return self._raw.original_schema_version
 
@@ -171,11 +175,22 @@ class Metadata(VariablesMixin, ValidationMixin):
     def is_legacy(self) -> bool:
         """Whether this metadata is a V0 (pre-``metadata_inference``) checkpoint.
 
-        Returns ``True`` when the underlying raw model is a
-        :class:`~anemoi.metadata.versions.v0.MetadataV0` instance, i.e. a
-        legacy checkpoint that has no ``metadata_inference`` block.
+        Returns ``True`` when the checkpoint is a legacy V0 instance (version
+        ``"0.0"``) that has no ``metadata_inference`` block. Returns ``False``
+        for native V1+ checkpoints and for hand-constructed instances with no
+        version information.
+
+        Note that the registry's ``detect_version`` assigns ``"0.0"`` to true
+        legacy data on load, so ``None`` only occurs for hand-constructed
+        instances without version metadata.
+
+        Returns
+        -------
+        bool
+            ``True`` if this is a legacy V0 checkpoint, ``False`` otherwise.
         """
-        return self._raw.original_schema_version == "0.0"
+        ver = self._raw.original_version
+        return ver is not None and ver < Version("1.0")
 
     @cached_property
     def created_at(self) -> datetime | None:

@@ -535,3 +535,89 @@ class TestRepr:
     def test_str_does_not_raise(self, meta):
         """str() does not raise any exception."""
         str(meta)  # must not raise
+
+
+class TestEnvelopePropertyAnnotations:
+    """schema_version and original_schema_version can be None; is_legacy is robust."""
+
+    def test_schema_version_none_for_missing_field(self, sample_v1_dict):
+        """schema_version returns None when not set."""
+        # Remove schema_version to simulate a hand-built instance
+        v1_dict_no_version = sample_v1_dict.copy()
+        del v1_dict_no_version["schema_version"]
+        from anemoi.metadata.versions.v1 import MetadataV1
+
+        raw = MetadataV1.model_validate(v1_dict_no_version)
+        meta = Metadata(raw)
+        assert meta.schema_version is None
+
+    def test_original_schema_version_none_for_missing_field(self, sample_v1_dict):
+        """original_schema_version returns None when not set."""
+        # Native V1 instances don't have original_schema_version set
+        v1_dict_no_orig = sample_v1_dict.copy()
+        # original_schema_version defaults to None if not present
+        from anemoi.metadata.versions.v1 import MetadataV1
+
+        raw = MetadataV1.model_validate(v1_dict_no_orig)
+        meta = Metadata(raw)
+        # For native V1, original_schema_version is None
+        assert meta.original_schema_version is None
+
+    def test_is_legacy_false_for_v1(self, sample_v1_dict):
+        """is_legacy returns False for a native V1 checkpoint."""
+        m = Metadata.from_dict(sample_v1_dict, migrate=False)
+        assert m.is_legacy is False
+
+    def test_is_legacy_false_for_none_version(self, sample_v1_dict):
+        """is_legacy returns False when original_version is None."""
+        v1_dict_no_version = sample_v1_dict.copy()
+        del v1_dict_no_version["schema_version"]
+        from anemoi.metadata.versions.v1 import MetadataV1
+
+        raw = MetadataV1.model_validate(v1_dict_no_version)
+        meta = Metadata(raw)
+        assert meta.is_legacy is False
+
+    def test_is_legacy_true_for_v0(self):
+        """is_legacy returns True for a V0 checkpoint (original_schema_version "0.0")."""
+        # Construct a MetadataV1 that was migrated from V0
+        from anemoi.metadata.versions.v1 import MetadataV1
+
+        # Build a minimal V1 dict with original_schema_version = "0.0"
+        v0_migrated_dict = {
+            "schema_version": "1.0",
+            "original_schema_version": "0.0",
+            "metadata_inference": {
+                "seed": 42,
+                "run_id": "legacy-run",
+                "task": None,
+                "dataset_names": ["data"],
+                "data": {
+                    "data_indices": {
+                        "input": {"2t": 0},
+                        "output": {"2t": 0},
+                    },
+                    "variable_types": {
+                        "prognostic": ["2t"],
+                        "forcing": [],
+                        "diagnostic": [],
+                        "target": ["2t"],
+                    },
+                    "timesteps": {
+                        "timestep": "6h",
+                        "input_relative_date_indices": [0],
+                        "output_relative_date_indices": [1],
+                        "relative_date_indices_training": [0, 1],
+                    },
+                    "shapes": {
+                        "variables": 1,
+                        "input_timesteps": 1,
+                        "ensemble": 1,
+                        "grid": 1000,
+                    },
+                },
+            },
+        }
+        raw = MetadataV1.model_validate(v0_migrated_dict)
+        meta = Metadata(raw)
+        assert meta.is_legacy is True
