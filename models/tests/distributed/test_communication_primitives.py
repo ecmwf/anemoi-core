@@ -17,18 +17,16 @@ from pathlib import Path
 import pytest
 import torch
 
+from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import reduce_shard_tensor
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.models.distributed.graph import shard_tensor
-
-GATHER_TENSOR_CASES = [
-    "dim0_even",
-    "dim0_uneven",
-    "dim1_uneven",
-    "negative_dim_uneven",
-]
-REDUCE_TENSOR_CASES = ["rank_offset"]
-SHARD_TENSOR_CASES = GATHER_TENSOR_CASES
+from anemoi.models.distributed.graph import sync_tensor
+from communication_primitive_cases import ALL_TO_ALL_TRANSPOSE_CASE_IDS
+from communication_primitive_cases import PARTITION_CASE_IDS
+from communication_primitive_cases import REDUCE_TENSOR_CASES
+from communication_primitive_cases import SYNC_TENSOR_NO_GATHER_CASES
 
 
 def _requested_backend() -> str:
@@ -50,11 +48,18 @@ def _requested_world_size() -> int:
     return world_size
 
 
+def _torch_version_less_than(major: int, minor: int) -> bool:
+    version_parts = torch.__version__.split("+", maxsplit=1)[0].split(".")
+    return (int(version_parts[0]), int(version_parts[1])) < (major, minor)
+
+
 def _run_spawned_primitive(*, backend: str, primitive: str, case_name: str, world_size: int) -> None:
     if backend == "nccl" and torch.cuda.device_count() < world_size:
         pytest.skip(
             f"NCCL backend requested with world_size={world_size}, but only {torch.cuda.device_count()} GPUs found."
         )
+    if backend == "gloo" and primitive == "all_to_all_transpose" and _torch_version_less_than(2, 6):
+        pytest.skip("Gloo all_to_all_transpose requires torch >= 2.6.")
 
     runner_path = Path(__file__).with_name("distributed_runner.py")
     cmd = [
@@ -82,8 +87,8 @@ def _run_spawned_primitive(*, backend: str, primitive: str, case_name: str, worl
         )
 
 
-class TestGatherTensorLocal:
-    def test_gather_tensor_without_process_group_is_identity_with_identity_backward(self) -> None:
+class TestGatherTensor:
+    def test_without_process_group_is_identity_with_identity_backward(self) -> None:
         x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
 
         y = gather_tensor(x, dim=0, sizes=[x.shape[0]], mgroup=None)
@@ -92,33 +97,9 @@ class TestGatherTensorLocal:
         y.sum().backward()
         torch.testing.assert_close(x.grad, torch.ones_like(x))
 
-
-class TestShardTensorLocal:
-    def test_shard_tensor_without_process_group_is_identity_with_identity_backward(self) -> None:
-        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
-
-        y = shard_tensor(x, dim=0, sizes=[x.shape[0]], mgroup=None)
-
-        torch.testing.assert_close(y, x)
-        y.sum().backward()
-        torch.testing.assert_close(x.grad, torch.ones_like(x))
-
-
-class TestReduceTensorLocal:
-    def test_reduce_tensor_without_process_group_is_identity_with_identity_backward(self) -> None:
-        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
-
-        y = reduce_tensor(x, mgroup=None)
-
-        torch.testing.assert_close(y, x)
-        y.sum().backward()
-        torch.testing.assert_close(x.grad, torch.ones_like(x))
-
-
-@pytest.mark.distributed
-class TestGatherTensor:
-    @pytest.mark.parametrize("case_name", GATHER_TENSOR_CASES, ids=GATHER_TENSOR_CASES)
-    def test_gather_tensor_distributed_forward_gathers_and_backward_splits(self, case_name: str) -> None:
+    @pytest.mark.distributed
+    @pytest.mark.parametrize("case_name", PARTITION_CASE_IDS, ids=PARTITION_CASE_IDS)
+    def test_distributed_forward_gathers_and_backward_splits(self, case_name: str) -> None:
         _run_spawned_primitive(
             backend=_requested_backend(),
             primitive="gather_tensor",
@@ -127,10 +108,40 @@ class TestGatherTensor:
         )
 
 
-@pytest.mark.distributed
+class TestShardTensor:
+    def test_without_process_group_is_identity_with_identity_backward(self) -> None:
+        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
+
+        y = shard_tensor(x, dim=0, sizes=[x.shape[0]], mgroup=None)
+
+        torch.testing.assert_close(y, x)
+        y.sum().backward()
+        torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+    @pytest.mark.distributed
+    @pytest.mark.parametrize("case_name", PARTITION_CASE_IDS, ids=PARTITION_CASE_IDS)
+    def test_distributed_forward_splits_and_backward_gathers(self, case_name: str) -> None:
+        _run_spawned_primitive(
+            backend=_requested_backend(),
+            primitive="shard_tensor",
+            case_name=case_name,
+            world_size=_requested_world_size(),
+        )
+
+
 class TestReduceTensor:
+    def test_without_process_group_is_identity_with_identity_backward(self) -> None:
+        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
+
+        y = reduce_tensor(x, mgroup=None)
+
+        torch.testing.assert_close(y, x)
+        y.sum().backward()
+        torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+    @pytest.mark.distributed
     @pytest.mark.parametrize("case_name", REDUCE_TENSOR_CASES, ids=REDUCE_TENSOR_CASES)
-    def test_reduce_tensor_distributed_forward_reduces_and_backward_is_identity(self, case_name: str) -> None:
+    def test_distributed_forward_reduces_and_backward_is_identity(self, case_name: str) -> None:
         _run_spawned_primitive(
             backend=_requested_backend(),
             primitive="reduce_tensor",
@@ -139,13 +150,81 @@ class TestReduceTensor:
         )
 
 
-@pytest.mark.distributed
-class TestShardTensor:
-    @pytest.mark.parametrize("case_name", SHARD_TENSOR_CASES, ids=SHARD_TENSOR_CASES)
-    def test_shard_tensor_distributed_forward_splits_and_backward_gathers(self, case_name: str) -> None:
+class TestSyncTensor:
+    def test_without_process_group_is_identity_with_identity_backward(self) -> None:
+        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
+
+        y = sync_tensor(x, dim=0, sizes=[x.shape[0]], mgroup=None)
+
+        torch.testing.assert_close(y, x)
+        y.sum().backward()
+        torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+    @pytest.mark.distributed
+    @pytest.mark.parametrize("case_name", PARTITION_CASE_IDS, ids=PARTITION_CASE_IDS)
+    def test_distributed_forward_gathers_and_backward_reduces_then_splits(self, case_name: str) -> None:
         _run_spawned_primitive(
             backend=_requested_backend(),
-            primitive="shard_tensor",
+            primitive="sync_tensor",
+            case_name=case_name,
+            world_size=_requested_world_size(),
+        )
+
+    @pytest.mark.distributed
+    @pytest.mark.parametrize("case_name", SYNC_TENSOR_NO_GATHER_CASES, ids=SYNC_TENSOR_NO_GATHER_CASES)
+    def test_distributed_without_forward_gather_keeps_forward_and_reduces_backward(self, case_name: str) -> None:
+        _run_spawned_primitive(
+            backend=_requested_backend(),
+            primitive="sync_tensor",
+            case_name=case_name,
+            world_size=_requested_world_size(),
+        )
+
+
+class TestReduceShardTensor:
+    def test_without_process_group_is_identity_with_identity_backward(self) -> None:
+        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
+
+        y = reduce_shard_tensor(x, dim=0, sizes=[x.shape[0]], mgroup=None)
+
+        torch.testing.assert_close(y, x)
+        y.sum().backward()
+        torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+    @pytest.mark.distributed
+    @pytest.mark.parametrize("case_name", PARTITION_CASE_IDS, ids=PARTITION_CASE_IDS)
+    def test_distributed_forward_reduces_then_splits_and_backward_gathers(self, case_name: str) -> None:
+        _run_spawned_primitive(
+            backend=_requested_backend(),
+            primitive="reduce_shard_tensor",
+            case_name=case_name,
+            world_size=_requested_world_size(),
+        )
+
+
+class TestAllToAllTranspose:
+    def test_without_process_group_is_identity_with_identity_backward(self) -> None:
+        x = torch.arange(12, dtype=torch.float32).reshape(4, 3).requires_grad_(True)
+
+        y = all_to_all_transpose(
+            x,
+            dim_split=0,
+            split_sizes=[x.shape[0]],
+            dim_concat=1,
+            concat_sizes=[x.shape[1]],
+            mgroup=None,
+        )
+
+        torch.testing.assert_close(y, x)
+        y.sum().backward()
+        torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+    @pytest.mark.distributed
+    @pytest.mark.parametrize("case_name", ALL_TO_ALL_TRANSPOSE_CASE_IDS, ids=ALL_TO_ALL_TRANSPOSE_CASE_IDS)
+    def test_distributed_forward_transposes_sharding_and_backward_reverses(self, case_name: str) -> None:
+        _run_spawned_primitive(
+            backend=_requested_backend(),
+            primitive="all_to_all_transpose",
             case_name=case_name,
             world_size=_requested_world_size(),
         )

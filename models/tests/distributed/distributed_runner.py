@@ -21,35 +21,18 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import reduce_shard_tensor
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.graph import sync_tensor
+from communication_primitive_cases import ALL_TO_ALL_TRANSPOSE_CASES
+from communication_primitive_cases import CASES_BY_PRIMITIVE
+from communication_primitive_cases import PARTITION_CASES
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
-GATHER_TENSOR_CASES = ("dim0_even", "dim0_uneven", "dim1_uneven", "negative_dim_uneven")
-REDUCE_TENSOR_CASES = ("rank_offset",)
-SHARD_TENSOR_CASES = GATHER_TENSOR_CASES
-PRIMITIVE_CASES = {
-    "gather_tensor": GATHER_TENSOR_CASES,
-    "reduce_tensor": REDUCE_TENSOR_CASES,
-    "shard_tensor": SHARD_TENSOR_CASES,
-}
-
-
-def _gather_tensor_case(case_name: str, world_size: int) -> tuple[tuple[int, ...], int]:
-    """Return a full tensor shape and gather dimension for a named gather_tensor case."""
-    if case_name == "dim0_even":
-        return (2 * world_size, 3), 0
-    if case_name == "dim0_uneven":
-        return (2 * world_size + 1, 3), 0
-    if case_name == "dim1_uneven":
-        return (3, 2 * world_size + 1), 1
-    if case_name == "negative_dim_uneven":
-        return (3, 2 * world_size + 1), -1
-
-    msg = f"Unknown gather_tensor case: {case_name}"
-    raise ValueError(msg)
 
 
 def _run_gather_tensor_case(
@@ -61,13 +44,13 @@ def _run_gather_tensor_case(
     atol: float,
     rtol: float,
 ) -> None:
-    shape, dim = _gather_tensor_case(case_name, world_size)
-    full = torch.arange(math.prod(shape), dtype=torch.float64, device=device).reshape(shape)
-    sizes = get_balanced_partition_sizes(full.shape[dim], world_size)
+    case = PARTITION_CASES[case_name](world_size)
+    full = torch.arange(math.prod(case.shape), dtype=torch.float64, device=device).reshape(case.shape)
+    sizes = get_balanced_partition_sizes(full.shape[case.dim], world_size)
 
     # The main-branch API already passes per-rank sizes, so use torch.split directly.
-    local = torch.split(full, sizes, dim=dim)[rank].contiguous().clone().requires_grad_(True)
-    gathered = gather_tensor(local, dim=dim, sizes=sizes, mgroup=model_comm_group)
+    local = torch.split(full, sizes, dim=case.dim)[rank].contiguous().clone().requires_grad_(True)
+    gathered = gather_tensor(local, dim=case.dim, sizes=sizes, mgroup=model_comm_group)
 
     torch.testing.assert_close(gathered, full, atol=atol, rtol=rtol)
 
@@ -84,16 +67,74 @@ def _run_shard_tensor_case(
     atol: float,
     rtol: float,
 ) -> None:
-    shape, dim = _gather_tensor_case(case_name, world_size)
-    full = torch.arange(math.prod(shape), dtype=torch.float64, device=device).reshape(shape).requires_grad_(True)
-    sizes = get_balanced_partition_sizes(full.shape[dim], world_size)
+    case = PARTITION_CASES[case_name](world_size)
+    full = (
+        torch.arange(math.prod(case.shape), dtype=torch.float64, device=device).reshape(case.shape).requires_grad_(True)
+    )
+    sizes = get_balanced_partition_sizes(full.shape[case.dim], world_size)
 
-    sharded = shard_tensor(full, dim=dim, sizes=sizes, mgroup=model_comm_group)
-    expected = torch.split(full.detach(), sizes, dim=dim)[rank].contiguous()
+    sharded = shard_tensor(full, dim=case.dim, sizes=sizes, mgroup=model_comm_group)
+    expected = torch.split(full.detach(), sizes, dim=case.dim)[rank].contiguous()
 
     torch.testing.assert_close(sharded, expected, atol=atol, rtol=rtol)
 
     sharded.sum().backward()
+    torch.testing.assert_close(full.grad, torch.ones_like(full), atol=atol, rtol=rtol)
+
+
+def _run_sync_tensor_case(
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    model_comm_group: dist.ProcessGroup,
+    case_name: str,
+    atol: float,
+    rtol: float,
+) -> None:
+    if case_name == "gather_in_fwd_false":
+        local = (torch.arange(6, dtype=torch.float64, device=device).reshape(2, 3) + rank).requires_grad_(True)
+        sizes = get_balanced_partition_sizes(local.shape[0], world_size)
+        synced = sync_tensor(local, dim=0, sizes=sizes, mgroup=model_comm_group, gather_in_fwd=False)
+
+        torch.testing.assert_close(synced, local.detach(), atol=atol, rtol=rtol)
+
+        synced.sum().backward()
+        torch.testing.assert_close(local.grad, torch.full_like(local, float(world_size)), atol=atol, rtol=rtol)
+        return
+
+    case = PARTITION_CASES[case_name](world_size)
+    full = torch.arange(math.prod(case.shape), dtype=torch.float64, device=device).reshape(case.shape)
+    sizes = get_balanced_partition_sizes(full.shape[case.dim], world_size)
+    local = torch.split(full, sizes, dim=case.dim)[rank].contiguous().clone().requires_grad_(True)
+
+    synced = sync_tensor(local, dim=case.dim, sizes=sizes, mgroup=model_comm_group, gather_in_fwd=True)
+    torch.testing.assert_close(synced, full, atol=atol, rtol=rtol)
+
+    synced.sum().backward()
+    torch.testing.assert_close(local.grad, torch.full_like(local, float(world_size)), atol=atol, rtol=rtol)
+
+
+def _run_reduce_shard_tensor_case(
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    model_comm_group: dist.ProcessGroup,
+    case_name: str,
+    atol: float,
+    rtol: float,
+) -> None:
+    case = PARTITION_CASES[case_name](world_size)
+    base = torch.arange(math.prod(case.shape), dtype=torch.float64, device=device).reshape(case.shape)
+    full = (base + rank).requires_grad_(True)
+    sizes = get_balanced_partition_sizes(full.shape[case.dim], world_size)
+
+    reduced_shard = reduce_shard_tensor(full, dim=case.dim, sizes=sizes, mgroup=model_comm_group)
+    expected_full = base * world_size + sum(range(world_size))
+    expected_shard = torch.split(expected_full, sizes, dim=case.dim)[rank].contiguous()
+
+    torch.testing.assert_close(reduced_shard, expected_shard, atol=atol, rtol=rtol)
+
+    reduced_shard.sum().backward()
     torch.testing.assert_close(full.grad, torch.ones_like(full), atol=atol, rtol=rtol)
 
 
@@ -122,6 +163,48 @@ def _run_reduce_tensor_case(
     torch.testing.assert_close(local.grad, torch.ones_like(local), atol=atol, rtol=rtol)
 
 
+def _run_all_to_all_transpose_case(
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    model_comm_group: dist.ProcessGroup,
+    case_name: str,
+    atol: float,
+    rtol: float,
+) -> None:
+    case = ALL_TO_ALL_TRANSPOSE_CASES[case_name](world_size)
+    full = torch.arange(math.prod(case.shape), dtype=torch.float64, device=device).reshape(case.shape)
+    ndim = len(case.shape)
+    split_sizes = get_balanced_partition_sizes(full.shape[case.dim_split % ndim], world_size)
+    concat_sizes = get_balanced_partition_sizes(full.shape[case.dim_concat % ndim], world_size)
+    local = torch.split(full, concat_sizes, dim=case.dim_concat)[rank].contiguous().clone().requires_grad_(True)
+
+    transposed = all_to_all_transpose(
+        local,
+        dim_split=case.dim_split,
+        split_sizes=split_sizes,
+        dim_concat=case.dim_concat,
+        concat_sizes=concat_sizes,
+        mgroup=model_comm_group,
+    )
+    expected = torch.split(full, split_sizes, dim=case.dim_split)[rank].contiguous()
+
+    torch.testing.assert_close(transposed, expected, atol=atol, rtol=rtol)
+
+    transposed.sum().backward()
+    torch.testing.assert_close(local.grad, torch.ones_like(local), atol=atol, rtol=rtol)
+
+
+RUNNERS_BY_PRIMITIVE = {
+    "all_to_all_transpose": _run_all_to_all_transpose_case,
+    "gather_tensor": _run_gather_tensor_case,
+    "reduce_shard_tensor": _run_reduce_shard_tensor_case,
+    "reduce_tensor": _run_reduce_tensor_case,
+    "shard_tensor": _run_shard_tensor_case,
+    "sync_tensor": _run_sync_tensor_case,
+}
+
+
 def _run_rank(
     rank: int,
     world_size: int,
@@ -148,16 +231,7 @@ def _run_rank(
 
     try:
         group = dist.group.WORLD
-        if primitive == "gather_tensor":
-            _run_gather_tensor_case(rank, world_size, device, group, case_name, atol, rtol)
-        elif primitive == "reduce_tensor":
-            _run_reduce_tensor_case(rank, world_size, device, group, case_name, atol, rtol)
-        elif primitive == "shard_tensor":
-            _run_shard_tensor_case(rank, world_size, device, group, case_name, atol, rtol)
-        else:
-            msg = f"Unknown primitive: {primitive}"
-            raise ValueError(msg)
-
+        RUNNERS_BY_PRIMITIVE[primitive](rank, world_size, device, group, case_name, atol, rtol)
         dist.barrier(group=group)
     finally:
         dist.destroy_process_group()
@@ -166,10 +240,10 @@ def _run_rank(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Distributed communication primitive test worker")
     parser.add_argument("--backend", choices=["gloo", "nccl"], required=True)
-    parser.add_argument("--primitive", choices=list(PRIMITIVE_CASES), required=True)
+    parser.add_argument("--primitive", choices=list(CASES_BY_PRIMITIVE), required=True)
     parser.add_argument(
         "--case",
-        choices=sorted({case for cases in PRIMITIVE_CASES.values() for case in cases}),
+        choices=sorted({case for cases in CASES_BY_PRIMITIVE.values() for case in cases}),
         required=True,
     )
     parser.add_argument("--world-size", type=int, default=2)
@@ -181,7 +255,7 @@ def main() -> None:
         msg = f"world-size must be >= 2, got {args.world_size}"
         raise ValueError(msg)
 
-    if args.case not in PRIMITIVE_CASES[args.primitive]:
+    if args.case not in CASES_BY_PRIMITIVE[args.primitive]:
         msg = f"Unknown {args.primitive} case: {args.case}"
         raise ValueError(msg)
 
