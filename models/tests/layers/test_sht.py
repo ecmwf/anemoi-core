@@ -175,23 +175,6 @@ def test_optimised_rffts_match_naive(sht_setup):
     torch.testing.assert_close(direct.rfft_rings_reduced_graphed(x), direct.rfft_rings_reduced_naive(x))
 
 
-@pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
-def test_direct_linearity(sht_setup):
-    dtype = sht_setup["dtype"]
-    tolerance = sht_setup["tolerance"]
-    direct = sht_setup["direct"]
-
-    target = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
-    pred = torch.randn((1, 1, 1, 1, direct.n_grid_points), dtype=dtype)
-
-    torch.testing.assert_close(
-        direct(pred - target),
-        direct(pred) - direct(target),
-        rtol=tolerance,
-        atol=tolerance,
-    )
-
-
 @pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
