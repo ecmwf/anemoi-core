@@ -203,10 +203,9 @@ class Forecaster(BaseTask):
         """
         new_data = {}
         for dataset_name, view in x.items():
-            view = x[dataset_name]
             if view.layout.time_in_grid:
-                # Sparse obs: no explicit time axis to roll; pass through.
-                new_data[dataset_name] = x[dataset_name]
+                # Sparse obs: no explicit time axis to roll; pass the data through unchanged.
+                new_data[dataset_name] = view.data
                 continue
 
             new_data[dataset_name] = self._advance_dataset_input(
