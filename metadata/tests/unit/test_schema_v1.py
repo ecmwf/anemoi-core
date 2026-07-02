@@ -178,3 +178,78 @@ class TestMetadataV1PermissiveSections:
         assert meta.dataset == {}
         assert meta.environment == {}
         assert meta.provenance == {}
+
+
+class TestMetadataV1NullSectionRobustness:
+    """MetadataV1 handles config sections set to None gracefully."""
+
+    def test_null_task_does_not_break_get_data_frequency(self, sample_v1_dict):
+        """config.task=None does not raise AttributeError in get_data_frequency."""
+        sample_v1_dict["config"]["task"] = None
+        sample_v1_dict["dataset"]["frequency"] = "6h"
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        assert meta.get_data_frequency() == "6h"
+
+    def test_null_data_does_not_break_get_data_frequency(self, sample_v1_dict):
+        """config.data=None does not raise AttributeError in get_data_frequency."""
+        sample_v1_dict["config"]["data"] = None
+        sample_v1_dict["dataset"]["frequency"] = "12h"
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        assert meta.get_data_frequency() == "12h"
+
+    def test_null_dataloader_returns_empty_dict(self, sample_v1_dict):
+        """config.dataloader=None causes get_dataloader_config to return {}."""
+        sample_v1_dict["config"]["dataloader"] = None
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        result = meta.get_dataloader_config("training")
+        assert result == {}
+
+    def test_null_partition_value_returns_empty_dict(self, sample_v1_dict):
+        """config.dataloader.training=None returns {} without raising."""
+        sample_v1_dict["config"]["dataloader"] = {"training": None}
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        result = meta.get_dataloader_config("training")
+        assert result == {}
+
+    def test_all_null_config_sections(self, sample_v1_dict):
+        """Multiple null config sections do not break accessors."""
+        sample_v1_dict["config"] = {
+            "task": None,
+            "data": None,
+            "dataloader": None,
+        }
+        sample_v1_dict["dataset"]["frequency"] = "3h"
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        # get_data_frequency falls back to dataset.frequency
+        assert meta.get_data_frequency() == "3h"
+        # get_dataloader_config returns empty dict
+        assert meta.get_dataloader_config() == {}
+
+
+class TestMetadataV1OutputTimestepPrecedence:
+    """config.task.output_timestep takes precedence over dataset.frequency."""
+
+    def test_output_timestep_overrides_dataset_frequency(self, sample_v1_dict):
+        """When output_timestep is set, it takes precedence."""
+        sample_v1_dict["config"]["task"] = {"output_timestep": "1h"}
+        sample_v1_dict["dataset"]["frequency"] = "6h"
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        assert meta.get_data_frequency() == "1h"
+
+    def test_dataset_frequency_when_no_output_timestep(self, sample_v1_dict):
+        """Without output_timestep, dataset.frequency is used."""
+        sample_v1_dict["config"].pop("task", None)
+        sample_v1_dict["dataset"]["frequency"] = "6h"
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        assert meta.get_data_frequency() == "6h"
+
+    def test_config_data_frequency_fallback(self, sample_v1_dict):
+        """Falls back to config.data.frequency if dataset.frequency is absent."""
+        sample_v1_dict["config"]["data"] = {"frequency": "3h"}
+        sample_v1_dict["dataset"].pop("frequency", None)
+        sample_v1_dict["config"].pop("task", None)
+
+        meta = MetadataV1.model_validate(sample_v1_dict)
+        assert meta.get_data_frequency() == "3h"

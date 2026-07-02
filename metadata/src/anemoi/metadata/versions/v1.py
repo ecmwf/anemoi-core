@@ -572,7 +572,7 @@ class MetadataV1(MetadataContract):
         str or None
             Frequency string (e.g. ``"6h"``), or ``None`` if not recorded.
         """
-        output_timestep = self.config.get("task", {}).get("output_timestep", None)
+        output_timestep = (self.config.get("task") or {}).get("output_timestep", None)
         if output_timestep is not None:
             return output_timestep
 
@@ -580,7 +580,7 @@ class MetadataV1(MetadataContract):
         if freq is not None:
             return freq
         # Fallback: config.data.frequency
-        return self.config.get("data", {}).get("frequency")
+        return (self.config.get("data") or {}).get("frequency")
 
     def get_sources(self, dataset_name: str | None = None) -> list[dict[str, Any]]:
         """Return source dataset configurations from the permissive dataset section.
@@ -650,7 +650,7 @@ class MetadataV1(MetadataContract):
         if dataset_name is None:
             dataset_name = self.get_dataset_names()[0]
 
-        dataloader = self.config.get("dataloader", {}).get(partition, {})
+        dataloader = (self.config.get("dataloader") or {}).get(partition, {})
         if not isinstance(dataloader, dict):
             return {}
 

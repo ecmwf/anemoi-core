@@ -176,7 +176,7 @@ class MetadataV0(MetadataContract):
         str
             Frequency string (e.g. ``"6h"``).
         """
-        return self.config.get("data", {}).get("timestep", "6h")
+        return (self.config.get("data") or {}).get("timestep", "6h")
 
     def get_variable_indices(self, dataset_name: str | None = None) -> dict[str, int]:
         """Return input variable name to tensor index mapping.
@@ -243,7 +243,7 @@ class MetadataV0(MetadataContract):
             ``"diagnostic"``, and ``"target"``.
         """
         variables = self._variables()
-        config_data = self.config.get("data", {})
+        config_data = self.config.get("data") or {}
         forcing_names: list[str] = config_data.get("forcing", [])
         diagnostic_names: list[str] = config_data.get("diagnostic", [])
 
@@ -292,7 +292,7 @@ class MetadataV0(MetadataContract):
         list[int]
             Relative date indices used as model inputs.
         """
-        multistep_input: int = self.config.get("training", {}).get("multistep_input", 1)
+        multistep_input: int = (self.config.get("training") or {}).get("multistep_input", 1)
         return list(range(-(multistep_input - 1), 1))
 
     def get_output_relative_date_indices(self, dataset_name: str | None = None) -> list[int]:
@@ -331,7 +331,7 @@ class MetadataV0(MetadataContract):
         shape: list[int] = self._ds.get("shape", [])
         # shape format: [samples, variables, ensemble, grid_points]
         grid: int | None = shape[-1] if len(shape) >= 4 else (shape[1] if len(shape) == 3 else None)
-        multistep_input: int = self.config.get("training", {}).get("multistep_input", 1)
+        multistep_input: int = (self.config.get("training") or {}).get("multistep_input", 1)
         return {
             "variables": len(self._data_input_full()),
             "input_timesteps": multistep_input,
@@ -451,7 +451,7 @@ class MetadataV0(MetadataContract):
         freq = self._ds.get("frequency")
         if freq is not None:
             return freq
-        return self.config.get("data", {}).get("frequency")
+        return (self.config.get("data") or {}).get("frequency")
 
     def get_sources(self, dataset_name: str | None = None) -> list[dict[str, Any]]:
         """Return source dataset configurations.
@@ -509,7 +509,7 @@ class MetadataV0(MetadataContract):
         dict[str, Any]
             The dataloader dataset configuration, or an empty dict if absent.
         """
-        dataloader = self.config.get("dataloader", {}).get(partition, {})
+        dataloader = (self.config.get("dataloader") or {}).get(partition, {})
         if not isinstance(dataloader, dict):
             return {}
         return dataloader
