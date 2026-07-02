@@ -537,6 +537,11 @@ class TestRepr:
         str(meta)  # must not raise
 
 
+# ---------------------------------------------------------------------------
+# Envelope property annotations (schema_version, original_schema_version, is_legacy)
+# ---------------------------------------------------------------------------
+
+
 class TestEnvelopePropertyAnnotations:
     """schema_version and original_schema_version can be None; is_legacy is robust."""
 
@@ -621,3 +626,249 @@ class TestEnvelopePropertyAnnotations:
         raw = MetadataV1.model_validate(v0_migrated_dict)
         meta = Metadata(raw)
         assert meta.is_legacy is True
+
+
+# ---------------------------------------------------------------------------
+# DatasetView
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetView:
+    """DatasetView provides per-dataset access without repeating the dataset name."""
+
+    @pytest.fixture()
+    def meta(self, sample_v1_dict):
+        """Return a Metadata instance from the sample V1 dict."""
+        return Metadata.from_dict(sample_v1_dict)
+
+    def test_dataset_default_returns_first(self, meta):
+        """dataset() without arguments returns a view for the first dataset."""
+        view = meta.dataset()
+        assert view.name == "era5_1deg"
+
+    def test_dataset_named_returns_correct_view(self, meta):
+        """dataset('era5_1deg') returns a view bound to that dataset."""
+        view = meta.dataset("era5_1deg")
+        assert view.name == "era5_1deg"
+
+    def test_dataset_nonexistent_raises_key_error(self, meta):
+        """dataset('nonexistent') raises KeyError with available datasets."""
+        with pytest.raises(KeyError, match="nonexistent.*era5_1deg"):
+            meta.dataset("nonexistent")
+
+    def test_dataset_empty_dataset_names_raises_index_error(self, sample_v1_dict):
+        """dataset() raises IndexError when dataset_names is empty."""
+        # Build a V1 dict with empty dataset_names
+        v1_dict_empty = sample_v1_dict.copy()
+        v1_dict_empty["metadata_inference"] = {
+            "seed": 42,
+            "run_id": "empty-run",
+            "task": None,
+            "dataset_names": [],
+            "datasets": {},
+        }
+        from anemoi.metadata.versions.v1 import MetadataV1
+
+        raw = MetadataV1.model_validate(v1_dict_empty)
+        meta = Metadata(raw)
+        with pytest.raises(IndexError, match="dataset_names is empty"):
+            meta.dataset()
+
+    def test_dataset_view_timestep(self, meta):
+        """DatasetView.timestep agrees with raw.get_timestep(name)."""
+        view = meta.dataset("era5_1deg")
+        assert view.timestep == meta.raw.get_timestep("era5_1deg")
+        assert view.timestep == "6h"
+
+    def test_dataset_view_input_relative_date_indices(self, meta):
+        """DatasetView.input_relative_date_indices agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.input_relative_date_indices == meta.raw.get_input_relative_date_indices("era5_1deg")
+        assert view.input_relative_date_indices == [-1, 0]
+
+    def test_dataset_view_output_relative_date_indices(self, meta):
+        """DatasetView.output_relative_date_indices agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.output_relative_date_indices == meta.raw.get_output_relative_date_indices("era5_1deg")
+        assert view.output_relative_date_indices == [1]
+
+    def test_dataset_view_multi_step_input(self, meta):
+        """DatasetView.multi_step_input is len(input_relative_date_indices)."""
+        view = meta.dataset("era5_1deg")
+        assert view.multi_step_input == 2
+        assert view.multi_step_input == len(view.input_relative_date_indices)
+
+    def test_dataset_view_multi_step_output(self, meta):
+        """DatasetView.multi_step_output is len(output_relative_date_indices)."""
+        view = meta.dataset("era5_1deg")
+        assert view.multi_step_output == 1
+        assert view.multi_step_output == len(view.output_relative_date_indices)
+
+    def test_dataset_view_variable_indices(self, meta):
+        """DatasetView.variable_indices agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.variable_indices == meta.raw.get_variable_indices("era5_1deg")
+        assert "2t" in view.variable_indices
+
+    def test_dataset_view_output_variable_indices(self, meta):
+        """DatasetView.output_variable_indices agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.output_variable_indices == meta.raw.get_output_variable_indices("era5_1deg")
+        assert "2t" in view.output_variable_indices
+
+    def test_dataset_view_variable_types(self, meta):
+        """DatasetView.variable_types agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.variable_types == meta.raw.get_variable_types("era5_1deg")
+        assert set(view.variable_types.keys()) == {
+            "forcing",
+            "prognostic",
+            "diagnostic",
+            "target",
+        }
+
+    def test_dataset_view_tensor_shapes(self, meta):
+        """DatasetView.tensor_shapes agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.tensor_shapes == meta.raw.get_tensor_shapes("era5_1deg")
+        assert set(view.tensor_shapes.keys()) == {
+            "variables",
+            "input_timesteps",
+            "ensemble",
+            "grid",
+        }
+
+    def test_dataset_view_grid_points(self, meta):
+        """DatasetView.grid_points agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.grid_points == meta.raw.get_grid_points("era5_1deg")
+        assert view.grid_points == 40320
+
+    def test_dataset_view_variables_metadata(self, meta):
+        """DatasetView.variables_metadata agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.variables_metadata == meta.raw.get_variables_metadata("era5_1deg")
+
+    def test_dataset_view_accumulations(self, meta):
+        """DatasetView.accumulations agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.accumulations == meta.raw.get_accumulations("era5_1deg")
+
+    def test_dataset_view_computed_forcings(self, meta):
+        """DatasetView.computed_forcings agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.computed_forcings == meta.raw.get_computed_forcings("era5_1deg")
+
+    def test_dataset_view_data_request(self, meta):
+        """DatasetView.data_request agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.data_request == meta.raw.get_data_request("era5_1deg")
+
+    def test_dataset_view_data_frequency(self, meta):
+        """DatasetView.data_frequency agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.data_frequency == meta.raw.get_data_frequency("era5_1deg")
+
+    def test_dataset_view_sources(self, meta):
+        """DatasetView.sources agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.sources == meta.raw.get_sources("era5_1deg")
+
+    def test_dataset_view_open_dataset_args(self, meta):
+        """DatasetView.open_dataset_args agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        assert view.open_dataset_args == meta.raw.get_open_dataset_args("era5_1deg")
+
+    def test_dataset_view_dataloader_config(self, meta):
+        """DatasetView.dataloader_config() agrees with raw."""
+        view = meta.dataset("era5_1deg")
+        result = view.dataloader_config("training")
+        expected = meta.raw.get_dataloader_config("training", "era5_1deg")
+        assert result == expected
+
+    def test_dataset_view_dataloader_config_custom_partition(self, meta):
+        """DatasetView.dataloader_config(partition) passes partition correctly."""
+        view = meta.dataset("era5_1deg")
+        result = view.dataloader_config("validation")
+        expected = meta.raw.get_dataloader_config("validation", "era5_1deg")
+        assert result == expected
+
+    def test_dataset_view_repr(self, meta):
+        """DatasetView.__repr__ contains the dataset name."""
+        view = meta.dataset("era5_1deg")
+        assert "era5_1deg" in repr(view)
+        assert "DatasetView" in repr(view)
+
+    def test_datasets_mapping_has_all_datasets(self, meta):
+        """Metadata.datasets contains one entry per dataset."""
+        assert len(meta.datasets) == len(meta.dataset_names)
+        assert set(meta.datasets.keys()) == set(meta.dataset_names)
+
+    def test_datasets_mapping_values_are_views(self, meta):
+        """Metadata.datasets values are DatasetView instances."""
+        from anemoi.metadata.interface import DatasetView
+
+        for view in meta.datasets.values():
+            assert isinstance(view, DatasetView)
+
+    def test_datasets_iteration_order_follows_dataset_names(self, meta):
+        """Iteration order of Metadata.datasets follows dataset_names."""
+        assert list(meta.datasets.keys()) == meta.dataset_names
+
+
+# ---------------------------------------------------------------------------
+# Multi-dataset fixture tests
+# ---------------------------------------------------------------------------
+
+
+class TestMultiDataset:
+    """Test DatasetView with a multi-dataset fixture."""
+
+    @pytest.fixture()
+    def multi_meta(self, multi_dataset_inference_dict):
+        """Build a Metadata instance with two datasets."""
+        from anemoi.metadata.versions.v1 import MetadataV1
+
+        v1_dict = {
+            "schema_version": "1.0",
+            "created_at": "2024-06-01T12:00:00",
+            "metadata_inference": multi_dataset_inference_dict,
+            "config": {},
+            "training": {},
+            "dataset": {},
+            "environment": {},
+            "provenance": {},
+        }
+        raw = MetadataV1.model_validate(v1_dict)
+        return Metadata(raw)
+
+    def test_multi_dataset_has_two_datasets(self, multi_meta):
+        """The multi-dataset fixture has two datasets."""
+        assert len(multi_meta.dataset_names) == 2
+        assert "era5_1deg" in multi_meta.dataset_names
+        assert "cerra_025deg" in multi_meta.dataset_names
+
+    def test_multi_dataset_default_is_first(self, multi_meta):
+        """dataset() defaults to the first dataset."""
+        view = multi_meta.dataset()
+        assert view.name == "era5_1deg"
+
+    def test_multi_dataset_can_access_second(self, multi_meta):
+        """dataset('cerra_025deg') returns the second dataset view."""
+        view = multi_meta.dataset("cerra_025deg")
+        assert view.name == "cerra_025deg"
+        assert view.timestep == "6h"
+
+    def test_multi_dataset_datasets_mapping(self, multi_meta):
+        """datasets contains both datasets."""
+        assert len(multi_meta.datasets) == 2
+        assert "era5_1deg" in multi_meta.datasets
+        assert "cerra_025deg" in multi_meta.datasets
+
+    def test_multi_dataset_views_have_distinct_indices(self, multi_meta):
+        """Each dataset view has its own variable indices."""
+        era5 = multi_meta.dataset("era5_1deg")
+        cerra = multi_meta.dataset("cerra_025deg")
+        # They should have different indices due to var_offset
+        assert era5.variable_indices["2t"] == 0
+        assert cerra.variable_indices["2t"] == 10

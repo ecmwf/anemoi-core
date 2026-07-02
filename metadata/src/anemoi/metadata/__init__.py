@@ -58,6 +58,7 @@ from .exceptions import UnknownVersionError
 from .exceptions import VersionError
 
 # Public API - Layer 2 (recommended for most users)
+from .interface import DatasetView
 from .interface import Metadata
 
 # Migration
@@ -73,6 +74,7 @@ __all__ = [
     "__version__",
     # Layer 2 - User API
     "Metadata",
+    "DatasetView",
     # Layer 1 - Raw API
     "MetadataContract",
     "MetadataRegistry",
