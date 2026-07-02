@@ -559,7 +559,7 @@ class MetadataV1(MetadataContract):
     def get_data_frequency(self, dataset_name: str | None = None) -> str | None:
         """Return the data frequency string from the permissive dataset section.
 
-        In V1, read from ``dataset.frequency``.
+        In V1, read from ``dataset.frequency``, or if `config.task.output_timestep` is set, that value takes precedence.
 
         Parameters
         ----------
@@ -572,6 +572,10 @@ class MetadataV1(MetadataContract):
         str or None
             Frequency string (e.g. ``"6h"``), or ``None`` if not recorded.
         """
+        output_timestep = self.config.get("task", {}).get("output_timestep", None)
+        if output_timestep is not None:
+            return output_timestep
+
         freq = self.dataset.get("frequency")
         if freq is not None:
             return freq
