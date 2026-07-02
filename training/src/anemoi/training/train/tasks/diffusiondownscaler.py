@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.layers.diffusion import NoiseLevelUncertainty
+
 from .base import BaseGraphModule
 
 if TYPE_CHECKING:
@@ -151,6 +153,53 @@ class GraphDiffusionDownscaler(BaseGraphModule):
                     persistent=True,
                 )
                 LOGGER.info("Registered direct_prediction buffers for %s: %d vars", target_ds, len(dp_model_idx))
+
+        # --- EDM2 uncertainty-based loss weighting (config-gated, default OFF) -------
+        # A tiny head u(sigma) reweights the per-noise-level loss as a Gaussian NLL
+        # (L_eff = L_raw / exp(logvar) + logvar). It MULTIPLIES on top of the lognormal
+        # sigma sampling and the 1/c_out^2 weight (both left UNCHANGED); preconditioning
+        # and all per-variable/area scalers are untouched. At inference u(sigma) is
+        # discarded (it lives on the LightningModule, not on self.model). See
+        # anemoi.models.layers.diffusion.NoiseLevelUncertainty.
+        unc_cfg = getattr(config.model.model.diffusion, "uncertainty_weighting", None)
+        self.uncertainty_weighting_enabled = bool(getattr(unc_cfg, "enabled", False)) if unc_cfg is not None else False
+        self.uncertainty_warmup_steps = 0
+        self.uncertainty_logvar_clamp = None
+        if self.uncertainty_weighting_enabled:
+            self.uncertainty_warmup_steps = int(getattr(unc_cfg, "warmup_steps", 0) or 0)
+            clamp = getattr(unc_cfg, "logvar_clamp", None)
+            self.uncertainty_logvar_clamp = float(clamp) if clamp is not None else None
+            num_channels = int(getattr(unc_cfg, "num_channels", 32))
+            max_period = int(getattr(unc_cfg, "max_period", 10000))
+            # Registering on the LightningModule auto-includes its ~33 params in the
+            # single AdamW group (base._create_optimizer_from_config iterates
+            # self.parameters()) -- joint training at the same LR, as in EDM2.
+            self.uncertainty_net = NoiseLevelUncertainty(num_channels=num_channels, max_period=max_period)
+            LOGGER.info(
+                "EDM2 uncertainty weighting ENABLED (num_channels=%d, max_period=%d, warmup_steps=%d, logvar_clamp=%s)",
+                num_channels,
+                max_period,
+                self.uncertainty_warmup_steps,
+                self.uncertainty_logvar_clamp,
+            )
+
+        # --- Part C: per-sigma-bin training-loss diagnostics (always on) ------------
+        # 10 bins over ln(sigma) in [-7, 5]. Accumulated each train step (no_grad) and
+        # reduced/logged at epoch end. Surfaces the per-noise-level (unweighted F-space)
+        # MSE profile and the learned u(sigma) curve for both baseline and EDM2 runs.
+        # IMPORTANT: these accumulators are PLAIN attributes, NOT registered buffers. A
+        # registered buffer is broadcast by DDP at every forward (broadcast_buffers), which
+        # injects collectives into the model's NCCL schedule and can deadlock multi-GPU
+        # training; plain attributes are invisible to DDP. They are created lazily on the
+        # correct device in _step and all_reduced symmetrically (all ranks) at epoch end.
+        self._n_sigma_bins = 10
+        self._sigma_bin_edges = torch.linspace(-7.0, 5.0, self._n_sigma_bins + 1)
+        self._sigma_bin_loss_sum = None
+        self._sigma_bin_count = None
+        self._sigma_bin_logvar_sum = None
+        # Bin only every N training steps (>1 cuts the full-grid-MSE overhead on long/large-grid
+        # runs; the per-sigma curve needs only ~100s of samples/epoch). Default 1 = bin every step.
+        self._sigma_log_every = max(1, int(getattr(unc_cfg, "sigma_log_every", 1) or 1)) if unc_cfg is not None else 1
 
     def _validate_residual_processors(self) -> None:
         """Validate and cache residual/tendency processors for each residual pair.
@@ -304,6 +353,57 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             use_reentrant=False,
         )
 
+        # --- EDM2 uncertainty weighting + per-sigma diagnostics ---------------------
+        # sigma[target_ds]: (batch, 1, ensemble, 1, 1) -> (batch, ensemble).
+        sigma_be = sigma[target_ds][:, 0, :, 0, 0]
+
+        logvar_flat = None
+        if self.uncertainty_weighting_enabled and not validation_mode:
+            # Computed OUTSIDE the checkpoint region (fp32, not recomputed in backward).
+            # c_noise = ln(sigma) / 4 (EDM2 conditioning). No .detach() -> the head and
+            # the denoiser train jointly through the same backward.
+            logvar_flat = self.uncertainty_net(sigma_be.log() / 4.0)  # (batch*ensemble,)
+            if self.uncertainty_logvar_clamp is not None:
+                logvar_flat = logvar_flat.clamp(-self.uncertainty_logvar_clamp, self.uncertainty_logvar_clamp)
+
+            if int(self.global_step) >= self.uncertainty_warmup_steps:
+                lv = logvar_flat.float().mean()
+                # Reduce to a scalar BEFORE adding +logvar so it is added exactly once
+                # (training_step .sum()s the returned loss). u is per-sigma, so scaling
+                # the reduced scalar == scaling per-element; keeping it here (not inside
+                # WeightedMSELoss) adds +logvar exactly once. L_raw already carries the
+                # 1/c_out^2 weight via noise_weights; EDM2 multiplies p(sigma) on top.
+                loss = loss.float().sum() / lv.exp() + lv
+
+        # Part C: accumulate per-sigma-bin unweighted F-space MSE (+ logvar) for the
+        # epoch-end diagnostic log. Training only (val must not pollute the train profile).
+        # Purely LOCAL (no collective); plain-attribute accumulators are lazily created
+        # on-device. Exact for num_gpus_per_model=1 (one DP sample per rank); under model
+        # sharding it would over-count by the group size (acceptable for a diagnostic).
+        # ln(sigma) is sanitised so the bin index can never go out of range (a stray
+        # out-of-range scatter_add index would be an illegal CUDA access -> NCCL deadlock).
+        # Subsampled to every self._sigma_log_every steps (purely local, no collective, so the
+        # per-rank cadence need not match across ranks).
+        if not validation_mode and (int(self.global_step) % self._sigma_log_every == 0):
+            with torch.no_grad():
+                dev = sigma_be.device
+                if self._sigma_bin_loss_sum is None or self._sigma_bin_loss_sum.device != dev:
+                    self._sigma_bin_loss_sum = torch.zeros(self._n_sigma_bins, device=dev)
+                    self._sigma_bin_count = torch.zeros(self._n_sigma_bins, device=dev)
+                    self._sigma_bin_logvar_sum = torch.zeros(self._n_sigma_bins, device=dev)
+                edges = self._sigma_bin_edges.to(dev)
+                err = (y_pred[target_ds].detach().float() - target_dict[target_ds].detach().float()) ** 2
+                per_sample = err.mean(dim=(1, 3, 4)).flatten()  # (batch*ensemble,)
+                ln_sigma = sigma_be.detach().float().log().flatten()
+                ln_sigma = torch.nan_to_num(
+                    ln_sigma, nan=0.0, posinf=float(edges[-1]) - 1e-3, neginf=float(edges[0]) + 1e-3,
+                )
+                idx = torch.bucketize(ln_sigma, edges).sub_(1).clamp_(0, self._n_sigma_bins - 1)
+                self._sigma_bin_loss_sum.scatter_add_(0, idx, per_sample)
+                self._sigma_bin_count.scatter_add_(0, idx, torch.ones_like(per_sample))
+                if logvar_flat is not None:
+                    self._sigma_bin_logvar_sum.scatter_add_(0, idx, logvar_flat.detach().float())
+
         # Reconstruct full prediction (denorm + add interpolated source)
         if source_ds is not None:
             y_pred_full = self.model.model.add_interp_to_state(
@@ -396,3 +496,55 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         batch = self._setup_batch_sharding(batch)
         self._prepare_loss_scalers()
         return batch
+
+    def on_train_epoch_end(self) -> None:
+        """Write the rank-0 LOCAL per-sigma diagnostics to OUTPUT/sigma_profile.jsonl,
+        then reset the accumulators.
+
+        IMPORTANT: this hook is deliberately COLLECTIVE-FREE. Doing a
+        torch.distributed.all_reduce (or any cross-rank self.log) inside a Lightning
+        epoch-end hook risks injecting a collective into the model's NCCL schedule that
+        not all ranks issue identically -> deadlock. Instead each rank keeps a purely
+        local profile; rank 0 writes its own to the jsonl. Over an epoch each rank sees
+        ~limit_batches samples (e.g. ~1000), which is ample for the per-noise-level
+        diagnostic (the curve shape, not a precise global mean, is what matters).
+
+        Recorded per ln-sigma bin k in [0, 9] over [-7, 5]:
+        - loss_by_sigma:   rank-0 local mean unweighted F-space MSE,
+        - count_by_sigma:  rank-0 sample count in the bin,
+        - logvar_by_sigma: rank-0 mean learned logvar (EDM2 runs only); u(s)=exp(lv/2).
+        """
+        super().on_train_epoch_end()
+        if self._sigma_bin_loss_sum is None:  # no training steps taken this epoch
+            return
+        denom = self._sigma_bin_count.clamp(min=1.0)
+        mean_loss = self._sigma_bin_loss_sum / denom
+        mean_logvar = self._sigma_bin_logvar_sum / denom
+        # rank-0 file write only (pure I/O, no collective). Never breaks training.
+        try:
+            if getattr(self.trainer, "is_global_zero", True):
+                import json
+                import os
+
+                centres = 0.5 * (self._sigma_bin_edges[:-1] + self._sigma_bin_edges[1:])
+                rec = {
+                    "epoch": int(self.current_epoch),
+                    "global_step": int(self.global_step),
+                    "ln_sigma_centre": centres.tolist(),
+                    "loss_by_sigma": mean_loss.detach().cpu().tolist(),
+                    "count_by_sigma": self._sigma_bin_count.detach().cpu().tolist(),
+                    "logvar_by_sigma": (
+                        mean_logvar.detach().cpu().tolist() if self.uncertainty_weighting_enabled else None
+                    ),
+                    "note": "rank-0 local",
+                }
+                outdir = os.environ.get("OUTPUT") or getattr(self.trainer, "default_root_dir", ".") or "."
+                with open(os.path.join(outdir, "sigma_profile.jsonl"), "a") as fh:
+                    fh.write(json.dumps(rec) + "\n")
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never break training
+            LOGGER.warning("per-sigma jsonl dump failed: %s", exc)
+
+        # Zero the local accumulators for the next epoch (local op, all ranks).
+        self._sigma_bin_loss_sum.zero_()
+        self._sigma_bin_count.zero_()
+        self._sigma_bin_logvar_sum.zero_()
