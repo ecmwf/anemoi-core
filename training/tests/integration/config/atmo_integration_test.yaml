@@ -1,0 +1,56 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer
+- task: forecaster
+- training: single
+- _self_
+
+config_validation: True
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      authentication: True
+      experiment_name: 'aifs-convergence'
+      run_name: "accuracy test"
+      enabled: True
+      offline: False
+    interval: 50
+model:
+  num_channels: 256 # 1/4 of number of channels for n320 models
+  trainable_parameters:
+    data: 0 # node
+    hidden: 0 # node
+    data2hidden: 0 # edge
+    hidden2data: 0 # edge
+    hidden2hidden: 0 # edge
+system:
+  input:
+    dataset: "${oc.env:DATASET_ROOT_PATH}/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr" #o96 instead of n320 input/output grid
+    graph: ${system.output.root}/graphs/graph_enc_proc_dec_o96.pt
+  output:
+    root: '${oc.env:SCRATCH}/aifs/o96/'
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 4 # o96 grid has a resolution of 6, can be set to 5 for faster tests
+
+dataloader:
+  limit_batches:
+    training: 400
+    validation: 100
+  training:
+    datasets:
+      data:
+        start: 2020
+training:
+  max_steps: 1000
+  optimization:
+    lr_scheduler:
+      warmup_t: 100 # number of optimizer steps after that LR reaches the maximum
