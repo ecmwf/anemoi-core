@@ -99,24 +99,36 @@ class MetadataRegistry:
         are accepted without breaking validation.
 
         This is the recommended pattern for backwards-compatible additions that
-        don't warrant a new schema class.
+        don't warrant a new schema class.  Migration from the base version is
+        handled automatically by the migrator (a no-op version bump), so no
+        migration registration is needed for schema-sharing minors unless you
+        need to populate or transform fields.
 
         Parameters
         ----------
         version : str
             New minor version string to register (e.g. "1.1").  The base
             version is derived by replacing the final component with "0".
+            Must match the pattern ``^\\d+\\.\\d+$`` (major.minor, digits only).
 
         Raises
         ------
         ValueError
-            If *version* is already registered or the derived base version
-            is not.
+            If *version* is already registered, the derived base version
+            is not registered, or the version format is invalid.
 
         Examples
         --------
         >>> MetadataRegistry.register_minor("1.1")
         """
+        import re
+
+        if not re.match(r"^\d+\.\d+$", version):
+            raise ValueError(
+                f"Version '{version}' does not match the required format 'major.minor' "
+                f"(e.g. '1.1', '2.3'). Version must be two numeric components separated by a dot."
+            )
+
         if version in cls._versions:
             raise ValueError(f"Version {version} already registered")
 

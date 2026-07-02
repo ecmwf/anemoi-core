@@ -222,6 +222,34 @@ def multi_dataset_inference_dict() -> dict:
 
 
 @pytest.fixture()
+def registry_state():
+    """Save and restore MetadataRegistry and MetadataMigrator state.
+
+    Use this fixture when tests mutate the global registry or migration
+    state to prevent leakage between tests.
+
+    Yields
+    ------
+    None
+        The fixture yields nothing; it simply saves and restores state.
+    """
+    from anemoi.metadata.migration import MetadataMigrator
+    from anemoi.metadata.registry import MetadataRegistry
+
+    # Save current state
+    saved_versions = MetadataRegistry._versions.copy()
+    saved_sorted = MetadataRegistry._sorted_versions
+    saved_migrations = MetadataMigrator._migrations.copy()
+
+    yield
+
+    # Restore state
+    MetadataRegistry._versions = saved_versions
+    MetadataRegistry._sorted_versions = saved_sorted
+    MetadataMigrator._migrations = saved_migrations
+
+
+@pytest.fixture()
 def sample_v0_dict() -> dict:
     """Minimal valid V0 metadata dict for migration testing.
 
