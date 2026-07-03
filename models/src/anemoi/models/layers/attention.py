@@ -388,9 +388,9 @@ class FlexAttentionWrapper(nn.Module):
 
             # Try import flash attention v4
             # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
-            # One reason to use flex attention with the flash attewntion v4 backend, ratehr then using flash attention v4 directly, is
+            # One reason to use flex attention with the flash attention v4 backend, rather then using flash attention v4 directly, is
             # flex attentions support for custom block masks.
-            # if flash attention is not available then the trion backend will be used for flex attention
+            # if flash attention is not available then the triton backend will be used for flex attention
             try:
                 from flash_attn.cute import flash_attn_func  # noqa: F401
 
