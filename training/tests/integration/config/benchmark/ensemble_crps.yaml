@@ -15,19 +15,15 @@ training:
   training_loss:
     datasets:
       data:
-        multiscale:
-          multiscale_config:
-            loss_matrices_path: ${system.input.loss_matrices_path}
-            loss_matrices: ["o96_smoothing_o96.npz", null]
-          weights: [1.0, 1.0]
+        # benchmark building smoothing matrices on the fly
+        multiscale_config: {num_scales: 2, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2.0}
+        weights: [1.0, 1.0, 1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          multiscale_config:
-            loss_matrices_path: ${system.input.loss_matrices_path}
-            loss_matrices: ["o96_smoothing_o96.npz", null]
-          weights: [1.0, 1.0]
+          multiscale_config: {num_scales: 2, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2.0}
+          weights: [1.0, 1.0, 1.0]
 
 dataloader:
   training:
