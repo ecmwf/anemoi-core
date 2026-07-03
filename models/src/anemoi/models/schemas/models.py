@@ -241,6 +241,45 @@ class Boolean1DSchema(BaseModel):
 
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
+class EncodersSchema(BaseModel):
+    """Encoder schema"""
+    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the encoder is applicable."
+    trainable_size: NonNegativeInt = Field(example=8)
+    "Size of trainable parameters vector. Default to 8."
+    sub_graph_edge_attributes: list[str] = Field(default_factory=list)
+    "Edge attributes to consider in the model component features."
+    mapper: Union[
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
+class DecodersSchema(BaseModel):
+    """Decoder schema"""
+    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the decoder is applicable."
+    trainable_size: NonNegativeInt = Field(example=8)
+    "Size of trainable parameters vector. Default to 8."
+    sub_graph_edge_attributes: list[str] = Field(default_factory=list)
+    "List of edge attributes for the sub-graph."
+    use_encoded_latents: bool = Field(default=True)
+    "Whether to use the encoded latents from the encoder."
+    mapper: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
 
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
@@ -267,27 +306,11 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
+    "Model processor schema."
+    encoders: dict[str, EncodersSchema]
+    "Model encoders schemas."
+    decoders: dict[str, DecodersSchema]
+    "Model decoders schemas."
     residual: ResidualConnectionSchema = Field(
         ...,
         discriminator="target_",

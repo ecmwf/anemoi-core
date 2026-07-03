@@ -85,6 +85,8 @@ class BaseGraphModel(nn.Module):
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
+        self._build_dataset_routing(model_config)
+
         # build networks
         self._build_networks(model_config)
 
@@ -95,6 +97,22 @@ class BaseGraphModel(nn.Module):
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+
+    def _build_dataset_routing(self, model_config: DotDict) -> None:
+        """Builds the dataset routing for encoders and decoders."""
+        self.dataset2encoder = {}
+        for encoder_name, encoder_config in model_config.model.encoders.items():
+            datasets_to_encode = encoder_config["datasets"]
+            assert len(datasets_to_encode) == 1, "Each encoder must be associated with exactly one dataset for now."
+            for d in datasets_to_encode:
+                self.dataset2encoder[d] = str(encoder_name)
+
+        self.dataset2decoder = {}
+        for decoder_name, decoder_config in model_config.model.decoders.items():
+            datasets_to_decode = decoder_config["datasets"]
+            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
+            for d in datasets_to_decode:
+                self.dataset2decoder[d] = str(decoder_name)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property

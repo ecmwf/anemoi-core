@@ -37,19 +37,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
-        self.encoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            encoder_config = model_config.model.encoders[self.dataset2encoder[dataset_name]]
+
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=encoder_config.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=encoder_config.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
+        self.encoder = torch.nn.ModuleDict()
+        for encoder_name, encoder_config in model_config.model.encoders.items():
+            self.encoder[str(encoder_name)] = instantiate(
+                encoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
@@ -75,18 +78,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
-        self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            decoder_config = model_config.model.decoders[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=decoder_config.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=decoder_config.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
+        self.decoder = torch.nn.ModuleDict()
+        for decoder_name, decoder_config in model_config.model.decoders.items():
+            self.decoder[str(decoder_name)] = instantiate(
+                decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
@@ -257,7 +262,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             # Encoder for this dataset
-            x_data_latent, x_latent = self.encoder[dataset_name](
+            encoder_name = self.dataset2encoder[dataset_name]
+            x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_size,
                 shard_info=enc_shard_info,
@@ -313,7 +319,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_out = self.decoder[dataset_name](
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
