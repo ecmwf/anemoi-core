@@ -50,6 +50,7 @@ from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import normalize_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -156,7 +157,7 @@ class AnemoiTrainer(ABC):
         This sets the same initial seed for all ranks. Ranks are re-seeded in the
         strategy to account for model communication groups.
         """
-        initial_seed = get_base_seed()
+        initial_seed = normalize_seed(get_base_seed())
         rnd_seed = pl.seed_everything(initial_seed, workers=True)
         np_rng = np.random.default_rng(rnd_seed)
         (torch.rand(1), np_rng.random())

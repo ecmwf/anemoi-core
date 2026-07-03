@@ -10,6 +10,14 @@
 
 import os
 
+MAX_SEED = 2**32 - 1
+_SEED_MODULUS = MAX_SEED + 1
+
+
+def normalize_seed(seed: int) -> int:
+    """Bring a seed into the range accepted by Lightning, NumPy, and PyTorch."""
+    return int(seed) % _SEED_MODULUS
+
 
 def get_base_seed(base_seed_env: str | None = None) -> int:
     """Gets the base seed from the environment variables.
