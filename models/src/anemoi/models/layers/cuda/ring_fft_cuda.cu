@@ -8,9 +8,7 @@
 #include <c10/util/complex.h>
 #include <torch/extension.h>
 
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
 #include <cufft.h>
-#endif
 
 #include <cmath>
 #include <cstdlib>
@@ -27,212 +25,12 @@ namespace {
 
 // Keep these values in sync with ring_fft.py.
 constexpr double TWO_PI = 6.283185307179586476925286766559;
-constexpr int64_t BACKEND_DIRECT = 0;
-constexpr int64_t BACKEND_CUFFT = 3;
 
 template <typename scalar_t>
 __device__ __forceinline__ scalar_t hermitian_mode_factor(const int m, const int nlon) {
     return (m == 0 || (nlon % 2 == 0 && m == nlon / 2)) ? scalar_t(1) : scalar_t(2);
 }
 
-// The direct kernels are useful when cuFFT is not available.
-template <typename scalar_t>
-__global__ void ring_rfft_direct_forward_kernel(
-    const scalar_t* __restrict__ x,
-    const int32_t* __restrict__ offsets,
-    const int32_t* __restrict__ lons,
-    c10::complex<scalar_t>* __restrict__ output,
-    const int64_t lead,
-    const int grid_points,
-    const int nlat,
-    const int nmodes
-) {
-    const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const int64_t total = lead * nlat * static_cast<int64_t>(nmodes);
-    if (idx >= total) {
-        return;
-    }
-
-    const int m = idx % nmodes;
-    const int lat = (idx / nmodes) % nlat;
-    const int64_t lead_idx = idx / (nmodes * nlat);
-    const int nlon = lons[lat];
-
-    if (m > nlon / 2) {
-        output[idx] = c10::complex<scalar_t>(0, 0);
-        return;
-    }
-
-    const scalar_t* ring = x + lead_idx * grid_points + offsets[lat];
-    const double inv_nlon = 1.0 / static_cast<double>(nlon);
-    const double step = TWO_PI * static_cast<double>(m) / static_cast<double>(nlon);
-
-    double step_s;
-    double step_c;
-    sincos(step, &step_s, &step_c);
-
-    double phase_c = 1;
-    double phase_s = 0;
-    double real = 0;
-    double imag = 0;
-
-    for (int j = 0; j < nlon; ++j) {
-        const double value = static_cast<double>(ring[j]);
-        real += value * phase_c;
-        imag -= value * phase_s;
-
-        const double next_c = phase_c * step_c - phase_s * step_s;
-        const double next_s = phase_s * step_c + phase_c * step_s;
-        phase_c = next_c;
-        phase_s = next_s;
-    }
-
-    output[idx] = c10::complex<scalar_t>(
-        static_cast<scalar_t>(real * inv_nlon),
-        static_cast<scalar_t>(imag * inv_nlon)
-    );
-}
-
-template <typename scalar_t>
-__global__ void ring_rfft_direct_backward_kernel(
-    const c10::complex<scalar_t>* __restrict__ grad_output,
-    const int32_t* __restrict__ offsets,
-    const int32_t* __restrict__ lons,
-    scalar_t* __restrict__ grad_x,
-    const int64_t lead,
-    const int grid_points,
-    const int nlat,
-    const int nmodes
-) {
-    const int64_t ring_idx = blockIdx.x;
-    const int lat = ring_idx % nlat;
-    const int64_t lead_idx = ring_idx / nlat;
-    if (lead_idx >= lead) {
-        return;
-    }
-
-    const int j = blockIdx.y * blockDim.x + threadIdx.x;
-    const int nlon = lons[lat];
-    if (j >= nlon) {
-        return;
-    }
-
-    const int available_modes = min(nmodes, nlon / 2 + 1);
-    const double inv_nlon = 1.0 / static_cast<double>(nlon);
-    double value = 0;
-
-    for (int m = 0; m < available_modes; ++m) {
-        const double angle =
-            TWO_PI * static_cast<double>(static_cast<int64_t>(m) * static_cast<int64_t>(j)) /
-            static_cast<double>(nlon);
-        double angle_s;
-        double angle_c;
-        sincos(angle, &angle_s, &angle_c);
-
-        const c10::complex<scalar_t> grad = grad_output[(lead_idx * nlat + lat) * nmodes + m];
-        value += (static_cast<double>(grad.real()) * angle_c - static_cast<double>(grad.imag()) * angle_s) * inv_nlon;
-    }
-
-    grad_x[lead_idx * grid_points + offsets[lat] + j] = static_cast<scalar_t>(value);
-}
-
-template <typename scalar_t>
-__global__ void ring_irfft_direct_forward_kernel(
-    const c10::complex<scalar_t>* __restrict__ x,
-    const int32_t* __restrict__ offsets,
-    const int32_t* __restrict__ lons,
-    scalar_t* __restrict__ output,
-    const int64_t lead,
-    const int grid_points,
-    const int nlat,
-    const int nmodes
-) {
-    const int64_t ring_idx = blockIdx.x;
-    const int lat = ring_idx % nlat;
-    const int64_t lead_idx = ring_idx / nlat;
-    if (lead_idx >= lead) {
-        return;
-    }
-
-    const int j = blockIdx.y * blockDim.x + threadIdx.x;
-    const int nlon = lons[lat];
-    if (j >= nlon) {
-        return;
-    }
-
-    const int available_modes = min(nmodes, nlon / 2 + 1);
-    double value = 0;
-    for (int m = 0; m < available_modes; ++m) {
-        const double angle =
-            TWO_PI * static_cast<double>(static_cast<int64_t>(m) * static_cast<int64_t>(j)) /
-            static_cast<double>(nlon);
-        double angle_s;
-        double angle_c;
-        sincos(angle, &angle_s, &angle_c);
-
-        const c10::complex<scalar_t> coeff = x[(lead_idx * nlat + lat) * nmodes + m];
-        const double factor = static_cast<double>(hermitian_mode_factor<scalar_t>(m, nlon));
-        value += factor * (static_cast<double>(coeff.real()) * angle_c - static_cast<double>(coeff.imag()) * angle_s);
-    }
-
-    output[lead_idx * grid_points + offsets[lat] + j] = static_cast<scalar_t>(value);
-}
-
-template <typename scalar_t>
-__global__ void ring_irfft_direct_backward_kernel(
-    const scalar_t* __restrict__ grad_output,
-    const int32_t* __restrict__ offsets,
-    const int32_t* __restrict__ lons,
-    c10::complex<scalar_t>* __restrict__ grad_x,
-    const int64_t lead,
-    const int grid_points,
-    const int nlat,
-    const int nmodes
-) {
-    const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const int64_t total = lead * nlat * static_cast<int64_t>(nmodes);
-    if (idx >= total) {
-        return;
-    }
-
-    const int m = idx % nmodes;
-    const int lat = (idx / nmodes) % nlat;
-    const int64_t lead_idx = idx / (nmodes * nlat);
-    const int nlon = lons[lat];
-
-    if (m > nlon / 2) {
-        grad_x[idx] = c10::complex<scalar_t>(0, 0);
-        return;
-    }
-
-    const scalar_t* ring = grad_output + lead_idx * grid_points + offsets[lat];
-    const double step = TWO_PI * static_cast<double>(m) / static_cast<double>(nlon);
-
-    double step_s;
-    double step_c;
-    sincos(step, &step_s, &step_c);
-
-    double phase_c = 1;
-    double phase_s = 0;
-    double real = 0;
-    double imag = 0;
-
-    for (int j = 0; j < nlon; ++j) {
-        const double value = static_cast<double>(ring[j]);
-        real += value * phase_c;
-        imag -= value * phase_s;
-
-        const double next_c = phase_c * step_c - phase_s * step_s;
-        const double next_s = phase_s * step_c + phase_c * step_s;
-        phase_c = next_c;
-        phase_s = next_s;
-    }
-
-    const double factor = static_cast<double>(hermitian_mode_factor<scalar_t>(m, nlon));
-    grad_x[idx] = c10::complex<scalar_t>(static_cast<scalar_t>(real * factor), static_cast<scalar_t>(imag * factor));
-}
-
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
 // cuFFT works on equal-length batches, so reduced-grid rings are packed by nlon.
 template <typename scalar_t>
 __global__ void pack_real_rings_kernel(
@@ -420,7 +218,6 @@ __global__ void scatter_cufft_irfft_backward_kernel(
     const scalar_t scale = hermitian_mode_factor<scalar_t>(m, nlon);
     grad_x[output_idx] = c10::complex<scalar_t>(value.real() * scale, value.imag() * scale);
 }
-#endif
 
 void check_metadata(torch::Tensor offsets, torch::Tensor lons) {
     TORCH_CHECK(offsets.is_cuda(), "offsets must be a CUDA tensor");
@@ -432,10 +229,6 @@ void check_metadata(torch::Tensor offsets, torch::Tensor lons) {
     TORCH_CHECK(offsets.dim() == 1, "offsets must be 1D");
     TORCH_CHECK(lons.dim() == 1, "lons must be 1D");
     TORCH_CHECK(offsets.size(0) == lons.size(0), "offsets and lons must have the same size");
-}
-
-void check_backend(const int64_t backend) {
-    TORCH_CHECK(backend == BACKEND_DIRECT || backend == BACKEND_CUFFT, "Unsupported ring FFT backend id: ", backend);
 }
 
 void check_cuda_stream_error() {
@@ -454,23 +247,6 @@ int checked_nonnegative_int(const int64_t value, const char* name) {
     return static_cast<int>(value);
 }
 
-int64_t checked_nonnegative_product(const int64_t lhs, const int64_t rhs, const char* name) {
-    TORCH_CHECK(lhs >= 0 && rhs >= 0, name, " factors must be non-negative");
-    TORCH_CHECK(rhs == 0 || lhs <= std::numeric_limits<int64_t>::max() / rhs, name, " is too large");
-    return lhs * rhs;
-}
-
-unsigned int checked_cuda_grid_dim(const int64_t value, const char* name) {
-    TORCH_CHECK(value >= 0, name, " must be non-negative");
-    TORCH_CHECK(
-        value <= std::numeric_limits<unsigned int>::max(),
-        name,
-        " exceeds CUDA grid dimension limit: ",
-        value
-    );
-    return static_cast<unsigned int>(value);
-}
-
 int kernel_blocks(const int64_t total, const int threads) {
     TORCH_CHECK(total >= 0, "CUDA kernel element count must be non-negative");
     TORCH_CHECK(total <= std::numeric_limits<int64_t>::max() - threads + 1, "CUDA kernel element count is too large");
@@ -479,7 +255,6 @@ int kernel_blocks(const int64_t total, const int threads) {
     return static_cast<int>(blocks);
 }
 
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
 void check_cufft(const cufftResult result, const char* message) {
     TORCH_CHECK(result == CUFFT_SUCCESS, message, " (cuFFT error ", static_cast<int>(result), ")");
 }
@@ -1037,7 +812,6 @@ void launch_cufft_irfft_backward(
         check_cuda_stream_error();
     }
 }
-#endif
 
 }  // namespace
 
@@ -1047,8 +821,7 @@ torch::Tensor ring_rfft_forward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     const int64_t max_nlon,
-    const int64_t truncation,
-    const int64_t backend
+    const int64_t truncation
 ) {
     TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
     TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
@@ -1059,7 +832,6 @@ torch::Tensor ring_rfft_forward_cuda(
     const int max_nlon_int = checked_positive_int(max_nlon, "max_nlon");
     const int truncation_int = checked_nonnegative_int(truncation, "truncation");
     TORCH_CHECK(truncation_int <= max_nlon_int / 2, "truncation must be <= max_nlon / 2");
-    check_backend(backend);
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(x));
     const int64_t lead = x.size(0);
@@ -1071,50 +843,19 @@ torch::Tensor ring_rfft_forward_cuda(
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    if (backend == BACKEND_CUFFT) {
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
-        AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "ring_rfft_cufft_forward_cuda", [&] {
-            launch_cufft_rfft_forward<scalar_t>(
-                x,
-                offsets,
-                lons,
-                output,
-                stream,
-                lead,
-                grid_points,
-                nlat,
-                nmodes
-            );
-        });
-        return output;
-#else
-        TORCH_CHECK(
-            false,
-            "The cuFFT ring FFT backend was selected, but the extension was built without cuFFT support. "
-            "Load nvidia/26.1 or set ANEMOI_CUFFT_ROOT before the first ring FFT call."
-        );
-#endif
-    }
-
-    const int threads = 256;
-    const int64_t lead_nlat = checked_nonnegative_product(lead, nlat, "lead * nlat");
-    const int64_t total = checked_nonnegative_product(lead_nlat, nmodes, "lead * nlat * nmodes");
-    const int blocks = kernel_blocks(total, threads);
-
-    AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "ring_rfft_forward_cuda", [&] {
-        ring_rfft_direct_forward_kernel<scalar_t><<<blocks, threads, 0, stream>>>(
-            x.data_ptr<scalar_t>(),
-            offsets.data_ptr<int32_t>(),
-            lons.data_ptr<int32_t>(),
-            output.data_ptr<c10::complex<scalar_t>>(),
+    AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "ring_rfft_cufft_forward_cuda", [&] {
+        launch_cufft_rfft_forward<scalar_t>(
+            x,
+            offsets,
+            lons,
+            output,
+            stream,
             lead,
             grid_points,
             nlat,
             nmodes
         );
     });
-    check_cuda_stream_error();
-
     return output;
 }
 
@@ -1124,8 +865,7 @@ torch::Tensor ring_rfft_backward_cuda(
     torch::Tensor lons,
     const int64_t max_nlon,
     const int64_t grid_points,
-    const int64_t truncation,
-    const int64_t backend
+    const int64_t truncation
 ) {
     TORCH_CHECK(grad_output.is_cuda(), "grad_output must be a CUDA tensor");
     TORCH_CHECK(grad_output.is_contiguous(), "grad_output must be contiguous");
@@ -1140,7 +880,6 @@ torch::Tensor ring_rfft_backward_cuda(
     const int grid_points_int = checked_positive_int(grid_points, "grid_points");
     const int truncation_int = checked_nonnegative_int(truncation, "truncation");
     TORCH_CHECK(truncation_int <= max_nlon_int / 2, "truncation must be <= max_nlon / 2");
-    check_backend(backend);
 
     const int nlat = checked_positive_int(lons.size(0), "latitude count");
     const int nmodes = max_nlon_int / 2 + 1;
@@ -1154,52 +893,19 @@ torch::Tensor ring_rfft_backward_cuda(
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    if (backend == BACKEND_CUFFT) {
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
-        AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_rfft_cufft_backward_cuda", [&] {
-            launch_cufft_rfft_backward<scalar_t>(
-                grad_output,
-                offsets,
-                lons,
-                grad_x,
-                stream,
-                lead,
-                grid_points_int,
-                nlat,
-                nmodes
-            );
-        });
-        return grad_x;
-#else
-        TORCH_CHECK(
-            false,
-            "The cuFFT ring FFT backend was selected, but the extension was built without cuFFT support. "
-            "Load nvidia/26.1 or set ANEMOI_CUFFT_ROOT before the first ring FFT call."
-        );
-#endif
-    }
-
-    const int threads = 256;
-    const int64_t ring_count = checked_nonnegative_product(lead, nlat, "lead * nlat");
-    const dim3 blocks(
-        checked_cuda_grid_dim(ring_count, "direct RFFT backward grid.x"),
-        checked_cuda_grid_dim(kernel_blocks(max_nlon_int, threads), "direct RFFT backward grid.y")
-    );
-
-    AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_rfft_backward_cuda", [&] {
-        ring_rfft_direct_backward_kernel<scalar_t><<<blocks, threads, 0, stream>>>(
-            grad_output.data_ptr<c10::complex<scalar_t>>(),
-            offsets.data_ptr<int32_t>(),
-            lons.data_ptr<int32_t>(),
-            grad_x.data_ptr<scalar_t>(),
+    AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_rfft_cufft_backward_cuda", [&] {
+        launch_cufft_rfft_backward<scalar_t>(
+            grad_output,
+            offsets,
+            lons,
+            grad_x,
+            stream,
             lead,
             grid_points_int,
             nlat,
             nmodes
         );
     });
-    check_cuda_stream_error();
-
     return grad_x;
 }
 
@@ -1208,8 +914,7 @@ torch::Tensor ring_irfft_forward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     const int64_t max_nlon,
-    const int64_t grid_points,
-    const int64_t backend
+    const int64_t grid_points
 ) {
     TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
     TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
@@ -1222,7 +927,6 @@ torch::Tensor ring_irfft_forward_cuda(
 
     const int max_nlon_int = checked_positive_int(max_nlon, "max_nlon");
     const int grid_points_int = checked_positive_int(grid_points, "grid_points");
-    check_backend(backend);
 
     const int nlat = checked_positive_int(lons.size(0), "latitude count");
     const int nmodes = checked_positive_int(x.size(2), "x mode dimension");
@@ -1236,52 +940,19 @@ torch::Tensor ring_irfft_forward_cuda(
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    if (backend == BACKEND_CUFFT) {
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
-        AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_irfft_cufft_forward_cuda", [&] {
-            launch_cufft_irfft_forward<scalar_t>(
-                x,
-                offsets,
-                lons,
-                output,
-                stream,
-                lead,
-                grid_points_int,
-                nlat,
-                nmodes
-            );
-        });
-        return output;
-#else
-        TORCH_CHECK(
-            false,
-            "The cuFFT ring FFT backend was selected, but the extension was built without cuFFT support. "
-            "Load nvidia/26.1 or set ANEMOI_CUFFT_ROOT before the first ring FFT call."
-        );
-#endif
-    }
-
-    const int threads = 256;
-    const int64_t ring_count = checked_nonnegative_product(lead, nlat, "lead * nlat");
-    const dim3 blocks(
-        checked_cuda_grid_dim(ring_count, "direct IRFFT forward grid.x"),
-        checked_cuda_grid_dim(kernel_blocks(max_nlon_int, threads), "direct IRFFT forward grid.y")
-    );
-
-    AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_irfft_forward_cuda", [&] {
-        ring_irfft_direct_forward_kernel<scalar_t><<<blocks, threads, 0, stream>>>(
-            x.data_ptr<c10::complex<scalar_t>>(),
-            offsets.data_ptr<int32_t>(),
-            lons.data_ptr<int32_t>(),
-            output.data_ptr<scalar_t>(),
+    AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_irfft_cufft_forward_cuda", [&] {
+        launch_cufft_irfft_forward<scalar_t>(
+            x,
+            offsets,
+            lons,
+            output,
+            stream,
             lead,
             grid_points_int,
             nlat,
             nmodes
         );
     });
-    check_cuda_stream_error();
-
     return output;
 }
 
@@ -1290,8 +961,7 @@ torch::Tensor ring_irfft_backward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     const int64_t max_nlon,
-    const int64_t nmodes,
-    const int64_t backend
+    const int64_t nmodes
 ) {
     TORCH_CHECK(grad_output.is_cuda(), "grad_output must be a CUDA tensor");
     TORCH_CHECK(grad_output.is_contiguous(), "grad_output must be contiguous");
@@ -1305,7 +975,6 @@ torch::Tensor ring_irfft_backward_cuda(
     const int max_nlon_int = checked_positive_int(max_nlon, "max_nlon");
     const int nmodes_int = checked_positive_int(nmodes, "nmodes");
     TORCH_CHECK(nmodes_int <= max_nlon_int / 2 + 1, "nmodes must be <= max_nlon / 2 + 1");
-    check_backend(backend);
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(grad_output));
     const int64_t lead = grad_output.size(0);
@@ -1316,49 +985,18 @@ torch::Tensor ring_irfft_backward_cuda(
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    if (backend == BACKEND_CUFFT) {
-#ifdef ANEMOI_RING_FFT_ENABLE_CUFFT
-        AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "ring_irfft_cufft_backward_cuda", [&] {
-            launch_cufft_irfft_backward<scalar_t>(
-                grad_output,
-                offsets,
-                lons,
-                grad_x,
-                stream,
-                lead,
-                grid_points,
-                nlat,
-                nmodes_int
-            );
-        });
-        return grad_x;
-#else
-        TORCH_CHECK(
-            false,
-            "The cuFFT ring FFT backend was selected, but the extension was built without cuFFT support. "
-            "Load nvidia/26.1 or set ANEMOI_CUFFT_ROOT before the first ring FFT call."
-        );
-#endif
-    }
-
-    const int threads = 256;
-    const int64_t lead_nlat = checked_nonnegative_product(lead, nlat, "lead * nlat");
-    const int64_t total = checked_nonnegative_product(lead_nlat, nmodes_int, "lead * nlat * nmodes");
-    const int blocks = kernel_blocks(total, threads);
-
-    AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "ring_irfft_backward_cuda", [&] {
-        ring_irfft_direct_backward_kernel<scalar_t><<<blocks, threads, 0, stream>>>(
-            grad_output.data_ptr<scalar_t>(),
-            offsets.data_ptr<int32_t>(),
-            lons.data_ptr<int32_t>(),
-            grad_x.data_ptr<c10::complex<scalar_t>>(),
+    AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "ring_irfft_cufft_backward_cuda", [&] {
+        launch_cufft_irfft_backward<scalar_t>(
+            grad_output,
+            offsets,
+            lons,
+            grad_x,
+            stream,
             lead,
             grid_points,
             nlat,
             nmodes_int
         );
     });
-    check_cuda_stream_error();
-
     return grad_x;
 }

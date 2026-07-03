@@ -16,20 +16,11 @@ import platform
 import site
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 import torch
 from torch.utils.cpp_extension import load
 
 LonsPerLat = tuple[int, ...]
-RingRFFTBackend = Literal["auto", "direct", "cufft"]
-RingIRFFTBackend = RingRFFTBackend
-_BACKEND_DIRECT = 0
-_BACKEND_CUFFT = 3
-_BACKEND_IDS = {
-    "direct": _BACKEND_DIRECT,
-    "cufft": _BACKEND_CUFFT,
-}
 
 
 def _device_index(x: torch.Tensor) -> int:
@@ -205,7 +196,7 @@ def _metadata(lons_per_lat: LonsPerLat, device_index: int) -> tuple[torch.Tensor
 
 class _RingRFFT(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat, truncation: int, backend_id: int) -> torch.Tensor:
+    def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat, truncation: int) -> torch.Tensor:
         if not x.is_cuda:
             raise RuntimeError("Ring RFFT CUDA extension requires a CUDA tensor")
         if x.dtype not in (torch.float32, torch.float64):
@@ -219,10 +210,9 @@ class _RingRFFT(torch.autograd.Function):
         truncation = int(truncation)
         x_flat = x.contiguous().reshape(-1, grid_points)
         offsets, lons, max_nlon = _metadata(lons_per_lat, _device_index(x))
-        out = _load_ring_fft_extension().forward(x_flat, offsets, lons, max_nlon, truncation, backend_id)
+        out = _load_ring_fft_extension().forward(x_flat, offsets, lons, max_nlon, truncation)
 
         ctx.truncation = truncation
-        ctx.backend_id = backend_id
         ctx.input_shape = tuple(x.shape)
         ctx.grid_points = grid_points
         ctx.max_nlon = max_nlon
@@ -242,14 +232,13 @@ class _RingRFFT(torch.autograd.Function):
             ctx.max_nlon,
             ctx.grid_points,
             truncation,
-            ctx.backend_id,
         )
         return grad_x.reshape(ctx.input_shape), None, None, None
 
 
 class _RingIRFFT(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat, backend_id: int) -> torch.Tensor:
+    def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat) -> torch.Tensor:
         if not x.is_cuda:
             raise RuntimeError("Ring IRFFT CUDA extension requires a CUDA tensor")
         if x.dtype not in (torch.complex64, torch.complex128):
@@ -264,9 +253,8 @@ class _RingIRFFT(torch.autograd.Function):
         nmodes = int(x.shape[-1])
         x_flat = x.contiguous().reshape(-1, nlat, nmodes)
         offsets, lons, max_nlon = _metadata(lons_per_lat, _device_index(x))
-        out = _load_ring_fft_extension().irfft_forward(x_flat, offsets, lons, max_nlon, grid_points, backend_id)
+        out = _load_ring_fft_extension().irfft_forward(x_flat, offsets, lons, max_nlon, grid_points)
 
-        ctx.backend_id = backend_id
         ctx.input_shape = tuple(x.shape)
         ctx.grid_points = grid_points
         ctx.max_nlon = max_nlon
@@ -284,65 +272,26 @@ class _RingIRFFT(torch.autograd.Function):
             lons,
             ctx.max_nlon,
             ctx.nmodes,
-            ctx.backend_id,
         )
         return grad_x.reshape(ctx.input_shape), None, None
-
-
-def _resolve_backend(
-    backend: RingRFFTBackend,
-    *,
-    env_var: str,
-    fallback_env_var: str | None = None,
-    op_name: str,
-) -> int:
-    if backend == "auto":
-        selected_backend = os.environ.get(env_var)
-        if selected_backend is None and fallback_env_var is not None:
-            selected_backend = os.environ.get(fallback_env_var)
-        if selected_backend is None:
-            selected_backend = "cufft" if is_cufft_available() else "direct"
-    else:
-        selected_backend = backend
-    try:
-        backend_id = _BACKEND_IDS[selected_backend]
-    except KeyError as exc:
-        valid = ", ".join(["auto", *_BACKEND_IDS])
-        raise ValueError(f"Unknown ring {op_name} backend {selected_backend!r}. Valid backends: {valid}") from exc
-    return backend_id
 
 
 def ring_rfft(
     x: torch.Tensor,
     lons_per_lat: list[int] | tuple[int, ...],
     truncation: int,
-    *,
-    backend: RingRFFTBackend = "auto",
 ) -> torch.Tensor:
     """Compute ring-wise ``rfft(norm="forward")`` on a flattened reduced grid."""
 
     lons_per_lat = tuple(lons_per_lat)
-    backend_id = _resolve_backend(
-        backend,
-        env_var="ANEMOI_RING_RFFT_BACKEND",
-        op_name="RFFT",
-    )
-    return _RingRFFT.apply(x, lons_per_lat, truncation, backend_id)
+    return _RingRFFT.apply(x, lons_per_lat, truncation)
 
 
 def ring_irfft(
     x: torch.Tensor,
     lons_per_lat: list[int] | tuple[int, ...],
-    *,
-    backend: RingIRFFTBackend = "auto",
 ) -> torch.Tensor:
     """Compute ring-wise ``irfft(norm="forward")`` on a reduced grid."""
 
     lons_per_lat = tuple(lons_per_lat)
-    backend_id = _resolve_backend(
-        backend,
-        env_var="ANEMOI_RING_IRFFT_BACKEND",
-        fallback_env_var="ANEMOI_RING_RFFT_BACKEND",
-        op_name="IRFFT",
-    )
-    return _RingIRFFT.apply(x, lons_per_lat, backend_id)
+    return _RingIRFFT.apply(x, lons_per_lat)

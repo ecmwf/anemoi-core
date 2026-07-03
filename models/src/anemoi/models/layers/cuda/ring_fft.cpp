@@ -11,8 +11,7 @@ torch::Tensor ring_rfft_forward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     int64_t max_nlon,
-    int64_t truncation,
-    int64_t backend
+    int64_t truncation
 );
 
 torch::Tensor ring_rfft_backward_cuda(
@@ -21,8 +20,7 @@ torch::Tensor ring_rfft_backward_cuda(
     torch::Tensor lons,
     int64_t max_nlon,
     int64_t grid_points,
-    int64_t truncation,
-    int64_t backend
+    int64_t truncation
 );
 
 torch::Tensor ring_irfft_forward_cuda(
@@ -30,8 +28,7 @@ torch::Tensor ring_irfft_forward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     int64_t max_nlon,
-    int64_t grid_points,
-    int64_t backend
+    int64_t grid_points
 );
 
 torch::Tensor ring_irfft_backward_cuda(
@@ -39,8 +36,7 @@ torch::Tensor ring_irfft_backward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     int64_t max_nlon,
-    int64_t nmodes,
-    int64_t backend
+    int64_t nmodes
 );
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
