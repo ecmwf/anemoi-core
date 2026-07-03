@@ -1,0 +1,50 @@
+# Modifications for the basic template "temporal_downscaler.yaml"
+system:
+  hardware:
+    num_gpus_per_model: 2
+  input:
+    dataset:  /ec/ai/project/ai-ml/datasets/aifs-od-fc-oper-0001-mars-n320-2016-2025-1h-v2.zarr
+    graph: ./temporal-downscaler-bm-graph.pt
+
+data:
+  frequency: null
+  datasets:
+    data:
+      diagnostic: []
+      processors:
+        normalizer:
+          config:
+            std: []
+
+task:
+  _target_: anemoi.training.tasks.TemporalDownscaler
+  input_timestep: 6h
+  output_timestep: 1h
+  output_right_boundary: True
+
+dataloader:
+  training:
+    datasets:
+      data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
+        end: 2020-11-30
+  validation:
+    datasets:
+      data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
+        start: 2020-12-31
+
+model:
+  num_channels: 512
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 6
