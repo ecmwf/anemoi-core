@@ -241,8 +241,10 @@ class Boolean1DSchema(BaseModel):
 
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
+
 class EncodersSchema(BaseModel):
     """Encoder schema"""
+
     datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
     trainable_size: NonNegativeInt = Field(example=8)
@@ -262,6 +264,7 @@ class EncodersSchema(BaseModel):
 
 class DecodersSchema(BaseModel):
     """Decoder schema"""
+
     datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the decoder is applicable."
     trainable_size: NonNegativeInt = Field(example=8)
