@@ -18,11 +18,11 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 # before torch is imported transitively by the anemoi imports below.
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
-import numpy as np
 import pandas as pd
 import pytest
 import torch
 from omegaconf import OmegaConf
+from torch.testing import assert_close
 
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.config import load_config
@@ -79,7 +79,7 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
             },
         ).set_index("step")
 
-    def is_similar(run_id1: str, run_id2: str) -> bool:
+    def assert_similar(run_id1: str, run_id2: str) -> None:
         df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
         if df1.empty:
             msg = f"Run {run_id1} has no '{metric}' history on {mlflow_server}"
@@ -87,15 +87,14 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
         if df2.empty:
             msg = f"Reference run {run_id2} has no '{metric}' history on {mlflow_server}"
             raise ValueError(msg)
-        # Align on step before comparing: np.allclose compares positionally and
-        # would silently broadcast-error (or mismatch) if the step sets differ.
         aligned = df1.join(df2, how="inner", lsuffix="_1", rsuffix="_2")
         if aligned.empty:
             msg = f"Runs {run_id1} and {run_id2} share no common steps"
             raise ValueError(msg)
-        return np.allclose(aligned.loc[:, "loss_1"], aligned.loc[:, "loss_2"])
+        assert_close(
+            aligned.loc[:, "loss_1"],
+            aligned.loc[:, "loss_2"],
+            msg=lambda msg: f"Loss curve for run {trainer.run_id} does not match reference\n{msg}",
+        )
 
-    assert is_similar(
-        trainer.run_id,
-        reference_id,
-    ), f"Loss curve for run {trainer.run_id} does not match reference"
+    assert_similar(trainer.run_id, reference_id)
