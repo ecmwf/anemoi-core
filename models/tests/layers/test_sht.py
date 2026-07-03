@@ -167,6 +167,9 @@ def test_idempotency_inverse_direct(sht_setup):
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_optimised_rffts_match_naive(sht_setup):
     """Optimised FFT implementations should match the naive implementation."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available, skipping test")
+
     dtype = sht_setup["dtype"]
     direct = sht_setup["direct"]
 
@@ -179,6 +182,9 @@ def test_optimised_rffts_match_naive(sht_setup):
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_optimised_irffts_match_naive(sht_setup):
     """Optimised FFT implementations should match the naive implementation."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available, skipping test")
+
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     inverse = sht_setup["inverse"]
