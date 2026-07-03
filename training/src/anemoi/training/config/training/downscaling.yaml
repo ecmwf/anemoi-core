@@ -44,15 +44,20 @@ optimizer:
   # ---------------------------------------------------------------
   # Choose optimizer type (_target_ approach)
   # ---------------------------------------------------------------
-  # Default optimizer: AdamW
-  _target_: torch.optim.AdamW
+  # Default optimizer: SOAP
+  _target_: anemoi.training.optimizers.soap.SOAP
 
   # ---------------------------------------------------------------
   # Common optimizer parameters
   # ---------------------------------------------------------------
-  # Learning rate is defined elsewhere
-  #kwargs:
-  betas: [0.9, 0.95]      # β₁, β₂ for Adam-style optimizers
+  lr: ${training.lr.rate}
+  weight_decay: 0.01
+  betas: [0.95, 0.95]
+  eps: 1.0e-8
+  precondition_frequency: 10
+  max_precond_dim: 10000
+  precondition_1d: False
+  normalize_grads: False
 
   # ---------------------------------------------------------------
   # Optional: configuration for AdEMAMix (custom optimizer)
