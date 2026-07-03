@@ -53,13 +53,18 @@ class SparseProjector(torch.nn.Module):
         input_shape = x.shape
         x = x.reshape(-1, *input_shape[-2:])
 
-        if num_chunks == 1:
-            out = self._project_flattened(x, projection_matrix)
-        else:
-            out = torch.cat(
-                [self._project_flattened(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
-                dim=0,
-            )
+        try:
+            if num_chunks == 1:
+                out = self._project_flattened(x, projection_matrix)
+            else:
+                out = torch.cat(
+                    [self._project_flattened(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
+                    dim=0,
+                )
+        except torch.cuda.OutOfMemoryError as e:
+            raise torch.cuda.OutOfMemoryError(
+                f"Out of memory during sparse projection. Consider doubling the number of chunks (currently {num_chunks}). This will reduce memory usage at the cost of additional kernel launches, which can increase runtime. Original error: {e}"
+            ) from e
 
         return out.reshape(*input_shape[:-2], *out.shape[-2:])
 
