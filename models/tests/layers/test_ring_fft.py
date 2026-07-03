@@ -18,7 +18,6 @@ from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 O96_NLAT = 192
 O96_GRID_POINTS = 40320
-EXTENSION_BACKENDS = ("direct", "cufft")
 REPRESENTATIVE_NLON_TEST_VALUES = [
     20,
     24,
