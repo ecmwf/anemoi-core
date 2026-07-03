@@ -15,14 +15,19 @@ training:
   training_loss:
     datasets:
       data:
-        multiscale_config: null
-        weights: [1.0]
+        multiscale:
+          multiscale_config:
+            loss_matrices_path: ${system.input.loss_matrices_path}
+            loss_matrices: ["o96_smoothing_o96.npz", null]
+          weights: [1.0, 1.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          multiscale_config: null
-          weights: [1.0]
+          multiscale_config:
+            loss_matrices_path: ${system.input.loss_matrices_path}
+            loss_matrices: ["o96_smoothing_o96.npz", null]
+          weights: [1.0, 1.0]
 
 dataloader:
   training:
