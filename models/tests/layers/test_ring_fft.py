@@ -159,6 +159,8 @@ def test_o96_rfft_backward_matches_torch(truncation: int) -> None:
 
 @pytest.mark.gpu
 def test_small_float64_known_values_high_precision() -> None:
+    _require_cuda_extension_environment()
+
     lons_per_lat = [4, 8]
     x = torch.zeros(1, sum(lons_per_lat), device="cuda", dtype=torch.float64, requires_grad=True)
     with torch.no_grad():
@@ -183,6 +185,7 @@ def test_small_float64_known_values_high_precision() -> None:
 
 @pytest.mark.gpu
 def test_small_irfft_float64_known_values_high_precision() -> None:
+    _require_cuda_extension_environment()
 
     lons_per_lat = [4, 8]
     x = torch.zeros(1, len(lons_per_lat), 5, device="cuda", dtype=torch.complex128, requires_grad=True)
@@ -204,6 +207,7 @@ def test_small_irfft_float64_known_values_high_precision() -> None:
 
 @pytest.mark.gpu
 def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch() -> None:
+    _require_cuda_extension_environment()
 
     lons_per_lat = [4, 5, 8]
     torch.manual_seed(17)
@@ -245,6 +249,8 @@ def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch() -> None:
 def test_generic_backend_representative_lengths_known_values_high_precision(
     nlon: int,
 ) -> None:
+    _require_cuda_extension_environment()
+
     lons_per_lat = [nlon]
     x = torch.zeros(1, nlon, device="cuda", dtype=torch.float64, requires_grad=True)
     with torch.no_grad():
@@ -267,6 +273,7 @@ def test_generic_backend_representative_lengths_known_values_high_precision(
 def test_generic_backend_irfft_representative_lengths_known_values_high_precision(
     nlon: int,
 ) -> None:
+    _require_cuda_extension_environment()
 
     lons_per_lat = [nlon]
     x = torch.zeros(1, 1, nlon // 2 + 1, device="cuda", dtype=torch.complex128, requires_grad=True)
@@ -318,9 +325,9 @@ def test_o96_inverse_sht_fast_path_matches_torch_path(truncation: int) -> None:
 
 
 @pytest.mark.gpu
-def test_o96_inverse_sht_simple_float64_fast_path_matches_torch_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_o96_inverse_sht_simple_float64_fast_path_matches_torch_path() -> None:
+    _require_cuda_extension_environment()
+
     truncation = 95
     lons_per_lat = _o96_lons_per_lat()
     fast = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).cuda()
@@ -364,6 +371,8 @@ def test_o96_rfft_realistic_shapes_and_dtypes(dtype: torch.dtype, shape_prefix: 
 
 @pytest.mark.gpu
 def test_o96_rfft_backend_forward_backward_matches_torch() -> None:
+    _require_cuda_extension_environment()
+
     torch.manual_seed(23)
     x_actual = torch.randn(2, O96_GRID_POINTS, device="cuda", dtype=torch.float32, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
@@ -415,6 +424,8 @@ def test_o96_irfft_realistic_shapes_and_dtypes(dtype: torch.dtype, shape_prefix:
 
 @pytest.mark.gpu
 def test_o96_irfft_backend_forward_backward_matches_torch() -> None:
+    _require_cuda_extension_environment()
+
     torch.manual_seed(24)
     lons_per_lat = _o96_lons_per_lat()
     x_actual = torch.randn(2, len(lons_per_lat), 96, device="cuda", dtype=torch.complex64, requires_grad=True)
@@ -454,6 +465,8 @@ def test_large_grid_ring_rfft_forward_backward_matches_torch(
     lons_per_lat_fn,
     truncation: int,
 ) -> None:
+    _require_cuda_extension_environment()
+
     del grid_name
 
     torch.manual_seed(4)
@@ -496,6 +509,8 @@ def test_large_grid_ring_irfft_forward_backward_matches_torch(
     lons_per_lat_fn,
     truncation: int,
 ) -> None:
+    _require_cuda_extension_environment()
+
     del grid_name
 
     torch.manual_seed(14)
