@@ -54,5 +54,3 @@ training:
   optimization:
     lr_scheduler:
       warmup_t: 100 # number of optimizer steps after that LR reaches the maximum
-    optimizer:
-      betas: [0.9, 0.999]
