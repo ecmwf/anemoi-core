@@ -529,7 +529,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
     def _build_from_file(self, file_path: str | Path, row_normalize: bool) -> None:
         """Load projection matrix from file."""
-        self._create_matrix_from_scipy(load_npz(file_path), row_normalize)
+        self._create_csr_matrix_from_scipy(load_npz(file_path), row_normalize)
 
     def _build_from_graph(
         self,
@@ -564,10 +564,10 @@ class ProjectionGraphProvider(BaseGraphProvider):
             ),
             dtype=np.float32,
         )
-        self._create_matrix_from_scipy(matrix, row_normalize)
+        self._create_csr_matrix_from_scipy(matrix, row_normalize)
 
-    def _create_matrix_from_scipy(self, matrix: spmatrix, row_normalize: bool) -> None:
-        """Create sparse projection matrix from a SciPy sparse matrix."""
+    def _create_csr_matrix_from_scipy(self, matrix: spmatrix, row_normalize: bool) -> None:
+        """Create sparse projection CSR matrix from a SciPy sparse matrix."""
         matrix = matrix.astype(np.float32, copy=False).tocsr()
         matrix.sum_duplicates()  # coalesce duplicate entries
 
@@ -595,7 +595,10 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
     @staticmethod
     def _row_normalize_matrix(matrix: spmatrix) -> spmatrix:
-        """Normalize weights per row (target node) so each row sums to 1."""
+        """Normalize weights per row (target node) so each row sums to 1.
+
+        Converts the input matrix to CSR format, computes the sum of each row, and divides each non-zero row by its sum. Rows that sum to zero remain unchanged.
+        """
         matrix = matrix.tocsr(copy=True)
         row_sums = np.asarray(matrix.sum(axis=1)).ravel()
         inv_row_sums = np.zeros_like(row_sums, dtype=np.float32)
