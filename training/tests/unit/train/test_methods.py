@@ -341,6 +341,46 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     }
 
 
+def test_base_compute_loss_passes_none_shard_sizes_when_gathered() -> None:
+    """Gathered tensors (grid_shard_slice=None) must report grid_shard_sizes=None to the loss.
+
+    Even though self.grid_shard_sizes still holds per-shard sizes, a gathered (full-grid) tensor
+    must be reported as unsharded.
+
+    Regression: a CombinedLoss containing a non-sharding loss makes _prepare_tensors_for_loss gather
+    to the full grid and return grid_shard_slice=None. A stale, non-None grid_shard_sizes leaking
+    through here makes a MultiscaleLossWrapper re-shard an already-full tensor (see scaler size mismatch).
+    """
+    module = MagicMock(spec=BaseTrainingModule)
+    loss = ShardingAwareCaptureLoss()
+    group = object()
+    shard_sizes = [1, 1]
+
+    module.loss = {"data": loss}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_sizes = {"data": shard_sizes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+
+    BaseTrainingModule._compute_loss(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=None,
+        dataset_name="data",
+    )
+
+    assert loss.calls[0]["kwargs"] == {
+        "grid_shard_slice": None,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_sizes": None,
+    }
+
+
 def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -666,6 +706,54 @@ def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> 
         "group": group,
         "grid_dim": -2,
         "grid_shard_sizes": shard_sizes,
+    }
+
+
+def test_calculate_val_metrics_passes_none_shard_sizes_when_gathered() -> None:
+    """Gathered tensors (grid_shard_slice=None) must report grid_shard_sizes=None to the metric.
+
+    Even though self.grid_shard_sizes still holds per-shard sizes, a gathered (full-grid) tensor
+    must be reported as unsharded.
+
+    Regression: with a non-sharding loss in a CombinedLoss, the validation tensors are gathered and
+    grid_shard_slice is None, but self.grid_shard_sizes stays non-None. A MultiscaleLossWrapper metric
+    keys is_model_sharded off grid_shard_sizes, so a stale value makes it re-shard the full tensor and
+    then scale a sharded tensor with a full-grid scaler -> expand_as size mismatch.
+    """
+    module = MagicMock(spec=BaseTrainingModule)
+    metric = ShardingAwareCaptureLoss()
+    post_processor = MagicMock(side_effect=lambda x, **_: x)
+    group = object()
+    shard_sizes = [1, 1]
+
+    module.model = MagicMock()
+    module.model.post_processors = {"data": post_processor}
+    module.metrics = {"data": {"multiscale": metric}}
+    module.val_metric_ranges = {"data": {"z_500": [1]}}
+    module.model_comm_group = group
+    module.model_comm_group_size = 2
+    module.grid_dim = -2
+    module.grid_shard_sizes = {"data": shard_sizes}
+
+    y_pred = torch.randn(1, 1, 1, 2, 3)
+    y = torch.randn(1, 1, 2, 3)
+
+    metrics = BaseTrainingModule.calculate_val_metrics(
+        module,
+        y_pred=y_pred,
+        y=y,
+        grid_shard_slice=None,
+        dataset_name="data",
+        step=0,
+    )
+
+    assert "multiscale_metric/data/z_500/1" in metrics
+    assert metric.calls[0]["kwargs"] == {
+        "scaler_indices": (..., [1]),
+        "grid_shard_slice": None,
+        "group": group,
+        "grid_dim": -2,
+        "grid_shard_sizes": None,
     }
 
 
