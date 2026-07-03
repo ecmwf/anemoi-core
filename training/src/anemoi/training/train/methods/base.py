@@ -196,11 +196,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.n_step_input = self.task.num_input_timesteps
         self.n_step_output = self.task.num_output_timesteps
-        self.n_step_input_by_dataset = {
+        self.n_step_input_by_dataset = self.task.num_input_timesteps_by_dataset or {
             dataset_name: len(self.task._requested_input_relative_times(dataset_name))
             for dataset_name in self.dataset_names
         }
-        self.n_step_output_by_dataset = {
+        self.n_step_output_by_dataset = self.task.num_output_timesteps_by_dataset or {
             dataset_name: len(self.task._requested_output_relative_times(dataset_name))
             for dataset_name in self.dataset_names
         }

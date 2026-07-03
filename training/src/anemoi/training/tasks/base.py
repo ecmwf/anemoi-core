@@ -62,6 +62,8 @@ class BaseTask(ABC):
         self.dataset_input_relative_times_by_dataset: dict[str, list[int]] = {}
         self.dataset_target_relative_times_by_dataset: dict[str, list[int]] = {}
         self.dataset_time_maps: dict[str, dict[int, int]] = {}
+        self.num_input_timesteps_by_dataset: dict[str, int] = {}
+        self.num_output_timesteps_by_dataset: dict[str, int] = {}
         self._reference_input_dataset_name: str | None = None
         self._reference_output_dataset_name: str | None = None
 
@@ -379,6 +381,8 @@ class BaseTask(ABC):
         self.dataset_input_relative_times_by_dataset = {}
         self.dataset_target_relative_times_by_dataset = {}
         self.dataset_time_maps = {}
+        self.num_input_timesteps_by_dataset = {}
+        self.num_output_timesteps_by_dataset = {}
 
         if len(dataset_names) == 0:
             return
@@ -399,6 +403,12 @@ class BaseTask(ABC):
                 "relative_date_target_indices_training_by_dataset",
             ),
         )
+        self.num_input_timesteps_by_dataset = {
+            dataset_name: len(self._requested_input_relative_times(dataset_name)) for dataset_name in dataset_names
+        }
+        self.num_output_timesteps_by_dataset = {
+            dataset_name: len(self._requested_output_relative_times(dataset_name)) for dataset_name in dataset_names
+        }
         relative_by_dataset = self._resolve_relative_time_metadata(
             metadata_inference,
             dataset_names,

@@ -162,7 +162,8 @@ class Forecaster(BaseTask):
         if requested is not None:
             if len(requested) == 0:
                 return []
-            rollout_window = max(self.rollout.maximum, self.validation_rollout)
+            validation_rollout = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
+            rollout_window = max(self.rollout.maximum, validation_rollout)
             if len(requested) % rollout_window != 0:
                 msg = (
                     f"Dataset '{dataset_name}' target indices {requested} do not divide evenly across "

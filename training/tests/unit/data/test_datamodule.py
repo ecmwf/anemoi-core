@@ -517,3 +517,5 @@ def test_datamodule_and_task_metadata_configure_mixed_frequency_timing(
     assert timesteps["relative_date_target_indices_training_by_dataset"]["nordic_radar"] == [1, 2, 3]
     assert task.dataset_time_maps["meps"] == {0: 0}
     assert task.dataset_time_maps["nordic_radar"] == {0: 0, 1: 1, 2: 2, 3: 3}
+    assert task.num_input_timesteps_by_dataset == {"meps": 1, "nordic_radar": 1}
+    assert task.num_output_timesteps_by_dataset == {"meps": 0, "nordic_radar": 1}
