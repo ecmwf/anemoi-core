@@ -498,6 +498,104 @@ def test_fft2d_spectral_losses_shape_and_validation(target: str) -> None:
         _ = loss(*wrong, squash=True)
 
 
+@pytest.mark.parametrize(
+    ("loss_cls", "ensemble_size"),
+    [
+        (SpectralL2Loss, 1),
+        (LogSpectralDistance, 1),
+        (FourierCorrelationLoss, 1),
+        (SpectralCRPSLoss, 4),
+    ],
+)
+def test_fft2d_spectral_losses_use_all_to_all_for_sharded_layout(
+    loss_cls: type[BaseLoss],
+    ensemble_size: int,
+    mocker: MockerFixture,
+) -> None:
+    x_dim, y_dim = 4, 4
+    group = object()
+    grid_shard_sizes = [8, 8]
+    channel_shard_sizes = [1, 1]
+    spectral_shard_sizes = [8, 8]
+    local_grid = grid_shard_sizes[0]
+
+    loss = loss_cls(transform="fft2d", x_dim=x_dim, y_dim=y_dim)
+    pred = torch.randn(1, 1, ensemble_size, local_grid, 2)
+    target = torch.randn(1, 1, 1, local_grid, 2)
+
+    def fake_all_to_all(
+        x: torch.Tensor,
+        dim_split: int,
+        split_sizes: list[int],
+        dim_concat: int,
+        concat_sizes: list[int],
+        _group: object,
+    ) -> torch.Tensor:
+        out_shape = list(x.shape)
+        dim_split %= x.ndim
+        dim_concat %= x.ndim
+        out_shape[dim_split] = split_sizes[0]
+        out_shape[dim_concat] = sum(concat_sizes)
+        return torch.zeros(out_shape, dtype=x.dtype, device=x.device)
+
+    get_sizes = mocker.patch(
+        "anemoi.training.losses.spectral.get_shard_sizes",
+        side_effect=[channel_shard_sizes, channel_shard_sizes, spectral_shard_sizes],
+    )
+    all_to_all = mocker.patch(
+        "anemoi.training.losses.spectral.all_to_all_transpose",
+        side_effect=fake_all_to_all,
+    )
+    mocker.patch("anemoi.training.losses.base.reduce_tensor", side_effect=lambda x, _group: x)
+    scale = mocker.spy(loss, "scale")
+
+    out = loss(
+        pred,
+        target,
+        group=group,
+        grid_shard_slice=slice(0, 8),
+        grid_shard_sizes=grid_shard_sizes,
+        grid_dim=-2,
+    )
+
+    assert torch.isfinite(out).all()
+    assert get_sizes.call_count == 3
+    assert get_sizes.call_args_list[0].args[1] == TensorDim.VARIABLE
+    assert get_sizes.call_args_list[1].args[1] == TensorDim.VARIABLE
+    assert get_sizes.call_args_list[2].args[1] == -2
+
+    assert all_to_all.call_count == 3
+    assert all_to_all.call_args_list[0].args[1:] == (
+        TensorDim.VARIABLE,
+        channel_shard_sizes,
+        -2,
+        grid_shard_sizes,
+        group,
+    )
+    assert all_to_all.call_args_list[1].args[1:] == (
+        TensorDim.VARIABLE,
+        channel_shard_sizes,
+        -2,
+        grid_shard_sizes,
+        group,
+    )
+    assert all_to_all.call_args_list[2].args[1:] == (
+        -2,
+        spectral_shard_sizes,
+        TensorDim.VARIABLE,
+        channel_shard_sizes,
+        group,
+    )
+    assert scale.call_args.kwargs["grid_shard_slice"] is None
+
+
+@pytest.mark.parametrize("loss_cls", spectral_losses)
+def test_spectral_losses_report_sharding_support(loss_cls: type[BaseLoss]) -> None:
+    loss = loss_cls(x_dim=4, y_dim=4)
+    assert loss.supports_sharding is True
+    assert loss.needs_shard_layout_info is True
+
+
 def test_iter_leaf_losses_flat() -> None:
     """Test that iter_leaf_losses on a simple loss yields itself."""
     loss = MSELoss()
