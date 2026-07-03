@@ -11,9 +11,6 @@ import pytest
 import torch
 from torch.utils.cpp_extension import is_ninja_available
 
-from anemoi.models.layers.ring_fft import RingIRFFTBackend
-from anemoi.models.layers.ring_fft import RingRFFTBackend
-from anemoi.models.layers.ring_fft import is_cufft_available
 from anemoi.models.layers.ring_fft import ring_irfft
 from anemoi.models.layers.ring_fft import ring_rfft
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
@@ -107,34 +104,20 @@ def _require_cuda_extension_environment() -> None:
         pytest.skip("Ninja is required to build the ring FFT CUDA extension")
 
 
-def _require_backend_environment(backend: RingRFFTBackend | RingIRFFTBackend) -> None:
-    _require_cuda_extension_environment()
-    if backend == "cufft" and not is_cufft_available():
-        pytest.skip("cuFFT headers/libraries are required for the cuFFT ring FFT backend")
+def _o96_rfft_tolerances() -> tuple[float, float]:
+    return 1e-6, 1e-7
 
 
-def _o96_rfft_backend_tolerances(backend: RingRFFTBackend) -> tuple[float, float]:
-    if backend == "cufft":
-        return 1e-6, 1e-7
-    return 2e-5, 8e-6
+def _o96_irfft_tolerances() -> tuple[tuple[float, float], tuple[float, float]]:
+    return (1e-5, 1e-5), (1e-5, 3e-5)
 
 
-def _o96_irfft_backend_tolerances(backend: RingIRFFTBackend) -> tuple[tuple[float, float], tuple[float, float]]:
-    if backend == "cufft":
-        return (1e-5, 1e-5), (1e-5, 3e-5)
-    return (1e-4, 5e-5), (1e-4, 5e-5)
+def _large_grid_rfft_tolerances() -> tuple[float, float]:
+    return 1e-6, 1e-7
 
 
-def _large_grid_rfft_backend_tolerances(backend: RingRFFTBackend) -> tuple[float, float]:
-    if backend == "cufft":
-        return 1e-6, 1e-7
-    return 1e-4, 2e-5
-
-
-def _large_grid_irfft_backend_tolerances(backend: RingIRFFTBackend) -> tuple[float, float]:
-    if backend == "cufft":
-        return 1e-5, 5e-5
-    return 1e-4, 1e-4
+def _large_grid_irfft_tolerances() -> tuple[float, float]:
+    return 1e-5, 5e-5
 
 
 @pytest.mark.gpu
@@ -175,74 +158,14 @@ def test_o96_rfft_backward_matches_torch(truncation: int) -> None:
 
 
 @pytest.mark.gpu
-def test_ring_rfft_backend_selection(monkeypatch: pytest.MonkeyPatch) -> None:
-    _require_cuda_extension_environment()
-
-    torch.manual_seed(5)
-    lons_per_lat = _o96_lons_per_lat()
-    x = torch.randn(1, O96_GRID_POINTS, device="cuda", dtype=torch.float32)
-
-    monkeypatch.delenv("ANEMOI_RING_RFFT_BACKEND", raising=False)
-    default_backend = "cufft" if is_cufft_available() else "direct"
-    default_expected = ring_rfft(x, lons_per_lat, 95, backend=default_backend)
-    torch.testing.assert_close(ring_rfft(x, lons_per_lat, 95), default_expected)
-
-    direct_expected = ring_rfft(x, lons_per_lat, 95, backend="direct")
-    monkeypatch.setenv("ANEMOI_RING_RFFT_BACKEND", "direct")
-    torch.testing.assert_close(ring_rfft(x, lons_per_lat, 95), direct_expected)
-
-    if is_cufft_available():
-        cufft_expected = ring_rfft(x, lons_per_lat, 95, backend="cufft")
-        monkeypatch.setenv("ANEMOI_RING_RFFT_BACKEND", "cufft")
-        torch.testing.assert_close(ring_rfft(x, lons_per_lat, 95), cufft_expected)
-
-    with pytest.raises(ValueError, match="Unknown ring RFFT backend"):
-        ring_rfft(x, lons_per_lat, 95, backend="missing")  # type: ignore[arg-type]
-
-
-@pytest.mark.gpu
-def test_ring_irfft_backend_selection(monkeypatch: pytest.MonkeyPatch) -> None:
-    _require_cuda_extension_environment()
-
-    torch.manual_seed(15)
-    lons_per_lat = _o96_lons_per_lat()
-    x = torch.randn(1, len(lons_per_lat), 96, device="cuda", dtype=torch.complex64)
-
-    monkeypatch.delenv("ANEMOI_RING_IRFFT_BACKEND", raising=False)
-    monkeypatch.delenv("ANEMOI_RING_RFFT_BACKEND", raising=False)
-    default_backend = "cufft" if is_cufft_available() else "direct"
-    default_expected = ring_irfft(x, lons_per_lat, backend=default_backend)
-    torch.testing.assert_close(ring_irfft(x, lons_per_lat), default_expected)
-
-    direct_expected = ring_irfft(x, lons_per_lat, backend="direct")
-    monkeypatch.setenv("ANEMOI_RING_IRFFT_BACKEND", "direct")
-    torch.testing.assert_close(ring_irfft(x, lons_per_lat), direct_expected)
-
-    monkeypatch.delenv("ANEMOI_RING_IRFFT_BACKEND")
-    monkeypatch.setenv("ANEMOI_RING_RFFT_BACKEND", "direct")
-    torch.testing.assert_close(ring_irfft(x, lons_per_lat), direct_expected)
-
-    if is_cufft_available():
-        cufft_expected = ring_irfft(x, lons_per_lat, backend="cufft")
-        monkeypatch.setenv("ANEMOI_RING_RFFT_BACKEND", "cufft")
-        torch.testing.assert_close(ring_irfft(x, lons_per_lat), cufft_expected)
-
-    with pytest.raises(ValueError, match="Unknown ring IRFFT backend"):
-        ring_irfft(x, lons_per_lat, backend="missing")  # type: ignore[arg-type]
-
-
-@pytest.mark.gpu
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
-def test_small_float64_known_values_high_precision(backend: RingRFFTBackend) -> None:
-    _require_backend_environment(backend)
-
+def test_small_float64_known_values_high_precision() -> None:
     lons_per_lat = [4, 8]
     x = torch.zeros(1, sum(lons_per_lat), device="cuda", dtype=torch.float64, requires_grad=True)
     with torch.no_grad():
         x[0, 0] = 1
         x[0, lons_per_lat[0]] = 1
 
-    actual = ring_rfft(x, lons_per_lat, 4, backend=backend)
+    actual = ring_rfft(x, lons_per_lat, 4)
     expected = torch.zeros_like(actual)
     expected[0, 0, :3] = 0.25
     expected[0, 1, :] = 0.125
@@ -259,16 +182,14 @@ def test_small_float64_known_values_high_precision(backend: RingRFFTBackend) -> 
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
-def test_small_irfft_float64_known_values_high_precision(backend: RingIRFFTBackend) -> None:
-    _require_backend_environment(backend)
+def test_small_irfft_float64_known_values_high_precision() -> None:
 
     lons_per_lat = [4, 8]
     x = torch.zeros(1, len(lons_per_lat), 5, device="cuda", dtype=torch.complex128, requires_grad=True)
     with torch.no_grad():
         x[0, :, 0] = 1
 
-    actual = ring_irfft(x, lons_per_lat, backend=backend)
+    actual = ring_irfft(x, lons_per_lat)
     expected = torch.ones_like(actual)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
@@ -282,9 +203,7 @@ def test_small_irfft_float64_known_values_high_precision(backend: RingIRFFTBacke
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
-def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch(backend: RingIRFFTBackend) -> None:
-    _require_backend_environment(backend)
+def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch() -> None:
 
     lons_per_lat = [4, 5, 8]
     torch.manual_seed(17)
@@ -297,8 +216,8 @@ def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch(backend: RingIR
                 x_perturbed[:, lat_idx, nlon // 2] = x_perturbed[:, lat_idx, nlon // 2].real - 23456j
     x_perturbed.requires_grad_(True)
 
-    actual = ring_irfft(x, lons_per_lat, backend=backend)
-    actual_perturbed = ring_irfft(x_perturbed, lons_per_lat, backend=backend)
+    actual = ring_irfft(x, lons_per_lat)
+    actual_perturbed = ring_irfft(x_perturbed, lons_per_lat)
     expected = _reference_ring_irfft(x.detach(), lons_per_lat)
     expected_perturbed = _reference_ring_irfft(x_perturbed.detach(), lons_per_lat)
     grad_output = torch.randn_like(expected)
@@ -323,19 +242,15 @@ def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch(backend: RingIR
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("nlon", REPRESENTATIVE_NLON_TEST_VALUES)
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
 def test_generic_backend_representative_lengths_known_values_high_precision(
     nlon: int,
-    backend: RingRFFTBackend,
 ) -> None:
-    _require_backend_environment(backend)
-
     lons_per_lat = [nlon]
     x = torch.zeros(1, nlon, device="cuda", dtype=torch.float64, requires_grad=True)
     with torch.no_grad():
         x[0, 0] = 1
 
-    actual = ring_rfft(x, lons_per_lat, nlon // 2, backend=backend)
+    actual = ring_rfft(x, lons_per_lat, nlon // 2)
     expected = torch.full_like(actual, 1 / nlon)
     torch.testing.assert_close(actual, expected, rtol=0, atol=1e-15)
 
@@ -349,19 +264,16 @@ def test_generic_backend_representative_lengths_known_values_high_precision(
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("nlon", REPRESENTATIVE_NLON_TEST_VALUES)
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
 def test_generic_backend_irfft_representative_lengths_known_values_high_precision(
     nlon: int,
-    backend: RingIRFFTBackend,
 ) -> None:
-    _require_backend_environment(backend)
 
     lons_per_lat = [nlon]
     x = torch.zeros(1, 1, nlon // 2 + 1, device="cuda", dtype=torch.complex128, requires_grad=True)
     with torch.no_grad():
         x[0, 0, 0] = 1
 
-    actual = ring_irfft(x, lons_per_lat, backend=backend)
+    actual = ring_irfft(x, lons_per_lat)
     expected = torch.ones_like(actual)
     torch.testing.assert_close(actual, expected, rtol=0, atol=1e-12)
 
@@ -406,19 +318,14 @@ def test_o96_inverse_sht_fast_path_matches_torch_path(truncation: int) -> None:
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
 def test_o96_inverse_sht_simple_float64_fast_path_matches_torch_path(
-    backend: RingIRFFTBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _require_backend_environment(backend)
-
     truncation = 95
     lons_per_lat = _o96_lons_per_lat()
     fast = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).cuda()
     grouped = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation).cuda()
     grouped._use_cuda_ring_irfft = False
-    monkeypatch.setenv("ANEMOI_RING_IRFFT_BACKEND", backend)
 
     x = torch.zeros(1, truncation + 1, truncation + 1, device="cuda", dtype=torch.complex128)
     x[0, 0, 0] = 1.0
@@ -456,15 +363,12 @@ def test_o96_rfft_realistic_shapes_and_dtypes(dtype: torch.dtype, shape_prefix: 
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
-def test_o96_rfft_backend_forward_backward_matches_torch(backend: RingRFFTBackend) -> None:
-    _require_backend_environment(backend)
-
+def test_o96_rfft_backend_forward_backward_matches_torch() -> None:
     torch.manual_seed(23)
     x_actual = torch.randn(2, O96_GRID_POINTS, device="cuda", dtype=torch.float32, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_rfft(x_actual, _o96_lons_per_lat(), 95, backend=backend)
+    actual = ring_rfft(x_actual, _o96_lons_per_lat(), 95)
     expected = _reference_ring_rfft(x_expected, _o96_lons_per_lat(), 95)
     grad_output = torch.randn_like(expected)
 
@@ -474,7 +378,7 @@ def test_o96_rfft_backend_forward_backward_matches_torch(backend: RingRFFTBacken
     actual_loss.backward()
     expected_loss.backward()
 
-    rtol, atol = _o96_rfft_backend_tolerances(backend)
+    rtol, atol = _o96_rfft_tolerances()
     torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
     torch.testing.assert_close(x_actual.grad, x_expected.grad, rtol=rtol, atol=atol)
 
@@ -510,16 +414,13 @@ def test_o96_irfft_realistic_shapes_and_dtypes(dtype: torch.dtype, shape_prefix:
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", EXTENSION_BACKENDS)
-def test_o96_irfft_backend_forward_backward_matches_torch(backend: RingIRFFTBackend) -> None:
-    _require_backend_environment(backend)
-
+def test_o96_irfft_backend_forward_backward_matches_torch() -> None:
     torch.manual_seed(24)
     lons_per_lat = _o96_lons_per_lat()
     x_actual = torch.randn(2, len(lons_per_lat), 96, device="cuda", dtype=torch.complex64, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_irfft(x_actual, lons_per_lat, backend=backend)
+    actual = ring_irfft(x_actual, lons_per_lat)
     expected = _reference_ring_irfft(x_expected, lons_per_lat)
     grad_output = torch.randn_like(expected)
 
@@ -529,33 +430,31 @@ def test_o96_irfft_backend_forward_backward_matches_torch(backend: RingIRFFTBack
     actual_loss.backward()
     expected_loss.backward()
 
-    output_tolerances, grad_tolerances = _o96_irfft_backend_tolerances(backend)
+    output_tolerances, grad_tolerances = _o96_irfft_tolerances()
     torch.testing.assert_close(actual, expected, rtol=output_tolerances[0], atol=output_tolerances[1])
     torch.testing.assert_close(x_actual.grad, x_expected.grad, rtol=grad_tolerances[0], atol=grad_tolerances[1])
 
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    ("grid_name", "lons_per_lat_fn", "truncation", "backend"),
+    ("grid_name", "lons_per_lat_fn", "truncation"),
     [
-        ("o320", _o320_lons_per_lat, 319, "direct"),
-        ("o320", _o320_lons_per_lat, 319, "cufft"),
-        ("o320", _o320_lons_per_lat, 639, "direct"),
-        ("o320", _o320_lons_per_lat, 639, "cufft"),
-        ("n320", _n320_lons_per_lat, 319, "direct"),
-        ("n320", _n320_lons_per_lat, 319, "cufft"),
-        ("n320", _n320_lons_per_lat, 639, "direct"),
-        ("n320", _n320_lons_per_lat, 639, "cufft"),
+        ("o320", _o320_lons_per_lat, 319),
+        ("o320", _o320_lons_per_lat, 319),
+        ("o320", _o320_lons_per_lat, 639),
+        ("o320", _o320_lons_per_lat, 639),
+        ("n320", _n320_lons_per_lat, 319),
+        ("n320", _n320_lons_per_lat, 319),
+        ("n320", _n320_lons_per_lat, 639),
+        ("n320", _n320_lons_per_lat, 639),
     ],
 )
 def test_large_grid_ring_rfft_forward_backward_matches_torch(
     grid_name: str,
     lons_per_lat_fn,
     truncation: int,
-    backend: RingRFFTBackend,
 ) -> None:
     del grid_name
-    _require_backend_environment(backend)
 
     torch.manual_seed(4)
     lons_per_lat = lons_per_lat_fn()
@@ -563,7 +462,7 @@ def test_large_grid_ring_rfft_forward_backward_matches_torch(
     x_actual = torch.randn(1, grid_points, device="cuda", dtype=torch.float32, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_rfft(x_actual, lons_per_lat, truncation, backend=backend)
+    actual = ring_rfft(x_actual, lons_per_lat, truncation)
     expected = _reference_ring_rfft(x_expected, lons_per_lat, truncation)
     grad_output = torch.randn_like(expected)
 
@@ -573,33 +472,31 @@ def test_large_grid_ring_rfft_forward_backward_matches_torch(
     actual_loss.backward()
     expected_loss.backward()
 
-    rtol, atol = _large_grid_rfft_backend_tolerances(backend)
+    rtol, atol = _large_grid_rfft_tolerances()
     torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
     torch.testing.assert_close(x_actual.grad, x_expected.grad, rtol=rtol, atol=atol)
 
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    ("grid_name", "lons_per_lat_fn", "truncation", "backend"),
+    ("grid_name", "lons_per_lat_fn", "truncation"),
     [
-        ("o320", _o320_lons_per_lat, 319, "direct"),
-        ("o320", _o320_lons_per_lat, 319, "cufft"),
-        ("o320", _o320_lons_per_lat, 639, "direct"),
-        ("o320", _o320_lons_per_lat, 639, "cufft"),
-        ("n320", _n320_lons_per_lat, 319, "direct"),
-        ("n320", _n320_lons_per_lat, 319, "cufft"),
-        ("n320", _n320_lons_per_lat, 639, "direct"),
-        ("n320", _n320_lons_per_lat, 639, "cufft"),
+        ("o320", _o320_lons_per_lat, 319),
+        ("o320", _o320_lons_per_lat, 319),
+        ("o320", _o320_lons_per_lat, 639),
+        ("o320", _o320_lons_per_lat, 639),
+        ("n320", _n320_lons_per_lat, 319),
+        ("n320", _n320_lons_per_lat, 319),
+        ("n320", _n320_lons_per_lat, 639),
+        ("n320", _n320_lons_per_lat, 639),
     ],
 )
 def test_large_grid_ring_irfft_forward_backward_matches_torch(
     grid_name: str,
     lons_per_lat_fn,
     truncation: int,
-    backend: RingIRFFTBackend,
 ) -> None:
     del grid_name
-    _require_backend_environment(backend)
 
     torch.manual_seed(14)
     lons_per_lat = lons_per_lat_fn()
@@ -613,7 +510,7 @@ def test_large_grid_ring_irfft_forward_backward_matches_torch(
     )
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_irfft(x_actual, lons_per_lat, backend=backend)
+    actual = ring_irfft(x_actual, lons_per_lat)
     expected = _reference_ring_irfft(x_expected, lons_per_lat)
     grad_output = torch.randn_like(expected)
 
@@ -623,6 +520,6 @@ def test_large_grid_ring_irfft_forward_backward_matches_torch(
     actual_loss.backward()
     expected_loss.backward()
 
-    rtol, atol = _large_grid_irfft_backend_tolerances(backend)
+    rtol, atol = _large_grid_irfft_tolerances()
     torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
     torch.testing.assert_close(x_actual.grad, x_expected.grad, rtol=rtol, atol=atol)
