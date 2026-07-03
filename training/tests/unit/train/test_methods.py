@@ -76,6 +76,24 @@ class ShardingAwareCaptureLoss(CaptureLoss):
         return True
 
 
+def assert_metric_kwargs(
+    kwargs: dict[str, Any],
+    *,
+    expected_indices: list[int],
+    grid_shard_slice: slice | None,
+    group: object,
+    grid_dim: int | None = None,
+    grid_shard_sizes: list[int] | None = None,
+) -> None:
+    assert kwargs["scaler_indices"][0] is Ellipsis
+    torch.testing.assert_close(kwargs["scaler_indices"][1], torch.tensor(expected_indices, dtype=torch.long))
+    assert kwargs["grid_shard_slice"] == grid_shard_slice
+    assert kwargs["group"] is group
+    if grid_dim is not None:
+        assert kwargs["grid_dim"] == grid_dim
+        assert kwargs["grid_shard_sizes"] == grid_shard_sizes
+
+
 class FakeGroup:
     def __init__(self, size: int) -> None:
         self._size = size
@@ -659,11 +677,12 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     assert len(metric.calls) == 1
     assert metric.calls[0]["pred"] is y_pred
     assert metric.calls[0]["target"] is y
-    assert metric.calls[0]["kwargs"] == {
-        "scaler_indices": (..., [1]),
-        "grid_shard_slice": grid_shard_slice,
-        "group": group,
-    }
+    assert_metric_kwargs(
+        metric.calls[0]["kwargs"],
+        expected_indices=[1],
+        grid_shard_slice=grid_shard_slice,
+        group=group,
+    )
 
 
 def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> None:
@@ -697,13 +716,14 @@ def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> 
     )
 
     assert "multiscale_metric/data/z_500/1" in metrics
-    assert metric.calls[0]["kwargs"] == {
-        "scaler_indices": (..., [1]),
-        "grid_shard_slice": grid_shard_slice,
-        "group": group,
-        "grid_dim": -2,
-        "grid_shard_sizes": shard_sizes,
-    }
+    assert_metric_kwargs(
+        metric.calls[0]["kwargs"],
+        expected_indices=[1],
+        grid_shard_slice=grid_shard_slice,
+        group=group,
+        grid_dim=-2,
+        grid_shard_sizes=shard_sizes,
+    )
 
 
 def test_calculate_val_metrics_passes_none_shard_sizes_when_gathered() -> None:
@@ -745,13 +765,14 @@ def test_calculate_val_metrics_passes_none_shard_sizes_when_gathered() -> None:
     )
 
     assert "multiscale_metric/data/z_500/1" in metrics
-    assert metric.calls[0]["kwargs"] == {
-        "scaler_indices": (..., [1]),
-        "grid_shard_slice": None,
-        "group": group,
-        "grid_dim": -2,
-        "grid_shard_sizes": None,
-    }
+    assert_metric_kwargs(
+        metric.calls[0]["kwargs"],
+        expected_indices=[1],
+        grid_shard_slice=None,
+        group=group,
+        grid_dim=-2,
+        grid_shard_sizes=None,
+    )
 
 
 # ── plot_adapter delegation ────────────────────────────────────────────────────
