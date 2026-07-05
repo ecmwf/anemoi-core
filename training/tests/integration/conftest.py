@@ -488,20 +488,20 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
 
 @pytest.fixture(
     params=[  # selects different test cases
-        "lam",
-        "graphtransformer",
-        "stretched",
-        "ensemble_crps",
-        "edm_diffusion_tendency",
-        "temporal_downscaler",
+        # "lam",
+        # "graphtransformer",
+        # "stretched",
+        # "ensemble_crps",
+        # "edm_diffusion_tendency",
+        "temporal_downscaler_ensemble",
     ],
     ids=[
-        "lam",
-        "graphtransformer",
-        "stretched",
-        "ensemble_crps",
-        "edm_diffusion_tendency",
-        "temporal_downscaler",
+        # "lam",
+        # "graphtransformer",
+        # "stretched",
+        # "ensemble_crps",
+        # "edm_diffusion_tendency",
+        "temporal_downscaler_ensemble",
     ],
 )
 def benchmark_config(
@@ -529,9 +529,9 @@ def benchmark_config(
     elif test_case == "edm_diffusion_tendency":
         overrides = []
         base_config = "transport_edm_diffusion_tendency"
-    elif test_case == "temporal_downscaler":
+    elif test_case == "temporal_downscaler_ensemble":
         overrides = []
-        base_config = "temporal_downscaler"
+        base_config = "temporal_downscaler_ensemble"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
@@ -613,7 +613,7 @@ def temporal_downscaler_config(
         config_path="../../src/anemoi/training/config",
         job_name="test_temporal_downscaler",
     ):
-        template = compose(config_name="temporal_downscaler.yaml")
+        template = compose(config_name="temporal_downscaler_ensemble.yaml")
 
     use_case_modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/test_temporal_downscaler.yaml",

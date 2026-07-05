@@ -4,7 +4,8 @@ system:
     num_gpus_per_model: 1
     num_gpus_per_ensemble: 2
   input:
-    dataset: ??? # datset building in progress
+    dataset: /ec/ai/project/ai-ml/datasets/aifs-od-fc-oper-0001-mars-o96-2016-2025-6h-1h-v5.zarr
+    loss_matrices_path: "anemoi-integration-tests/training/assets/"
     graph: ./temporal-downscaler-bm-graph.pt
 
 data:
@@ -33,13 +34,11 @@ training:
             w: 0.1
             z: 1
             sp: 1
-            msl: 1
             10u: 1
             10v: 1
             2d: 1
             tp: 1
             cp: 0.1
-            10fg: 0.5
   optimization:
     lr: 5.0e-5
     lr_scheduler:
@@ -53,12 +52,9 @@ training:
         _target_: anemoi.training.losses.combined.CombinedLoss
         ignore_nans: False
         loss_weights: [0.6, 0.4]
-        checkpoint_losses: False
-        offload_saved_tensors: False
-        offload_pin_memory: True
         losses:
         - _target_: anemoi.training.losses.MultiscaleLossWrapper
-          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570}  # null = single scale, no smoothing
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}  # null = single scale, no smoothing
           weights: [1.0, 1.0, 1.0, 4.0]
           per_scale_loss:
             _target_: anemoi.training.losses.CRPS
@@ -67,7 +63,7 @@ training:
             no_autocast: True
             alpha: 0.95
         - _target_: anemoi.training.losses.MultiscaleLossWrapper
-          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
           weights: [1.0, 1.0, 1.0, 4.0]
           per_scale_loss:
             _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
