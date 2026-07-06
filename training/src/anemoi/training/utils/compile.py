@@ -43,7 +43,7 @@ def subset_tensor(
         subset_index = subset_indices[-1]
     else:
         subset_dim = 0
-        subset_index = subset_indices
+        subset_index = subset_indices[0] if len(subset_indices) == 1 else subset_indices
 
     # Convert subset_index to a tensor if it is not already one, and move it to the same device as x
     if not isinstance(subset_index, torch.Tensor):
