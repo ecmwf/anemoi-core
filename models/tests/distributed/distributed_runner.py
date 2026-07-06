@@ -7,6 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+"""Utilities for launching distributed pytest checks.
+
+These functions handle the setup and launching of torch multiprocess tests, including
+verification of spawned ranks, backends, and devices. Tests of parallel kernels,
+communication primitives should live in separate test modules that call ``run_distributed_test``,
+see models/tests/distributed/test_communication_primitives.py for an example.
+
+Set ``ANEMOI_DISTRIBUTED_TEST_DEBUG=1`` and run pytest with ``-s`` to print
+rank/backend/device information from each spawned process.
+"""
+
 from __future__ import annotations
 
 import os
@@ -28,6 +39,13 @@ def run_distributed_test(
     world_size: int,
     **rank_kwargs: Any,
 ) -> None:
+    """Launch worker processes and run a distributed test function.
+
+    This helper spawns ``world_size`` processes, initializes a process group in
+    each, validates the backend/device context, and then calls ``rank_fn`` once
+    per rank with ``rank``, ``world_size``, ``device``, ``group``, and any
+    forwarded keyword arguments.
+    """
     if world_size < 2:
         msg = f"world_size must be >= 2, got {world_size}"
         raise ValueError(msg)
@@ -64,6 +82,7 @@ def _run_rank(
     rank_fn: Callable[..., None],
     rank_kwargs: dict[str, Any],
 ) -> None:
+    """Spawn entry point that initializes one distributed rank."""
     if backend == "nccl":
         torch.cuda.set_device(rank)
         device = torch.device("cuda", rank)
@@ -93,19 +112,26 @@ def _assert_distributed_context(
     device: torch.device,
     group: dist.ProcessGroup,
 ) -> None:
+    """Verify rank, backend, world size, and device placement."""
     assert dist.is_initialized(), "Expected torch.distributed process group to be initialized."
-    assert dist.get_backend(group) == backend
-    assert dist.get_world_size(group=group) == world_size
-    assert dist.get_rank(group=group) == rank
+    assert dist.get_backend(group) == backend, f"Expected backend {backend}, got {dist.get_backend(group)}."
+    assert dist.get_world_size(group=group) == world_size, (
+        f"Expected world_size={world_size}, got {dist.get_world_size(group=group)}."
+    )
+    assert dist.get_rank(group=group) == rank, f"Expected rank={rank}, got {dist.get_rank(group=group)}."
 
     if backend == "nccl":
         assert device.type == "cuda", f"Expected NCCL rank {rank} to use a CUDA device, got {device}."
         assert torch.cuda.is_available(), "Expected CUDA to be available for NCCL tests."
-        assert torch.cuda.device_count() >= world_size
-        assert torch.cuda.current_device() == rank
+        assert torch.cuda.device_count() >= world_size, (
+            f"Expected at least {world_size} CUDA devices, got {torch.cuda.device_count()}."
+        )
+        assert torch.cuda.current_device() == rank, (
+            f"Expected current CUDA device {rank}, got {torch.cuda.current_device()}."
+        )
         probe = torch.empty(1, device=device)
-        assert probe.is_cuda
-        assert probe.device.index == rank
+        assert probe.is_cuda, "Expected NCCL probe tensor to be a CUDA tensor."
+        assert probe.device.index == rank, f"Expected probe on cuda:{rank}, got {probe.device}."
     else:
         assert device.type == "cpu", f"Expected {backend} rank {rank} to use CPU, got {device}."
 
