@@ -16,25 +16,26 @@ model. Different strategies handle different use cases: warm start
 
 Wiring to the Lightning trainer
 -------------------------------
-This module defines the strategy contract; the actual
-trainer-to-pipeline wiring (replacing the legacy
-``model.load_from_checkpoint(...)`` call site and the
-``AnemoiLightningModule.on_load_checkpoint`` hook) lands in Phase 3 of
-the checkpoint refactor (Issue #495 / CheckpointManager). Until that
-ships, strategies still need to perform every step that
-``on_load_checkpoint`` did, so that an integration that simply forwards
-the loaded model into Lightning does not silently regress. Two helper
-methods bridge that gap:
+This module defines the strategy contract. The trainer-to-pipeline wiring has
+shipped (Issue #495): ``AnemoiTrainer.model`` builds and runs the pipeline at
+model-construction time, so a configured ``training.checkpoint`` loading
+strategy owns weight loading. For the weights-only, transfer-learning and
+cold-start paths Lightning never sees the checkpoint (its ``ckpt_path`` restore
+is suppressed), so each strategy must itself perform every step that
+``AnemoiLightningModule.on_load_checkpoint`` would have done — otherwise the
+loaded state dict would silently differ from the legacy path.
 
-- ``_apply_format_migrations`` mirrors the
-  ``chunking_fix_migration(checkpoint)`` call in
-  ``anemoi.training.utils.checkpoint.transfer_learning_loading``.
-- ``_refresh_checkpoint_processors`` mirrors
-  ``AnemoiLightningModule._update_checkpoint_state_dict_for_load`` and
-  honours ``config.training.update_ds_stats_on_ckpt_load``.
-
-Both run at the top of every strategy's ``process()`` so the loaded
-state dict matches what the legacy path would have produced.
+Those parity steps live as shared, context-free functions at the bottom of this
+module (:func:`apply_checkpoint_format_migrations`,
+:func:`apply_trainable_edge_perm_migration`,
+:func:`refresh_checkpoint_processors`, :func:`preserve_anemoi_metadata`,
+:func:`extract_checkpoint_variables_metadata`,
+:func:`warn_on_hparams_divergence`). The ``LoadingStrategy._*`` methods are thin
+wrappers over them, and ``AnemoiLightningModule.on_load_checkpoint`` calls the
+same functions, so the algorithm lives in exactly one place. Warm start keeps
+Lightning's ``ckpt_path`` restore (to recover optimizer/epoch state), so
+``on_load_checkpoint`` runs the shared steps for that path while the loading
+strategies run them for the non-Lightning paths.
 
 Example
 -------
@@ -88,6 +89,16 @@ class LoadingStrategy(PipelineStage):
     ...         self._mark_weights_loaded(context.model)
     ...         return context
     """
+
+    #: Whether this strategy needs the optimizer / scheduler / loop-progress state
+    #: restored at fit time. The pipeline always applies weights + parity at
+    #: model-build, but cannot restore optimizer/loop state (those objects exist
+    #: only once ``trainer.fit()`` starts). Strategies that resume an interrupted
+    #: run set this ``True`` so the trainer keeps Lightning's ``ckpt_path`` resume,
+    #: which owns that runtime-state restore. Fresh-training strategies leave it
+    #: ``False`` (the default) so ``ckpt_path`` is suppressed and no second load
+    #: happens.
+    restores_training_state: bool = False
 
     @abstractmethod
     async def process(self, context: CheckpointContext) -> CheckpointContext:
@@ -152,181 +163,72 @@ class LoadingStrategy(PipelineStage):
         model: nn.Module,
         checkpoint_data: dict[str, Any],
     ) -> None:
-        """Restore Anemoi-specific metadata from checkpoint onto model.
+        """Restore Anemoi metadata onto the model.
 
-        Sets ``model._ckpt_model_name_to_index``, which maps variable names
-        to their tensor indices and is consumed by diagnostics callbacks
-        (sanity checks) and downstream inference.
-
-        Two checkpoint shapes are supported, matching the production hook
-        in ``anemoi.training.train.tasks.base.AnemoiLightningModule.on_load_checkpoint``:
-
-        - **Multi-dataset** (current): ``hyper_parameters["data_indices"]``
-          is a ``dict[str, IndexCollection]`` keyed by dataset name. The
-          attribute becomes ``{dataset_name: ic.name_to_index for ...}``,
-          which matches what ``DiagnosticsSanityCallback`` indexes by
-          dataset name.
-        - **Single-dataset** (legacy): ``hyper_parameters["data_indices"]``
-          is a single ``IndexCollection`` with a ``.name_to_index``
-          attribute. The flat mapping is assigned unchanged.
-
-        If neither shape is recognised, the attribute is left alone and
-        a debug message is logged.
-
-        Parameters
-        ----------
-        model : nn.Module
-            Target model to attach metadata to
-        checkpoint_data : dict
-            Full checkpoint data dictionary (not just the state dict)
+        Thin wrapper over :func:`preserve_anemoi_metadata` (the shared parity
+        home, also used by ``AnemoiLightningModule.on_load_checkpoint``).
         """
-        hyper_params = checkpoint_data.get("hyper_parameters", {})
-        data_indices = hyper_params.get("data_indices")
-
-        if isinstance(data_indices, dict) and data_indices:
-            try:
-                model._ckpt_model_name_to_index = {name: ic.name_to_index for name, ic in data_indices.items()}
-            except AttributeError:
-                LOGGER.debug(
-                    "Multi-dataset data_indices entries lack .name_to_index; skipping restoration",
-                )
-                return
-            LOGGER.debug(
-                "Restored multi-dataset _ckpt_model_name_to_index for %d datasets",
-                len(data_indices),
-            )
-            return
-
-        if data_indices is not None and hasattr(data_indices, "name_to_index"):
-            model._ckpt_model_name_to_index = data_indices.name_to_index
-            LOGGER.debug("Restored single-dataset _ckpt_model_name_to_index from checkpoint hyper_parameters")
-            return
-
-        LOGGER.debug(
-            "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
-            "skipping _ckpt_model_name_to_index restoration",
-        )
+        preserve_anemoi_metadata(model, checkpoint_data)
 
     def _apply_format_migrations(self, context: CheckpointContext) -> None:
-        """Run anemoi-models checkpoint-format migrations against ``context.checkpoint_data``.
+        """Run checkpoint-format migrations (``chunking_fix``) against ``context.checkpoint_data``.
 
-        Mirrors the legacy ``chunking_fix_migration(checkpoint)`` call in
-        ``anemoi.training.utils.checkpoint.transfer_learning_loading`` so
-        old checkpoints with the pre-chunking attention head layout get
-        rewritten before any ``load_state_dict`` attempt. Without this,
-        :func:`~anemoi.training.checkpoint.loading.utils.filter_state_dict`
-        silently drops the affected weights as shape mismatches.
-
-        Importing the migration is best-effort: anemoi-models versions
-        that predate the migration module are tolerated as a no-op, so
-        the pipeline does not hard-require a specific anemoi-models
-        version.
-
-        Mutates ``context.checkpoint_data`` in place (the migration
-        returns the rewritten dict; we reassign it onto the context).
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            Pipeline context with ``checkpoint_data`` set
+        Thin wrapper over :func:`apply_checkpoint_format_migrations`; reassigns the
+        (possibly rewritten) checkpoint onto the context.
         """
         if context.checkpoint_data is None:
             return
+        context.checkpoint_data = apply_checkpoint_format_migrations(context.checkpoint_data)
 
-        migrate = _load_chunking_fix_migration()
-        if migrate is None:
-            return
+    def _refresh_checkpoint_processors(self, context: CheckpointContext) -> None:
+        """Replace pre/post processor weights in the checkpoint with the current model's.
 
-        try:
-            context.checkpoint_data = migrate(context.checkpoint_data)
-        except (KeyError, AttributeError) as exc:
-            # The migration reads ``ckpt["hyper_parameters"]["config"].model.processor``
-            # unconditionally. Test fixtures and minimally-built checkpoints (raw
-            # state_dict saves) lack that tree, so the access raises KeyError or
-            # AttributeError. Treat that as "nothing to migrate" rather than
-            # propagating — real anemoi checkpoints always have the structure.
-            LOGGER.debug("chunking_fix migration skipped: checkpoint shape incomplete (%s)", exc)
-            return
-        LOGGER.debug("Applied chunking_fix migration to checkpoint data")
-
-    @staticmethod
-    def _processor_prefixes_from_config(context: CheckpointContext) -> tuple[str, ...]:
-        """Return the processor key prefixes to refresh, based on context.config.
-
-        Reads ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``
-        defensively (any missing layer yields an empty tuple, i.e. no refresh).
+        Thin wrapper over :func:`refresh_checkpoint_processors`; reads
+        ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``
+        defensively (a missing config layer disables the refresh).
         """
+        if context.checkpoint_data is None:
+            return
         update_cfg = getattr(
             getattr(getattr(context, "config", None), "training", None),
             "update_ds_stats_on_ckpt_load",
             None,
         )
         if update_cfg is None:
-            return ()
-
-        prefixes: tuple[str, ...] = ()
-        if bool(getattr(update_cfg, "states", False)):
-            prefixes += ("model.pre_processors.", "model.post_processors.")
-        if bool(getattr(update_cfg, "tendencies", False)):
-            prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
-        return prefixes
-
-    def _refresh_checkpoint_processors(self, context: CheckpointContext) -> None:
-        """Replace pre/post processor weights in the checkpoint with the current model's.
-
-        Mirrors
-        ``anemoi.training.train.tasks.base.AnemoiLightningModule._update_checkpoint_state_dict_for_load``
-        so pipeline-based loading honours
-        ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``.
-        Without this, users with the default ``tendencies: True`` config
-        would load stale processor stats from the checkpoint instead of
-        rebuilding them from the current dataset.
-
-        Mutates ``context.checkpoint_data["state_dict"]`` in place (the
-        whole point: the checkpoint payload is rewritten so the
-        subsequent ``load_state_dict`` call picks up fresh processor
-        weights). No-op when ``context.config`` is missing or the flags
-        are both false.
-
-        Parameters
-        ----------
-        context : CheckpointContext
-            Pipeline context with ``checkpoint_data``, ``model`` and
-            optionally ``config`` set
-        """
-        prefixes = self._processor_prefixes_from_config(context)
-        if not prefixes:
             return
-
-        state_dict = context.checkpoint_data.get("state_dict") if context.checkpoint_data else None
-        if not isinstance(state_dict, dict):
-            return
-
-        removed = _drop_keys_with_prefix(state_dict, prefixes)
-        injected = _inject_model_weights(state_dict, context.model, prefixes) if context.model is not None else 0
-
-        LOGGER.debug(
-            "Refreshed checkpoint processors: removed %d stale entries, injected %d from current model",
-            removed,
-            injected,
+        # refresh_checkpoint_processors / _inject_model_weights operate on the inner
+        # AnemoiModelInterface: its state_dict keys lack the LightningModule's leading
+        # ``model.`` (which _inject_model_weights re-adds), so they re-inject at the
+        # correct ``model.<processor>...`` level. This matches the legacy contract
+        # (on_load_checkpoint passes ``self.model``). ``context.model`` is the
+        # LightningModule, so pass its inner ``.model``; passing the LightningModule
+        # itself double-prefixes to ``model.model.*`` and breaks the strict warm-start
+        # load. ``getattr`` keeps the no-op path safe when no model is set.
+        inner_model = getattr(context.model, "model", None)
+        refresh_checkpoint_processors(
+            context.checkpoint_data,
+            inner_model,
+            update_states=bool(getattr(update_cfg, "states", False)),
+            update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
         )
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
         """Mark the model as having successfully loaded weights.
 
-        Sets ``model.weights_initialized = True``. Downstream checks
-        (``anemoi.training.checkpoint.pipeline.CheckpointPipeline`` at
-        line 501 and ``anemoi.training.checkpoint.validation`` at
-        line 297) read this attribute to decide whether to warn that
-        a source stage ran without a loading strategy ever applying
-        weights.
+        Sets ``model.weights_initialized = True``. Downstream checks read
+        this attribute to detect a source stage that ran without any
+        loading strategy applying weights. Two readers treat it differently:
 
-        The flag is a **hint, not a gate**: ``getattr(model,
-        "weights_initialized", False)`` is treated as "no loading
-        strategy executed" and only triggers a warning log. Code that
-        forgets to call ``_mark_weights_loaded`` still runs, it just
-        produces noisier output. Tests that bypass strategies entirely
-        therefore do not need to set the attribute.
+        - ``CheckpointPipeline._verify_weights_loaded`` treats it as a
+          **gate**: if a source stage was configured but the flag is False,
+          it raises ``CheckpointLoadError`` rather than train on random
+          weights.
+        - ``validation.validate_pipeline_health`` treats it as a health
+          **finding** (collected into the issues list).
+
+        A strategy that forgets to call ``_mark_weights_loaded`` after a
+        source has run will therefore trip the pipeline gate. Tests that
+        construct a context without a real source stage are unaffected.
 
         Parameters
         ----------
@@ -335,6 +237,30 @@ class LoadingStrategy(PipelineStage):
         """
         model.weights_initialized = True
         LOGGER.debug("Marked model weights as initialized")
+
+    def _apply_trainable_edge_perm_migration(self, context: CheckpointContext) -> None:
+        """Apply the runtime trainable-edge-permutation migration to the checkpoint.
+
+        Thin wrapper over :func:`apply_trainable_edge_perm_migration`; reassigns the
+        (possibly rewritten) checkpoint onto the context.
+        """
+        if context.checkpoint_data is None or context.model is None:
+            return
+        context.checkpoint_data = apply_trainable_edge_perm_migration(context.checkpoint_data, context.model)
+
+    def _extract_variables_metadata(self, model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
+        """Populate ``model._ckpt_variables_metadata`` from the checkpoint.
+
+        Thin wrapper over :func:`extract_checkpoint_variables_metadata`.
+        """
+        extract_checkpoint_variables_metadata(model, checkpoint_data)
+
+    def _warn_on_hparams_divergence(self, context: CheckpointContext) -> None:
+        """Warn when the checkpoint's stored hyper-parameters differ from the run config.
+
+        Thin wrapper over :func:`warn_on_hparams_divergence`.
+        """
+        warn_on_hparams_divergence(context.checkpoint_data, context.config)
 
 
 # Candidate import paths for the chunking_fix migration. Try the friendly
@@ -366,6 +292,34 @@ def _load_chunking_fix_migration() -> Any | None:
     return None
 
 
+# The trainable-edge permutation migration is runtime and model-dependent
+# (``migrate(ckpt, model)``); it ships alongside chunking_fix in anemoi-models.
+# Resolve the friendly name first, then the timestamp-prefixed module
+# (``1779202136_trainable_edge_perm_fix``, the name the legacy import in
+# ``anemoi.training.utils.checkpoint`` uses). Returns ``None`` when neither is
+# importable (older anemoi-models), treated as "no migration needed".
+_TRAINABLE_EDGE_PERM_PATHS = (
+    "anemoi.models.migrations.scripts.trainable_edge_perm_fix",
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+)
+
+
+def _load_trainable_edge_perm_migration() -> Any | None:
+    """Resolve the ``trainable_edge_perm_fix.migrate`` callable from anemoi-models, or ``None``."""
+    import importlib
+
+    for path in _TRAINABLE_EDGE_PERM_PATHS:
+        try:
+            module = importlib.import_module(path)
+        except ImportError:
+            continue
+        migrate = getattr(module, "migrate", None)
+        if migrate is not None:
+            return migrate
+    LOGGER.debug("trainable_edge_perm migration not available in anemoi-models; skipping")
+    return None
+
+
 def _drop_keys_with_prefix(state_dict: dict[str, Any], prefixes: tuple[str, ...]) -> int:
     """Remove every key in ``state_dict`` starting with one of ``prefixes``; return count."""
     to_remove = [key for key in state_dict if key.startswith(prefixes)]
@@ -379,11 +333,199 @@ def _inject_model_weights(
     model: nn.Module,
     prefixes: tuple[str, ...],
 ) -> int:
-    """Copy model parameters into ``state_dict`` under ``model.<key>``; return count injected."""
+    """Copy model parameters into ``state_dict`` under ``model.<key>``; return count injected.
+
+    Mirrors the legacy refresh (``train/methods/base.py``): the configured processor
+    prefixes are extended with every live-model key containing ``model_output_idx``,
+    so those index buffers always carry the live values, not stale checkpoint ones.
+    """
+    model_state_dict = model.state_dict()
+    effective_prefixes = prefixes + tuple(f"model.{key}" for key in model_state_dict if "model_output_idx" in key)
     injected = 0
-    for key, value in model.state_dict().items():
+    for key, value in model_state_dict.items():
         full_key = f"model.{key}"
-        if full_key.startswith(prefixes):
+        if full_key.startswith(effective_prefixes):
             state_dict[full_key] = value
             injected += 1
     return injected
+
+
+# ---------------------------------------------------------------------------
+# Shared Lightning-parity functions.
+#
+# These context-free functions are the single home for the checkpoint-load
+# parity steps. Both the pipeline loading strategies (via the thin
+# ``LoadingStrategy._*`` wrappers above) and the trainer's Lightning hook
+# (``AnemoiLightningModule.on_load_checkpoint``) call them, so the algorithm
+# lives in exactly one place. Each caller keeps its own assignment idiom: the
+# strategies reassign ``context.checkpoint_data = apply_*_migration(...)`` while
+# ``on_load_checkpoint`` discards the return and relies on the migration
+# mutating Lightning's checkpoint dict in place (its long-standing contract).
+# ---------------------------------------------------------------------------
+
+
+def apply_checkpoint_format_migrations(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    """Apply anemoi-models checkpoint-format migrations (``chunking_fix``) to a checkpoint dict.
+
+    Returns the (possibly rewritten) checkpoint. A no-op when the migration is
+    unavailable in the installed anemoi-models, and tolerant of incomplete
+    checkpoint shapes (raw ``state_dict`` saves / test fixtures lack the
+    ``hyper_parameters.config`` tree the migration reads), which are skipped
+    rather than raising.
+    """
+    if checkpoint is None:
+        return checkpoint
+    migrate = _load_chunking_fix_migration()
+    if migrate is None:
+        return checkpoint
+    try:
+        return migrate(checkpoint)
+    except (KeyError, AttributeError) as exc:
+        LOGGER.debug("chunking_fix migration skipped: checkpoint shape incomplete (%s)", exc)
+        return checkpoint
+
+
+def apply_trainable_edge_perm_migration(checkpoint: dict[str, Any], model: nn.Module) -> dict[str, Any]:
+    """Apply the runtime, model-dependent trainable-edge-permutation migration.
+
+    Returns the (possibly rewritten) checkpoint. A no-op when the migration is
+    unavailable or ``checkpoint``/``model`` is missing, and tolerant of
+    incomplete checkpoint shapes (skipped rather than raising).
+    """
+    if checkpoint is None or model is None:
+        return checkpoint
+    migrate = _load_trainable_edge_perm_migration()
+    if migrate is None:
+        return checkpoint
+    try:
+        return migrate(checkpoint, model)
+    except (KeyError, AttributeError) as exc:
+        LOGGER.debug("trainable_edge_perm migration skipped: checkpoint shape incomplete (%s)", exc)
+        return checkpoint
+
+
+def refresh_checkpoint_processors(
+    checkpoint: dict[str, Any],
+    model: nn.Module | None,
+    *,
+    update_states: bool,
+    update_tendencies: bool,
+) -> None:
+    """Replace stale pre/post-processor weights in ``checkpoint['state_dict']`` with the model's.
+
+    Honours ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``: drops the
+    matching ``model.(pre|post)_processors[_tendencies].*`` keys and re-injects them
+    from ``model`` (plus any ``model_output_idx`` buffers). Mutates the state dict in
+    place. A no-op when neither flag is set, ``model`` is ``None``, or no state dict
+    is present.
+    """
+    if not (update_states or update_tendencies):
+        return
+    state_dict = checkpoint.get("state_dict") if checkpoint else None
+    if not isinstance(state_dict, dict):
+        return
+
+    prefixes: tuple[str, ...] = ()
+    if update_states:
+        prefixes += ("model.pre_processors.", "model.post_processors.")
+    if update_tendencies:
+        prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+    if not prefixes:
+        return
+
+    removed = _drop_keys_with_prefix(state_dict, prefixes)
+    injected = _inject_model_weights(state_dict, model, prefixes) if model is not None else 0
+    LOGGER.debug(
+        "Refreshed checkpoint processors: removed %d stale entries, injected %d from current model",
+        removed,
+        injected,
+    )
+
+
+def preserve_anemoi_metadata(model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
+    """Restore ``model._ckpt_model_name_to_index`` from a checkpoint's ``data_indices``.
+
+    Multi-dataset (current): ``hyper_parameters["data_indices"]`` is a
+    ``dict[str, IndexCollection]`` and the attribute becomes
+    ``{name: ic.name_to_index}``. Single-dataset (pre-multi-dataset) checkpoints
+    carry a flat ``IndexCollection`` and are rejected with a ``TypeError`` (the
+    current loaders require the dataset-keyed dict). Any other shape is a
+    debug-logged skip.
+    """
+    hyper_params = checkpoint_data.get("hyper_parameters", {})
+    data_indices = hyper_params.get("data_indices")
+
+    if isinstance(data_indices, dict) and data_indices:
+        try:
+            model._ckpt_model_name_to_index = {name: ic.name_to_index for name, ic in data_indices.items()}
+        except AttributeError:
+            LOGGER.debug("Multi-dataset data_indices entries lack .name_to_index; skipping restoration")
+            return
+        LOGGER.debug("Restored multi-dataset _ckpt_model_name_to_index for %d datasets", len(data_indices))
+        return
+
+    if data_indices is not None and hasattr(data_indices, "name_to_index"):
+        # Single-dataset IndexCollection from a pre-multi-dataset anemoi-core. The
+        # current loaders expect dict[str, IndexCollection] keyed by dataset name; a
+        # flat mapping silently breaks the dataset-keyed lookups downstream, so reject
+        # it loudly rather than load a subtly-wrong model.
+        msg = (
+            "Checkpoint hyper_parameters.data_indices is a single-dataset IndexCollection "
+            "from a pre-multi-dataset anemoi-core, incompatible with the current loaders. "
+            "Run `anemoi-models migration sync <checkpoint>` to upgrade it to the "
+            "multi-dataset format, or re-export it with current anemoi-core."
+        )
+        raise TypeError(msg)
+
+    LOGGER.debug(
+        "Checkpoint does not contain hyper_parameters.data_indices.name_to_index; "
+        "skipping _ckpt_model_name_to_index restoration",
+    )
+
+
+def extract_checkpoint_variables_metadata(model: nn.Module, checkpoint_data: dict[str, Any] | None) -> None:
+    """Populate ``model._ckpt_variables_metadata`` from the checkpoint.
+
+    A no-op when ``model._ckpt_model_name_to_index`` is unset (metadata was not
+    restored) or when ``checkpoint_data`` is ``None``, so it is safe to call
+    unconditionally after :func:`preserve_anemoi_metadata`.
+    """
+    from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+    name_to_index = getattr(model, "_ckpt_model_name_to_index", None)
+    if name_to_index is None or checkpoint_data is None:
+        return
+    model._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(checkpoint_data, name_to_index)
+
+
+def warn_on_hparams_divergence(checkpoint_data: dict[str, Any], run_config: Any) -> None:
+    """Warn when the checkpoint's stored model hyper-parameters differ from the run config.
+
+    Fill-model loading keeps the current architecture, so a checkpoint trained with a
+    different model config whose tensor shapes happen to coincide would otherwise pass
+    unnoticed. Best-effort: any comparison failure is silently skipped.
+    """
+    if run_config is None or checkpoint_data is None:
+        return
+
+    hyper_params = checkpoint_data.get("hyper_parameters")
+    if not isinstance(hyper_params, dict):
+        return
+    ckpt_config = hyper_params.get("config")
+    if ckpt_config is None:
+        return
+
+    from omegaconf import OmegaConf
+
+    try:
+        ckpt_model = OmegaConf.to_container(OmegaConf.create(ckpt_config), resolve=True).get("model")
+        run_model = OmegaConf.to_container(OmegaConf.create(run_config), resolve=True).get("model")
+    except (ValueError, TypeError, AttributeError):
+        return
+
+    if ckpt_model is not None and ckpt_model != run_model:
+        LOGGER.warning(
+            "Checkpoint hparams differ from the run config (checkpoint "
+            "hyper_parameters.config.model != training config model); fill-model loading "
+            "keeps the current architecture. Verify the checkpoint matches this run.",
+        )

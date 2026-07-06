@@ -4,11 +4,12 @@ defaults:
   - training_loss: single
   - optimization: default
   - weight_averaging: null
+  # Opt-in checkpoint pipeline (training.checkpoint). Default null = fresh run.
+  # Set training.checkpoint.source to resume/fork a run or load weights from a file.
+  - optional checkpoint/source: null
+  - optional checkpoint/loading: null
+  - optional checkpoint/modifiers: null
 
-run_id: null
-fork_run_id: null
-transfer_learning: False
-load_weights_only: False
 update_ds_stats_on_ckpt_load:
   states: False
   tendencies: True
@@ -68,5 +69,4 @@ metrics:
 max_epochs: null
 max_steps: 1000000
 
-submodules_to_freeze: []
 recompile_limit: 32

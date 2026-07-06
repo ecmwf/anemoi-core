@@ -152,6 +152,60 @@ def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str,
     return None
 
 
+# Removed config KEYS (by dotted path). Unlike _DEPRECATED_TARGETS (which keys on
+# _target_ values), these fire on the PRESENCE of the key — even when set to null —
+# because the field is gone from the schema and a leftover entry is a migration signal.
+_DEPRECATED_KEYS: dict[str, str] = {
+    "training.run_id": (
+        "training.run_id has been removed. To resume a run, set training.checkpoint.source to "
+        "{_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>, fork: false} "
+        "(config group: training/checkpoint/source=run +training.checkpoint.source.run_id=<id>)."
+    ),
+    "training.fork_run_id": (
+        "training.fork_run_id has been removed. To fork a new run from an existing run, set "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.run.RunSource, "
+        "run_id: <id>, fork: true}."
+    ),
+    "system.input.warm_start": (
+        "system.input.warm_start has been removed. To load an explicit checkpoint file, set "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.local.LocalSource, "
+        "path: <path>}."
+    ),
+    "training.load_weights_only": (
+        "training.load_weights_only has been removed. Set training.checkpoint.source to the run or file to "
+        "load ({_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>} or "
+        "{_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) and "
+        "training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader}."
+    ),
+    "training.transfer_learning": (
+        "training.transfer_learning has been removed. Set training.checkpoint.source to the checkpoint to "
+        "load and training.checkpoint.loading to "
+        "{_target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader, skip_mismatched: true}."
+    ),
+    "training.submodules_to_freeze": (
+        "training.submodules_to_freeze has been removed. Set training.checkpoint.modifiers to a list of "
+        "modifier stages, e.g. [{_target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage, "
+        "submodules_to_freeze: [<submodule>, ...]}]."
+    ),
+}
+
+
+def _find_deprecated_key(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Find a removed config key by dotted path; fires on key PRESENCE (any value)."""
+    for path, hint in deprecated.items():
+        node = data
+        for part in path.split("."):
+            if hasattr(node, "keys") and part in node:
+                node = node[part]
+            else:
+                node = None
+                break
+        else:
+            return path, hint
+    return None
+
+
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
@@ -168,6 +222,16 @@ class SchemaCommonMixin:
             target, hint = result
             msg = f"'{target}' is deprecated and has been removed. {hint}"
             raise ValueError(msg)
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_deprecated_keys(cls, values: Any) -> Any:
+        """Raise before validation if a removed config key is present (any value)."""
+        result = _find_deprecated_key(values, _DEPRECATED_KEYS)
+        if result:
+            _, hint = result
+            raise ValueError(hint)
         return values
 
     def model_post_init(self, _: Any) -> None:

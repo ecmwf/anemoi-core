@@ -4,12 +4,12 @@ defaults:
   - training_loss: single
   - optimization: default
   - weight_averaging: null
+  # Opt-in checkpoint pipeline (training.checkpoint). Default null = fresh run.
+  # Set training.checkpoint.source to resume/fork a run or load weights from a file.
+  - optional checkpoint/source: null
+  - optional checkpoint/loading: null
+  - optional checkpoint/modifiers: null
 
-# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
-run_id: null
-fork_run_id: null
-transfer_learning: False # activate to perform transfer learning
-load_weights_only: False # only load model weights, do not restore optimiser states etc.
 update_ds_stats_on_ckpt_load:
   states: False # rebuild state processors from current dataset when loading a checkpoint
   tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
@@ -119,8 +119,6 @@ metrics:
 max_epochs: null
 max_steps: 150000
 
-
-submodules_to_freeze: []
 
 # if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
 # A higher limit can result in better performance but will increase compilation time and disk space
