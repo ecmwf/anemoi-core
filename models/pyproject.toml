@@ -66,9 +66,9 @@ urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
 urls.Issues = "https://github.com/ecmwf/anemoi-models/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-models/"
-# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
 # Add subcommand in the `commands` directory
 scripts.anemoi-models = "anemoi.models.__main__:main"
+# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
 
 [tool.setuptools_scm]
 version_file = "src/anemoi/models/_version.py"
