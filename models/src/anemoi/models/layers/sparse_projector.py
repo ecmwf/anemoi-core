@@ -13,6 +13,8 @@ import torch
 class SparseProjector(torch.nn.Module):
     """Applies a sparse projection matrix to input tensors.
 
+    The projection matrix is provided by the GraphProvider in CSR format.
+
     Stateless: the matrix is passed to :meth:`forward`, not stored.
     """
 

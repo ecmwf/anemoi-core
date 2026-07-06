@@ -539,7 +539,11 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_node_weight_attribute: Optional[str],
         row_normalize: bool,
     ) -> None:
-        """Build projection matrix from graph."""
+        """Build projection matrix from graph.
+
+        The matrix is initially built in COO format
+        and then converted to CSR format for efficient sparse operations.
+        """
         sub_graph = graph[edges_name]
 
         if edge_weight_attribute:
