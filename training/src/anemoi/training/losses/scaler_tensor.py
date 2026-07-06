@@ -17,6 +17,7 @@ from typing import Self
 import torch
 from torch import nn
 
+from anemoi.training.utils.compile import subset_tensor
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -542,32 +543,6 @@ class ScaleTensor(nn.Module):
 
         return ScaleTensor(**resolved_scalers)
 
-    @staticmethod
-    def _subset_tensor(
-        x: torch.Tensor,
-        subset_indices: tuple[int, ...] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, int | None]:
-        if subset_indices is None or (len(subset_indices) == 1 and subset_indices[0] is Ellipsis):
-            return x, None, None
-
-        if subset_indices[0] is Ellipsis:
-            subset_dim = -1
-            subset_index = subset_indices[-1]
-        else:
-            subset_dim = 0
-            subset_index = subset_indices
-
-        if not isinstance(subset_index, torch.Tensor):
-            subset_index = torch.as_tensor(
-                subset_index,
-                device=x.device,
-                dtype=torch.long,
-            )
-        else:
-            subset_index = subset_index.to(device=x.device, dtype=torch.long)
-
-        return torch.index_select(x, dim=subset_dim, index=subset_index), subset_index, subset_dim
-
     def scale_iteratively(
         self,
         x: torch.Tensor,
@@ -589,7 +564,7 @@ class ScaleTensor(nn.Module):
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset, subset_index, subset_dim = self._subset_tensor(x, subset_indices)
+        x_subset, subset_index, subset_dim = subset_tensor(x, subset_indices)
 
         out = x_subset.clone()
         ndim = x.ndim
@@ -641,7 +616,7 @@ class ScaleTensor(nn.Module):
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
-        x_subset, subset_index, subset_dim = self._subset_tensor(x, subset_indices)
+        x_subset, subset_index, subset_dim = subset_tensor(x, subset_indices)
         scaler = self.get_scaler(x.ndim)
         if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
             slices = [slice(None)] * x.ndim
