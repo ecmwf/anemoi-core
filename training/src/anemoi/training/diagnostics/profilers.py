@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -323,6 +323,8 @@ class BenchmarkProfiler(Profiler):
         # THE STRATEGY IS ALREADY INITIALISED AND TORCH DISTRIBUTED IS ACTIVE
         # we need to broadcast the profiler path to all ranks to save the memory traces
         self.dirpath = Path(self.broadcast_profiler_path(str(self.dirpath), 0))
+        # on non-root ranks the directory is not created yet
+        self.dirpath.mkdir(parents=True, exist_ok=True)
         self._stage = stage
         self._local_rank = local_rank
         self._create_time_profilers()
@@ -489,6 +491,7 @@ class BenchmarkProfiler(Profiler):
         return system_metrics_df
 
     def _save_report(self, df: pd.DataFrame, fname: Path) -> None:
+        fname.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(fname)
 
     def _save_model_summary(self, model_summary: str, fname: Path) -> None:

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,9 +13,11 @@ from typing import Never
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
+from anemoi.training.tasks import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
 
@@ -246,7 +248,9 @@ def test_on_epoch_wrong_validation(
 def test_on_load_checkpoint_restores_name_to_index() -> None:
     """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
+    torch.nn.Module.__init__(module)
     dataset_name = "test_dataset"
+    module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.config = types.SimpleNamespace(
         training=types.SimpleNamespace(
             update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
@@ -359,7 +363,7 @@ def test_check_variable_units_ignore_units_option(mocker: Any) -> None:
             },
         },
     }
-    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_period": False}
+    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_processing_period": False}
     pl_module = mocker.Mock()
     pl_module._ckpt_variables_metadata = {
         "era5": {
