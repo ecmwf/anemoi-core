@@ -85,23 +85,20 @@ def test_graph_build_forwards_full_dataset_config_to_node_builder() -> None:
         },
     )
 
-    captured = {}
-
-    def fake_create() -> HeteroData:
-        # Capture what was set on the node builder's dataset before GraphCreator.create runs.
-        captured["dataset"] = OmegaConf.to_container(
-            trainer.config.graph.nodes[DEFAULT_DATASET_NAME].node_builder.dataset,
-            resolve=True,
-        )
-        return HeteroData()
-
     mock_creator = MagicMock()
-    mock_creator.create.side_effect = fake_create
+    mock_creator.create.return_value = HeteroData()
 
-    with patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator):
+    with patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator) as mock_gc_cls:
         trainer.graph_data
 
-    assert captured["dataset"] == dataset_config, (
-        "The full dataset_config (including check_variables_compatibility) must be forwarded "
-        f"to the graph node builder, but got: {captured['dataset']}"
+    # GraphCreator is called with the modified graph_config as first positional arg
+    graph_config_arg = mock_gc_cls.call_args[0][0]
+    captured_dataset = OmegaConf.to_container(
+        graph_config_arg.nodes[DEFAULT_DATASET_NAME].node_builder.dataset,
+        resolve=True,
+    )
+
+    assert captured_dataset == dataset_config, (
+        "Extra open_dataset kwargs (like check_variables_compatibility) must be forwarded "
+        f"to the graph node builder alongside the dataset path, but got: {captured_dataset}"
     )

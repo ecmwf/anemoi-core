@@ -45,16 +45,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
     def __init__(self, dataset: DictConfig, name: str) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        # _open_dataset_config holds the full config (may include check_variables_compatibility
-        # and other open_dataset kwargs) and is used by get_coordinates().
-        self._open_dataset_config = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
-        # self.dataset is stored as the hidden _dataset node attribute used by area_weights /
-        # masks which call open_dataset(nodes["_dataset"], select=variable).  It must be just
-        # the bare dataset path/list so that extra kwargs like select= are handled correctly.
-        if isinstance(self._open_dataset_config, dict) and "dataset" in self._open_dataset_config:
-            self.dataset = self._open_dataset_config["dataset"]
-        else:
-            self.dataset = self._open_dataset_config
+        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
@@ -68,7 +59,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         """
         from anemoi.datasets import open_dataset
 
-        dataset = open_dataset(self._open_dataset_config)
+        dataset = open_dataset(self.dataset)
         return self.reshape_coords(dataset.latitudes, dataset.longitudes)
 
 
