@@ -87,7 +87,7 @@ def test_graph_build_forwards_full_dataset_config_to_node_builder() -> None:
 
     captured = {}
 
-    def fake_create(save_path=None, overwrite=False):
+    def fake_create(_save_path: None = None, _overwrite: bool = False) -> HeteroData:
         # Capture what was set on the node builder's dataset before GraphCreator.create runs.
         captured["dataset"] = OmegaConf.to_container(
             trainer.config.graph.nodes[DEFAULT_DATASET_NAME].node_builder.dataset,
