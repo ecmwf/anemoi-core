@@ -90,6 +90,125 @@ def _node_id_to_partition_id(node_ids: Tensor, partition_sizes: list[int]) -> Te
     return torch.searchsorted(cumulative, node_ids, right=True)
 
 
+def _build_halo_info_for_partition_impl(
+    partition: GraphPartition,
+    edge_index: Tensor,
+    partition_id: int,
+    edge_shard_sizes: ShardSizes = None,
+    debug: bool = False,
+) -> HaloInfo:
+    """Build halo metadata for a specific partition without distributed comm primitives.
+
+    This mirrors ``build_halo_info`` but accepts an explicit ``partition_id`` and
+    ``num_parts`` from ``partition`` instead of deriving rank/world-size from a
+    process group. Useful for offline partition analysis.
+    """
+    if not (0 <= partition_id < partition.num_parts):
+        raise ValueError(f"partition_id ({partition_id}) must be in [0, {partition.num_parts})")
+
+    num_parts = partition.num_parts
+
+    # local edges for this partition
+    if edge_shard_sizes is not None:
+        start, end = get_partition_range(edge_shard_sizes, partition_id)
+        local_edge_index = edge_index[:, start:end]
+    else:
+        edge_range = partition._get_edge_range(partition_id)
+        local_edge_index = edge_index[:, edge_range]
+
+    # partition range for this partition
+    dst_start, dst_end = get_partition_range(partition.dst_splits, partition_id)
+    num_local_nodes = dst_end - dst_start
+
+    # identify halo src nodes (outside this partition's dst-range)
+    src_global = local_edge_index[0]
+    is_halo_src = (src_global < dst_start) | (src_global >= dst_end)
+
+    # map halo src nodes to their owning partition
+    halo_src_global = src_global[is_halo_src]
+    halo_partition_ids = _node_id_to_partition_id(halo_src_global, partition.dst_splits)
+
+    # the matching local destinations (inner nodes)
+    halo_dst_global = local_edge_index[1, is_halo_src]
+
+    send_indices_list: list[Tensor] = []
+    recv_nodes_list: list[Tensor] = []
+
+    for rank in range(num_parts):
+        rank_mask = halo_partition_ids == rank
+
+        recv_nodes = halo_src_global[rank_mask].unique(sorted=True)
+        send_nodes_global = halo_dst_global[rank_mask].unique(sorted=True)
+        send_nodes_local = send_nodes_global - dst_start
+
+        send_indices_list.append(send_nodes_local)
+        recv_nodes_list.append(recv_nodes)
+
+    recv_counts = tuple(t.size(0) for t in recv_nodes_list)
+
+    all_halo_nodes = torch.cat(recv_nodes_list) if len(recv_nodes_list) > 0 else torch.empty(0, dtype=torch.long)
+    num_halo_nodes = all_halo_nodes.size(0)
+
+    # relabel edge_index to local + halo indexing
+    edge_index_local = local_edge_index.clone()
+    edge_index_local[1] -= dst_start
+
+    inner_src_mask = ~is_halo_src
+    edge_index_local[0, inner_src_mask] = src_global[inner_src_mask] - dst_start
+
+    if num_halo_nodes > 0:
+        n_total_nodes = partition.num_nodes[0]
+        halo_relabel = torch.empty(n_total_nodes, dtype=torch.long, device=edge_index.device)
+        halo_relabel[all_halo_nodes] = torch.arange(num_halo_nodes, device=edge_index.device) + num_local_nodes
+        edge_index_local[0, is_halo_src] = halo_relabel[src_global[is_halo_src]]
+
+    return HaloInfo(
+        num_local_nodes=num_local_nodes,
+        num_halo_nodes=num_halo_nodes,
+        send_indices=tuple(send_indices_list),
+        recv_counts=recv_counts,
+        recv_global_ids=tuple(recv_nodes_list) if debug else None,
+        edge_index_local=edge_index_local,
+    )
+
+
+def build_halo_info_for_partition(
+    partition: GraphPartition,
+    edge_index: Tensor,
+    partition_id: int,
+    edge_shard_sizes: ShardSizes = None,
+    debug: bool = False,
+) -> HaloInfo:
+    """Build halo exchange metadata for one partition without a process group.
+
+    Parameters
+    ----------
+    partition : GraphPartition
+        Global partition metadata.
+    edge_index : Tensor
+        Edge index with global node ids, sorted by destination node.
+    partition_id : int
+        Target partition index in ``[0, partition.num_parts)``.
+    edge_shard_sizes : ShardSizes, optional
+        If given, ``edge_index`` is interpreted as concatenated edge shards and
+        this partition will use the corresponding edge interval.
+    debug : bool, optional
+        Whether to keep received global halo ids for validation.
+
+    Returns
+    -------
+    HaloInfo
+        Halo metadata for the selected partition.
+    """
+    return _build_halo_info_for_partition_impl(
+        partition=partition,
+        edge_index=edge_index,
+        partition_id=partition_id,
+        edge_shard_sizes=edge_shard_sizes,
+        debug=debug,
+    )
+
+
 def build_halo_info(
     partition: GraphPartition,
     edge_index: Tensor,
@@ -135,74 +254,19 @@ def build_halo_info(
         partition.num_parts == num_parts
     ), f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})"
 
-    # local edges for this rank
     if edge_shard_sizes is not None:
-        local_edge_index = edge_index
+        edge_index_rank = edge_index
+        edge_shard_sizes_rank = None
     else:
-        local_edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
+        edge_index_rank = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
+        edge_shard_sizes_rank = None
 
-    # partition range for this rank
-    dst_start, dst_end = get_partition_range(partition.dst_splits, my_rank)
-    num_local_nodes = dst_end - dst_start
-
-    # identify halo src nodes (outside this rank's partition range)
-    # i.e. (halo_src, dst) edges where dst is local but src is not
-    src_global = local_edge_index[0]
-    # boolean mask for edges where src is a halo node
-    is_halo_src = (src_global < dst_start) | (src_global >= dst_end)
-
-    # map halo src nodes to their owning partition
-    halo_src_global = src_global[is_halo_src]
-    halo_partition_ids = _node_id_to_partition_id(halo_src_global, partition.dst_splits)
-
-    # due to undirected graph symmetry, each (halo_src, dst) edge corresponds to a (dst, halo_src) edge in an other rank's partition, so we will receive halo_src as a halo node from that rank, and send dst as an inner node to that rank
-    halo_dst_global = local_edge_index[1, is_halo_src]
-
-    # build per-rank send / recv info
-    send_indices_list: list[Tensor] = []
-    recv_nodes_list: list[Tensor] = []
-
-    for rank in range(num_parts):
-        rank_mask = halo_partition_ids == rank
-
-        # recv: unique halo node global IDs from this rank
-        recv_nodes = halo_src_global[rank_mask].unique(sorted=True)
-        # send: unique inner node local indices to send to this rank
-        send_nodes_global = halo_dst_global[rank_mask].unique(sorted=True)
-        send_nodes_local = send_nodes_global - dst_start
-
-        send_indices_list.append(send_nodes_local)
-        recv_nodes_list.append(recv_nodes)
-
-    recv_counts = tuple(t.size(0) for t in recv_nodes_list)
-
-    all_halo_nodes = torch.cat(recv_nodes_list)  # disjoint per rank
-    num_halo_nodes = all_halo_nodes.size(0)
-
-    # relabel edge_index to local [0, num_local_nodes) + halo nodes [num_local_nodes, num_local_nodes + num_halo_nodes)
-    edge_index_local = local_edge_index.clone()
-
-    # dst: global → local [0, num_local_nodes)
-    edge_index_local[1] -= dst_start
-
-    # src – inner nodes: global → local [0, num_local_nodes)
-    inner_src_mask = ~is_halo_src
-    edge_index_local[0, inner_src_mask] = src_global[inner_src_mask] - dst_start
-
-    # src – halo nodes: global → [num_local_nodes, total_nodes)
-    if num_halo_nodes > 0:
-        n_total_nodes = partition.num_nodes[0]
-        halo_relabel = torch.empty(n_total_nodes, dtype=torch.long, device=edge_index.device)
-        halo_relabel[all_halo_nodes] = torch.arange(num_halo_nodes, device=edge_index.device) + num_local_nodes
-        edge_index_local[0, is_halo_src] = halo_relabel[src_global[is_halo_src]]
-
-    return HaloInfo(
-        num_local_nodes=num_local_nodes,
-        num_halo_nodes=num_halo_nodes,
-        send_indices=tuple(send_indices_list),
-        recv_counts=recv_counts,
-        recv_global_ids=tuple(recv_nodes_list) if debug else None,
-        edge_index_local=edge_index_local,
+    return _build_halo_info_for_partition_impl(
+        partition=partition,
+        edge_index=edge_index_rank,
+        partition_id=my_rank,
+        edge_shard_sizes=edge_shard_sizes_rank,
+        debug=debug,
     )
 
 

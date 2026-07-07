@@ -239,6 +239,187 @@ def build_graph_partition_from_shard_info(
     return build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
 
 
+def build_graph_partition_from_node_partition(
+    edge_index: Adj,
+    node_partition: Tensor,
+    num_nodes: tuple[int, int],
+) -> tuple["GraphPartition", Adj, Tensor]:
+    """Build a GraphPartition from a node-to-partition assignment tensor.
+
+    Relabels nodes so that each partition occupies a contiguous block,
+    re-sorts the edge index by the relabeled destination node, and computes
+    dst/edge splits from the actual per-partition node counts.  Intended for
+    use with external partitioners such as METIS.
+
+    Parameters
+    ----------
+    edge_index : Adj
+        Edge index with *original* global node ids, shape ``[2, num_edges]``.
+        Does not need to be dst-sorted beforehand.
+    node_partition : Tensor
+        Integer tensor of shape ``[num_nodes]`` mapping each node to a partition
+        id in ``[0, num_parts)``.
+    num_nodes : tuple[int, int]
+        Number of (src, dst) nodes in the full graph.
+
+    Returns
+    -------
+    partition : GraphPartition
+        Partition metadata with custom dst/edge splits derived from the
+        external partitioner.
+    edge_index_relabeled : Adj
+        Edge index relabeled to new contiguous node ids, sorted by destination.
+    perm : Tensor
+        Permutation of length ``num_nodes[1]`` such that ``perm[new_id]`` is
+        the original node id.  The inverse ``inv_perm[old_id] = new_id`` is
+        used internally to relabel edge_index.
+    """
+    num_parts = int(node_partition.max().item()) + 1
+
+    # Sort nodes by partition id so each partition occupies a contiguous range.
+    perm = torch.argsort(node_partition, stable=True)   # perm[new_id] = old_id
+    inv_perm = torch.empty(perm.size(0), dtype=torch.long, device=perm.device)
+    inv_perm[perm] = torch.arange(perm.size(0), device=perm.device)
+
+    # Relabel all node ids in edge_index and sort by (relabeled) dst.
+    edge_index_relabeled = inv_perm[edge_index]
+    edge_index_relabeled, _ = sort_edge_index_by_dst(edge_index_relabeled)
+
+    # Compute splits from the actual partition node counts (may be unequal).
+    partition_sizes = torch.bincount(node_partition, minlength=num_parts)
+    dst_splits = [int(x) for x in partition_sizes.tolist()]
+
+    n_dst = num_nodes[1]
+    degree_per_dst = degree(edge_index_relabeled[1], num_nodes=n_dst, dtype=torch.long)
+    edge_splits = [int(chunk.sum().item()) for chunk in torch.split(degree_per_dst, dst_splits)]
+
+    partition = GraphPartition(
+        num_nodes=num_nodes,
+        num_edges=edge_index_relabeled.size(1),
+        num_parts=num_parts,
+        dst_splits=dst_splits,
+        edge_splits=edge_splits,
+    )
+
+    return partition, edge_index_relabeled, perm
+
+
+def build_geo_node_partition_from_coordinates(node_coords: Tensor, num_partitions: int) -> Tensor:
+    """Build a geographic node partition from latitude/longitude coordinates.
+
+    The partitioning is intentionally simple and deterministic:
+    - split nodes into northern vs southern hemisphere using latitude
+    - subdivide each hemisphere into equal-width longitude bands from west to east
+
+    This is intended as a lightweight, geometry-aware alternative to balanced
+    contiguous partitioning for offline analysis and halo visualisation.
+
+    Parameters
+    ----------
+    node_coords : Tensor
+        Node coordinates with shape ``[num_nodes, 2]`` where column 0 is latitude
+        and column 1 is longitude, both in radians.
+    num_partitions : int
+        Total number of partitions. Must be even so the hemispheres can be split
+        into an equal number of longitude bands.
+
+    Returns
+    -------
+    Tensor
+        Integer tensor of shape ``[num_nodes]`` with partition ids.
+    """
+    if num_partitions < 2:
+        raise ValueError(f"num_partitions must be >= 2, got {num_partitions}")
+    if num_partitions % 2 != 0:
+        raise ValueError(
+            f"Geo partitioning requires an even num_partitions so north/south can be split equally, got {num_partitions}"
+        )
+
+    node_coords = node_coords.detach()
+    lat = node_coords[:, 0]
+    lon = node_coords[:, 1]
+
+    lon_partitions_per_hemisphere = num_partitions // 2
+
+    # 0 = north, 1 = south
+    hemisphere_id = (lat < 0).to(torch.long)
+
+    # Equal-width longitude bins from west (-pi) to east (+pi).
+    lon_scaled = ((lon + torch.pi) / (2 * torch.pi)).clamp(0.0, 1.0 - torch.finfo(torch.float32).eps)
+    lon_bin = torch.floor(lon_scaled * lon_partitions_per_hemisphere).to(torch.long)
+    lon_bin = lon_bin.clamp(0, lon_partitions_per_hemisphere - 1)
+
+    return hemisphere_id * lon_partitions_per_hemisphere + lon_bin
+
+
+def build_metis_node_partition(
+    edge_index: Adj,
+    num_partitions: int,
+    num_nodes: int,
+    symmetrize: bool = False,
+) -> Tensor:
+    """Build a node partition using METIS graph partitioning.
+
+    Converts the edge_index to CSR format and calls ``pyg_lib.partition.metis``
+    to assign each node to a partition.
+
+    Parameters
+    ----------
+    edge_index : Adj
+        Edge index with shape ``[2, num_edges]``.  METIS requires an undirected
+        graph, so the caller is responsible for passing edges in both directions
+        (the typical anemoi-graphs convention).  Set ``symmetrize=True`` if the
+        input is a directed graph that needs to be made undirected first.
+    num_partitions : int
+        Number of partitions to produce.
+    num_nodes : int
+        Total number of nodes in the graph.
+    symmetrize : bool, optional
+        If ``True``, symmetrize the adjacency and remove self-loops before
+        building the CSR representation.  This is only needed when
+        ``edge_index`` is a directed graph (edges present in only one
+        direction).  Default: ``False``.
+
+    Returns
+    -------
+    Tensor
+        Integer tensor of shape ``[num_nodes]`` with partition ids in
+        ``[0, num_partitions)``.
+    """
+    try:
+        import pyg_lib  # noqa: PLC0415
+    except ImportError as exc:
+        raise ImportError(
+            "pyg_lib is required for METIS partitioning. "
+            "Install it with: pip install pyg-lib"
+        ) from exc
+
+    ei = edge_index
+    if symmetrize:
+        ei = torch.cat([ei, ei.flip(0)], dim=1)
+        ei = ei[:, ei[0] != ei[1]]  # remove self-loops
+
+    # Sort by src for CSR construction; deduplicate if symmetrize added duplicates.
+    order = torch.argsort(ei[0].long() * num_nodes + ei[1].long())
+    ei = ei[:, order]
+    if symmetrize and ei.size(1) > 1:
+        keep = torch.ones(ei.size(1), dtype=torch.bool, device=edge_index.device)
+        keep[1:] = (ei[:, 1:] != ei[:, :-1]).any(dim=0)
+        ei = ei[:, keep]
+
+    src = ei[0]
+    col = ei[1]
+    rowptr = torch.zeros(num_nodes + 1, dtype=torch.long, device=edge_index.device)
+    rowptr[1:] = torch.cumsum(torch.bincount(src, minlength=num_nodes), dim=0)
+
+    return pyg_lib.partition.metis(
+        rowptr=rowptr.cpu(),
+        col=col.cpu(),
+        num_partitions=num_partitions,
+        recursive=False,
+    ).to(edge_index.device)
+
+
 def ensure_edges_are_dst_sorted(
     edge_attr: Tensor,
     edge_index: Adj,
