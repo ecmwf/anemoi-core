@@ -229,13 +229,16 @@ class AnemoiTrainer(ABC):
                     graph_dataset_value = dataset_path
                     if isinstance(reader_cfg, (DictConfig, dict)):
                         _schema_keys = {
-                            "dataset", "frequency", "drop", "select",
-                            "statistics", "step_start", "step_end", "step_frequency",
+                            "dataset",
+                            "frequency",
+                            "drop",
+                            "select",
+                            "statistics",
+                            "step_start",
+                            "step_end",
+                            "step_frequency",
                         }
-                        extra = {
-                            k: v for k, v in dict(reader_cfg).items()
-                            if k not in _schema_keys and v is not None
-                        }
+                        extra = {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None}
                         if extra:
                             graph_dataset_value = {"dataset": dataset_path, **extra}
                     data_node_cfg.node_builder.dataset = graph_dataset_value
