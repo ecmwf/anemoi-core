@@ -190,7 +190,7 @@ def _metadata(lons_per_lat: LonsPerLat, device_index: int) -> tuple[torch.Tensor
 
 class _RingRFFT(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat, truncation: int) -> torch.Tensor:
+    def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat) -> torch.Tensor:
         if not x.is_cuda:
             raise RuntimeError("Ring RFFT CUDA extension requires a CUDA tensor")
         if x.dtype not in (torch.float32, torch.float64):
@@ -201,12 +201,10 @@ class _RingRFFT(torch.autograd.Function):
         if x.shape[-1] != grid_points:
             raise ValueError(f"Expected last dimension to be {grid_points}, got {x.shape[-1]}")
 
-        truncation = int(truncation)
         x_flat = x.contiguous().reshape(-1, grid_points)
         offsets, lons, max_nlon = _metadata(lons_per_lat, _device_index(x))
-        out = _load_ring_fft_extension().forward(x_flat, offsets, lons, max_nlon, truncation)
+        out = _load_ring_fft_extension().forward(x_flat, offsets, lons, max_nlon)
 
-        ctx.truncation = truncation
         ctx.input_shape = tuple(x.shape)
         ctx.grid_points = grid_points
         ctx.max_nlon = max_nlon
@@ -215,7 +213,6 @@ class _RingRFFT(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None, None, None]:
-        truncation = ctx.truncation
         offsets, lons = ctx.saved_tensors
         nlat = lons.numel()
         grad_flat = grad_output.contiguous().reshape(-1, nlat, ctx.max_nlon // 2 + 1)
@@ -225,7 +222,6 @@ class _RingRFFT(torch.autograd.Function):
             lons,
             ctx.max_nlon,
             ctx.grid_points,
-            truncation,
         )
         return grad_x.reshape(ctx.input_shape), None, None, None
 
@@ -273,12 +269,11 @@ class _RingIRFFT(torch.autograd.Function):
 def ring_rfft(
     x: torch.Tensor,
     lons_per_lat: list[int] | tuple[int, ...],
-    truncation: int,
 ) -> torch.Tensor:
     """Compute ring-wise ``rfft(norm="forward")`` on a flattened reduced grid."""
 
     lons_per_lat = tuple(lons_per_lat)
-    return _RingRFFT.apply(x, lons_per_lat, truncation)
+    return _RingRFFT.apply(x, lons_per_lat)
 
 
 def ring_irfft(

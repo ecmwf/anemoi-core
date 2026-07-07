@@ -298,7 +298,7 @@ class SphericalHarmonicTransform(Module):
         if x.device.type != "cuda":
             raise RuntimeError('CUDA rFFT requested but input device is not "cuda"')
 
-        return ring_rfft(x, self.lons_per_lat, self.truncation)
+        return ring_rfft(x, self.lons_per_lat)
 
     def rfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.

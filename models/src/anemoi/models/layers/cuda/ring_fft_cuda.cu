@@ -815,8 +815,7 @@ torch::Tensor ring_rfft_forward_cuda(
     torch::Tensor x,
     torch::Tensor offsets,
     torch::Tensor lons,
-    const int64_t max_nlon,
-    const int64_t truncation
+    const int64_t max_nlon
 ) {
     TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
     TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
@@ -825,8 +824,6 @@ torch::Tensor ring_rfft_forward_cuda(
     check_metadata(offsets, lons);
 
     const int max_nlon_int = checked_positive_int(max_nlon, "max_nlon");
-    const int truncation_int = checked_nonnegative_int(truncation, "truncation");
-    TORCH_CHECK(truncation_int <= max_nlon_int / 2, "truncation must be <= max_nlon / 2");
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(x));
     const int64_t lead = x.size(0);
@@ -859,8 +856,7 @@ torch::Tensor ring_rfft_backward_cuda(
     torch::Tensor offsets,
     torch::Tensor lons,
     const int64_t max_nlon,
-    const int64_t grid_points,
-    const int64_t truncation
+    const int64_t grid_points
 ) {
     TORCH_CHECK(grad_output.is_cuda(), "grad_output must be a CUDA tensor");
     TORCH_CHECK(grad_output.is_contiguous(), "grad_output must be contiguous");
@@ -873,8 +869,6 @@ torch::Tensor ring_rfft_backward_cuda(
 
     const int max_nlon_int = checked_positive_int(max_nlon, "max_nlon");
     const int grid_points_int = checked_positive_int(grid_points, "grid_points");
-    const int truncation_int = checked_nonnegative_int(truncation, "truncation");
-    TORCH_CHECK(truncation_int <= max_nlon_int / 2, "truncation must be <= max_nlon / 2");
 
     const int nlat = checked_positive_int(lons.size(0), "latitude count");
     const int nmodes = max_nlon_int / 2 + 1;
