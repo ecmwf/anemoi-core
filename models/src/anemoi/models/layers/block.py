@@ -29,6 +29,7 @@ from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.halo import build_halo_info
+from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
 from anemoi.models.distributed.halo import verify_halo_info
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
@@ -1082,6 +1083,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
 
         self.shard_strategy = shard_strategy
         self._cached_halo_info = None
+        self._cached_halo_cache_specs = None
         self._cached_partition = None
 
     def _get_or_build_cached_halo_info(
@@ -1096,13 +1098,14 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         if not model_is_distributed(model_comm_group):
             return None
 
-        if self._cached_halo_info is not None:
-            return self._cached_halo_info
-
         if batch_size != 1:
             raise ValueError(
                 "GraphTransformerProcessorBlock halo exchange requires batch_size=1 when model sharding is enabled."
             )
+
+        cache_specs = halo_cache_specs(shard_info, model_comm_group)
+        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
+            return self._cached_halo_info
 
         LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
         assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
@@ -1121,6 +1124,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             shard_info.edges,
             debug=ANEMOI_DEBUG_SHARDING,
         )
+        self._cached_halo_cache_specs = cache_specs
 
         if ANEMOI_DEBUG_SHARDING:
             verify_halo_info(self._cached_halo_info, partition, model_comm_group)

@@ -7,16 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# (C) Copyright 2026+ Anemoi contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation
-# nor does it submit to any jurisdiction.
-
-
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,6 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 
 
@@ -78,6 +69,19 @@ class HaloInfo:
     def send_counts(self) -> tuple[int, ...]:
         """Per-rank number of nodes to send."""
         return tuple(t.size(0) for t in self.send_indices)
+
+
+def cache_specs(
+    shard_info: GraphShardInfo,
+    model_comm_group: ProcessGroup,
+) -> tuple[int, int, tuple[int, ...], tuple[int, ...]]:
+    """Return specs that determine whether cached halo metadata can be reused."""
+    return (
+        model_comm_group.size(),
+        torch.distributed.get_rank(group=model_comm_group),
+        tuple(shard_info.nodes or ()),
+        tuple(shard_info.edges or ()),
+    )
 
 
 def _node_id_to_partition_id(node_ids: Tensor, partition_sizes: list[int]) -> Tensor:
@@ -164,7 +168,10 @@ def build_halo_info(
     halo_src_global = src_global[is_halo_src]
     halo_partition_ids = _node_id_to_partition_id(halo_src_global, partition.dst_splits)
 
-    # due to undirected graph symmetry, each (halo_src, dst) edge corresponds to a (dst, halo_src) edge in an other rank's partition, so we will receive halo_src as a halo node from that rank, and send dst as an inner node to that rank
+    # Processor graphs are symmetric; asymmetric graph connections are represented as mappers.
+    # Due to undirected graph symmetry, each (halo_src, dst) edge corresponds to a (dst, halo_src)
+    # edge in an other rank's partition, so we will receive halo_src as a halo node from that rank,
+    # and send dst as an inner node to that rank.
     halo_dst_global = local_edge_index[1, is_halo_src]
 
     # build per-rank send / recv info
