@@ -115,20 +115,20 @@ def _assert_distributed_context(
     """Verify rank, backend, world size, and device placement."""
     assert dist.is_initialized(), "Expected torch.distributed process group to be initialized."
     assert dist.get_backend(group) == backend, f"Expected backend {backend}, got {dist.get_backend(group)}."
-    assert dist.get_world_size(group=group) == world_size, (
-        f"Expected world_size={world_size}, got {dist.get_world_size(group=group)}."
-    )
+    assert (
+        dist.get_world_size(group=group) == world_size
+    ), f"Expected world_size={world_size}, got {dist.get_world_size(group=group)}."
     assert dist.get_rank(group=group) == rank, f"Expected rank={rank}, got {dist.get_rank(group=group)}."
 
     if backend == "nccl":
         assert device.type == "cuda", f"Expected NCCL rank {rank} to use a CUDA device, got {device}."
         assert torch.cuda.is_available(), "Expected CUDA to be available for NCCL tests."
-        assert torch.cuda.device_count() >= world_size, (
-            f"Expected at least {world_size} CUDA devices, got {torch.cuda.device_count()}."
-        )
-        assert torch.cuda.current_device() == rank, (
-            f"Expected current CUDA device {rank}, got {torch.cuda.current_device()}."
-        )
+        assert (
+            torch.cuda.device_count() >= world_size
+        ), f"Expected at least {world_size} CUDA devices, got {torch.cuda.device_count()}."
+        assert (
+            torch.cuda.current_device() == rank
+        ), f"Expected current CUDA device {rank}, got {torch.cuda.current_device()}."
         probe = torch.empty(1, device=device)
         assert probe.is_cuda, "Expected NCCL probe tensor to be a CUDA tensor."
         assert probe.device.index == rank, f"Expected probe on cuda:{rank}, got {probe.device}."
