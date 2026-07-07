@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -303,7 +303,7 @@ class AnemoiAzureMLflowLogger(BaseAnemoiMLflowLogger):
             def default(self, o: Any) -> str:
                 return str(o)
 
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         now = str(now).replace(" ", "T")
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / f"config.{now}.json"

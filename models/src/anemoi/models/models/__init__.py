@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,19 +8,23 @@
 # nor does it submit to any jurisdiction.
 
 from .base import BaseGraphModel
-from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
-from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
-from .interpolator import AnemoiModelEncProcDecInterpolator
+
+from .autoencoder import AnemoiModelAutoEncoder  # isort: skip
+from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder  # isort: skip
+from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec  # isort: skip
+from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
 
 __all__ = [
     "BaseGraphModel",
     "AnemoiModelEncProcDec",
     "AnemoiEnsModelEncProcDec",
-    "AnemoiDiffusionModelEncProcDec",
-    "AnemoiDiffusionTendModelEncProcDec",
+    "AnemoiTransportModelEncProcDec",
+    "AnemoiTransportTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
-    "AnemoiModelEncProcDecInterpolator",
+    "AnemoiEnsModelEncProcDec",
+    "AnemoiModelAutoEncoder",
+    "AnemoiModelHierarchicalAutoEncoder",
 ]

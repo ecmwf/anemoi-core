@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-    from anemoi.training.train.tasks.base import BaseGraphModule
+    from anemoi.training.train.methods.base import BaseTrainingModule
 
     if importlib.util.find_spec("ipywidgets") is not None:
         from tqdm.auto import tqdm as _tqdm
@@ -323,6 +323,8 @@ class BenchmarkProfiler(Profiler):
         # THE STRATEGY IS ALREADY INITIALISED AND TORCH DISTRIBUTED IS ACTIVE
         # we need to broadcast the profiler path to all ranks to save the memory traces
         self.dirpath = Path(self.broadcast_profiler_path(str(self.dirpath), 0))
+        # on non-root ranks the directory is not created yet
+        self.dirpath.mkdir(parents=True, exist_ok=True)
         self._stage = stage
         self._local_rank = local_rank
         self._create_time_profilers()
@@ -483,15 +485,13 @@ class BenchmarkProfiler(Profiler):
             system_metrics_df = self.to_df(WandBSystemSummarizer(logger).summarize_system_metrics())
         elif logger_name == "mlflow":
             system_metrics_df = MLFlowSystemSummarizer(logger).summarize_mlflow_system_metrics()
-        elif logger_name == "tensorboard":
-            LOGGER.info("No system profiler data available for Tensorboard")
-            system_metrics_df = None
 
         self.system_report_fname = self.dirpath / "system_profiler.csv"
         self._save_report(system_metrics_df, self.system_report_fname)
         return system_metrics_df
 
     def _save_report(self, df: pd.DataFrame, fname: Path) -> None:
+        fname.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(fname)
 
     def _save_model_summary(self, model_summary: str, fname: Path) -> None:
@@ -499,14 +499,15 @@ class BenchmarkProfiler(Profiler):
             f.write(model_summary)
             f.close()
 
-    def get_model_summary(self, model: BaseGraphModule, example_input_array: np.ndarray) -> str:
+    def get_model_summary(self, model: BaseTrainingModule, example_input_array: dict[str, np.ndarray]) -> str:
 
         from torchinfo import summary
 
         # when using flash attention model, we need to convert the input and model to float16 and cuda
         # since FlashAttention only supports fp16 and bf16 data type
-        example_input_array = example_input_array.to(dtype=torch.float16)
-        example_input_array = example_input_array.to("cuda")
+        for dataset_name in example_input_array:
+            example_input_array[dataset_name] = example_input_array[dataset_name].to(dtype=torch.float16)
+            example_input_array[dataset_name] = example_input_array[dataset_name].to("cuda")
         model.half()
         model = model.to("cuda")
 

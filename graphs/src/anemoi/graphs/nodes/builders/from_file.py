@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -17,7 +17,7 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
@@ -179,14 +179,14 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         reference_node_name: str,
         name: str,
         lat_key: str = "latitudes",
-        lon_key: str = "longiutdes",
+        lon_key: str = "longitudes",
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
         attributes: list | None = None,
     ) -> None:
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
-
         super().__init__(npz_file, name, lat_key, lon_key, attributes)
+
+        self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> HeteroData:
         self.area_mask_builder.fit(graph)

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -25,7 +25,9 @@ from typing import Literal
 from weakref import WeakValueDictionary
 
 import mlflow
+from mlflow.exceptions import RestException
 from mlflow.tracking import MlflowClient
+from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Checkpoint
 from pytorch_lightning.loggers.mlflow import MLFlowLogger
 from pytorch_lightning.loggers.mlflow import _convert_params
@@ -38,6 +40,7 @@ from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
 from anemoi.training.diagnostics.mlflow.utils import FixedLengthSet
 from anemoi.training.diagnostics.mlflow.utils import clean_config_params
 from anemoi.training.diagnostics.mlflow.utils import expand_iterables
+from anemoi.utils.mlflow.auth import AuthBase
 from anemoi.utils.mlflow.auth import TokenAuth
 from anemoi.utils.mlflow.utils import health_check
 
@@ -247,6 +250,8 @@ class LogsMonitor:
 class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
     """A custom MLflow logger that logs terminal output."""
 
+    auth: AuthBase  # set by `_init_authentication`
+
     def __init__(
         self,
         experiment_name: str = "lightning_logs",
@@ -314,21 +319,20 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         self.offline = offline
         self.log_system = system
         self.log_terminal = terminal
-        self.expand_hyperparams = expand_hyperparams if expand_hyperparams else ["config"]
+        self.expand_hyperparams = expand_hyperparams or ["config"]
         self._resumed = run_id is not None
         self._forked = fork_run_id is not None
         self._flag_log_hparams = log_hyperparams
         if self._resumed and not on_resume_create_child:
             LOGGER.info(
-                (
-                    "Resuming run without creating child run - MLFlow logs will not update the"
-                    "initial runs hyperparameters with those of the resumed run."
-                    "To update the initial run's hyperparameters, set "
-                    "`diagnostics.log.mlflow.on_resume_create_child: True`."
-                ),
+                "Resuming run without creating child run - MLFlow logs will not update the"
+                "initial runs hyperparameters with those of the resumed run."
+                "To update the initial run's hyperparameters, set "
+                "`diagnostics.log.mlflow.on_resume_create_child: True`.",
             )
             self._flag_log_hparams = False
 
+        # initialize server2server lineage attributes
         self._fork_run_server2server = None
         self._parent_run_server2server = None
         self._parent_dry_run = False
@@ -434,6 +438,10 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         run_id = None
         tags = {"projectName": project_name}
 
+        if info := self.auth.user_info():
+            tags["train.user"] = info.name
+            tags["train.username"] = info.username
+
         # create a tag with the command used to run the script
         command = os.environ.get("ANEMOI_TRAINING_CMD", sys.argv[0])
         tags["command"] = command.split("/")[-1]  # get the python script name
@@ -515,7 +523,15 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 cleaned_metrics.pop(k)
                 continue
             self._logged_metrics.add(metric_id)
-        return super().log_metrics(metrics=cleaned_metrics, step=step)
+        try:
+            return super().log_metrics(metrics=cleaned_metrics, step=step)
+        except RestException as e:
+            # Handle duplicate metric key issue gracefully
+            if "duplicate key value violates unique constraint" in str(e):
+                LOGGER.warning("Duplicate metric detected %s", e)
+            else:
+                # Re-raise if it's a different kind of error
+                raise
 
     @rank_zero_only
     def log_system_metrics(self) -> None:
@@ -597,7 +613,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
 
             # this is needed to resolve optional missing config values to a string, instead of raising a missing error
             if config := params.get("config"):
-                params["config"] = config.model_dump(by_alias=True)
+                params["config"] = config if isinstance(config, dict | DictConfig) else config.model_dump(by_alias=True)
 
             self.log_hyperparams_as_mlflow_artifact(
                 client=self.experiment,
@@ -671,9 +687,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         params = params.copy()
         for key in expand_keys or []:
             if key in params:
-                expanded_params.update(
-                    expand_iterables(params, size_threshold=None, delimiter="."),
-                )
+                expanded_params[key] = expand_iterables(params.pop(key))
         expanded_params.update(params)
 
         expanded_params = _flatten_dict(

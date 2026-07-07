@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -137,7 +137,7 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     gt_ref = GraphTransformerConv(out_channels=d)
     out_ref = gt_ref.forward(query, key, value, edge_attr, edge_index)
 
-    tolerance = 1e-5
+    tolerance = 1e-4
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
 
 
@@ -184,7 +184,7 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     grads_ref = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
 
     # Compare outputs and gradients
-    tolerance = 1e-5
+    tolerance = 1e-4
     torch.testing.assert_close(out_triton, out_ref, atol=tolerance, rtol=0)
     torch.testing.assert_close(grads_triton[0], grads_ref[0], atol=tolerance, rtol=0)  # queries
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys

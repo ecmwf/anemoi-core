@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,14 +9,26 @@
 
 import types
 from typing import Any
+from typing import Never
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
-from anemoi.training.train.tasks.forecaster import GraphForecaster
+from anemoi.training.tasks import Forecaster
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
+
+
+class DummyTrainingModule(BaseTrainingModule):
+
+    def __init__(self) -> None:
+        pass
+
+    def _step(self, batch, validation_mode: bool = False) -> Never:  # noqa: ANN001
+        raise NotImplementedError
 
 
 @pytest.fixture
@@ -47,18 +59,22 @@ def name_to_index_rename_permute() -> dict:
 @pytest.fixture
 def fake_trainer(mocker: Any, name_to_index: dict) -> AnemoiTrainer:
     trainer = mocker.Mock(spec=AnemoiTrainer)
-    trainer.datamodule.data_indices.name_to_index = name_to_index
-    trainer.datamodule.data_indices.compare_variables = types.MethodType(
+    data_indices = {"data": mocker.Mock(spec=IndexCollection)}
+    data_indices["data"].name_to_index = name_to_index
+    trainer.datamodule.data_indices = data_indices
+    trainer.datamodule.data_indices["data"].compare_variables = types.MethodType(
         IndexCollection.compare_variables,
         trainer.datamodule.data_indices,
     )
+    trainer.datamodule.config.training.get.return_value = {}
     return trainer
 
 
 @pytest.fixture
 def fake_pl_module(mocker: Any, name_to_index: dict) -> MagicMock:
     pl_module = mocker.Mock()
-    pl_module._ckpt_model_name_to_index = name_to_index
+    pl_module._ckpt_model_name_to_index = {"data": name_to_index}
+    pl_module._ckpt_variables_metadata = None
     return pl_module
 
 
@@ -80,17 +96,17 @@ def test_on_epoch(
     name_to_index: dict,
 ) -> None:
     """Test all epoch functions with "working" indices."""
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index}
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
     assert (
-        fake_trainer.datamodule.data_indices.compare_variables(
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
             fake_pl_module._ckpt_model_name_to_index,
-            name_to_index,
+            {"data": name_to_index},
         )
         is None
     )
@@ -106,9 +122,9 @@ def test_on_epoch_permute(
 
     Expecting errors in all cases.
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_permute
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_permute
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_permute}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_permute}
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
         callback.on_train_start(fake_trainer, fake_pl_module)
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
@@ -120,8 +136,8 @@ def test_on_epoch_permute(
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
 
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
-        fake_trainer.datamodule.data_indices.compare_variables(
-            fake_pl_module._ckpt_model_name_to_index,
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
+            fake_pl_module._ckpt_model_name_to_index["data"],
             name_to_index_permute,
         )
     assert "{'c': (2, 1), 'b': (1, 2)}" in str(exc_info.value) or "{'b': (1, 2), 'c': (2, 1)}" in str(exc_info.value)
@@ -137,15 +153,15 @@ def test_on_epoch_rename(
 
     Expecting passes in all cases.
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_rename
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_rename
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_rename}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_rename}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_rename}
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
-    fake_trainer.datamodule.data_indices.compare_variables(
-        fake_pl_module._ckpt_model_name_to_index,
+    fake_trainer.datamodule.data_indices["data"].compare_variables(
+        fake_pl_module._ckpt_model_name_to_index["data"],
         name_to_index_rename,
     )
 
@@ -160,15 +176,15 @@ def test_on_epoch_rename_permute(
 
     Expects all passes (but warnings).
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_rename_permute
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_rename_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename_permute
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_rename_permute}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_rename_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_rename_permute}
     callback.on_train_start(fake_trainer, fake_pl_module)
     callback.on_validation_start(fake_trainer, fake_pl_module)
     callback.on_test_start(fake_trainer, fake_pl_module)
 
-    fake_trainer.datamodule.data_indices.compare_variables(
-        fake_pl_module._ckpt_model_name_to_index,
+    fake_trainer.datamodule.data_indices["data"].compare_variables(
+        fake_pl_module._ckpt_model_name_to_index["data"],
         name_to_index_rename_permute,
     )
 
@@ -183,9 +199,9 @@ def test_on_epoch_partial_rename_permute(
 
     Expects all errors.
     """
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index_partial_rename_permute
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_partial_rename_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_partial_rename_permute
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index_partial_rename_permute}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_partial_rename_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_partial_rename_permute}
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
         callback.on_train_start(fake_trainer, fake_pl_module)
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
@@ -194,8 +210,8 @@ def test_on_epoch_partial_rename_permute(
         callback.on_test_start(fake_trainer, fake_pl_module)
 
     with pytest.raises(ValueError, match=r"The variable order in the model and data is different."):
-        fake_trainer.datamodule.data_indices.compare_variables(
-            fake_pl_module._ckpt_model_name_to_index,
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
+            fake_pl_module._ckpt_model_name_to_index["data"],
             name_to_index_partial_rename_permute,
         )
 
@@ -209,9 +225,9 @@ def test_on_epoch_wrong_validation(
     name_to_index_rename: dict,
 ) -> None:
     """Test all epoch functions with "working" indices, but different validation indices."""
-    fake_trainer.datamodule.ds_train.name_to_index = name_to_index
-    fake_trainer.datamodule.ds_valid.name_to_index = name_to_index_permute
-    fake_trainer.datamodule.ds_test.name_to_index = name_to_index_rename
+    fake_trainer.datamodule.ds_train.name_to_index = {"data": name_to_index}
+    fake_trainer.datamodule.ds_valid.name_to_index = {"data": name_to_index_permute}
+    fake_trainer.datamodule.ds_test.name_to_index = {"data": name_to_index_rename}
     callback.on_train_start(fake_trainer, fake_pl_module)
     with pytest.raises(ValueError, match="Detected a different sort order of the same variables:") as exc_info:
         callback.on_validation_start(fake_trainer, fake_pl_module)
@@ -221,8 +237,8 @@ def test_on_epoch_wrong_validation(
     callback.on_test_start(fake_trainer, fake_pl_module)
 
     assert (
-        fake_trainer.datamodule.data_indices.compare_variables(
-            fake_pl_module._ckpt_model_name_to_index,
+        fake_trainer.datamodule.data_indices["data"].compare_variables(
+            fake_pl_module._ckpt_model_name_to_index["data"],
             name_to_index,
         )
         is None
@@ -230,15 +246,131 @@ def test_on_epoch_wrong_validation(
 
 
 def test_on_load_checkpoint_restores_name_to_index() -> None:
-
-    model = GraphForecaster.__new__(GraphForecaster)
-
-    model.on_load_checkpoint = types.MethodType(GraphForecaster.on_load_checkpoint, GraphForecaster)
+    """Test that on_load_checkpoint correctly restores _ckpt_model_name_to_index."""
+    module = DummyTrainingModule.__new__(DummyTrainingModule)
+    torch.nn.Module.__init__(module)
+    dataset_name = "test_dataset"
+    module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    module.config = types.SimpleNamespace(
+        training=types.SimpleNamespace(
+            update_ds_stats_on_ckpt_load=types.SimpleNamespace(states=False, tendencies=False),
+        ),
+    )
 
     mock_name_to_index = {"var1": 0, "var2": 1}
-    mock_checkpoint = {"hyper_parameters": {"data_indices": MagicMock(name_to_index=mock_name_to_index)}}
+    mock_checkpoint = {
+        "hyper_parameters": {
+            "data_indices": {
+                dataset_name: MagicMock(name_to_index=mock_name_to_index),
+            },
+        },
+    }
     # Act
-    model.on_load_checkpoint(mock_checkpoint)
+    module.on_load_checkpoint(mock_checkpoint)
 
     # Assert
-    assert model._ckpt_model_name_to_index == mock_name_to_index
+    assert module._ckpt_model_name_to_index == {dataset_name: mock_name_to_index}
+
+
+# --- Tests for _check_variable_units via CheckVariableOrder ---
+
+
+def test_check_variable_units_compatible(mocker: Any) -> None:
+    """Test that compatible units pass without error via callback."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "K"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer.datamodule.config.training.get.return_value = {}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+
+    # Should not raise
+    callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_incompatible(mocker: Any) -> None:
+    """Test that incompatible units raise ValueError via callback with dataset context."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer.datamodule.config.training.get.return_value = {}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+
+    with pytest.raises(ValueError, match="dataset 'era5'"):
+        callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_no_checkpoint_metadata(mocker: Any) -> None:
+    """Test that missing checkpoint variables_metadata warns but doesn't error."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {"era5": {"variables_metadata": {"t2m": {"units": "K"}}}}
+    trainer.datamodule.config.training.get.return_value = {}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = None
+
+    # Should not raise
+    callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_no_dataset_metadata(mocker: Any) -> None:
+    """Test that missing dataset variables_metadata warns but doesn't error."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {"era5": {}}
+    trainer.datamodule.config.training.get.return_value = {}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {"era5": {"t2m": {"units": "K"}}}
+
+    # Should not raise
+    callback._check_variable_units(trainer, pl_module)
+
+
+def test_check_variable_units_ignore_units_option(mocker: Any) -> None:
+    """Test that ignore_units=True suppresses an otherwise-failing unit check."""
+    callback = CheckVariableOrder()
+    trainer = mocker.Mock()
+    trainer.datamodule.metadata = {
+        "era5": {
+            "variables_metadata": {
+                "t2m": {"units": "C"},
+                "u10": {"units": "m s**-1"},
+            },
+        },
+    }
+    trainer.datamodule.config.training.get.return_value = {"ignore_units": True, "ignore_processing_period": False}
+    pl_module = mocker.Mock()
+    pl_module._ckpt_variables_metadata = {
+        "era5": {
+            "t2m": {"units": "K"},
+            "u10": {"units": "m s**-1"},
+        },
+    }
+
+    # Should not raise because ignore_units=True
+    callback._check_variable_units(trainer, pl_module)

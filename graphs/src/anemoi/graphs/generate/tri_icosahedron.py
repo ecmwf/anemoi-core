@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from collections.abc import Iterable
 
 import networkx as nx
@@ -15,13 +16,15 @@ import numpy as np
 import trimesh
 from sklearn.neighbors import BallTree
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
+LOGGER = logging.getLogger(__name__)
+
 
 def create_tri_nodes(
-    resolution: int, area_mask_builder: KNNAreaMaskBuilder | None = None
+    resolution: int, area_mask_builder: AreaMaskBuilder | None = None
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedron.
 
@@ -31,8 +34,8 @@ def create_tri_nodes(
     ----------
     resolution : int
         Level of mesh resolution to consider.
-    area_mask_builder : KNNAreaMaskBuilder
-        KNNAreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
+    area_mask_builder : AreaMaskBuilder
+        AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
 
     Returns
     -------
@@ -49,6 +52,7 @@ def create_tri_nodes(
 
     if area_mask_builder is not None:
         area_mask = area_mask_builder.get_mask(coords_rad)
+        area_mask = area_mask.cpu().numpy()
         node_ordering = node_ordering[area_mask[node_ordering]]
 
     # Creates the graph, with the nodes sorted by latitude and longitude.
@@ -60,7 +64,7 @@ def create_tri_nodes(
 def create_stretched_tri_nodes(
     base_resolution: int,
     lam_resolution: int,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> tuple[nx.DiGraph, np.ndarray, list[int]]:
     """Creates a global mesh with 2 levels of resolution.
 
@@ -73,8 +77,8 @@ def create_stretched_tri_nodes(
         Global resolution level.
     lam_resolution : int
         Local resolution level.
-    area_mask_builder : KNNAreaMaskBuilder
-        NearestNeighbors with the cloud of points to limit the mesh area.
+    area_mask_builder : AreaMaskBuilder
+        Builder used to generate the Area Of Interest (AOI) mask that limits the mesh area.
 
     Returns
     -------
@@ -91,6 +95,7 @@ def create_stretched_tri_nodes(
 
     # Define the low resolution outside AOI mask
     base_area_mask = ~area_mask_builder.get_mask(base_coords_rad)
+    base_area_mask = base_area_mask.cpu().numpy()
 
     # Get the high resolution nodes
     coords_rad = get_latlon_coords_icosphere(lam_resolution)
@@ -100,6 +105,7 @@ def create_stretched_tri_nodes(
 
     # Define the high resolution inside AOI mask
     lam_area_mask = area_mask_builder.get_mask(coords_rad)
+    lam_area_mask = lam_area_mask.cpu().numpy()
 
     # Pad the low resolution ~(AOI mask) to match the high resolution AOI mask
     base_area_mask_padded = np.pad(base_area_mask, (0, len(lam_area_mask) - len(base_area_mask)), mode="constant")
@@ -146,11 +152,58 @@ def create_nx_graph_from_tri_coords(coords_rad: np.ndarray, node_ordering: np.nd
     return graph
 
 
+def add_1_hop_edges(
+    nodes_coords_rad,
+    node_resolutions: list[int],
+    edge_resolutions: list[int],
+    node_ordering: list[int],
+    area_mask_builder: AreaMaskBuilder | None = None,
+) -> np.ndarray:
+    """Adds edges for x_hops = 1 relying on trimesh only."""
+
+    hop_1_edges = []
+
+    # Loop over the edge_resolutions to get edges at all refinement levels
+    for subdivisions in edge_resolutions:
+        sphere = trimesh.creation.icosphere(subdivisions=subdivisions, radius=1.0)
+        LOGGER.debug("Adding %d unmasked 1-hop edges for resolution %d", sphere.edges.shape[0], subdivisions)
+        hop_1_edges.append(sphere.edges)
+
+    # Concatenate all edges from different resolutions and transpose to get shape (2, num_edges)
+    multiscale_edges = np.transpose(np.concatenate(hop_1_edges, axis=0), (1, 0))
+
+    # Map the edges to the node ordering
+    #  - Calculate the total (unmasked) number of nodes
+    unmasked_nodes = cartesian_to_latlon_rad(
+        trimesh.creation.icosphere(subdivisions=max(node_resolutions), radius=1.0).vertices
+    )
+    assert np.all(
+        (nodes_coords_rad.cpu().numpy() - unmasked_nodes[node_ordering]) == 0
+    ), "Node coordates do not match coordinates used for multi-scale edge building"
+    LOGGER.debug("unmasked_nodes shape[0]: %d", unmasked_nodes.shape[0])
+    if area_mask_builder is not None:
+        # Take care of the edges with start- or end-point outside the mask
+        inverse_ordering = np.full(unmasked_nodes.shape[0], -1, dtype=int)
+    else:
+        inverse_ordering = np.full(unmasked_nodes.shape[0], 0, dtype=int)
+
+    # Update the start- and end indexes according to the node ordering
+    inverse_ordering[node_ordering] = np.arange(len(node_ordering))
+    updated_edges = inverse_ordering[multiscale_edges]
+    valid_edges_mask = np.all(updated_edges >= 0, axis=0)
+
+    # Select only those edges requested by the mask
+    multiscale_edges = updated_edges[:, valid_edges_mask]
+    LOGGER.debug("multiscale_edges_shape: %s", multiscale_edges.shape)
+
+    return multiscale_edges
+
+
 def add_edges_to_nx_graph(
     graph: nx.DiGraph,
     resolutions: list[int],
     x_hops: int = 1,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> nx.DiGraph:
     """Adds the edges to the graph.
 
@@ -165,7 +218,7 @@ def add_edges_to_nx_graph(
         Levels of mesh refinement levels to consider.
     x_hops : int, optional
         Number of hops between 2 nodes to consider them neighbours, by default 1.
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         NearestNeighbors with the cloud of points to limit the mesh area, by default None.
 
     Returns
@@ -187,6 +240,7 @@ def add_edges_to_nx_graph(
         # Limit area of mesh points.
         if area_mask_builder is not None:
             area_mask = area_mask_builder.get_mask(r_vertices_rad)
+            area_mask = area_mask.cpu().numpy()
             valid_nodes = np.where(area_mask)[0]
         else:
             valid_nodes = None
@@ -195,6 +249,7 @@ def add_edges_to_nx_graph(
 
         _, vertex_mapping_index = tree.query(r_vertices_rad, k=1)
         neighbour_pairs = create_node_neighbours_list(graph, node_neighbours, vertex_mapping_index)
+        LOGGER.debug("Adding %d edges for resolution %d", len(neighbour_pairs), resolution)
         graph.add_edges_from(neighbour_pairs)
     return graph
 

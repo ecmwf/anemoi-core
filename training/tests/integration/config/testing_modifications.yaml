@@ -4,22 +4,14 @@ dataloader:
     training: 2
     validation: 2
   batch_size:
-    training: 2
-    validation: 2
+    training: 3
+    validation: 3
   limit_batches:
-    training: 2
-    validation: 2
+    training: 3
+    validation: 3
 
 diagnostics:
-  plot:
-    callbacks: []
-    asynchronous: False # Whether to plot asynchronously
   log:
-    wandb:
-      enabled: False
-      entity: null # override '???'
-    tensorboard:
-      enabled: False
     mlflow:
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
       enabled: False
@@ -37,6 +29,7 @@ system:
     root: ${oc.env:PWD}/tmp_output/
 
   input:
+    graph: null
     truncation: null
     truncation_inv: null
 
@@ -45,6 +38,13 @@ graph:
 
 model:
   num_channels: 16
+  processor:
+    num_layers: 2
+    num_chunks: 2
 
 training:
   max_epochs: 2
+  optimization:
+    lr: 10e-5
+    lr_scheduler:
+      warmup_t: 1

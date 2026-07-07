@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,8 +18,8 @@ import tarfile
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Callable
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -625,7 +625,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
 
     # get metadata
     commit = get_git_revision_hash()
-    yyyy_mm_dd = datetime.now(tz=timezone.utc).date()
+    yyyy_mm_dd = datetime.now(tz=UTC).date()
 
     # create Benchmark value objects
     local_benchmark_results = []
@@ -684,6 +684,40 @@ def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
         artifacts.append(trace_file)
 
     return artifacts
+
+
+@rank_zero_only
+def track_dataloader_benchmark_results(
+    test_case: str,
+    batches_per_second: float,
+) -> None:
+    """Track dataloader metrics by updating the remote benchmark server on main."""
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping dataloader benchmark tracking: not on main branch")
+        return
+
+    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+    user, hostname, path = parse_benchmark_config(config_path)
+    store = f"ssh://{user}@{hostname}:{path}"
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
+
+    commit = get_git_revision_hash()
+    today = datetime.now(tz=UTC).date()
+    dataloader_benchmark_results = [
+        BenchmarkValue(
+            name="dataloaderThroughputIterPerS",
+            value=batches_per_second,
+            unit="iter/s",
+            date=today,
+            commit=commit,
+            op=operator.ge,
+            tolerance=10,
+        ),
+    ]
+
+    LOGGER.info("Updating dataloader benchmark metrics on server")
+    for dataloader_benchmark_value in dataloader_benchmark_results:
+        benchmark_server.set_value(dataloader_benchmark_value)
 
 
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:

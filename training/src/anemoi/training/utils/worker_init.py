@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 def worker_init_func(worker_id: int) -> None:
     """Configures each dataset worker process.
 
-    Calls WeatherBenchDataset.per_worker_init() on each dataset object.
+    Calls per_worker_init() on each dataset object.
 
     Parameters
     ----------

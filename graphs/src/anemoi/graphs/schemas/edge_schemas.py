@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -26,6 +26,19 @@ class KNNEdgeSchema(BaseModel):
     "KNN based edges implementation from anemoi.graphs.edges."
     num_nearest_neighbours: PositiveInt = Field(example=3)
     "Number of nearest neighbours. Default to 3."
+    source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to source nodes of the edges. Default to None."
+    target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
+    "Mask to apply to target nodes of the edges. Default to None."
+
+
+class MutualKNNEdgeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.MutualKNNEdges"] = Field(..., alias="_target_")
+    "Mutual KNN based edges implementation from anemoi.graphs.edges."
+    num_nearest_neighbours: PositiveInt = Field(example=3)
+    "Number of nearest source nodes considered for each target node."
+    reversed_num_nearest_neighbours: PositiveInt | None = Field(default=None, example=3)
+    "Number of nearest target nodes considered for each source node. Defaults to num_nearest_neighbours."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
@@ -95,8 +108,6 @@ class ICONTopologicalEdgeSchema(BaseModel):
         "anemoi.graphs.edges.ICONTopologicalEncoderEdges",
         "anemoi.graphs.edges.ICONTopologicalDecoderEdges",
     ] = Field("anemoi.graphs.edges.ICONTopologicalProcessorEdges", alias="_target_")
-    icon_mesh: str
-    "The name of the ICON mesh (defines both the processor mesh and the data)."
     source_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
     "Mask to apply to source nodes of the edges. Default to None."
     target_mask_attr_name: str | None = Field(default=None, examples=["boundary_mask"])
@@ -113,6 +124,11 @@ class EdgeAttributeSchema(BaseModel):
 
 
 EdgeBuilderSchemas = Annotated[
-    KNNEdgeSchema | CutoffEdgeSchema | MultiScaleEdgeSchema | HEALPixMultiScaleEdgesSchema | ICONTopologicalEdgeSchema,
+    KNNEdgeSchema
+    | MutualKNNEdgeSchema
+    | CutoffEdgeSchema
+    | MultiScaleEdgeSchema
+    | HEALPixMultiScaleEdgesSchema
+    | ICONTopologicalEdgeSchema,
     Field(discriminator="target_"),
 ]

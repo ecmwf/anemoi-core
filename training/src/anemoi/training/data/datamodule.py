@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,22 +9,20 @@
 
 
 import logging
-from collections.abc import Callable
 from functools import cached_property
 
-import numpy as np
 import pytorch_lightning as pl
-from hydra.utils import instantiate
 from torch.utils.data import DataLoader
-from torch_geometric.data import HeteroData
 
-from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.data.dataset import NativeGridDataset
-from anemoi.training.data.grid_indices import BaseGridIndices
+from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
-from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,225 +30,217 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, graph_data: HeteroData) -> None:
-        """Initialize Anemoi Datasets data module.
+    def __init__(self, config: BaseSchema, task: BaseTask) -> None:
+        """Initialize Multi-dataset data module.
 
         Parameters
         ----------
         config : BaseSchema
-            Job configuration
-
+            Job configuration with multi-dataset specification
+        task : BaseTask
+            Task defining the problem to solve
         """
         super().__init__()
 
         self.config = config
-        self.graph_data = graph_data
+        self.task = task
 
-        # Set the training end date if not specified
-        if self.config.dataloader.training.end is None:
-            LOGGER.info(
-                "No end date specified for training data, setting default before validation start date %s.",
-                self.config.dataloader.validation.start - 1,
-            )
-            self.config.dataloader.training.end = self.config.dataloader.validation.start - 1
+        self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
+        self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
+        self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
+
+        self.dataset_names = list(self.train_dataloader_config.keys())
+        LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
+
+        # Set training end dates if not specified for each dataset
+        for name, dataset_config in self.train_dataloader_config.items():
+            if dataset_config.end is None:
+                msg = f"No end date specified for training dataset {name}."
+                raise ValueError(msg)
 
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
+        self.epoch = 0
+
     @cached_property
     def statistics(self) -> dict:
+        """Return statistics from all training datasets."""
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
-        return self.ds_train.statistics_tendencies
+    def statistics_tendencies(self) -> dict[str, dict | None] | None:
+        """Return tendency statistics from all training datasets."""
+        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
+
+        # If the task defines a fixed tendency_delta (e.g. TemporalDownscaler uses 1h
+        # per-step differences rather than cumulative offsets from t=0), use that
+        # delta for every lead time so all steps share the same tendency statistics.
+        tendency_delta = getattr(self.task, "tendency_delta", None)
+        tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
+
+        stats_by_dataset: dict[str, dict | None] = {}
+        for dataset_name, dataset in self.ds_train.data_readers.items():
+            stats_by_lead = {
+                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
+            }
+            if all(stats is None for stats in stats_by_lead.values()):
+                stats_by_dataset[dataset_name] = None
+                continue
+            stats_by_lead["lead_times"] = lead_times
+            stats_by_dataset[dataset_name] = stats_by_lead
+
+        if not any(stats is not None for stats in stats_by_dataset.values()):
+            return None
+        return stats_by_dataset
 
     @cached_property
     def metadata(self) -> dict:
+        """Return metadata from all training datasets."""
         return self.ds_train.metadata
 
     @cached_property
     def supporting_arrays(self) -> dict:
-        return self.ds_train.supporting_arrays | self.grid_indices.supporting_arrays
+        """Return supporting arrays from all training datasets."""
+        return self.ds_train.supporting_arrays
 
     @cached_property
-    def data_indices(self) -> IndexCollection:
-        return IndexCollection(self.config, self.ds_train.name_to_index)
-
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
-        """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
-
-        # Calculate indices using multistep, timeincrement and rollout.
-        # Use the maximum rollout to be expected
-        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
-
-        rollout_max = getattr(rollout_cfg, "max", None)
-        rollout_start = getattr(rollout_cfg, "start", 1)
-        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
-
-        # Fallback if max is None or rollout_cfg is missing
-        rollout_value = rollout_start
-        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
-            rollout_value = rollout_max
-
-        else:
-            LOGGER.warning(
-                "Falling back rollout to: %s",
-                rollout_value,
-            )
-
-        rollout = max(rollout_value, val_rollout)
-
-        multi_step = self.config.training.multistep_input
-        return [self.timeincrement * mstep for mstep in range(multi_step + rollout)]
-
-    def add_trajectory_ids(self, data_reader: Callable) -> Callable:
-        """Determine an index of forecast trajectories associated with the time index and add to a data_reader object.
-
-        This is needed for interpolation to ensure that the interpolator is trained on consistent time slices.
-
-        NOTE: This is only relevant when training on non-analysis and could in the future be replaced with
-        a property of the dataset stored in data_reader. Now assumes regular interval of changed model runs
-        """
-        if not hasattr(self.config.dataloader, "model_run_info"):
-            data_reader.trajectory_ids = None
-            return data_reader
-
-        mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
-        mr_len = self.config.dataloader.model_run_info.length  # model run length in number of date indices
-        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
-            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
-            assert (
-                max_rollout_index < mr_len
-            ), f"""Requested data length {max_rollout_index + 1}
-                    longer than model run length {mr_len}"""
-
-        data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
-            mr_len * frequency_to_seconds(self.config.data.frequency),
-            "s",
-        )
-        return data_reader
+    def data_indices(self) -> dict[str, IndexCollection]:
+        """Return data indices for each dataset."""
+        indices = {}
+        data_config = get_multiple_datasets_config(self.config.data)
+        for dataset_name in self.dataset_names:
+            name_to_index = self.ds_train.name_to_index[dataset_name]
+            # Get dataset-specific data config
+            indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
+        return indices
 
     @cached_property
-    def grid_indices(self) -> type[BaseGridIndices]:
-        reader_group_size = self.config.dataloader.read_group_size
-
-        grid_indices = instantiate(
-            self.config.dataloader.grid_indices,
-            reader_group_size=reader_group_size,
-        )
-        grid_indices.setup(self.graph_data)
-        return grid_indices
+    def ds_train(self) -> MultiDataset:
+        """Create multi-dataset for training."""
+        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
 
     @cached_property
-    def timeincrement(self) -> int:
-        """Determine the step size relative to the data frequency."""
-        try:
-            frequency = frequency_to_seconds(self.config.data.frequency)
-        except ValueError as e:
-            msg = f"Error in data frequency, {self.config.data.frequency}"
-            raise ValueError(msg) from e
-
-        try:
-            timestep = frequency_to_seconds(self.config.data.timestep)
-        except ValueError as e:
-            msg = f"Error in timestep, {self.config.data.timestep}"
-            raise ValueError(msg) from e
-
-        assert timestep % frequency == 0, (
-            f"Timestep ({self.config.data.timestep} == {timestep}) isn't a "
-            f"multiple of data frequency ({self.config.data.frequency} == {frequency})."
-        )
-
-        LOGGER.info(
-            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
-            timestep // frequency,
-            frequency,
-            timestep,
-        )
-        return timestep // frequency
+    def ds_valid(self) -> MultiDataset:
+        """Create multi-dataset for validation."""
+        return self._get_dataset(self.valid_dataloader_config, shuffle=False, label="validation")
 
     @cached_property
-    def ds_train(self) -> NativeGridDataset:
-        return self._get_dataset(
-            open_dataset(self.config.dataloader.training),
-            label="train",
-        )
-
-    @cached_property
-    def ds_valid(self) -> NativeGridDataset:
-        if not self.config.dataloader.training.end < self.config.dataloader.validation.start:
-            LOGGER.warning(
-                "Training end date %s is not before validation start date %s.",
-                self.config.dataloader.training.end,
-                self.config.dataloader.validation.start,
-            )
-        return self._get_dataset(
-            open_dataset(self.config.dataloader.validation),
-            shuffle=False,
-            val_rollout=self.config.dataloader.validation_rollout,
-            label="validation",
-        )
-
-    @cached_property
-    def ds_test(self) -> NativeGridDataset:
-        assert self.config.dataloader.training.end < self.config.dataloader.test.start, (
-            f"Training end date {self.config.dataloader.training.end} is not before"
-            f"test start date {self.config.dataloader.test.start}"
-        )
-        assert self.config.dataloader.validation.end < self.config.dataloader.test.start, (
-            f"Validation end date {self.config.dataloader.validation.end} is not before"
-            f"test start date {self.config.dataloader.test.start}"
-        )
-        return self._get_dataset(
-            open_dataset(self.config.dataloader.test),
-            shuffle=False,
-            label="test",
-        )
+    def ds_test(self) -> MultiDataset:
+        """Create multi-dataset for testing."""
+        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
 
     def _get_dataset(
         self,
-        data_reader: Callable,
+        config: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 1,
         label: str = "generic",
-    ) -> NativeGridDataset:
+    ) -> MultiDataset:
+        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
-        data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
-
-        return NativeGridDataset(
-            data_reader=data_reader,
-            relative_date_indices=self.relative_date_indices(val_rollout),
-            timestep=self.config.data.timestep,
+        return MultiDataset(
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
             shuffle=shuffle,
-            grid_indices=self.grid_indices,
             label=label,
+            epoch=self.epoch,
+            rollout=len(tuple(self.task.steps(label))),
         )
 
-    def _get_dataloader(self, ds: NativeGridDataset, stage: str) -> DataLoader:
+    def set_epoch(self, epoch: int) -> None:
+        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        self.epoch = epoch
+
+        for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
+            if dataset_name not in self.__dict__:
+                continue
+
+            dataset = self.__dict__[dataset_name]
+            # Store the current rollout length, and refresh the time steps that must
+            # be loaded for it. The task provides both values: steps() gives the rollout
+            # length, and get_offsets() gives the time steps via compute_relative_date_indices().
+            dataset.set_epoch(
+                epoch,
+                rollout=len(tuple(self.task.steps(label))),
+                relative_date_indices=compute_relative_date_indices(
+                    self.task,
+                    dataset.data_readers,
+                    mode=label,
+                ),
+            )
+
+    def _persistent_workers(self) -> bool:
+        """Return whether DataLoader workers can persist across epochs."""
+        rollout = getattr(self.task, "rollout", None)
+        if rollout is None:
+            return True
+        # Workers could also be persisted once rollout.step >= rollout.maximum,
+        # but that would make resumed runs behave differently from uninterrupted
+        # runs.
+        return rollout.epoch_increment == 0
+
+    def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
+        """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
+
+        extra = {}
+
+        if self.config.dataloader.get("multiprocessing_context", None) is not None:
+            import multiprocessing
+
+            ctx = self.config.dataloader.multiprocessing_context
+            extra["multiprocessing_context"] = multiprocessing.get_context(ctx)
+
+            LOGGER.info("Using multiprocessing context '%s' for dataloader workers.", ctx)
+
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],
-            # number of worker processes
             num_workers=self.config.dataloader.num_workers[stage],
-            # use of pinned memory can speed up CPU-to-GPU data transfers
-            # see https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-pinning
             pin_memory=self.config.dataloader.pin_memory,
-            # worker initializer
             worker_init_fn=worker_init_func,
-            # prefetch batches
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=True,
+            persistent_workers=self._persistent_workers(),
+            **extra,
         )
 
     def train_dataloader(self) -> DataLoader:
+        """Return training dataloader."""
         return self._get_dataloader(self.ds_train, "training")
 
     def val_dataloader(self) -> DataLoader:
+        """Return validation dataloader."""
         return self._get_dataloader(self.ds_valid, "validation")
 
     def test_dataloader(self) -> DataLoader:
+        """Return test dataloader."""
         return self._get_dataloader(self.ds_test, "test")
+
+    def fill_metadata(self, metadata: dict) -> None:
+        """Fill metadata dictionary with dataset metadata."""
+        datasets_config = self.metadata.copy()
+        metadata["dataset"] = datasets_config
+        data_indices = self.data_indices.copy()
+        metadata["data_indices"] = data_indices
+
+        metadata["metadata_inference"]["dataset_names"] = self.dataset_names
+
+        for dataset_name in self.dataset_names:
+            metadata["metadata_inference"][dataset_name] = {}
+
+            name_to_index = {
+                "input": data_indices[dataset_name].model.input.name_to_index,
+                "output": data_indices[dataset_name].model.output.name_to_index,
+            }
+            metadata["metadata_inference"][dataset_name]["data_indices"] = name_to_index
+
+            input_data_indices = data_indices[dataset_name].data.input.todict()
+            input_index_to_name = {v: k for k, v in input_data_indices["name_to_index"].items()}
+            variable_types = {
+                "forcing": [input_index_to_name[int(index)] for index in input_data_indices["forcing"]],
+                "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
+                "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
+                "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
+            }
+            metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types

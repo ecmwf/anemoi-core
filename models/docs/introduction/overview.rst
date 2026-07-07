@@ -68,8 +68,6 @@ The package currently includes the following model architectures:
    base architecture
 -  **AnemoiEnsModelEncProcDec**: The CRPS-optimized ensemble version
    that injects noise in the processor, e.g. AIFS-CRPS
--  **AnemoiModelEncProcDecInterpolator**: A specialized architecture for
-   time interpolation
 
 All models support flexible layer kernel configuration, allowing for
 customization of linear and normalization layers in different parts of
@@ -103,6 +101,20 @@ process the data on the hidden grid. The `Processors` use a series of
 `Blocks` to process the data. These `Blocks` can be partitioned into
 checkpointed chunks via `num_chunks` to reduce memory usage during
 training.
+
+Graph Providers
+===============
+
+Graph providers encapsulate the logic for supplying edge indices and
+attributes to mapper and processor layers. This separation allows for
+different graph types:
+
+-  **StaticGraphProvider**: For fixed graph structures with optional
+   trainable edge parameters
+-  **NoOpGraphProvider**: For edge-less architectures (e.g., pure
+   Transformers)
+-  **DynamicGraphProvider**: For on-the-fly graph construction (future)
+-  **ProjectionGraphProvider**: For sparse projection matrices
 
 **************
  Data Indices

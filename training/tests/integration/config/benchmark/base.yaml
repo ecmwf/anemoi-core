@@ -6,8 +6,6 @@ system:
     num_gpus_per_node: 2
     num_nodes: 1
 
-
-
 dataloader:
   num_workers:
     training: 8
@@ -37,6 +35,8 @@ training:
 
 diagnostics:
   callbacks: []
+  plot:
+    callbacks: []
   enable_checkpointing: False
   print_memory_summary: true
   benchmark_profiler:

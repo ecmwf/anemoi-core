@@ -1,0 +1,39 @@
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-od-fc-oper-0001-mars-o48-2017-2017-6h-1h-v5-testing.zarr
+    loss_matrices_path: "anemoi-integration-tests/training/assets/"
+
+data:
+  frequency: null
+  datasets:
+    data:
+      diagnostic: []
+      processors:
+        normalizer:
+          config:
+            std: []
+
+task:
+  _target_: anemoi.training.tasks.TemporalDownscaler
+  input_timestep: 6h
+  output_timestep: 1h
+  output_right_boundary: True
+
+
+dataloader:
+  training:
+    datasets:
+      data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
+        end: 2017-01-08 12:00:00
+  validation:
+    datasets:
+      data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
+        start: 2017-01-08 18:00:00

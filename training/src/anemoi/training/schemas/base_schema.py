@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,16 +12,15 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any
+from typing import Self
 from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import model_validator
-from pydantic._internal import _model_construction
 from pydantic_core import PydanticCustomError
 from pydantic_core import ValidationError
-from typing_extensions import Self
 
 from anemoi.graphs.schemas.base_graph import BaseGraphSchema
 from anemoi.models.schemas.decoder import GraphTransformerDecoderSchema
@@ -36,9 +35,8 @@ from .data import DataSchema
 from .dataloader import DataLoaderSchema
 from .diagnostics import DiagnosticsSchema
 from .system import SystemSchema
+from .tasks import TaskSchema
 from .training import TrainingSchema
-
-_object_setattr = _model_construction.object_setattr
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,10 +61,6 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     output_config.logs.mlflow = (
         base / "mlflow" if output_config.logs.mlflow is None else base / output_config.logs.mlflow
     )
-    output_config.logs.tensorboard = (
-        base / "tensorboard" if output_config.logs.tensorboard is None else base / output_config.logs.tensorboard
-    )
-
     # CheckPointSchema
     output_config.checkpoints.root = (
         root_output_path / output_config.checkpoints.root if output_config.checkpoints.root else root_output_path
@@ -75,12 +69,106 @@ def expand_paths(config_system: Union[SystemSchema, DictConfig]) -> Union[System
     return config_system
 
 
+_DEPRECATED_TARGETS: dict[str, str] = {
+    "anemoi.training.losses.kcrps.KernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' (default). The 'alpha' parameter controls the fair/standard CRPS blend "
+        "(alpha=1.0 gives fully fair CRPS)."
+    ),
+    "anemoi.training.losses.kcrps.AlmostFairKernelCRPS": (
+        "This loss has been deprecated and removed. Use 'anemoi.training.losses.CRPS' instead "
+        "with 'backend: stable' and set 'alpha' to control the fair/standard CRPS blend "
+        "(0 < alpha < 1 gives the almost fair formulation, alpha=1.0 gives fully fair CRPS)."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots": (
+        "This callback has been deprecated and removed, update your config to remove any references to it. "
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotEnsSample' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotHistogram' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotLoss' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotSpectrum' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.PlotSample": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.PlotSample' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
+        "This callback has been deprecated and removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.models.layers.activations.GLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: glu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.SwiGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: swiglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.GEGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: geglu' "
+        "in your model component config instead."
+    ),
+    "anemoi.models.layers.activations.ReGLU": (
+        "This activation has been deprecated and removed. Use 'mlp_implementation: reglu' "
+        "in your model component config instead."
+    ),
+}
+
+
+def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str, str] | None:
+    """Recursively search for deprecated _target_ values anywhere in a config."""
+    if isinstance(data, str):
+        return None
+    if hasattr(data, "keys"):  # dict / DictConfig (not ListConfig)
+        target = data.get("_target_")
+        if target in deprecated:
+            return target, deprecated[target]
+        for v in data.values():
+            result = _find_deprecated_target(v, deprecated)
+            if result:
+                return result
+    elif hasattr(data, "__iter__"):  # list / ListConfig
+        for item in data:
+            result = _find_deprecated_target(item, deprecated)
+            if result:
+                return result
+    return None
+
+
 class SchemaCommonMixin:
     """Shared logic for schema objects."""
 
     def model_dump(self, by_alias: bool = False) -> dict:
         dumped_model = super().model_dump(by_alias=by_alias)
         return DictConfig(dumped_model)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check_deprecated_targets(cls, values: Any) -> Any:
+        """Raise before validation if any _target_ in the config is deprecated."""
+        result = _find_deprecated_target(values, _DEPRECATED_TARGETS)
+        if result:
+            target, hint = result
+            msg = f"'{target}' is deprecated and has been removed. {hint}"
+            raise ValueError(msg)
+        return values
 
     def model_post_init(self, _: Any) -> None:
         expand_paths(self.system)
@@ -106,10 +194,37 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Graph configuration."""
     model: ModelSchema
     """Model configuration."""
+    task: TaskSchema
+    """Task configuration."""
     training: TrainingSchema
     """Training configuration."""
     config_validation: bool = True
     """Flag to disable validation of the configuration"""
+
+    @model_validator(mode="after")
+    def check_frequency_null_for_trajectory_datasets(self) -> Self:
+        """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
+        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+
+        all_splits = [
+            self.dataloader.training,
+            self.dataloader.validation,
+            self.dataloader.test,
+        ]
+        uses_trajectory = any(
+            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            for split in all_splits
+            for dataset in split.values()
+        )
+        if uses_trajectory and self.data.frequency is not None:
+            msg = (
+                "data.frequency must be null when using trajectory (forecast) datasets. "
+                "The step frequency is read directly from the dataset. "
+                f"Got data.frequency={self.data.frequency!r}."
+            )
+            error = "trajectory_frequency_conflict"
+            raise PydanticCustomError(error, msg)
+        return self
 
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:
@@ -150,13 +265,15 @@ class UnvalidatedBaseSchema(SchemaCommonMixin, PydanticBaseModel):
     """Graph configuration."""
     model: Any
     """Model configuration."""
+    task: Any
+    """Task configuration."""
     training: Any
     """Training configuration."""
     config_validation: bool = False
     """Flag to disable validation of the configuration"""
 
 
-def convert_to_omegaconf(config: BaseSchema) -> dict:
+def convert_to_omegaconf(config: BaseSchema) -> DictConfig:
     config = config.model_dump(by_alias=True)
     return OmegaConf.create(config)
 

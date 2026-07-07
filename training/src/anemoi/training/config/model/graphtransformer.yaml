@@ -5,6 +5,8 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -27,10 +29,12 @@ processor:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
@@ -40,10 +44,12 @@ encoder:
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
@@ -54,11 +60,13 @@ decoder:
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   initialise_data_extractor_zero: False
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
   shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"

@@ -1,3 +1,12 @@
+# (C) Copyright 2026- Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 from pathlib import Path
 from typing import Union
 
@@ -21,7 +30,6 @@ def base_config() -> DictConfig:
                     "root": "logs",
                     "wandb": None,
                     "mlflow": None,
-                    "tensorboard": None,
                 },
                 "checkpoints": {"root": "checkpoints"},
             },
@@ -51,24 +59,21 @@ def test_expand_paths_basic(base_config: DictConfig) -> None:
     assert output.logs.root == root / "logs"
     assert output.logs.wandb == root / "logs" / "wandb"
     assert output.logs.mlflow == root / "logs" / "mlflow"
-    assert output.logs.tensorboard == root / "logs" / "tensorboard"
 
     # --- checkpoints ---
     assert output.checkpoints.root == root / "checkpoints"
 
 
 def test_expand_paths_respects_existing_values(base_config: DictConfig) -> None:
-    """If wandb/mlflow/tensorboard are already set, keep and prefix them."""
+    """If wandb/mlflow are already set, keep and prefix them."""
     base_config.output.logs.wandb = "custom_wandb"
     base_config.output.logs.mlflow = "custom_mlflow"
-    base_config.output.logs.tensorboard = "custom_tb"
 
     result = expand_paths(base_config)
 
     root = Path("runs") / "logs"
     assert result.output.logs.wandb == root / "custom_wandb"
     assert result.output.logs.mlflow == root / "custom_mlflow"
-    assert result.output.logs.tensorboard == root / "custom_tb"
 
 
 @pytest.mark.parametrize("root_value", [None, ""])
@@ -84,7 +89,6 @@ def test_expand_paths_with_no_root(root_value: Union[None, str]) -> None:
                     "root": "logs",
                     "wandb": None,
                     "mlflow": None,
-                    "tensorboard": None,
                 },
                 "checkpoints": {"root": "checkpoints"},
             },
@@ -115,7 +119,6 @@ def test_expand_paths_with_no_root_but_full_paths(root_value: Union[None, str]) 
                     "root": "/scratch/logs",
                     "wandb": None,
                     "mlflow": None,
-                    "tensorboard": None,
                 },
                 "checkpoints": {"root": "/scratch/checkpoints"},
             },

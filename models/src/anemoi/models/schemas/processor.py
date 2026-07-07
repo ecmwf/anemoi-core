@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,7 +9,9 @@
 
 from typing import Any
 from typing import Literal
+from typing import Union
 
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
@@ -18,6 +20,11 @@ from pydantic import model_validator
 from .common_components import GNNModelComponent
 from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
+
+
+class NoOpProcessorSchema(PydanticBaseModel):
+    target_: Literal["anemoi.models.layers.processor.NoOpProcessor"] = Field(..., alias="_target_")
+    "No-op processor, used for ablations."
 
 
 class GNNProcessorSchema(GNNModelComponent):
@@ -46,7 +53,7 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"graph_attention_backend": str, "edge_pre_mlp": bool}
+        allowed_extras = {"graph_attention_backend": str, "edge_pre_mlp": bool, "gradient_checkpointing": bool}
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
@@ -66,7 +73,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Number of layers of Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    window_size: NonNegativeInt = Field(example=512)
+    window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"
@@ -83,7 +90,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
     def check_valid_extras(self) -> Any:
         # Check for valid extra fields related to MultiHeadSelfAttention and MultiHeadCrossAttention
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"use_rotary_embeddings": bool}
+        allowed_extras = {"use_rotary_embeddings": bool, "gradient_checkpointing": bool}
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
@@ -101,7 +108,7 @@ class PointWiseMLPProcessorSchema(PointWiseModelComponent):
     "Transformer processor object from anemoi.models.layers.processor."
     num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Transformer processor."
-    num_channels: NonNegativeInt = Field(example=128)
-    "Number of channels."
-    dropout_p: NonNegativeFloat = Field(example=0.1)
+    mlp_hidden_ratio: NonNegativeInt = Field(example=4)
+    "Ratio of the hidden dimension to the processor channel dimension."
+    dropout_p: NonNegativeFloat = Field(default=0.0, example=0.0)
     "Dropout probability, default 0.0"

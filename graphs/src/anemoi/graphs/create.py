@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -167,9 +167,9 @@ class GraphCreator(GraphBuilder):
         if isinstance(config, Path) or isinstance(config, str):
             config = DotDict.from_file(config)
         elif isinstance(config, DictConfig):
-            self.config = DotDict(config)
-        else:
-            self.config = config
+            config = DotDict(config)
+
+        self.config = config
 
         nodes = _parse_nodes(config)
         edges = _parse_edges(config)
@@ -240,3 +240,27 @@ def _parse_post_processors(cfg: DotDict) -> list[PostProcessor]:
             post_processor = instantiate(pp_cfg)
             _post_processors.append(post_processor)
     return _post_processors
+
+
+def load_graph_from_file(graph_filename: Path) -> HeteroData:
+    """Load a serialized graph on the currently active distributed device."""
+    try:
+        from anemoi.graphs.utils import get_distributed_device
+
+        map_location = get_distributed_device()
+    except Exception:
+        map_location = "cpu"
+
+    LOGGER.info("Loading graph data from %s", graph_filename)
+    return torch.load(graph_filename, map_location=map_location, weights_only=False)
+
+
+def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
+    """Ensure the loaded graph contains the required dataset node types."""
+    missing = [n for n in required_dataset_names if n not in graph_data.node_types]
+    if missing:
+        msg = (
+            "Loaded graph is missing dataset node types required by the dataloader. "
+            f"Missing {missing}; available nodes are {graph_data.node_types}."
+        )
+        raise ValueError(msg)

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
 
     Attributes
     ----------
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         The area of interest mask builder.
     """
 
@@ -89,7 +89,7 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
         super().__init__(resolution, name, attributes=attributes)
         self.hidden_attributes = self.hidden_attributes | {"area_mask_builder"}
 
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+        self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
@@ -131,7 +131,7 @@ class LimitedAreaTriNodes(LimitedAreaIcosahedralNodes):
 
     Parameters
     ----------
-    area_mask_builder: KNNAreaMaskBuilder
+    area_mask_builder: AreaMaskBuilder
         The area of interest mask builder.
     """
 
@@ -150,7 +150,7 @@ class LimitedAreaHexNodes(LimitedAreaIcosahedralNodes):
 
     Parameters
     ----------
-    area_mask_builder: KNNAreaMaskBuilder
+    area_mask_builder: AreaMaskBuilder
         The area of interest mask builder.
     """
 
@@ -168,7 +168,7 @@ class StretchedIcosahedronNodes(LimitedAreaIcosahedralNodes, ABC):
 
     Attributes
     ----------
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         The area of interest mask builder.
     """
 

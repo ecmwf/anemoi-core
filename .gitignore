@@ -51,6 +51,7 @@ docs/_api/
 .env
 .envrc
 .venv
+uv.lock
 env/
 venv/
 ENV/
@@ -99,6 +100,10 @@ dmypy.json
 *.zip
 *.db
 *.tgz
+*.odb
+
+# Keep the copyright notice used by pre-commit (overrides *.txt above)
+!tools/pre-commit-copyright-notice.txt
 
 # ML artifacts
 wandb/

@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -23,11 +23,4 @@ def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint"""
     assert "baz" in ckpt
     ckpt["test"] = ckpt.pop("baz")
-    return ckpt
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollback the migration"""
-    assert "test" in ckpt
-    ckpt["baz"] = ckpt.pop("test")
     return ckpt
