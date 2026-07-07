@@ -222,7 +222,9 @@ class AnemoiTrainer(ABC):
                     and hasattr(data_node_cfg, "node_builder")
                     and hasattr(data_node_cfg.node_builder, "dataset")
                 ):
-                    data_node_cfg.node_builder.dataset = dataset_path
+                    # Pass the full dataset_config (not just the "dataset" key) so that
+                    # options like check_variables_compatibility are forwarded to open_dataset.
+                    data_node_cfg.node_builder.dataset = reader_cfg if isinstance(reader_cfg, (DictConfig, dict)) else dataset_path
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
