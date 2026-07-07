@@ -44,6 +44,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -222,22 +223,18 @@ class AnemoiTrainer(ABC):
                     and hasattr(data_node_cfg, "node_builder")
                     and hasattr(data_node_cfg.node_builder, "dataset")
                 ):
-                    # Forward extra open_dataset kwargs (e.g. check_variables_compatibility)
-                    # that are not part of the standard DatasetConfigSchema fields.
-                    # Schema-managed keys (frequency, select, drop, etc.) are NOT forwarded
-                    # to avoid passing complex validated objects or None defaults.
-                    graph_dataset_value = dataset_path
+                    # Build the dataset value for the graph node builder.
+                    # Start with the bare dataset path, then merge any keys from
+                    # dataset_config that are not part of DatasetConfigSchema
+                    # (e.g. check_variables_compatibility).  Schema-managed keys
+                    # are excluded to avoid forwarding complex validated objects
+                    # or None defaults (e.g. select: None, frequency: Frequency(...)).
+                    graph_dataset_value: str | dict = {"dataset": dataset_path}
                     if isinstance(reader_cfg, (DictConfig, dict)):
-                        _schema_keys = {
-                            "dataset", "frequency", "drop", "select",
-                            "statistics", "step_start", "step_end", "step_frequency",
-                        }
-                        extra = {
-                            k: v for k, v in dict(reader_cfg).items()
-                            if k not in _schema_keys and v is not None
-                        }
-                        if extra:
-                            graph_dataset_value = {"dataset": dataset_path, **extra}
+                        _schema_keys = set(DatasetConfigSchema.model_fields.keys())
+                        graph_dataset_value.update(
+                            {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
+                        )
                     data_node_cfg.node_builder.dataset = graph_dataset_value
             else:
                 msg = (
