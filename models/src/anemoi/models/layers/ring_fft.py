@@ -9,8 +9,6 @@
 
 """CUDA ring FFT extension bindings."""
 
-from __future__ import annotations
-
 import os
 import platform
 import site
@@ -136,10 +134,6 @@ def _find_cufft_paths() -> tuple[Path, Path] | None:
         return include_dirs[0], library_files[0]
 
     return None
-
-
-def is_cufft_available() -> bool:
-    return _find_cufft_paths() is not None
 
 
 @lru_cache(maxsize=1)

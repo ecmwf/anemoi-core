@@ -10,7 +10,6 @@
 
 #include <cufft.h>
 
-#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <list>
@@ -21,9 +20,6 @@
 #include <vector>
 
 namespace {
-
-// Keep these values in sync with ring_fft.py.
-constexpr double TWO_PI = 6.283185307179586476925286766559;
 
 template <typename scalar_t>
 __device__ __forceinline__ scalar_t hermitian_mode_factor(const int m, const int nlon) {
