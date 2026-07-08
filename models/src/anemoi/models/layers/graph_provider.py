@@ -391,6 +391,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         target_coords = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
 
         edge_index = self.edge_builder.compute_edge_index_from_coords(source_coords, target_coords)
+        edge_index = edge_index.to(source_coords.device)
 
         edge_attr = torch.cat(
             [attr.propagate(edge_index, x=(source_coords, target_coords)) for attr in self.attributes_config.values()],
