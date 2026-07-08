@@ -154,9 +154,13 @@ class SphericalHarmonicTransform(Module):
     Methods
     -------
     rfft_rings_reduced_naive(x: Tensor) -> Tensor
-        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using a ring loop.
-    rfft_rings_reduced_grouped(x: Tensor) -> Tensor
-        Performs direct real-to-complex FFT on reduced-grid latitude rings grouped by longitude count.
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using a naive loop.
+    rfft_rings_reduced_banded(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each of a band of latitudes of a reduced grid using a naive loop.
+    rfft_rings_reduced_cuda(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using the CUDA backend.
+    rfft_rings_reduced_graphed(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid with a graphed implementation.
     rfft_rings_regular(x: Tensor) -> Tensor
         Performs direct real-to-complex FFT on each latitude ring of a regular grid.
     forward(x: Tensor) -> Tensor
@@ -205,6 +209,7 @@ class SphericalHarmonicTransform(Module):
         # Set padding for each latitude so every rFFT output ring has the same length
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
+        # Determine the FFT backend
         unique_nlons = set(self.lons_per_lat)
         if len(unique_nlons) > 1:
             # Reduced grids have different ring lengths; regular grids can use one batched FFT.
@@ -293,6 +298,19 @@ class SphericalHarmonicTransform(Module):
         return output_tensor
 
     def rfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+        Uses the CUDA backend.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
         from anemoi.models.layers.cuda_fft import cuda_rfft
 
         if x.device.type != "cuda":
@@ -398,8 +416,14 @@ class InverseSphericalHarmonicTransform(Module):
 
     Methods
     -------
-    irfft_rings_reduced(x: Tensor) -> Tensor
+    irfft_rings_reduced_naive(x: Tensor) -> Tensor
         Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+    irfft_rings_reduced_banded(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each of a band of latitudes of a reduced grid using a naive loop.
+    irfft_rings_reduced_cuda(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid using the CUDA backend.
+    irfft_rings_reduced_graphed(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid with a graphed implementation.
     irfft_rings_regular(x: Tensor) -> Tensor
         Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
     forward(x: Tensor) -> Tensor
