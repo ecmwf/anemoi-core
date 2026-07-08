@@ -149,8 +149,6 @@ def _load_cuda_fft_extension():
 
     if cufft_paths := _find_cufft_paths():
         include_dir, lib_file = cufft_paths
-        extra_cflags.append("-DANEMOI_FFT_ENABLE_CUDA")
-        extra_cuda_cflags.append("-DANEMOI_FFT_ENABLE_CUDA")
         extra_include_paths.append(str(include_dir))
         extra_ldflags.extend([str(lib_file), f"-Wl,-rpath,{lib_file.parent}"])
 
