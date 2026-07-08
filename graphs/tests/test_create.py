@@ -20,7 +20,6 @@ from anemoi.graphs.edges import CutOffEdges
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.nodes import LatLonNodes
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 
 
