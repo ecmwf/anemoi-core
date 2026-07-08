@@ -171,7 +171,7 @@ class SphericalHarmonicTransform(Module):
         self,
         lons_per_lat: list[int],
         truncation: int,
-        use_cuda_ring_fft: bool = False,
+        use_cuda_fft: bool = False,
         use_graphed_rfft: bool = False,
     ) -> None:
         r"""Initializes SphericalHarmonicTransform.
@@ -182,8 +182,8 @@ class SphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
-        use_cuda_ring_fft : bool, optional
-            Whether to use the CUDA ring FFT extension for supported reduced grids. Default is False.
+        use_cuda_fft : bool, optional
+            Whether to use the CUDA FFT extension for supported reduced grids. Default is False.
         use_graphed_rfft : bool, optional
             Whether to use CUDA graphs for the reduced grid rFFT. Default is False.
         """
@@ -210,7 +210,7 @@ class SphericalHarmonicTransform(Module):
             # Reduced grids have different ring lengths; regular grids can use one batched FFT.
             if use_graphed_rfft:
                 self.rfft_rings = self.rfft_rings_reduced_graphed
-            elif use_cuda_ring_fft:
+            elif use_cuda_fft:
                 self.rfft_rings = self.rfft_rings_reduced_cuda
             else:
                 self.rfft_rings = self.rfft_rings_reduced_naive
@@ -293,12 +293,12 @@ class SphericalHarmonicTransform(Module):
         return output_tensor
 
     def rfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
-        from anemoi.models.layers.ring_fft import ring_rfft
+        from anemoi.models.layers.cuda_fft import cuda_rfft
 
         if x.device.type != "cuda":
             raise RuntimeError('CUDA rFFT requested but input device is not "cuda"')
 
-        return ring_rfft(x, self.lons_per_lat)
+        return cuda_rfft(x, self.lons_per_lat)
 
     def rfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
@@ -414,7 +414,7 @@ class InverseSphericalHarmonicTransform(Module):
         self,
         lons_per_lat: list[int],
         truncation: int,
-        use_cuda_ring_fft: bool = False,
+        use_cuda_fft: bool = False,
         use_graphed_irfft: bool = False,
     ) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
@@ -425,8 +425,8 @@ class InverseSphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
-        use_cuda_ring_fft : bool, optional
-            Whether to use the CUDA ring FFT extension for supported reduced grids. Default is False.
+        use_cuda_fft : bool, optional
+            Whether to use the CUDA FFT extension for supported reduced grids. Default is False.
         use_graphed_irfft : bool, optional
             Whether to use CUDA graphs for the reduced grid irFFT. Default is False.
         """
@@ -447,7 +447,7 @@ class InverseSphericalHarmonicTransform(Module):
             # Reduced grids need per-ring inverse FFTs.
             if use_graphed_irfft:
                 self.irfft_rings = self.irfft_rings_reduced_graphed
-            elif use_cuda_ring_fft:
+            elif use_cuda_fft:
                 self.irfft_rings = self.irfft_rings_reduced_cuda
             else:
                 self.irfft_rings = self.irfft_rings_reduced_naive
@@ -528,12 +528,12 @@ class InverseSphericalHarmonicTransform(Module):
         return output_tensor
 
     def irfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
-        from anemoi.models.layers.ring_fft import ring_irfft
+        from anemoi.models.layers.cuda_fft import cuda_irfft
 
         if x.device.type != "cuda":
             raise RuntimeError('CUDA irFFT requested but input device is not "cuda"')
 
-        return ring_irfft(x, self.lons_per_lat)
+        return cuda_irfft(x, self.lons_per_lat)
 
     def irfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
         r"""Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.

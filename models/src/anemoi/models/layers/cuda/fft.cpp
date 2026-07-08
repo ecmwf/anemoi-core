@@ -5,15 +5,15 @@
 
 #include <torch/extension.h>
 
-// Implemented in ring_fft_cuda.cu.
-torch::Tensor ring_rfft_forward_cuda(
+// Implemented in fft.cu.
+torch::Tensor rfft_forward(
     torch::Tensor x,
     torch::Tensor offsets,
     torch::Tensor lons,
     int64_t max_nlon
 );
 
-torch::Tensor ring_rfft_backward_cuda(
+torch::Tensor rfft_backward(
     torch::Tensor grad_output,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -21,7 +21,7 @@ torch::Tensor ring_rfft_backward_cuda(
     int64_t grid_points
 );
 
-torch::Tensor ring_irfft_forward_cuda(
+torch::Tensor irfft_forward(
     torch::Tensor x,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -29,7 +29,7 @@ torch::Tensor ring_irfft_forward_cuda(
     int64_t grid_points
 );
 
-torch::Tensor ring_irfft_backward_cuda(
+torch::Tensor irfft_backward(
     torch::Tensor grad_output,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -38,8 +38,8 @@ torch::Tensor ring_irfft_backward_cuda(
 );
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &ring_rfft_forward_cuda, "Reduced-grid ring RFFT forward");
-    m.def("backward", &ring_rfft_backward_cuda, "Reduced-grid ring RFFT backward");
-    m.def("irfft_forward", &ring_irfft_forward_cuda, "Reduced-grid ring IRFFT forward");
-    m.def("irfft_backward", &ring_irfft_backward_cuda, "Reduced-grid ring IRFFT backward");
+    m.def("forward", &rfft_forward, "Reduced-grid ring RFFT forward");
+    m.def("backward", &rfft_backward, "Reduced-grid ring RFFT backward");
+    m.def("irfft_forward", &irfft_forward, "Reduced-grid ring IRFFT forward");
+    m.def("irfft_backward", &irfft_backward, "Reduced-grid ring IRFFT backward");
 }

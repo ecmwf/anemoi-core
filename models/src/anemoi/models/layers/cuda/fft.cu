@@ -811,7 +811,7 @@ void launch_cufft_irfft_backward(
 }  // namespace
 
 // Python calls these four functions.
-torch::Tensor ring_rfft_forward_cuda(
+torch::Tensor rfft_forward(
     torch::Tensor x,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -851,7 +851,7 @@ torch::Tensor ring_rfft_forward_cuda(
     return output;
 }
 
-torch::Tensor ring_rfft_backward_cuda(
+torch::Tensor rfft_backward(
     torch::Tensor grad_output,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -898,7 +898,7 @@ torch::Tensor ring_rfft_backward_cuda(
     return grad_x;
 }
 
-torch::Tensor ring_irfft_forward_cuda(
+torch::Tensor irfft_forward(
     torch::Tensor x,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -929,7 +929,7 @@ torch::Tensor ring_irfft_forward_cuda(
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    AT_DISPATCH_FLOATING_TYPES(real_dtype, "ring_irfft_cufft_forward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES(real_dtype, "irfft_cufft_forward_cuda", [&] {
         launch_cufft_irfft_forward<scalar_t>(
             x,
             offsets,
@@ -945,7 +945,7 @@ torch::Tensor ring_irfft_forward_cuda(
     return output;
 }
 
-torch::Tensor ring_irfft_backward_cuda(
+torch::Tensor irfft_backward(
     torch::Tensor grad_output,
     torch::Tensor offsets,
     torch::Tensor lons,
@@ -974,7 +974,7 @@ torch::Tensor ring_irfft_backward_cuda(
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "ring_irfft_cufft_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "irfft_cufft_backward_cuda", [&] {
         launch_cufft_irfft_backward<scalar_t>(
             grad_output,
             offsets,

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""CUDA ring FFT extension bindings."""
+"""CUDA FFT extension bindings."""
 
 import os
 import platform
@@ -137,11 +137,11 @@ def _find_cufft_paths() -> tuple[Path, Path] | None:
 
 
 @lru_cache(maxsize=1)
-def _load_ring_fft_extension():
+def _load_cuda_fft_extension():
     _configure_cuda_home()
 
     source_dir = Path(__file__).resolve().parent / "cuda"
-    verbose = os.environ.get("ANEMOI_RING_FFT_VERBOSE", os.environ.get("ANEMOI_RING_RFFT_VERBOSE", "0")) == "1"
+    verbose = os.environ.get("ANEMOI_CUDA_FFT_VERBOSE", os.environ.get("ANEMOI_cuda_rfft_VERBOSE", "0")) == "1"
     extra_cflags = ["-O3"]
     extra_cuda_cflags = ["-O3"]
     extra_include_paths: list[str] = []
@@ -149,16 +149,16 @@ def _load_ring_fft_extension():
 
     if cufft_paths := _find_cufft_paths():
         include_dir, lib_file = cufft_paths
-        extra_cflags.append("-DANEMOI_RING_FFT_ENABLE_CUFFT")
-        extra_cuda_cflags.append("-DANEMOI_RING_FFT_ENABLE_CUFFT")
+        extra_cflags.append("-DANEMOI_FFT_ENABLE_CUDA")
+        extra_cuda_cflags.append("-DANEMOI_FFT_ENABLE_CUDA")
         extra_include_paths.append(str(include_dir))
         extra_ldflags.extend([str(lib_file), f"-Wl,-rpath,{lib_file.parent}"])
 
     return load(
-        name="anemoi_ring_fft",
+        name="anemoi_cuda_fft",
         sources=[
-            str(source_dir / "ring_fft.cpp"),
-            str(source_dir / "ring_fft_cuda.cu"),
+            str(source_dir / "fft.cpp"),
+            str(source_dir / "fft.cu"),
         ],
         extra_cflags=extra_cflags,
         extra_cuda_cflags=extra_cuda_cflags,
@@ -188,13 +188,13 @@ def _metadata(lons_per_lat: LonsPerLat, device_index: int) -> tuple[torch.Tensor
     )
 
 
-class _RingRFFT(torch.autograd.Function):
+class _CUDARFFT(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat) -> torch.Tensor:
         if not x.is_cuda:
-            raise RuntimeError("Ring RFFT CUDA extension requires a CUDA tensor")
+            raise RuntimeError("RFFT CUDA extension requires a CUDA tensor")
         if x.dtype not in (torch.float32, torch.float64):
-            raise RuntimeError("Ring RFFT CUDA extension supports float32 and float64")
+            raise RuntimeError("RFFT CUDA extension supports float32 and float64")
 
         lons_per_lat = tuple(int(nlon) for nlon in lons_per_lat)
         grid_points = sum(lons_per_lat)
@@ -203,7 +203,7 @@ class _RingRFFT(torch.autograd.Function):
 
         x_flat = x.contiguous().reshape(-1, grid_points)
         offsets, lons, max_nlon = _metadata(lons_per_lat, _device_index(x))
-        out = _load_ring_fft_extension().forward(x_flat, offsets, lons, max_nlon)
+        out = _load_cuda_fft_extension().forward(x_flat, offsets, lons, max_nlon)
 
         ctx.input_shape = tuple(x.shape)
         ctx.grid_points = grid_points
@@ -216,7 +216,7 @@ class _RingRFFT(torch.autograd.Function):
         offsets, lons = ctx.saved_tensors
         nlat = lons.numel()
         grad_flat = grad_output.contiguous().reshape(-1, nlat, ctx.max_nlon // 2 + 1)
-        grad_x = _load_ring_fft_extension().backward(
+        grad_x = _load_cuda_fft_extension().backward(
             grad_flat,
             offsets,
             lons,
@@ -226,13 +226,13 @@ class _RingRFFT(torch.autograd.Function):
         return grad_x.reshape(ctx.input_shape), None, None, None
 
 
-class _RingIRFFT(torch.autograd.Function):
+class _CUDAIRFFT(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor, lons_per_lat: LonsPerLat) -> torch.Tensor:
         if not x.is_cuda:
-            raise RuntimeError("Ring IRFFT CUDA extension requires a CUDA tensor")
+            raise RuntimeError("IRFFT CUDA extension requires a CUDA tensor")
         if x.dtype not in (torch.complex64, torch.complex128):
-            raise RuntimeError("Ring IRFFT CUDA extension supports complex64 and complex128")
+            raise RuntimeError("IRFFT CUDA extension supports complex64 and complex128")
 
         lons_per_lat = tuple(int(nlon) for nlon in lons_per_lat)
         nlat = len(lons_per_lat)
@@ -243,7 +243,7 @@ class _RingIRFFT(torch.autograd.Function):
         nmodes = int(x.shape[-1])
         x_flat = x.contiguous().reshape(-1, nlat, nmodes)
         offsets, lons, max_nlon = _metadata(lons_per_lat, _device_index(x))
-        out = _load_ring_fft_extension().irfft_forward(x_flat, offsets, lons, max_nlon, grid_points)
+        out = _load_cuda_fft_extension().irfft_forward(x_flat, offsets, lons, max_nlon, grid_points)
 
         ctx.input_shape = tuple(x.shape)
         ctx.grid_points = grid_points
@@ -256,7 +256,7 @@ class _RingIRFFT(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None, None]:
         offsets, lons = ctx.saved_tensors
         grad_flat = grad_output.contiguous().reshape(-1, ctx.grid_points)
-        grad_x = _load_ring_fft_extension().irfft_backward(
+        grad_x = _load_cuda_fft_extension().irfft_backward(
             grad_flat,
             offsets,
             lons,
@@ -266,21 +266,21 @@ class _RingIRFFT(torch.autograd.Function):
         return grad_x.reshape(ctx.input_shape), None, None
 
 
-def ring_rfft(
+def cuda_rfft(
     x: torch.Tensor,
     lons_per_lat: list[int] | tuple[int, ...],
 ) -> torch.Tensor:
-    """Compute ring-wise ``rfft(norm="forward")`` on a flattened reduced grid."""
+    """Compute ``rfft(norm="forward")`` on a flattened reduced grid."""
 
     lons_per_lat = tuple(lons_per_lat)
-    return _RingRFFT.apply(x, lons_per_lat)
+    return _CUDARFFT.apply(x, lons_per_lat)
 
 
-def ring_irfft(
+def cuda_irfft(
     x: torch.Tensor,
     lons_per_lat: list[int] | tuple[int, ...],
 ) -> torch.Tensor:
-    """Compute ring-wise ``irfft(norm="forward")`` on a reduced grid."""
+    """Compute ``irfft(norm="forward")`` on a reduced grid."""
 
     lons_per_lat = tuple(lons_per_lat)
-    return _RingIRFFT.apply(x, lons_per_lat)
+    return _CUDAIRFFT.apply(x, lons_per_lat)
