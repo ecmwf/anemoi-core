@@ -202,15 +202,22 @@ class SpectralLoss(BaseLoss):
         pred: torch.Tensor,
         target: torch.Tensor,
         group: ProcessGroup | None,
+        grid_shard_slice: slice | None,
         grid_shard_sizes: ShardSizes,
         grid_dim: int,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int] | None]:
         """Move grid-sharded tensors to full-grid, channel-sharded layout."""
-        if grid_shard_sizes is None:
+        is_grid_sharded = grid_shard_slice is not None
+        has_shard_sizes = grid_shard_sizes is not None
+        if is_grid_sharded != has_shard_sizes:
+            msg = "Spectral losses require grid_shard_slice and grid_shard_sizes to be provided."
+            raise ValueError(msg)
+
+        if not is_grid_sharded:
             return pred, target, None
 
         if group is None:
-            msg = "Spectral losses require a process group when grid_shard_sizes is provided."
+            msg = "Spectral losses require a process group for sharded inputs."
             raise ValueError(msg)
 
         channel_shard_sizes_pred = get_shard_sizes(pred, TensorDim.VARIABLE, group)
@@ -337,6 +344,7 @@ class SpectralAMSELoss(SpectralLoss):
             pred,
             target,
             group,
+            grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
         )
@@ -400,6 +408,7 @@ class SpectralL2Loss(SpectralLoss):
             pred,
             target,
             group,
+            grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
         )
@@ -443,6 +452,7 @@ class LogSpectralDistance(SpectralLoss):
             pred,
             target,
             group,
+            grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
         )
@@ -490,6 +500,7 @@ class FourierCorrelationLoss(SpectralLoss):
             pred,
             target,
             group,
+            grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
         )
@@ -600,6 +611,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             pred,
             target,
             group,
+            grid_shard_slice,
             grid_shard_sizes,
             grid_dim,
         )
