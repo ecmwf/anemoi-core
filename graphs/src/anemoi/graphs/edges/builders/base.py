@@ -124,13 +124,19 @@ class BaseEdgeBuilder(ABC):
             )
         return graph
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(
+        self,
+        graph: HeteroData,
+        attributes: list[BaseEdgeAttributeBuilder] | None = None,
+    ) -> HeteroData:
         """Update the graph with the edges.
 
         Parameters
         ----------
         graph : HeteroData
             The graph.
+        attributes : list[BaseEdgeAttributeBuilder], optional
+            Attributes to register instead of the attributes stored on the builder.
 
         Returns
         -------
@@ -142,9 +148,11 @@ class BaseEdgeBuilder(ABC):
         t1 = time.time()
         LOGGER.debug("Time to register edge indices (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
-        if self.attributes:
+        attributes = self.attributes if attributes is None else attributes
+
+        if attributes:
             t0 = time.time()
-            graph = self.register_attributes(graph, self.attributes)
+            graph = self.register_attributes(graph, attributes)
             t1 = time.time()
             LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
 

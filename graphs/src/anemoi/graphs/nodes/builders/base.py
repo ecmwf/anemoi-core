@@ -127,13 +127,19 @@ class BaseNodeBuilder(ABC):
         coords = torch.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
         return torch.deg2rad(coords)
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(
+        self,
+        graph: HeteroData,
+        attributes: list[BaseNodeAttribute] | None = None,
+    ) -> HeteroData:
         """Update the graph with new nodes.
 
         Parameters
         ----------
         graph : HeteroData
             Input graph.
+        attributes : list[BaseNodeAttribute], optional
+            Attributes to register instead of the attributes stored on the builder.
 
         Returns
         -------
@@ -146,7 +152,7 @@ class BaseNodeBuilder(ABC):
         LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         t0 = time.time()
-        graph = self.register_attributes(graph, self.attributes)
+        graph = self.register_attributes(graph, self.attributes if attributes is None else attributes)
         t1 = time.time()
         LOGGER.debug("Time to register node attributes (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
