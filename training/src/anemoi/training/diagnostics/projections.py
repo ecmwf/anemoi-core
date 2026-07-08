@@ -238,12 +238,6 @@ class MapProjection(BaseProjection):
         return (pc_lon, pc_lat), None, None
 
 
-def equirectangular_projection(latlons: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Project (N, 2) [lat, lon] in degrees to (pc_lat, pc_lon). Backward-compat wrapper."""
-    x, y = MapProjection.equirectangular().project(latlons)
-    return y, x  # pc_lat, pc_lon
-
-
 def lambert_conformal_from_latlon_points(latlon: np.ndarray) -> object:
     """Build a Cartopy Lambert Conformal projection suited to a given set of (lat, lon) points.
 
