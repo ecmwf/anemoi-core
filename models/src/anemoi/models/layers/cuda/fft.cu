@@ -431,6 +431,8 @@ std::map<CufftRingGroupsKey, std::shared_ptr<const CufftRingGroups>>& cufft_ring
     return *cache;
 }
 
+// For a longitudes-per-latitude array (lons), return a map from latitude ring width to latitude
+// index.
 std::map<int, std::vector<int32_t>> make_nlon_groups(torch::Tensor lons) {
     auto lons_cpu = lons.to(torch::kCPU);
     const auto* lons_ptr = lons_cpu.data_ptr<int32_t>();
@@ -454,6 +456,8 @@ torch::Tensor ring_indices_to_cuda(const std::vector<int32_t>& ring_indices, con
     return ring_indices_cpu.to(device);
 }
 
+// For a longitudes-per-latitude array (lons), return a CufftRingGroups in which latitudes of the
+// same width are grouped together, with a caching mechanism.
 std::shared_ptr<const CufftRingGroups> get_cufft_ring_groups(torch::Tensor lons) {
     const CufftRingGroupsKey key{
         lons.get_device(),
@@ -563,17 +567,20 @@ void launch_cufft_rfft_forward(
     const int nmodes
 ) {
     constexpr int threads = 256;
+
+    // Loop over all latitudes of the same width ("ring groups")
     const auto ring_groups = get_cufft_ring_groups(lons);
     for (const auto& group : ring_groups->groups) {
-        const int nlon = group.nlon;
+        const int nlon = group.nlon; // Width of this group
         const torch::Tensor& ring_indices = group.ring_indices;
-        const int group_count = static_cast<int>(ring_indices.size(0));
-        const int nfreq = nlon / 2 + 1;
-        const int64_t batch64 = lead * static_cast<int64_t>(group_count);
+        const int group_count = static_cast<int>(ring_indices.size(0)); // Size of this group
+        const int nfreq = nlon / 2 + 1; // Highest FFT wavenumber for this group + 1
+        const int64_t batch64 = lead * static_cast<int64_t>(group_count); // Batch size
         const int batch = checked_cufft_batch(batch64);
-        auto packed = torch::empty({batch64, nlon}, x.options());
-        auto cufft_output = torch::empty({batch64, nfreq}, output.options());
+        auto packed = torch::empty({batch64, nlon}, x.options()); // Input buffer
+        auto cufft_output = torch::empty({batch64, nfreq}, output.options()); // Output buffer
 
+        // Pack input to FFT
         pack_real_rings_kernel<scalar_t><<<
             kernel_blocks(batch64 * nlon, threads),
             threads,
@@ -590,12 +597,14 @@ void launch_cufft_rfft_forward(
         );
         check_cuda_stream_error();
 
+        // Perform FFT
         auto plan = get_cufft_plan(nlon, batch, cufft_r2c_type<scalar_t>(), stream);
         {
             std::lock_guard<std::mutex> guard(plan->execution_mutex);
             cufft_exec_r2c(plan->handle, packed.data_ptr<scalar_t>(), cufft_output.data_ptr<c10::complex<scalar_t>>());
         }
 
+        // Unpack output
         scatter_cufft_rfft_kernel<scalar_t><<<
             kernel_blocks(batch64 * nmodes, threads),
             threads,
@@ -627,17 +636,20 @@ void launch_cufft_rfft_backward(
     const int nmodes
 ) {
     constexpr int threads = 256;
+
+    // Loop over all latitudes of the same width ("ring groups")
     const auto ring_groups = get_cufft_ring_groups(lons);
     for (const auto& group : ring_groups->groups) {
-        const int nlon = group.nlon;
+        const int nlon = group.nlon; // Width of this group
         const torch::Tensor& ring_indices = group.ring_indices;
-        const int group_count = static_cast<int>(ring_indices.size(0));
-        const int nfreq = nlon / 2 + 1;
-        const int64_t batch64 = lead * static_cast<int64_t>(group_count);
+        const int group_count = static_cast<int>(ring_indices.size(0)); // Size of this group
+        const int nfreq = nlon / 2 + 1; // Highest FFT wavenumber for this group + 1
+        const int64_t batch64 = lead * static_cast<int64_t>(group_count); // Batch size
         const int batch = checked_cufft_batch(batch64);
-        auto packed_grad = torch::empty({batch64, nfreq}, grad_output.options());
-        auto packed_real = torch::empty({batch64, nlon}, grad_x.options());
+        auto packed_grad = torch::empty({batch64, nfreq}, grad_output.options()); // Input buffer
+        auto packed_real = torch::empty({batch64, nlon}, grad_x.options()); // Output buffer
 
+        // Pack input to FFT
         pack_cufft_rfft_backward_kernel<scalar_t><<<
             kernel_blocks(batch64 * nfreq, threads),
             threads,
@@ -654,12 +666,14 @@ void launch_cufft_rfft_backward(
         );
         check_cuda_stream_error();
 
+        // Perform FFT
         auto plan = get_cufft_plan(nlon, batch, cufft_c2r_type<scalar_t>(), stream);
         {
             std::lock_guard<std::mutex> guard(plan->execution_mutex);
             cufft_exec_c2r(plan->handle, packed_grad.data_ptr<c10::complex<scalar_t>>(), packed_real.data_ptr<scalar_t>());
         }
 
+        // Unpack output
         scatter_real_rings_kernel<scalar_t><<<
             kernel_blocks(batch64 * nlon, threads),
             threads,
@@ -692,17 +706,20 @@ void launch_cufft_irfft_forward(
     const int nmodes
 ) {
     constexpr int threads = 256;
+
+    // Loop over all latitudes of the same width ("ring groups")
     const auto ring_groups = get_cufft_ring_groups(lons);
     for (const auto& group : ring_groups->groups) {
-        const int nlon = group.nlon;
+        const int nlon = group.nlon; // Width of this group
         const torch::Tensor& ring_indices = group.ring_indices;
-        const int group_count = static_cast<int>(ring_indices.size(0));
-        const int nfreq = nlon / 2 + 1;
-        const int64_t batch64 = lead * static_cast<int64_t>(group_count);
+        const int group_count = static_cast<int>(ring_indices.size(0)); // Size of this group
+        const int nfreq = nlon / 2 + 1; // Highest FFT wavenumber for this group + 1
+        const int64_t batch64 = lead * static_cast<int64_t>(group_count); // Batch size
         const int batch = checked_cufft_batch(batch64);
-        auto packed_coeffs = torch::empty({batch64, nfreq}, x.options());
-        auto packed_real = torch::empty({batch64, nlon}, output.options());
+        auto packed_coeffs = torch::empty({batch64, nfreq}, x.options()); // Input buffer
+        auto packed_real = torch::empty({batch64, nlon}, output.options()); // Output buffer
 
+        // Pack input to FFT
         pack_cufft_irfft_forward_kernel<scalar_t><<<
             kernel_blocks(batch64 * nfreq, threads),
             threads,
@@ -719,12 +736,14 @@ void launch_cufft_irfft_forward(
         );
         check_cuda_stream_error();
 
+        // Perform FFT
         auto plan = get_cufft_plan(nlon, batch, cufft_c2r_type<scalar_t>(), stream);
         {
             std::lock_guard<std::mutex> guard(plan->execution_mutex);
             cufft_exec_c2r(plan->handle, packed_coeffs.data_ptr<c10::complex<scalar_t>>(), packed_real.data_ptr<scalar_t>());
         }
 
+        // Unpack output
         scatter_real_rings_kernel<scalar_t><<<
             kernel_blocks(batch64 * nlon, threads),
             threads,
@@ -757,17 +776,20 @@ void launch_cufft_irfft_backward(
     const int nmodes
 ) {
     constexpr int threads = 256;
+
+    // Loop over all latitudes of the same width ("ring groups")
     const auto ring_groups = get_cufft_ring_groups(lons);
     for (const auto& group : ring_groups->groups) {
-        const int nlon = group.nlon;
+        const int nlon = group.nlon; // Width of this group
         const torch::Tensor& ring_indices = group.ring_indices;
-        const int group_count = static_cast<int>(ring_indices.size(0));
-        const int nfreq = nlon / 2 + 1;
-        const int64_t batch64 = lead * static_cast<int64_t>(group_count);
+        const int group_count = static_cast<int>(ring_indices.size(0)); // Size of this group
+        const int nfreq = nlon / 2 + 1; // Highest FFT wavenumber for this group + 1
+        const int64_t batch64 = lead * static_cast<int64_t>(group_count); // Batch size
         const int batch = checked_cufft_batch(batch64);
-        auto packed_real = torch::empty({batch64, nlon}, grad_output.options());
-        auto packed_coeffs = torch::empty({batch64, nfreq}, grad_x.options());
+        auto packed_real = torch::empty({batch64, nlon}, grad_output.options()); // Input buffer
+        auto packed_coeffs = torch::empty({batch64, nfreq}, grad_x.options()); // Output buffer
 
+        // Pack input to FFT
         pack_real_rings_kernel<scalar_t><<<
             kernel_blocks(batch64 * nlon, threads),
             threads,
@@ -784,12 +806,14 @@ void launch_cufft_irfft_backward(
         );
         check_cuda_stream_error();
 
+        // Perform FFT
         auto plan = get_cufft_plan(nlon, batch, cufft_r2c_type<scalar_t>(), stream);
         {
             std::lock_guard<std::mutex> guard(plan->execution_mutex);
             cufft_exec_r2c(plan->handle, packed_real.data_ptr<scalar_t>(), packed_coeffs.data_ptr<c10::complex<scalar_t>>());
         }
 
+        // Unpack output
         scatter_cufft_irfft_backward_kernel<scalar_t><<<
             kernel_blocks(batch64 * nmodes, threads),
             threads,
