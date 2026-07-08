@@ -22,6 +22,42 @@ from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
+class FakeTritonAnnotation:
+    """Fake triton annotation.
+
+    Triton functions are annotated with '@triton.jit'. When
+    Triton is not installed, this annotation will cause an
+    error when the file is loaded.
+    Therefore this fake annotation can be imported instead
+    when Triton is not available.
+    It is simply the identity operation, returning the
+    annotated function.
+    """
+
+    @staticmethod
+    def jit(fn=None, *args, **kwargs):
+        # Identity operation
+        if fn is None:
+            return lambda f: f
+        return fn
+
+
+class FakeTLType:
+    """fake tl namespace
+
+    Triton functions contain 'tl.constexpr' type hints.
+    When Triton is not installed, this type hint will
+    throw the compiler. This fake class can be imported
+    instead to avoid the import error.
+    """
+
+    constexpr = object
+
+
+fake_triton_annotation = FakeTritonAnnotation()
+fake_tl_type = FakeTLType()
+
+
 def edge_index_to_csc(
     edge_index: Adj,
     num_nodes: Optional[Tuple[int, int]] = None,

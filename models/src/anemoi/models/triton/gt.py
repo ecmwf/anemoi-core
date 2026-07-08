@@ -11,13 +11,18 @@ import torch
 
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
+TRITON_AVAILABLE = True
 try:
     import triton
     import triton.language as tl
 except ImportError:
-    raise ValueError(
-        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
-    )
+    TRITON_AVAILABLE = False
+
+    # Triton is not available
+    # functions annotated with '@triton.jit' will fail
+    # Therefore, we create a fake no-op annotation
+    from anemoi.models.triton.utils import fake_tl_type as tl
+    from anemoi.models.triton.utils import fake_triton_annotation as triton
 
 
 @triton.jit
@@ -382,6 +387,11 @@ class GraphTransformerFunction(torch.autograd.Function):
     """Custom autograd for GraphTransformer using Triton kernels."""
 
     def __init__(self):
+        if not TRITON_AVAILABLE:
+            raise ValueError(
+                "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
+            )
+
         if not torch.cuda.is_available():
             raise ValueError(
                 "Error. The 'triton' backend was selected for the GraphTransformer but 'torch.cuda.is_available()' returned 'False'. The 'triton' backend is currently only supported on GPUs. To run on other device types, please select a different backend for the GraphTransformer in the models config. If you intend to run on GPUs, please ensure your torch install supports running on GPUs."
