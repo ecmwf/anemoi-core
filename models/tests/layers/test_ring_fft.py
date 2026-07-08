@@ -11,8 +11,8 @@ import pytest
 import torch
 from torch.utils.cpp_extension import is_ninja_available
 
-from anemoi.models.layers.ring_fft import ring_irfft
-from anemoi.models.layers.ring_fft import ring_rfft
+from anemoi.models.layers.cuda_fft import cuda_irfft
+from anemoi.models.layers.cuda_fft import cuda_rfft
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
@@ -128,7 +128,7 @@ def test_o96_rfft_forward_matches_torch(truncation: int, lead: int) -> None:
     torch.manual_seed(0)
     x = torch.randn(lead, O96_GRID_POINTS, device="cuda", dtype=torch.float32)
 
-    actual = ring_rfft(x, _o96_lons_per_lat(), truncation)
+    actual = cuda_rfft(x, _o96_lons_per_lat())
     expected = _reference_ring_rfft(x, _o96_lons_per_lat(), truncation)
 
     torch.testing.assert_close(actual, expected, rtol=2e-5, atol=5e-6)
@@ -143,7 +143,7 @@ def test_o96_rfft_backward_matches_torch(truncation: int) -> None:
     x_actual = torch.randn(2, O96_GRID_POINTS, device="cuda", dtype=torch.float32, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_rfft(x_actual, _o96_lons_per_lat(), truncation)
+    actual = cuda_rfft(x_actual, _o96_lons_per_lat())
     expected = _reference_ring_rfft(x_expected, _o96_lons_per_lat(), truncation)
     grad_output = torch.randn_like(expected)
 
@@ -166,7 +166,7 @@ def test_small_float64_known_values_high_precision() -> None:
         x[0, 0] = 1
         x[0, lons_per_lat[0]] = 1
 
-    actual = ring_rfft(x, lons_per_lat, 4)
+    actual = cuda_rfft(x, lons_per_lat)
     expected = torch.zeros_like(actual)
     expected[0, 0, :3] = 0.25
     expected[0, 1, :] = 0.125
@@ -191,7 +191,7 @@ def test_small_irfft_float64_known_values_high_precision() -> None:
     with torch.no_grad():
         x[0, :, 0] = 1
 
-    actual = ring_irfft(x, lons_per_lat)
+    actual = cuda_irfft(x, lons_per_lat)
     expected = torch.ones_like(actual)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
@@ -219,8 +219,8 @@ def test_irfft_ignores_self_conjugate_imaginary_parts_like_torch() -> None:
                 x_perturbed[:, lat_idx, nlon // 2] = x_perturbed[:, lat_idx, nlon // 2].real - 23456j
     x_perturbed.requires_grad_(True)
 
-    actual = ring_irfft(x, lons_per_lat)
-    actual_perturbed = ring_irfft(x_perturbed, lons_per_lat)
+    actual = cuda_irfft(x, lons_per_lat)
+    actual_perturbed = cuda_irfft(x_perturbed, lons_per_lat)
     expected = _reference_ring_irfft(x.detach(), lons_per_lat)
     expected_perturbed = _reference_ring_irfft(x_perturbed.detach(), lons_per_lat)
     grad_output = torch.randn_like(expected)
@@ -255,7 +255,7 @@ def test_generic_backend_representative_lengths_known_values_high_precision(
     with torch.no_grad():
         x[0, 0] = 1
 
-    actual = ring_rfft(x, lons_per_lat, nlon // 2)
+    actual = cuda_rfft(x, lons_per_lat)
     expected = torch.full_like(actual, 1 / nlon)
     torch.testing.assert_close(actual, expected, rtol=0, atol=1e-15)
 
@@ -279,7 +279,7 @@ def test_generic_backend_irfft_representative_lengths_known_values_high_precisio
     with torch.no_grad():
         x[0, 0, 0] = 1
 
-    actual = ring_irfft(x, lons_per_lat)
+    actual = cuda_irfft(x, lons_per_lat)
     expected = torch.ones_like(actual)
     torch.testing.assert_close(actual, expected, rtol=0, atol=1e-12)
 
@@ -350,7 +350,7 @@ def test_o96_rfft_realistic_shapes_and_dtypes(dtype: torch.dtype, shape_prefix: 
     x_actual = torch.randn(shape, device="cuda", dtype=dtype, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_rfft(x_actual, _o96_lons_per_lat(), 95)
+    actual = cuda_rfft(x_actual, _o96_lons_per_lat())
     expected = _reference_ring_rfft(x_expected, _o96_lons_per_lat(), 95)
     grad_output = torch.randn_like(expected)
 
@@ -376,7 +376,7 @@ def test_o96_rfft_backend_forward_backward_matches_torch() -> None:
     x_actual = torch.randn(2, O96_GRID_POINTS, device="cuda", dtype=torch.float32, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_rfft(x_actual, _o96_lons_per_lat(), 95)
+    actual = cuda_rfft(x_actual, _o96_lons_per_lat())
     expected = _reference_ring_rfft(x_expected, _o96_lons_per_lat(), 95)
     grad_output = torch.randn_like(expected)
 
@@ -403,7 +403,7 @@ def test_o96_irfft_realistic_shapes_and_dtypes(dtype: torch.dtype, shape_prefix:
     x_actual = torch.randn(shape, device="cuda", dtype=dtype, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_irfft(x_actual, lons_per_lat)
+    actual = cuda_irfft(x_actual, lons_per_lat)
     expected = _reference_ring_irfft(x_expected, lons_per_lat)
     grad_output = torch.randn_like(expected)
 
@@ -430,7 +430,7 @@ def test_o96_irfft_backend_forward_backward_matches_torch() -> None:
     x_actual = torch.randn(2, len(lons_per_lat), 96, device="cuda", dtype=torch.complex64, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_irfft(x_actual, lons_per_lat)
+    actual = cuda_irfft(x_actual, lons_per_lat)
     expected = _reference_ring_irfft(x_expected, lons_per_lat)
     grad_output = torch.randn_like(expected)
 
@@ -474,7 +474,7 @@ def test_large_grid_ring_rfft_forward_backward_matches_torch(
     x_actual = torch.randn(1, grid_points, device="cuda", dtype=torch.float32, requires_grad=True)
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_rfft(x_actual, lons_per_lat, truncation)
+    actual = cuda_rfft(x_actual, lons_per_lat)
     expected = _reference_ring_rfft(x_expected, lons_per_lat, truncation)
     grad_output = torch.randn_like(expected)
 
@@ -524,7 +524,7 @@ def test_large_grid_ring_irfft_forward_backward_matches_torch(
     )
     x_expected = x_actual.detach().clone().requires_grad_(True)
 
-    actual = ring_irfft(x_actual, lons_per_lat)
+    actual = cuda_irfft(x_actual, lons_per_lat)
     expected = _reference_ring_irfft(x_expected, lons_per_lat)
     grad_output = torch.randn_like(expected)
 
