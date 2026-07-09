@@ -69,20 +69,17 @@ def create_graph_provider(
         Appropriate graph provider instance
     """
     if graph:
-        return StaticGraphProvider(
-            graph=graph,
-            edge_attributes=edge_attributes,
-            src_size=src_size,
-            dst_size=dst_size,
-            trainable_size=trainable_size,
-        )
-    elif graph_dir is not None:
-        assert graph is None, "Cannot specify both graph_dir and graph. Please choose one."
-        return FileGraphProvider(
-            graph_dir=graph_dir,
-            num_workers=1,
-            pin_memory=torch.cuda.is_available(),
-        )
+        print("graph type:", type(graph))
+        if isinstance(graph, Path) and graph.is_dir():
+            return FileGraphProvider(graph_dir=graph, src_size=src_size, dst_size=dst_size, edge_attributes=edge_attributes, trainable_size=trainable_size)
+        else:
+            return StaticGraphProvider(
+                graph=graph,
+                edge_attributes=edge_attributes,
+                src_size=src_size,
+                dst_size=dst_size,
+                trainable_size=trainable_size,
+            )
     else:
         return NoOpGraphProvider()
 
@@ -647,15 +644,18 @@ class _GraphFileDataset(Dataset):
         self.paths: list[Path] = sorted(self.graph_dir.glob(f"*{extension}"))
         if not self.paths:
             raise RuntimeError(f"No {extension} files found in {self.graph_dir}")
+        
+        self.paths = {path.parts[-1].split(".")[0]: path for path in self.paths}
+        self.names = list(self.paths.keys())
 
         LOGGER.info("Found %d graph file(s) in %s", len(self.paths), self.graph_dir)
 
     def __len__(self) -> int:
         return len(self.paths)
 
-    def __getitem__(self, idx: int) -> HeteroData:
-        """Load and return the graph object at *idx*."""
-        path = self.paths[idx]
+    def __getitem__(self, name: str) -> HeteroData:
+        """Load and return the graph object at *names*."""
+        path = self.paths[name]
         return torch.load(path, weights_only=False, map_location="cpu")
 
     def __repr__(self) -> str:
@@ -703,7 +703,11 @@ class FileGraphProvider(BaseGraphProvider):
 
     def __init__(
         self,
+        src_size: str,
+        dst_size: str,
         graph_dir: Union[str, Path],
+        edge_attributes: Optional[list[str]] = None,
+        trainable_size: int = 0,
         extension: str = ".pt",
         batch_size: int = 1,
         num_workers: int = 1,
@@ -712,11 +716,16 @@ class FileGraphProvider(BaseGraphProvider):
         pin_memory: bool = True,
     ) -> None:
         super().__init__()
+        self.src_name = src_size
+        self.dst_name = dst_size
+        self.edge_attributes = edge_attributes
+        self.trainable_size = trainable_size
 
         self.graph_dir = Path(graph_dir)
 
         # Build dataset and dataloader
         self._dataset = _GraphFileDataset(self.graph_dir, extension=extension)
+        self.names = self._dataset.names
 
         collate_fn = PyGCollater(dataset=None, follow_batch=[], exclude_keys=[])
 
@@ -733,14 +742,14 @@ class FileGraphProvider(BaseGraphProvider):
         self._dataloader = DataLoader(self._dataset, **loader_kwargs)
 
         # Peek at the first graph to derive metadata
-        first_graph = self._dataset[0]
+        first_graph = self._dataset[self.names[0]].cuda(non_blocking=True)
         self._init_from_graph(first_graph)
 
     def _init_from_graph(self, graph: HeteroData) -> None:
         """Derive src_size, dst_size, edge_attributes, trainable_size from a graph."""
         # --- src_size / dst_size ---
-        self.src_size = getattr(graph, "src_size", None)
-        self.dst_size = getattr(graph, "dst_size", None)
+        self.src_size = graph[self.src_name].num_nodes
+        self.dst_size = graph[self.dst_name].num_nodes
         assert (
             self.src_size is not None or self.dst_size is not None
         ), "Graph must have at least one of src_size or dst_size attributes"
@@ -750,7 +759,7 @@ class FileGraphProvider(BaseGraphProvider):
             self.edge_attributes is not None
         ), "Graph must have 'edge_attribute_names' attribute listing edge attribute tensor names"
 
-        edge_attr_tensor = torch.cat([graph[attr] for attr in self.edge_attributes], axis=1)
+        edge_attr_tensor = torch.cat([graph[(self.src_name, "to", self.dst_name)][attr] for attr in self.edge_attributes], axis=1)
 
         # --- trainable_size ---
         self.trainable_size: int = int(getattr(graph, "trainable_size", 0))
@@ -784,8 +793,8 @@ class FileGraphProvider(BaseGraphProvider):
         return iter(self._dataloader)
 
     def __getitem__(self, index: int) -> HeteroData:
-        """Get a specific graph by index."""
-        graph = self._dataset[index]
+        """Get a specific subgraph by index."""
+        graph = self._dataset[self.names[index]][(self.src_name, "to", self.dst_name)]
         assert (
             graph.src_size == self.src_size
         ), f"Graph src_size {graph.src_size} does not match expected {self.src_size}"
@@ -814,7 +823,8 @@ class FileGraphProvider(BaseGraphProvider):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-        graph: Optional[HeteroData] = None,
+        graph_name: str = None,
+        device: Optional[torch.device] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edges from a specific loaded graph.
 
@@ -842,27 +852,33 @@ class FileGraphProvider(BaseGraphProvider):
         tuple[Tensor, Adj, Optional[ShardSizes]]
             Edge attributes, expanded edge index, and optional edge_shard_sizes.
         """
-        if graph is None:
-            graph = self._dataset[0]
+        full_graph = self._dataset[graph_name]
+        src_size = full_graph[self.src_name].num_nodes
+        dst_size = full_graph[self.dst_name].num_nodes
+        graph = self._dataset[graph_name][(self.src_name, "to", self.dst_name)].to(device)
 
         edge_attr = torch.cat([graph[attr] for attr in self.edge_attributes], axis=1)
-        edge_attr = self.trainable(edge_attr, batch_size)
+        edge_attr = self.trainable(edge_attr, batch_size).to(device)
 
         # Derive src/dst sizes from this specific graph (may differ across files)
         src_size = int(getattr(graph, "src_size", graph.edge_index[0].max().item() + 1))
         dst_size = int(getattr(graph, "dst_size", graph.edge_index[1].max().item() + 1))
 
         edge_index = graph.edge_index
-        if batch_size > 1:
-            edge_inc = torch.tensor([[src_size], [dst_size]], dtype=torch.int64, device=edge_index.device)
-            edge_index = torch.cat(
-                [edge_index + i * edge_inc for i in range(batch_size)],
-                dim=1,
-            )
+        edge_inc = torch.tensor([[src_size], [dst_size]], dtype=torch.int64, device=device)
+        edge_index = torch.cat(
+            [edge_index + i * edge_inc for i in range(batch_size)],
+            dim=1,
+        )
 
         if shard_edges:
+            # ensure correct dtypes for sharding
+            edge_index = edge_index.to(torch.int64)
+            edge_attr = edge_attr.to(torch.float16)
             return shard_edges_1hop(
                 edge_attr, edge_index, src_size * batch_size, dst_size * batch_size, model_comm_group
             )
-
+        # remove graph from memory after processing
+        del graph
+        del full_graph
         return edge_attr, edge_index, None
