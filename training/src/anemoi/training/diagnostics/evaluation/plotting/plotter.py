@@ -72,24 +72,36 @@ class BasePlotter:
 class BaseSpatialPlotter(BasePlotter):
     """Plotter base for plots that support optional spatial masking.
 
-    Builds a :class:`SpatialMask` from the ``focus_area`` dict at construction
-    time.  Subclass ``_plot()`` methods should call
-    ``self.focus_mask.apply(graph_data, latlons, *fields)`` before drawing.
+    Callers that already own a :class:`SpatialMask` (e.g. a callback that
+    applies the same mask to its batch data before calling the plotter)
+    should pass it via ``focus_mask`` so the mask is only constructed once.
+    Standalone callers (e.g. the ``evaluate`` CLI) may instead pass a raw
+    ``focus_area`` dict and let this class build the mask.  Passing both is
+    an error.
 
     Parameters
     ----------
     focus_area : dict | None, optional
         Focus-area configuration with optional keys ``mask_attr_name``,
         ``latlon_bbox``, and ``name``.  ``None`` produces a no-op mask.
+    focus_mask : SpatialMask | None, optional
+        An already-constructed mask to reuse instead of building one from
+        ``focus_area``.
     """
 
-    def __init__(self, focus_area: dict | None = None) -> None:
+    def __init__(self, focus_area: dict | None = None, focus_mask: SpatialMask | None = None) -> None:
         super().__init__()
-        self.focus_mask: SpatialMask = build_spatial_mask(
-            node_attribute_name=focus_area.get("mask_attr_name") if focus_area is not None else None,
-            latlon_bbox=focus_area.get("latlon_bbox") if focus_area is not None else None,
-            name=focus_area.get("name") if focus_area is not None else None,
-        )
+        if focus_area is not None and focus_mask is not None:
+            msg = "Pass either focus_area or focus_mask, not both."
+            raise ValueError(msg)
+        if focus_mask is not None:
+            self.focus_mask: SpatialMask = focus_mask
+        else:
+            self.focus_mask = build_spatial_mask(
+                node_attribute_name=focus_area.get("mask_attr_name") if focus_area is not None else None,
+                latlon_bbox=focus_area.get("latlon_bbox") if focus_area is not None else None,
+                name=focus_area.get("name") if focus_area is not None else None,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +424,10 @@ class SamplePlotter(BaseSpatialPlotter):
         ``"equirectangular"``.
     focus_area : dict | None, optional
         Focus-area configuration forwarded to :class:`BaseSpatialPlotter`.
+    focus_mask : SpatialMask | None, optional
+        Already-constructed mask forwarded to :class:`BaseSpatialPlotter`,
+        for callers that already own one (e.g. a callback masking its own
+        batch data with the same mask).
     """
 
     def __init__(
@@ -423,8 +439,9 @@ class SamplePlotter(BaseSpatialPlotter):
         datashader: bool = False,
         projection_kind: str = "equirectangular",
         focus_area: dict | None = None,
+        focus_mask: SpatialMask | None = None,
     ) -> None:
-        super().__init__(focus_area=focus_area)
+        super().__init__(focus_area=focus_area, focus_mask=focus_mask)
         self.per_sample = per_sample
         self.accumulation_levels_plot = accumulation_levels_plot
         self.precip_and_related_fields = precip_and_related_fields
@@ -439,6 +456,9 @@ class SamplePlotter(BaseSpatialPlotter):
         x: np.ndarray,
         y_true: np.ndarray | None,
         y_pred: np.ndarray,
+        prediction_label: str = "pred",
+        auxiliary: np.ndarray | None = None,
+        auxiliary_label: str = "corrupted targets",
     ) -> Figure:
         """Plot one forecast sample.
 
@@ -454,6 +474,13 @@ class SamplePlotter(BaseSpatialPlotter):
             Target field array, or ``None`` for single-output tasks.
         y_pred : np.ndarray
             Predicted field array.
+        prediction_label : str, optional
+            Label used for the prediction panel titles, by default "pred".
+        auxiliary : np.ndarray | None, optional
+            Optional extra field (e.g. corrupted targets) plotted as an
+            additional panel per variable, by default None.
+        auxiliary_label : str, optional
+            Label used for the auxiliary panel title, by default "corrupted targets".
 
         Returns
         -------
@@ -472,6 +499,9 @@ class SamplePlotter(BaseSpatialPlotter):
             precip_and_related_fields=self.precip_and_related_fields,
             colormaps=self.colormaps,
             projection_kind=self.projection_kind,
+            prediction_label=prediction_label,
+            auxiliary=auxiliary,
+            auxiliary_label=auxiliary_label,
         )
 
 
@@ -484,10 +514,17 @@ class SpectrumPlotter(BaseSpatialPlotter):
         Minimum increment magnitude to include in the plot, by default None.
     focus_area : dict | None, optional
         Focus-area configuration forwarded to :class:`BaseSpatialPlotter`.
+    focus_mask : SpatialMask | None, optional
+        Already-constructed mask forwarded to :class:`BaseSpatialPlotter`.
     """
 
-    def __init__(self, min_delta: float | None = None, focus_area: dict | None = None) -> None:
-        super().__init__(focus_area=focus_area)
+    def __init__(
+        self,
+        min_delta: float | None = None,
+        focus_area: dict | None = None,
+        focus_mask: SpatialMask | None = None,
+    ) -> None:
+        super().__init__(focus_area=focus_area, focus_mask=focus_mask)
         self.min_delta = min_delta
 
     def plot(
@@ -539,6 +576,8 @@ class HistogramPlotter(BaseSpatialPlotter):
         Whether to use a logarithmic y-axis, by default False.
     focus_area : dict | None, optional
         Focus-area configuration forwarded to :class:`BaseSpatialPlotter`.
+    focus_mask : SpatialMask | None, optional
+        Already-constructed mask forwarded to :class:`BaseSpatialPlotter`.
     """
 
     def __init__(
@@ -546,8 +585,9 @@ class HistogramPlotter(BaseSpatialPlotter):
         precip_and_related_fields: list[str] | None = None,
         log_scale: bool = False,
         focus_area: dict | None = None,
+        focus_mask: SpatialMask | None = None,
     ) -> None:
-        super().__init__(focus_area=focus_area)
+        super().__init__(focus_area=focus_area, focus_mask=focus_mask)
         self.precip_and_related_fields = precip_and_related_fields
         self.log_scale = log_scale
 
@@ -604,6 +644,8 @@ class EnsemblePlotter(BaseSpatialPlotter):
         Map projection kind, by default ``"equirectangular"``.
     focus_area : dict | None, optional
         Focus-area configuration forwarded to :class:`BaseSpatialPlotter`.
+    focus_mask : SpatialMask | None, optional
+        Already-constructed mask forwarded to :class:`BaseSpatialPlotter`.
     """
 
     def __init__(
@@ -614,8 +656,9 @@ class EnsemblePlotter(BaseSpatialPlotter):
         datashader: bool = True,
         projection_kind: str = "equirectangular",
         focus_area: dict | None = None,
+        focus_mask: SpatialMask | None = None,
     ) -> None:
-        super().__init__(focus_area=focus_area)
+        super().__init__(focus_area=focus_area, focus_mask=focus_mask)
         self.accumulation_levels_plot = accumulation_levels_plot
         self.precip_and_related_fields = precip_and_related_fields
         self.colormaps = colormaps

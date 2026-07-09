@@ -50,6 +50,10 @@ from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
+# Sentinel distinguishing "members not specified, use the plot adapter's
+# default" from an explicit `members=None` ("select all members").
+_UNSET_MEMBERS = object()
+
 
 class PlottingSettings(PydanticBaseModel):
     """Settings for plotting callbacks, shared across all plot callbacks in a run."""
@@ -885,7 +889,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
-        members: int | list[int] | None = 0,
+        members: int | list[int] | None = _UNSET_MEMBERS,
         processed_cache: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
@@ -907,7 +911,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             The batch of data.
         members : int | list[int] | None, optional
             Ensemble members to select. Only used when the plot adapter is ensemble-aware.
-            None returns all members. Default is 0 (first member).
+            If not given, defaults to ``pl_module.plot_adapter.default_plot_members``
+            (member 0 for non-ensemble adapters, all members for ensemble adapters).
+            Pass ``None`` explicitly to select all members regardless of adapter default.
         processed_cache : dict | None, optional
             Optional dict for caching computed results across callbacks within the same batch.
             Should be created fresh per batch (e.g. in ``on_validation_batch_end``) so that
@@ -919,6 +925,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         tuple[np.ndarray, np.ndarray]
             The post-processed input data and output tensor for plotting.
         """
+        if members is _UNSET_MEMBERS:
+            members = pl_module.plot_adapter.default_plot_members
+
         if self.latlons is None:
             self.latlons = {}
 
@@ -1176,10 +1185,14 @@ class PlotSample(BasePlotAdditionalMetrics):
     def _get_process_members(self) -> int | list[int] | None:
         """Return the ``members`` argument passed to ``process()``.
 
-        Default selects member 0 (deterministic view). Subclasses override
-        to pass a different selection (e.g. all members for ensemble plots).
+        Defers to the plot adapter's default (member 0 for non-ensemble runs,
+        all members for ensemble runs) unless overridden. Subclasses override
+        only to request a user-configured subset of members (e.g.
+        :class:`PlotEnsSample`'s ``members`` config option) — the ensemble
+        vs. non-ensemble distinction itself is the plot adapter's
+        responsibility, not this callback's.
         """
-        return 0
+        return _UNSET_MEMBERS
 
     def _make_figure(
         self,

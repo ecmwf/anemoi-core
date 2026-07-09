@@ -1110,7 +1110,7 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
     """plot_predicted_multilevel_flat_sample can add the corrupted-target panel."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     parameters = {0: ("t2m", False), 1: ("tp", True)}
     nlatlon, nvar = 12, 2
@@ -1153,7 +1153,7 @@ def test_plots_global_non_equirectangular_projection_does_not_crash(projection_k
     pytest.importorskip("cartopy")
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     parameters = {0: ("t2m", False)}
     nlatlon, nvar = 100, 1
