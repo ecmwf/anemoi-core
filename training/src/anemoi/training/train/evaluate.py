@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,12 +8,16 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from functools import cached_property
 
 import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
+from anemoi.training.diagnostics.callbacks import CallbacksContext
+from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.train.train import AnemoiTrainer
 
 LOGGER = logging.getLogger(__name__)
@@ -23,12 +27,41 @@ class AnemoiEvaluator(AnemoiTrainer):
     """Utility class for evaluating a trained model.
 
     Inherits all setup from :class:`AnemoiTrainer` (datamodule, graph, model,
-    callbacks, logger, strategy).  The only difference is that the final step
-    calls :meth:`pl.Trainer.validate` rather than :meth:`pl.Trainer.fit`.
+    callbacks, logger, strategy).  The key differences from training are:
+
+    - :meth:`pl.Trainer.validate` is called instead of :meth:`pl.Trainer.fit`.
+    - A checkpoint **must** be specified via ``training.run_id`` or
+      ``system.input.warm_start``; omitting both raises a :exc:`RuntimeError`
+      immediately rather than silently evaluating a randomly-initialised model.
+    - Checkpointing and weight-averaging callbacks are disabled regardless of
+      the diagnostics config — evaluation is a read-only operation on a trained
+      model and should never write new checkpoint files.
     """
+
+    @cached_property
+    def callbacks(self) -> list[pl.callbacks.Callback]:
+        """Callbacks for evaluation — checkpointing and weight averaging disabled."""
+        diag_cfg = OmegaConf.merge(self.config.diagnostics, {"enable_checkpointing": False})
+        context = CallbacksContext(
+            diagnostics=diag_cfg,
+            checkpoints_output=self.config.system.output.checkpoints,
+            plots_output=self.config.system.output.plots,
+            wandb_enabled=getattr(getattr(self.config.diagnostics.log, "wandb", None), "enabled", False),
+            mlflow_enabled=getattr(getattr(self.config.diagnostics.log, "mlflow", None), "enabled", False),
+            weight_averaging_config=None,
+        )
+        return get_callbacks(context)
 
     def evaluate(self) -> None:
         """Evaluation entry point — runs one full validation pass."""
+        if not self.start_from_checkpoint:
+            msg = (
+                "No checkpoint specified for evaluation. "
+                "Set 'training.run_id', 'training.fork_run_id', or "
+                "'system.input.warm_start' to point to a trained checkpoint."
+            )
+            raise RuntimeError(msg)
+
         LOGGER.debug("Setting up evaluator trainer..")
 
         trainer = pl.Trainer(
@@ -65,7 +98,7 @@ class AnemoiEvaluator(AnemoiTrainer):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def evaluate(config: DictConfig) -> None:
     AnemoiEvaluator(config).evaluate()
 

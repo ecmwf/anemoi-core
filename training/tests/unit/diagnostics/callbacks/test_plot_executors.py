@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -100,8 +100,8 @@ def test_async_executor_is_concrete_base_plot_executor(async_executor):
 
 def test_async_executor_starts_event_loop(async_executor):
     """AsyncPlotExecutor starts its background event loop on construction."""
-    assert async_executor.loop is not None
-    assert async_executor.loop.is_running()
+    assert async_executor._loop is not None
+    assert async_executor._loop.is_running()
 
 
 def test_async_executor_runs_fn_in_background(async_executor):
@@ -146,14 +146,14 @@ def test_async_executor_shuts_down_on_fn_exception():
         assert raised.wait(timeout=5), "failing_fn was not called"
 
         deadline = time.monotonic() + 5.0
-        while executor.loop.is_running() and time.monotonic() < deadline:
+        while executor._loop.is_running() and time.monotonic() < deadline:
             time.sleep(0.05)
 
-        assert not executor.loop.is_running(), "executor loop should have stopped after fn raised"
+        assert not executor._loop.is_running(), "executor loop should have stopped after fn raised"
 
 
 def test_async_executor_shutdown_stops_loop():
     """After shutdown(), the event loop is no longer running."""
     executor = AsyncPlotExecutor()
     executor.shutdown()
-    assert not executor.loop.is_running()
+    assert not executor._loop.is_running()

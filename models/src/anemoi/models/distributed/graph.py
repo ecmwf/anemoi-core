@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,11 +13,13 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.primitives import _alltoall_transpose
+from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
 
 
 def ensure_sharded(
@@ -319,14 +321,23 @@ class _ShardParallelSection(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.comm_group and ctx.gather_in_backward is True:
-            return (
-                _gather(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
-                None,
-                None,
-                None,
-                None,
-            )
+        if ctx.comm_group is not None:
+            if ctx.gather_in_backward:
+                return (
+                    _gather(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            else:
+                return (
+                    _expand_sharded_tensor(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
         return grad_output, None, None, None, None
 
 
