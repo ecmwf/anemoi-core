@@ -1147,6 +1147,43 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
     plt.close(fig)
 
 
+@pytest.mark.parametrize("projection_kind", ["robinson", "mollweide"])
+def test_plots_global_non_equirectangular_projection_does_not_crash(projection_kind):
+    """Global data with non-equirectangular Cartopy projections must not raise ValueError from set_extent."""
+    pytest.importorskip("cartopy")
+    import matplotlib.pyplot as plt
+
+    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+
+    parameters = {0: ("t2m", False)}
+    nlatlon, nvar = 100, 1
+    # Global grid: lat -90..90, lon -180..180
+    latlons = np.stack(
+        [np.linspace(-90, 90, nlatlon), np.linspace(-180, 180, nlatlon)],
+        axis=1,
+    )
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_true = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_pred = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+
+    fig = plot_predicted_multilevel_flat_sample(
+        parameters,
+        6,
+        latlons,
+        0.5,
+        x,
+        y_true,
+        y_pred,
+        datashader=False,
+        projection_kind=projection_kind,
+    )
+
+    assert fig is not None
+    fig.clear()
+    plt.close(fig)
+
+
 # Ensemble plot tests
 
 
