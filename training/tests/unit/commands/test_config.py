@@ -46,11 +46,7 @@ def test_dump_config_sort(config_generator: ConfigGenerator) -> None:
 
         unsorted_cfg = OmegaConf.create({"zebra": 1, "alpha": 2})
 
-        with (
-            mock.patch("anemoi.training.commands.config.ConfigGenerator.copy_files"),
-            mock.patch("anemoi.training.commands.config.initialize"),
-            mock.patch("anemoi.training.commands.config.compose", return_value=unsorted_cfg),
-        ):
+        with mock.patch("anemoi.training.commands.config.compose", return_value=unsorted_cfg):
             unsorted_output = Path(tmpdirname) / "unsorted.yaml"
             config_generator.dump_config(config_path, "test", unsorted_output, sort=False)
             assert unsorted_output.read_text().splitlines() == ["zebra: 1", "alpha: 2"]
