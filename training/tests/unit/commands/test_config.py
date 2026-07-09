@@ -46,6 +46,27 @@ def test_dump_config(config_generator: ConfigGenerator) -> None:
             assert OmegaConf.load(output_path) == {"test": "value"}
 
 
+def test_dump_config_sort(config_generator: ConfigGenerator) -> None:
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        config_path = Path(tmpdirname) / "config"
+        config_path.mkdir(parents=True, exist_ok=True)
+
+        unsorted_cfg = OmegaConf.create({"zebra": 1, "alpha": 2})
+
+        with (
+            mock.patch("anemoi.training.commands.config.ConfigGenerator.copy_files"),
+            mock.patch("anemoi.training.commands.config.initialize"),
+            mock.patch("anemoi.training.commands.config.compose", return_value=unsorted_cfg),
+        ):
+            unsorted_output = Path(tmpdirname) / "unsorted.yaml"
+            config_generator.dump_config(config_path, "test", unsorted_output, sort=False)
+            assert unsorted_output.read_text().splitlines() == ["zebra: 1", "alpha: 2"]
+
+            sorted_output = Path(tmpdirname) / "sorted.yaml"
+            config_generator.dump_config(config_path, "test", sorted_output, sort=True)
+            assert sorted_output.read_text().splitlines() == ["alpha: 2", "zebra: 1"]
+
+
 def test_validate_config_uses_package_path(config_generator: ConfigGenerator) -> None:
     """Test that validate_config works correctly with package configs.
 
