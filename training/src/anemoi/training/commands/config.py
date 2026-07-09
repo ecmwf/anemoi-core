@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -15,13 +15,13 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 from hydra import compose
 from hydra import initialize
+from hydra import initialize_config_dir
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel
@@ -48,18 +48,11 @@ class ConfigGenerator(Command):
         generate.add_argument("--output", "-o", default=Path.cwd(), help="Output directory")
         generate.add_argument("--overwrite", "-f", action="store_true")
 
-        help_msg = "Generate the Anemoi training configs in home."
-        anemoi_training_home = subparsers.add_parser(
-            "training-home",
-            help=help_msg,
-            description=help_msg,
-        )
-        anemoi_training_home.add_argument("--overwrite", "-f", action="store_true")
-
         help_msg = "Validate the Anemoi training configs."
         validate = subparsers.add_parser("validate", help=help_msg, description=help_msg)
 
         validate.add_argument("--config-name", help="Name of the primary config file")
+        validate.add_argument("--config-path", "-i", type=Path, default=None, help="Configuration directory")
         validate.add_argument("--overwrite", "-f", action="store_true")
         validate.add_argument(
             "--mask_env_vars",
@@ -74,7 +67,7 @@ class ConfigGenerator(Command):
             help=help_msg,
             description=help_msg,
         )
-        dump.add_argument("--config-path", "-i", default=Path.cwd(), type=Path, help="Configuration directory")
+        dump.add_argument("--config-path", "-i", default=None, type=Path, help="Configuration directory")
         dump.add_argument("--config-name", "-n", default="dev", help="Name of the configuration")
         dump.add_argument("--output", "-o", default="./config.yaml", type=Path, help="Output file path")
         dump.add_argument("--overwrite", "-f", action="store_true")
@@ -91,12 +84,6 @@ class ConfigGenerator(Command):
             self.traverse_config(args.output)
             return
 
-        if args.subcommand == "training-home":
-            anemoi_home = Path.home() / ".config" / "anemoi" / "training" / "config"
-            LOGGER.info("Inference checkpoint saved to %s", anemoi_home)
-            self.traverse_config(anemoi_home)
-            return
-
         if args.subcommand == "validate":
             LOGGER.info("Validating configs.")
             LOGGER.warning(
@@ -104,7 +91,7 @@ class ConfigGenerator(Command):
                     the config_validation flag to false."
                 "So this command will validate the config regardless of the flag.",
             )
-            self.validate_config(args.config_name, args.mask_env_vars)
+            self.validate_config(args.config_name, args.mask_env_vars, args.config_path)
             LOGGER.info("Config files validated.")
             return
 
@@ -192,41 +179,42 @@ class ConfigGenerator(Command):
 
         return OmegaConf.create(updated_cfg)
 
-    def validate_config(self, config_name: Path | str, mask_env_vars: bool) -> None:
-        """Validates the configuration files in the given directory."""
-        with initialize(version_base=None, config_path=""):
+    def validate_config(self, config_name: Path | str, mask_env_vars: bool, config_path: Path | None = None) -> None:
+        """Validate a configuration, composed from ``config_path`` when given (see ``_initialize_hydra``)."""
+        with _initialize_hydra(config_path):
             cfg = compose(config_name=config_name)
             if mask_env_vars:
                 cfg = self._mask_slurm_env_variables(cfg)
             OmegaConf.resolve(cfg)
             BaseSchema(**cfg)
 
-    def dump_config(self, config_path: Path, name: str, output: Path, sort: bool = False) -> None:
-        """Dump config files in one YAML file."""
-        # Copy config files in temporary directory
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            tmp_dir = Path(tmpdirname)
-            self.copy_files(config_path, tmp_dir)
+    def dump_config(self, config_path: Path | None, name: str, output: Path, sort: bool = False) -> None:
+        """Dump config files in one YAML file, composed from ``config_path`` when given."""
+        with _initialize_hydra(config_path):
+            cfg = compose(config_name=name)
 
-            # Move to config directory to be able to handle hydra
-            with change_directory(tmp_dir), initialize(version_base=None, config_path="./"):
-                cfg = compose(config_name=name)
-
-            # Dump configuration in output file
-            LOGGER.info("Dumping file in %s.", output)
-            with output.open("w") as f:
-                f.write(OmegaConf.to_yaml(cfg, sort_keys=sort))
+        LOGGER.info("Dumping file in %s.", output)
+        with output.open("w") as f:
+            f.write(OmegaConf.to_yaml(cfg, sort_keys=sort))
 
 
 @contextlib.contextmanager
-def change_directory(destination: Path) -> Generator[None, None, None]:
-    """A context manager to temporarily change the current working directory."""
-    original_directory = Path.cwd()
-    try:
-        os.chdir(destination)
-        yield
-    finally:
-        os.chdir(original_directory)
+def _initialize_hydra(config_path: Path | None) -> Generator[None, None, None]:
+    """Initialise Hydra for config composition, shared by ``validate`` and ``dump``.
+
+    With ``config_path`` the configs are composed from that directory, installed as Hydra's
+    primary (``main``) search-path entry so it takes precedence over the current working
+    directory and the packaged defaults — the same model ``@hydra.main`` gives ``train``'s
+    ``--config-path``. Without it, discovery is left to the ``AnemoiSearchPathPlugin`` (the
+    current working directory and the packaged defaults). ``initialize_config_dir`` requires
+    an absolute path.
+    """
+    if config_path is not None:
+        with initialize_config_dir(version_base=None, config_dir=str(Path(config_path).absolute())):
+            yield
+    else:
+        with initialize(version_base=None):
+            yield
 
 
 def extract_primitive_type_hints(model: type[BaseModel], prefix: str = "") -> dict[str, Any]:

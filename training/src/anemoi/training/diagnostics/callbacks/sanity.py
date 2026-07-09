@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,6 +10,7 @@
 import logging
 
 import pytorch_lightning as pl
+from omegaconf import OmegaConf
 
 from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
@@ -67,7 +68,11 @@ class CheckVariableOrder(pl.callbacks.Callback):
             If variables have incompatible units between checkpoint and dataset.
         """
         ckpt_variables_metadata = getattr(pl_module, "_ckpt_variables_metadata", None)
-        check_variables_metadata_compatibility(ckpt_variables_metadata, trainer.datamodule.metadata)
+        compat_cfg = trainer.datamodule.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, trainer.datamodule.metadata, **compat_options)
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.
