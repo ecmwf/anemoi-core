@@ -9,9 +9,8 @@
 
 import pytest
 
-from anemoi.training.utils.seeding import MAX_SEED
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.seeding import normalize_seed
 
 
 @pytest.mark.parametrize("env_var", ["ANEMOI_BASE_SEED", "SLURM_JOB_ID", "CUSTOM_BASE_SEED"])
@@ -30,19 +29,31 @@ def test_get_base_seed_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.delenv("ANEMOI_BASE_SEED", raising=False)
     monkeypatch.delenv("SLURM_JOB_ID", raising=False)
 
-    assert get_base_seed() == 42000
+    assert get_base_seed() == 42
 
 
 @pytest.mark.parametrize(
-    ("seed", "expected_seed"),
+    ("base_seed", "keys", "expected_seed"),
     [
-        (0, 0),
-        (1234, 1234),
-        (MAX_SEED, MAX_SEED),
-        (MAX_SEED + 1, 0),
-        (MAX_SEED + 2, 1),
-        (19525198 * 220, 576264),
+        (19525198, (), 4284267609),
+        (19525198, (0,), 2478688360),
+        (19525198, (1,), 2310896010),
+        (19525198, (0, 5), 3358054325),
     ],
 )
-def test_normalize_seed(seed: int, expected_seed: int) -> None:
-    assert normalize_seed(seed) == expected_seed
+def test_derive_seed_is_reproducible(base_seed: int, keys: tuple[int, ...], expected_seed: int) -> None:
+    assert derive_seed(base_seed, *keys) == expected_seed
+
+
+@pytest.mark.parametrize(
+    ("base_seed", "keys"),
+    [
+        (0, ()),
+        (42, (0,)),
+        (19525198, (219,)),  # the model comm group that overflowed 2**32 in the old multiply scheme
+        (19525198, (10_000,)),
+        (2**63, (7, 42)),
+    ],
+)
+def test_derive_seed_within_uint32_bounds(base_seed: int, keys: tuple[int, ...]) -> None:
+    assert 0 <= derive_seed(base_seed, *keys) <= 2**32 - 1

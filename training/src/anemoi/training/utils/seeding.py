@@ -10,13 +10,27 @@
 
 import os
 
-MAX_SEED = 2**32 - 1
-_SEED_MODULUS = MAX_SEED + 1
+import numpy as np
 
 
-def normalize_seed(seed: int) -> int:
-    """Bring a seed into the range accepted by Lightning, NumPy, and PyTorch."""
-    return int(seed) % _SEED_MODULUS
+def derive_seed(base_seed: int, *keys: int) -> int:
+    """Build a seed accepted by Lightning, NumPy, and PyTorch.
+
+    Parameters
+    ----------
+    base_seed : int
+        Base seed shared by all ranks.
+    *keys : int
+        keys to initalise the independent seeds, by default none.
+
+    Returns
+    -------
+    int
+        Seed in the range [0, 2**32 - 1].
+
+    """
+    seed_seq = np.random.SeedSequence(entropy=base_seed, spawn_key=keys)
+    return int(seed_seq.generate_state(1, dtype=np.uint32)[0])
 
 
 def get_base_seed(base_seed_env: str | None = None) -> int:
@@ -48,9 +62,5 @@ def get_base_seed(base_seed_env: str | None = None) -> int:
 
     if base_seed is None:
         base_seed = 42
-
-    base_seed_threshold = 1000
-    if base_seed < base_seed_threshold:
-        base_seed *= base_seed_threshold  # make it (hopefully) big enough
 
     return base_seed

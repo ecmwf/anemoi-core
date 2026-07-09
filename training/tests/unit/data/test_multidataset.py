@@ -15,6 +15,7 @@ import pytest
 from pytest_mock import MockFixture
 
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.utils.seeding import derive_seed
 
 
 class TestMultiDataset:
@@ -85,11 +86,18 @@ class TestMultiDataset:
 
         multi_dataset.set_epoch(0)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
-        assert multi_dataset.seed == 1000
+        seed_epoch_0 = multi_dataset.seed
+        assert seed_epoch_0 == derive_seed(1000, 0)
 
         multi_dataset.set_epoch(5)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
-        assert multi_dataset.seed == 1005
+        seed_epoch_5 = multi_dataset.seed
+        assert seed_epoch_5 == derive_seed(1000, 5)
+
+        assert seed_epoch_0 != seed_epoch_5
+
+        multi_dataset.per_worker_init(n_workers=4, worker_id=3)
+        assert multi_dataset.seed == seed_epoch_5
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset) -> None:
         """Test that MultiDataset raises ValueError when a dataset has no valid anchors."""

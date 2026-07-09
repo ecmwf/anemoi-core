@@ -49,8 +49,8 @@ from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.seeding import normalize_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -151,13 +151,18 @@ class AnemoiTrainer(ABC):
         return self.datamodule.data_indices
 
     @cached_property
+    def base_seed(self) -> int:
+        """Base seed shared by all ranks."""
+        return get_base_seed()
+
+    @cached_property
     def initial_seed(self) -> int:
         """Initial seed for the RNG.
 
         This sets the same initial seed for all ranks. Ranks are re-seeded in the
         strategy to account for model communication groups.
         """
-        initial_seed = normalize_seed(get_base_seed())
+        initial_seed = derive_seed(self.base_seed)
         rnd_seed = pl.seed_everything(initial_seed, workers=True)
         np_rng = np.random.default_rng(rnd_seed)
         (torch.rand(1), np_rng.random())
@@ -471,6 +476,7 @@ class AnemoiTrainer(ABC):
         """Metadata and provenance information."""
         metadata_inference = {
             "seed": self.initial_seed,
+            "base_seed": self.base_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
             "task": None,  # will be populated in BaseTrainingModule
@@ -486,6 +492,7 @@ class AnemoiTrainer(ABC):
             "version": "2.0",
             "config": self.config,
             "seed": self.initial_seed,
+            "base_seed": self.base_seed,
             "run_id": self.run_id,
             "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
