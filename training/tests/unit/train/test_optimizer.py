@@ -15,6 +15,7 @@ from pytorch_lightning.utilities.types import LRSchedulerConfig
 from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
+from anemoi.training.optimizers.soap import SOAP
 from anemoi.training.train.methods.base import BaseTrainingModule
 
 _ADAM_CFG = OmegaConf.create({"_target_": "torch.optim.Adam", "betas": [0.9, 0.95], "weight_decay": 0.1})
@@ -201,3 +202,31 @@ def test_ademamix_single_step_numerical() -> None:
 
     # --- Compare ---
     assert torch.allclose(param, torch.tensor([expected_param]), atol=1e-8)
+
+
+def test_create_optimizer_from_config_soap(mocked_module: BaseTrainingModule) -> None:
+    mocked_module.config.training.optimization.optimizer = OmegaConf.create(
+        {
+            "_target_": "anemoi.training.optimizers.soap.SOAP",
+            "betas": [0.95, 0.95],
+            "weight_decay": 0.01,
+            "precondition_frequency": 10,
+        },
+    )
+
+    optimizer = mocked_module.configure_optimizers()
+
+    assert isinstance(optimizer, SOAP)
+    assert optimizer.defaults["betas"] == (0.95, 0.95)
+
+
+def test_soap_runs_two_finite_steps() -> None:
+    model = torch.nn.Linear(3, 1)
+    optimizer = SOAP(model.parameters(), lr=3e-3, precondition_frequency=2)
+
+    for _ in range(2):
+        optimizer.zero_grad()
+        model(torch.ones(4, 3)).square().mean().backward()
+        optimizer.step()
+
+    assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
