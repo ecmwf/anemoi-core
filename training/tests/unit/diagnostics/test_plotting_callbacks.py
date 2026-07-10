@@ -1340,3 +1340,43 @@ def test_ensemble_plot_ens_sample_instantiation():
     )
     assert plot_ens_sample is not None
     assert plot_ens_sample.plot_members is None
+
+
+@pytest.mark.parametrize("projection_kind", ["robinson", "mollweide"])
+def test_sample_plot_fn_global_non_equirectangular_projection_does_not_crash(projection_kind):
+    """Global data with non-equirectangular Cartopy projections must not raise
+    ValueError from set_extent (regression test for Robinson/Mollweide extent clamp)."""
+    pytest.importorskip("cartopy")
+    import matplotlib.pyplot as plt
+
+    parameters = {0: ("t2m", False)}
+    nlatlon, nvar = 100, 1
+    latlons = np.stack(
+        [np.linspace(-90, 90, nlatlon), np.linspace(-180, 180, nlatlon)],
+        axis=1,
+    )
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_true = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_pred = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+
+    settings = MagicMock()
+    settings.datashader = False
+    settings.projection_kind = projection_kind
+    settings.precip_and_related_fields = None
+    settings.colormaps = None
+
+    fig = sample_plot_fn(
+        parameters,
+        x=x,
+        y_true=y_true,
+        y_pred=y_pred,
+        latlons=latlons,
+        settings=settings,
+        per_sample=6,
+        accumulation_levels_plot=[0.5],
+    )
+
+    assert fig is not None
+    fig.clear()
+    plt.close(fig)
