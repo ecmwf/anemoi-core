@@ -20,7 +20,7 @@ from matplotlib.colors import TwoSlopeNorm
 from matplotlib.figure import Figure
 
 from anemoi.training.diagnostics.evaluation.geospatial.maps import map_features
-from anemoi.training.diagnostics.evaluation.geospatial.projections import Projection
+from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
 
@@ -152,7 +152,13 @@ def single_plot(
         )
 
     if transform is not None:
-        ax.set_extent([lon.min() - 0.1, lon.max() + 0.1, lat.min() - 0.1, lat.max() + 0.1], crs=transform)
+        # Clamp to PlateCarree's valid range to avoid NaN from non-equirectangular
+        # projections (e.g. Robinson, Mollweide) when the data spans the whole globe.
+        x0 = max(lon.min() - 0.1, -180.0)
+        x1 = min(lon.max() + 0.1, 180.0)
+        y0 = max(lat.min() - 0.1, -90.0)
+        y1 = min(lat.max() + 0.1, 90.0)
+        ax.set_extent([x0, x1, y0, y1], crs=transform)
     else:
         xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
         ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
@@ -178,7 +184,7 @@ def get_scatter_frame(
     vmax: int | None = None,
 ) -> [plt.Axes, PathCollection]:
     """Create a scatter plot for a single frame of an animation."""
-    pc_lon, pc_lat = Projection.equirectangular().project(latlons)
+    pc_lon, pc_lat = MapProjection.equirectangular().project(latlons)
 
     scatter_frame = ax.scatter(
         pc_lon,
@@ -430,7 +436,7 @@ def plot_predicted_multilevel_flat_sample(
     n_plots_y = max(n_plots_per_sample, 7 if auxiliary is not None else 6)
 
     plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
+    (pc_lon, pc_lat), proj, transform = MapProjection.for_plot(latlons, plot_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     subplot_kw = {"projection": proj} if proj is not None else {}

@@ -14,7 +14,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from scipy.interpolate import griddata
 
-from anemoi.training.diagnostics.evaluation.geospatial.projections import Projection
+from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 
 LOGGER = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ def plot_power_spectrum(
     if n_plots_x == 1:
         ax = [ax]
 
-    pc_lon, pc_lat = Projection.equirectangular().project(latlons)
+    pc_lon, pc_lat = MapProjection.equirectangular().project(latlons)
 
     delta_lat = abs(np.diff(pc_lat))
     non_zero_delta_lat = delta_lat[delta_lat != 0]

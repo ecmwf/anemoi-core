@@ -24,8 +24,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from matplotlib.colors import Colormap
-from matplotlib.figure import Figure
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
@@ -35,15 +33,9 @@ from pytorch_lightning.utilities import rank_zero_only
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_node_trainable_tensors
-from anemoi.training.diagnostics.evaluation.plotting.graph import plot_graph_edge_features
-from anemoi.training.diagnostics.evaluation.plotting.graph import plot_graph_node_features
-from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
-from anemoi.training.diagnostics.evaluation.plotting.loss import plot_loss
-from anemoi.training.diagnostics.evaluation.plotting.loss import sort_and_color_by_parameter_group
-from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
-from anemoi.training.diagnostics.evaluation.plotting.settings import argsort_variablename_variablelevel
+from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_settings
-from anemoi.training.diagnostics.evaluation.plotting.spectrum import plot_power_spectrum
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -51,9 +43,19 @@ from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
 
+
+class _Unset:
+    """Typed sentinel for kwargs that need to distinguish "not specified" from ``None``."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        return "UNSET"
+
+
 # Sentinel distinguishing "members not specified, use the plot adapter's
 # default" from an explicit `members=None` ("select all members").
-_UNSET_MEMBERS = object()
+_UNSET_MEMBERS: Any = _Unset()
 
 
 class PlottingSettings(PydanticBaseModel):
@@ -209,8 +211,9 @@ class BasePlotCallback(Callback, ABC):
         self.latlons = None
 
         init_plot_settings()
-        self.datashader_plotting = plotting_settings.datashader
-        self.projection_kind = plotting_settings.projection_kind
+        # `plotting_settings` is the single source of truth for datashader,
+        # projection_kind and colormaps — access it directly rather than
+        # duplicating attributes here.
         self.asynchronous = plotting_settings.asynchronous
 
         if self.asynchronous:
@@ -365,6 +368,19 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         del pl_module, output
         return {}
 
+    def _prepare_batch(
+        self,
+        pl_module: pl.LightningModule,
+        batch: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Hook for subclasses to transform the batch before plotting.
+
+        Default: no-op. Override to inject callback-specific batch preparation
+        (e.g. :class:`PlotLoss` uses ``pl_module.plot_adapter.prepare_loss_batch``).
+        """
+        del pl_module
+        return batch
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -376,6 +392,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
 
+            batch = self._prepare_batch(pl_module, batch)
             # gather tensors if necessary
             batch = {
                 dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
@@ -470,13 +487,35 @@ class BasePerEpochPlotCallback(BasePlotCallback):
 
 
 class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
-    """Visualize the node & edge trainable features defined."""
+    """Visualize the node & edge trainable features defined.
+
+    The visualization function is supplied via ``plot_fn`` and follows the
+    same pluggable pattern as :class:`SpatialMapPlot` and :class:`PlotLoss`.
+    ``plot_fn`` must match the
+    :class:`anemoi.training.diagnostics.evaluation.plotting.graph.GraphPlotFn`
+    protocol and yield ``(figure, tag)`` pairs.
+
+    The callback resolves the underlying model and forwards **only**
+    already-extracted graph artifacts to ``plot_fn`` (never the raw model
+    object) — see :class:`GraphPlotFn` for the full list of kwargs::
+
+        fn(dataset_name, *, node_attributes, node_trainable_tensors,
+           edge_trainable_modules, q_extreme_limit, settings, **kwargs)
+            -> Iterable[tuple[Figure, str]]
+
+    Hierarchical models are handled here (``edge_trainable_modules={}``);
+    the plot function does not need to check the model type.
+
+    The default is
+    :func:`anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn`.
+    """
 
     def __init__(
         self,
         dataset_names: list[str] | None = None,
         every_n_epochs: int | None = None,
         q_extreme_limit: float = 0.05,
+        plot_fn: Any = None,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
         """Initialise the GraphTrainableFeaturesPlot callback.
@@ -489,6 +528,10 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             Override for frequency to plot at, by default None
         q_extreme_limit : float, optional
             Quantile edges to represent, by default 0.05
+        plot_fn : Callable, optional
+            Plug-in plot function yielding ``(figure, tag)`` pairs. Typically
+            a Hydra ``functools.partial`` (``_partial_: true``). Defaults to
+            :func:`graph_plot_fn`.
         plotting_settings : PlottingSettings, optional
             Plotting configuration settings, by default None (uses defaults)
         """
@@ -498,6 +541,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
             plotting_settings=plotting_settings,
         )
         self.q_extreme_limit = q_extreme_limit
+        self.plot_fn = plot_fn if plot_fn is not None else _default_graph_plot_fn
 
     def _plot(
         self,
@@ -508,58 +552,61 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
+
         node_trainable_tensors = get_node_trainable_tensors(model.node_attributes)
 
         for dataset_name in dataset_names:
-            if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
-                fig = plot_graph_node_features(
-                    model.node_attributes,
-                    node_trainable_tensors,
-                    datashader=self.datashader_plotting,
-                )
-
+            edge_trainable_modules = get_edge_trainable_modules(model, dataset_name)
+            for fig, tag in self.plot_fn(
+                dataset_name,
+                node_attributes=model.node_attributes,
+                node_trainable_tensors=node_trainable_tensors,
+                edge_trainable_modules=edge_trainable_modules,
+                q_extreme_limit=self.q_extreme_limit,
+                settings=self.plotting_settings,
+            ):
                 self._output_figure(
                     trainer.logger,
                     fig,
                     epoch=trainer.current_epoch,
-                    tag=f"node_trainable_params_{dataset_name}",
-                    exp_log_tag=f"node_trainable_params_{dataset_name}",
+                    tag=tag,
+                    exp_log_tag=tag,
                 )
-            else:
-                LOGGER.warning("There are no trainable node attributes to plot.")
-
-            from anemoi.models.models import AnemoiModelEncProcDecHierarchical
-
-            if isinstance(model, AnemoiModelEncProcDecHierarchical):
-                LOGGER.warning(
-                    "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
-                )
-            elif len(edge_trainable_modules := get_edge_trainable_modules(model, dataset_name)):
-                fig = plot_graph_edge_features(
-                    model.node_attributes,
-                    edge_trainable_modules,
-                    q_extreme_limit=self.q_extreme_limit,
-                )
-
-                self._output_figure(
-                    trainer.logger,
-                    fig,
-                    epoch=trainer.current_epoch,
-                    tag=f"edge_trainable_params_{dataset_name}",
-                    exp_log_tag=f"edge_trainable_params_{dataset_name}",
-                )
-            else:
-                LOGGER.warning("There are no trainable edge attributes to plot.")
 
 
 class PlotLoss(BasePerBatchPlotCallback):
-    """Plots the unsqueezed loss over rollouts."""
+    """Plots the unsqueezed loss over rollouts.
+
+    The visualization function is supplied via ``plot_fn`` following the same
+    pluggable pattern as :class:`SpatialMapPlot`. It must match the
+    :class:`anemoi.training.diagnostics.evaluation.plotting.loss.LossPlotFn`
+    protocol and receives the raw per-variable loss array plus the parameter
+    naming/grouping context; it is free to decide how (or whether) to sort,
+    group, colour and render::
+
+        fn(loss, *, parameter_names, parameter_groups, metadata_variables,
+           step_index, metric_name, task_kwargs, settings, **kwargs)
+            -> matplotlib.figure.Figure
+
+    All keyword arguments except ``loss`` and ``parameter_names`` are
+    optional context: plug-in functions are expected to accept ``**kwargs``
+    and only bind what they need (e.g. a per-variable bar chart uses
+    ``parameter_groups``; a per-step title uses ``step_index`` /
+    ``metric_name``).
+
+    The default is
+    :func:`anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn`,
+    which reproduces the historic grouped bar-chart via
+    :func:`argsort_variablename_variablelevel` +
+    :func:`sort_and_color_by_parameter_group` + :func:`plot_loss`.
+    """
 
     def __init__(
         self,
         parameter_groups: dict[dict[str, list[str]]],
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
+        plot_fn: Any = None,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
         """Initialise the PlotLoss callback.
@@ -572,6 +619,9 @@ class PlotLoss(BasePerBatchPlotCallback):
             Override for batch frequency, by default None
         dataset_names : list[str] | None, optional
             Dataset names, by default None
+        plot_fn : Callable, optional
+            Plug-in plot function. Typically a Hydra ``functools.partial``
+            (``_partial_: true``). Defaults to :func:`loss_plot_fn`.
         plotting_settings : PlottingSettings, optional
             Plotting configuration settings, by default None (uses defaults)
         """
@@ -584,6 +634,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
             self.parameter_groups = {}
+        self.plot_fn = plot_fn if plot_fn is not None else _default_loss_plot_fn
 
     def _plot(
         self,
@@ -612,22 +663,11 @@ class PlotLoss(BasePerBatchPlotCallback):
             metadata = pl_module.model.metadata
             metadata_variables = metadata["dataset"].get("variables_metadata") if metadata is not None else None
 
-            # Sort the list using the custom key
-            argsort_indices = argsort_variablename_variablelevel(
-                parameter_names,
-                metadata_variables=metadata_variables,
-            )
-            parameter_names = [parameter_names[i] for i in argsort_indices]
             if not isinstance(self.loss[dataset_name], BaseLoss):
                 LOGGER.warning(
                     "Loss function must be a subclass of BaseLoss, or provide `squash`.",
                     RuntimeWarning,
                 )
-
-            sort_by_parameter_group, colors, xticks, legend_patches = sort_and_color_by_parameter_group(
-                parameter_names,
-                self.parameter_groups,
-            )
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs.predictions[i][dataset_name]
@@ -649,10 +689,18 @@ class PlotLoss(BasePerBatchPlotCallback):
                     .numpy(),
                 )
 
-                loss = loss[argsort_indices]
-                fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
-
                 metric_name = pl_module.task.get_metric_name(**task_kwargs)
+                fig = self.plot_fn(
+                    loss,
+                    parameter_names=parameter_names,
+                    parameter_groups=self.parameter_groups,
+                    metadata_variables=metadata_variables,
+                    step_index=i,
+                    metric_name=metric_name,
+                    task_kwargs=task_kwargs,
+                    settings=self.plotting_settings,
+                )
+
                 self._output_figure(
                     logger,
                     fig,
@@ -661,39 +709,28 @@ class PlotLoss(BasePerBatchPlotCallback):
                     exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
                 )
 
-    def on_validation_batch_end(
+    def _prepare_batch(
         self,
-        trainer: pl.Trainer,
         pl_module: pl.LightningModule,
-        output: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
-        batch_idx: int,
-    ) -> None:
+    ) -> dict[str, torch.Tensor]:
+        """Snapshot loss + gather nan-mask weights, then delegate batch prep to the plot adapter."""
+        self.loss = copy.deepcopy(pl_module.loss)
 
-        if batch_idx % self.every_n_batches == 0:
+        # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+        for dataset in self.loss:
+            for leaf_loss in self.loss[dataset].iter_leaf_losses():
+                if (
+                    hasattr(leaf_loss, "scaler")
+                    and hasattr(leaf_loss.scaler, "nan_mask_weights")
+                    and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
+                ):
+                    leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
+                        leaf_loss.scaler.nan_mask_weights,
+                        dataset,
+                    )
 
-            self.loss = copy.deepcopy(pl_module.loss)
-
-            # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            for dataset in self.loss:
-                for leaf_loss in self.loss[dataset].iter_leaf_losses():
-                    if (
-                        hasattr(leaf_loss, "scaler")
-                        and hasattr(leaf_loss.scaler, "nan_mask_weights")
-                        and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                    ):
-                        leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
-                            leaf_loss.scaler.nan_mask_weights,
-                            dataset,
-                        )
-
-            super().on_validation_batch_end(
-                trainer,
-                pl_module,
-                output,
-                pl_module.plot_adapter.prepare_loss_batch(batch),
-                batch_idx,
-            )
+        return pl_module.plot_adapter.prepare_loss_batch(batch)
 
 
 class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
@@ -701,6 +738,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
     def __init__(
         self,
+        sample_idx: int = 0,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
         focus_area: list[dict] | None = None,
@@ -710,6 +748,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         Parameters
         ----------
+        sample_idx : int, optional
+            Index of the sample within the batch to plot. Consumed by
+            :meth:`process` and :meth:`process_output_tensor`. Default 0.
         every_n_batches : int | None, optional
             Override for batch frequency, by default None
         dataset_names : list[str] | None, optional
@@ -724,6 +765,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             dataset_names=dataset_names,
             plotting_settings=plotting_settings,
         )
+        self.sample_idx = sample_idx
 
         # Build focus mask
         self.focus_mask = build_spatial_mask(
@@ -732,13 +774,27 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             name=focus_area.get("name", None) if focus_area is not None else None,
         )
 
+    def _gather_auxiliary(
+        self,
+        pl_module: pl.LightningModule,
+        output: TrainingStepOutput,
+    ) -> dict[str, torch.Tensor] | None:
+        """Return an allgathered ``auxiliary_output`` from *output*, or ``None`` if absent."""
+        auxiliary_output = output.plot_kwargs.get("auxiliary_output")
+        if auxiliary_output is None:
+            return None
+        return {
+            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+            for dataset_name, dataset_tensor in auxiliary_output.items()
+        }
+
     def process(
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
         outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
-        members: int | list[int] | None = _UNSET_MEMBERS,
+        members: Any = _UNSET_MEMBERS,
         processed_cache: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
@@ -774,7 +830,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         tuple[np.ndarray, np.ndarray]
             The post-processed input data and output tensor for plotting.
         """
-        if members is _UNSET_MEMBERS:
+        if isinstance(members, _Unset):
             members = pl_module.plot_adapter.default_plot_members
 
         if self.latlons is None:
@@ -840,99 +896,94 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
 
 
-class PlotSample(BasePlotAdditionalMetrics):
-    """Plots a post-processed sample: input, target and prediction."""
 
-    output_tag_prefix = "pred_val_sample"
-    exp_log_tag_prefix = "val_pred_sample"
+class SpatialMapPlot(BasePlotAdditionalMetrics):
+    """Generic, config-driven spatial-map plot callback.
+
+    Handles the shared plumbing (per-dataset loop, ``process()``, focus mask,
+    ``iter_plot_samples``, figure output, tag naming) for any plot function
+    conforming to
+    :class:`anemoi.training.diagnostics.evaluation.plotting.spatial_map.SpatialMapPlotFn`.
+    New spatial plots can be added by writing that function and pointing to it
+    from YAML — no callback subclass or schema entry required.
+
+    Example
+    -------
+    .. code-block:: yaml
+
+        - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+          tag_infix: my_map
+          sample_idx: 0
+          parameters: [z_500, 2t]
+          every_n_batches: 750
+          plot_fn:
+            _target_: my_package.my_plot_fn
+            _partial_: true
+            my_option: 42
+    """
 
     def __init__(
         self,
+        plot_fn: Any,
+        tag_infix: str,
         sample_idx: int,
         parameters: list[str],
-        accumulation_levels_plot: list[float],
-        precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str, Colormap] | None = None,
-        per_sample: int = 6,
+        *,
+        with_auxiliary: bool = False,
+        members: Any = _UNSET_MEMBERS,
         every_n_batches: int | None = None,
         dataset_names: list[str] | None = None,
-        focus_area: list[dict] | None = None,
-        prediction_label: str = "pred",
-        auxiliary_label: str = "corrupted targets",
+        focus_area: dict | None = None,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
-        """Initialise the PlotSample callback.
+        """Initialise the SpatialMapPlot callback.
 
         Parameters
         ----------
+        plot_fn : Callable
+            Plot function (typically a ``functools.partial`` from Hydra with
+            ``_partial_: true``) matching the ``SpatialMapPlotFn`` protocol.
+        tag_infix : str
+            Short tag inserted into the logged artifact name to distinguish
+            this callback's outputs (e.g. ``"sample"``, ``"spec"``, ``"histo"``).
         sample_idx : int
-            Sample to plot
+            Index of the sample within the batch to plot.
         parameters : list[str]
-            Parameters to plot
-        accumulation_levels_plot : list[float]
-            Accumulation levels to plot
-        precip_and_related_fields : list[str] | None, optional
-            Precip variable names, by default None
-        colormaps : dict[str, Colormap] | None, optional
-            Dictionary of colormaps, by default None
-        per_sample : int, optional
-            Number of plots per sample, by default 6
-        every_n_batches : int, optional
-            Batch frequency to plot at, by default None
-        dataset_names : list[str] | None, optional
-            Dataset names, by default None
-        focus_area : list[dict] | None, optional
-            Focus area configuration, by default None
-        plotting_settings : PlottingSettings, optional
-            Plotting configuration settings, by default None (uses defaults)
+            Model output parameters to include in the plot.
+        with_auxiliary : bool, optional
+            If True, forward the optional auxiliary tensor (e.g. corrupted
+            targets) to ``plot_fn``. Default False.
+        members : int | list[int] | None, optional
+            Ensemble members to select. Defaults to the plot adapter's default.
+        every_n_batches, dataset_names, focus_area, plotting_settings
+            See :class:`BasePlotAdditionalMetrics`.
         """
         super().__init__(
-            dataset_names=dataset_names,
+            sample_idx=sample_idx,
             every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
             focus_area=focus_area,
             plotting_settings=plotting_settings,
         )
-        self.sample_idx = sample_idx
+        self.plot_fn = plot_fn
+        self.tag_infix = tag_infix
         self.parameters = parameters
+        self.with_auxiliary = with_auxiliary
+        self._members = members
 
-        # Per-callback value takes priority; fall back to plotting_settings if not given.
-        self.precip_and_related_fields = precip_and_related_fields or (
-            self.plotting_settings.precip_and_related_fields if self.plotting_settings else None
-        )
-        self.accumulation_levels_plot = accumulation_levels_plot
-        self.per_sample = per_sample
-        self.colormaps = colormaps
-        self.prediction_label = prediction_label
-        self.auxiliary_label = auxiliary_label
-
-        LOGGER.info(
-            "Using defined accumulation colormap for fields: %s",
-            self.precip_and_related_fields,
-        )
-
-    def _figure_tags(self, dataset_name: str, tag_suffix: str, batch_idx: int, local_rank: int) -> tuple[str, str]:
-        focus_tag = self.focus_mask.tag
-        tag = (
-            f"{self.output_tag_prefix}_{dataset_name}_{tag_suffix}_"
-            f"batch{batch_idx:04d}_rank{local_rank:01d}{focus_tag}"
-        )
-        exp_log_tag = f"{self.exp_log_tag_prefix}_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{focus_tag}"
-        return tag, exp_log_tag
+    def _get_process_members(self) -> int | list[int] | None:
+        return self._members
 
     def _plot_kwargs_from_output(
         self,
         pl_module: pl.LightningModule,
         output: TrainingStepOutput,
     ) -> dict[str, Any]:
-        """Return the optional corrupted-target field for sample plots."""
-        auxiliary_output = output.plot_kwargs.get("auxiliary_output")
+        if not self.with_auxiliary:
+            return {}
+        auxiliary_output = self._gather_auxiliary(pl_module, output)
         if auxiliary_output is None:
             return {}
-
-        auxiliary_output = {
-            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
-            for dataset_name, dataset_tensor in auxiliary_output.items()
-        }
         return {"auxiliary_output": auxiliary_output}
 
     @rank_zero_only
@@ -949,17 +1000,14 @@ class PlotSample(BasePlotAdditionalMetrics):
         processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
+        local_rank = pl_module.local_rank
 
         for dataset_name in dataset_names:
-            # Build dictionary of indices and parameters to be plotted
             input_data = pl_module.data_indices[dataset_name].data.input.todict()
             index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
             diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
             plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
                 for name in self.parameters
             }
 
@@ -971,21 +1019,16 @@ class PlotSample(BasePlotAdditionalMetrics):
                 members=self._get_process_members(),
                 processed_cache=processed_cache,
             )
-            auxiliary_tensor = (
-                None
-                if auxiliary_output is None
-                else self.process_output_tensor(
+
+            auxiliary_tensor = None
+            if self.with_auxiliary and auxiliary_output is not None:
+                auxiliary_tensor = self.process_output_tensor(
                     pl_module,
                     dataset_name,
                     [auxiliary_output],
                     members=self._get_process_members(),
                 )
-            )
 
-            local_rank = pl_module.local_rank
-
-            # Apply spatial mask. apply() is variadic, so the optional auxiliary
-            # tensor is passed through the same call rather than branching on it.
             extra_fields = (auxiliary_tensor,) if auxiliary_tensor is not None else ()
             latlons, data, output_tensor, *masked_extra = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
@@ -995,226 +1038,24 @@ class PlotSample(BasePlotAdditionalMetrics):
                 *extra_fields,
             )
             auxiliary_tensor = masked_extra[0] if masked_extra else None
-            auxiliary_by_suffix = {}
+
+            auxiliary_by_suffix: dict[str, Any] = {}
             if auxiliary_tensor is not None:
                 auxiliary_by_suffix = {
-                    auxiliary_suffix: auxiliary
-                    for _, _, auxiliary, auxiliary_suffix in pl_module.plot_adapter.iter_plot_samples(
-                        data,
-                        auxiliary_tensor,
-                    )
+                    suffix: aux
+                    for _, _, aux, suffix in pl_module.plot_adapter.iter_plot_samples(data, auxiliary_tensor)
                 }
 
-            plot_samples = list(pl_module.plot_adapter.iter_plot_samples(data, output_tensor))
-            for x, y_true, y_pred, tag_suffix in plot_samples:
-                auxiliary = auxiliary_by_suffix.get(tag_suffix)
-                fig = self._make_figure(
-                    plot_parameters_dict,
-                    latlons,
-                    x,
-                    y_true,
-                    y_pred,
-                    auxiliary=auxiliary,
-                )
-
-                tag, exp_log_tag = self._figure_tags(dataset_name, tag_suffix, batch_idx, local_rank)
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=tag,
-                    exp_log_tag=exp_log_tag,
-                )
-
-    def _get_process_members(self) -> int | list[int] | None:
-        """Return the ``members`` argument passed to ``process()``.
-
-        Defers to the plot adapter's default (member 0 for non-ensemble runs,
-        all members for ensemble runs) unless overridden. Subclasses override
-        only to request a user-configured subset of members (e.g.
-        :class:`PlotEnsSample`'s ``members`` config option) — the ensemble
-        vs. non-ensemble distinction itself is the plot adapter's
-        responsibility, not this callback's.
-        """
-        return _UNSET_MEMBERS
-
-    def _make_figure(
-        self,
-        plot_parameters_dict: dict,
-        latlons: np.ndarray,
-        x: np.ndarray,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        auxiliary: np.ndarray | None = None,
-    ) -> Figure:
-        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
-        return plot_predicted_multilevel_flat_sample(
-            plot_parameters_dict,
-            self.per_sample,
-            latlons,
-            self.accumulation_levels_plot,
-            x,
-            y_true,
-            y_pred,
-            datashader=self.datashader_plotting,
-            precip_and_related_fields=self.precip_and_related_fields,
-            colormaps=self.colormaps,
-            projection_kind=self.projection_kind,
-            prediction_label=self.prediction_label,
-            auxiliary=auxiliary,
-            auxiliary_label=self.auxiliary_label,
-        )
-
-
-class PlotEnsSample(PlotSample):
-    """Plot ensemble mean, spread, and the difference of members to the mean for each variable."""
-
-    def __init__(
-        self,
-        sample_idx: int,
-        parameters: list[str],
-        accumulation_levels_plot: list[float],
-        precip_and_related_fields: list[str] | None = None,
-        colormaps: dict[str, Colormap] | None = None,
-        per_sample: int = 6,
-        every_n_batches: int | None = None,
-        dataset_names: list[str] | None = None,
-        members: list[int] | int | None = None,
-        focus_area: list[dict] | None = None,
-        plotting_settings: PlottingSettings | None = None,
-    ) -> None:
-        """Initialise the PlotEnsSample callback.
-
-        Parameters
-        ----------
-        sample_idx : int
-            Sample to plot
-        parameters : list[str]
-            Parameters to plot
-        accumulation_levels_plot : list[float]
-            Accumulation levels to plot
-        precip_and_related_fields : list[str] | None, optional
-            Precip variable names, by default None
-        colormaps : dict[str, Colormap] | None, optional
-            Dictionary of colormaps, by default None
-        per_sample : int, optional
-            Number of plots per sample, by default 6
-        every_n_batches : int | None, optional
-            Batch frequency to plot at, by default None
-        dataset_names : list[str] | None, optional
-            Dataset names, by default None
-        members : list[int] | int | None, optional
-            Ensemble members to plot. None plots all members, by default None.
-        focus_area : list[dict] | None, optional
-            Focus area configuration, by default None
-        plotting_settings : PlottingSettings | None, optional
-            Plotting configuration settings, by default None (uses defaults)
-        """
-        super().__init__(
-            sample_idx=sample_idx,
-            parameters=parameters,
-            accumulation_levels_plot=accumulation_levels_plot,
-            precip_and_related_fields=precip_and_related_fields,
-            colormaps=colormaps,
-            per_sample=per_sample,
-            every_n_batches=every_n_batches,
-            dataset_names=dataset_names,
-            focus_area=focus_area,
-            plotting_settings=plotting_settings,
-        )
-        self.plot_members = members
-
-    def _get_process_members(self) -> list | None:
-        """Return configured ensemble members (None = all members)."""
-        return self.plot_members
-
-    def _make_figure(
-        self,
-        plot_parameters_dict: dict,
-        latlons: np.ndarray,
-        x: np.ndarray,  # noqa: ARG002
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        auxiliary: np.ndarray | None = None,  # noqa: ARG002
-    ) -> Figure:
-        """Create an ensemble figure with members, mean, spread and error."""
-        from anemoi.training.diagnostics.evaluation.plotting.ensemble import plot_predicted_ensemble
-
-        return plot_predicted_ensemble(
-            parameters=plot_parameters_dict,
-            n_plots_per_sample=4,
-            latlons=latlons,
-            clevels=self.accumulation_levels_plot,
-            y_true=np.asarray(y_true).squeeze(),
-            y_pred=np.asarray(y_pred).squeeze(),
-            datashader=self.datashader_plotting,
-            precip_and_related_fields=self.precip_and_related_fields,
-            colormaps=self.colormaps,
-            projection_kind=self.projection_kind,
-        )
-
-
-class SpatialMetricPlotCallback(BasePlotAdditionalMetrics):
-    """Shared implementation for per-sample metric plots that need no auxiliary tensor.
-
-    Subclasses (:class:`PlotSpectrum`, :class:`PlotHistogram`) differ only in which
-    low-level plot function to call (:meth:`_make_figure`) and the tag infix used to
-    distinguish their logged artifacts (:attr:`tag_infix`).
-    """
-
-    tag_infix: str
-
-    def _make_figure(
-        self,
-        plot_parameters_dict: dict,
-        latlons: np.ndarray,
-        x: np.ndarray,
-        y_true: np.ndarray | None,
-        y_pred: np.ndarray,
-    ) -> Figure:
-        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
-        raise NotImplementedError
-
-    def _plot(
-        self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        dataset_names: list[str],
-        outputs: TrainingStepOutput,
-        batch: dict[str, torch.Tensor],
-        batch_idx: int,
-        epoch: int,
-        processed_cache: dict | None = None,
-    ) -> None:
-        logger = trainer.logger
-        local_rank = pl_module.local_rank
-
-        for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, processed_cache=processed_cache)
-
-            # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
-
-            # Build dictionary of indices and parameters to be plotted
-            input_data = pl_module.data_indices[dataset_name].data.input.todict()
-            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
-            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
-            plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
-                for name in self.parameters
-            }
-
             for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
-                fig = self._make_figure(plot_parameters_dict, latlons, x, y_true, y_pred)
-
+                fig = self.plot_fn(
+                    plot_parameters_dict,
+                    x=x,
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    latlons=latlons,
+                    auxiliary=auxiliary_by_suffix.get(tag_suffix),
+                    settings=self.plotting_settings,
+                )
                 self._output_figure(
                     logger,
                     fig,
@@ -1224,146 +1065,8 @@ class SpatialMetricPlotCallback(BasePlotAdditionalMetrics):
                         f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
                     ),
                     exp_log_tag=(
-                        f"pred_val_{self.tag_infix}_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                        f"pred_val_{self.tag_infix}_{dataset_name}_{tag_suffix}_"
+                        f"rank{local_rank:01d}{self.focus_mask.tag}"
                     ),
                 )
 
-
-class PlotSpectrum(SpatialMetricPlotCallback):
-    """Plots TP related metric comparing target and prediction.
-
-    The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
-
-    - Power Spectrum
-    """
-
-    tag_infix = "spec"
-
-    def __init__(
-        self,
-        sample_idx: int,
-        parameters: list[str],
-        min_delta: float | None = None,
-        every_n_batches: int | None = None,
-        dataset_names: list[str] | None = None,
-        focus_area: list[dict] | None = None,
-        plotting_settings: PlottingSettings | None = None,
-    ) -> None:
-        """Initialise the PlotSpectrum callback.
-
-        Parameters
-        ----------
-        sample_idx : int
-            Sample to plot
-        parameters : list[str]
-            Parameters to plot
-        every_n_batches : int | None, optional
-            Override for batch frequency, by default None
-        dataset_names : list[str] | None, optional
-            Dataset names, by default None
-        focus_area : list[dict] | None, optional
-            Focus area configuration, by default None
-        plotting_settings : PlottingSettings, optional
-            Plotting configuration settings, by default None (uses defaults)
-        """
-        super().__init__(
-            dataset_names=dataset_names,
-            every_n_batches=every_n_batches,
-            focus_area=focus_area,
-            plotting_settings=plotting_settings,
-        )
-        self.sample_idx = sample_idx
-        self.parameters = parameters
-        self.min_delta = min_delta
-
-    def _make_figure(
-        self,
-        plot_parameters_dict: dict,
-        latlons: np.ndarray,
-        x: np.ndarray,
-        y_true: np.ndarray | None,
-        y_pred: np.ndarray,
-    ) -> Figure:
-        return plot_power_spectrum(
-            plot_parameters_dict,
-            latlons,
-            x,
-            y_true,
-            y_pred,
-            min_delta=self.min_delta,
-        )
-
-
-class PlotHistogram(SpatialMetricPlotCallback):
-    """Plots histograms comparing target and prediction.
-
-    The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
-    """
-
-    tag_infix = "histo"
-
-    def __init__(
-        self,
-        sample_idx: int,
-        parameters: list[str],
-        precip_and_related_fields: list[str] | None = None,
-        log_scale: bool = False,
-        every_n_batches: int | None = None,
-        dataset_names: list[str] | None = None,
-        focus_area: list[dict] | None = None,
-        plotting_settings: PlottingSettings | None = None,
-    ) -> None:
-        """Initialise the PlotHistogram callback.
-
-        Parameters
-        ----------
-        sample_idx : int
-            Sample to plot
-        parameters : list[str]
-            Parameters to plot
-        precip_and_related_fields : list[str] | None, optional
-            Precip variable names, by default None
-        log_scale : bool, optional
-            Whether to use logarithmic scale, by default False
-        every_n_batches : int | None, optional
-            Override for batch frequency, by default None
-        dataset_names : list[str] | None, optional
-            Dataset names, by default None
-        focus_area : list[dict] | None, optional
-            Focus area configuration, by default None
-        plotting_settings : PlottingSettings, optional
-            Plotting configuration settings, by default None (uses defaults)
-
-        """
-        super().__init__(
-            dataset_names=dataset_names,
-            every_n_batches=every_n_batches,
-            focus_area=focus_area,
-            plotting_settings=plotting_settings,
-        )
-        self.sample_idx = sample_idx
-        self.parameters = parameters
-        self.precip_and_related_fields = precip_and_related_fields
-        self.log_scale = log_scale
-
-        LOGGER.info(
-            "Using precip histogram plotting method for fields: %s.",
-            self.precip_and_related_fields,
-        )
-
-    def _make_figure(
-        self,
-        plot_parameters_dict: dict,
-        latlons: np.ndarray,  # noqa: ARG002
-        x: np.ndarray,
-        y_true: np.ndarray | None,
-        y_pred: np.ndarray,
-    ) -> Figure:
-        return plot_histogram(
-            plot_parameters_dict,
-            x,
-            y_true,
-            y_pred,
-            self.precip_and_related_fields,
-            self.log_scale,
-        )

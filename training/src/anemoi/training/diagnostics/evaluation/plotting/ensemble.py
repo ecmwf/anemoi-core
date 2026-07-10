@@ -17,7 +17,7 @@ from matplotlib.colors import Normalize
 from matplotlib.colors import TwoSlopeNorm
 from matplotlib.figure import Figure
 
-from anemoi.training.diagnostics.evaluation.geospatial.projections import Projection
+from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
 
@@ -241,7 +241,7 @@ def plot_predicted_ensemble(
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
     plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
+    (pc_lon, pc_lat), proj, transform = MapProjection.for_plot(latlons, plot_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     subplot_kw = {"projection": proj} if proj is not None else {}

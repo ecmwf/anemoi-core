@@ -9,6 +9,10 @@
 
 from typing import Any
 
+import logging
+from collections.abc import Iterable
+from typing import Protocol
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
@@ -19,6 +23,51 @@ from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.evaluation.geospatial.maps import map_features
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
+
+LOGGER = logging.getLogger(__name__)
+
+
+class GraphPlotFn(Protocol):
+    """Typing Protocol for :class:`GraphTrainableFeaturesPlot`-compatible plot functions.
+
+    The callback extracts the pieces the plot function actually needs from the
+    training :class:`~pytorch_lightning.LightningModule` — so plug-in
+    functions receive **already-resolved** graph artifacts and never touch
+    the raw model. Implementations yield ``(figure, tag)`` pairs; one call
+    may emit multiple figures under distinct logging tags (e.g. node
+    features + edge features). Any additional keyword arguments bound via
+    the ``plot_fn:`` YAML block (``_partial_: true``) are forwarded through
+    ``**kwargs``.
+
+    Parameters passed by the callback
+    ---------------------------------
+    dataset_name
+        Name of the dataset currently being plotted (used to look up per-
+        dataset node/edge features and to build the artifact tag).
+    node_attributes
+        :class:`~anemoi.models.layers.graph.NamedNodesAttributes` for
+        coordinate/mesh lookups.
+    node_trainable_tensors
+        Mapping from node-set name to its trainable parameter tensor. Empty
+        when the model has no trainable node attributes.
+    edge_trainable_modules
+        Mapping from ``(src_nodes, dst_nodes)`` to graph mapper module for
+        every edge-set that carries a trainable parameter. Empty when the
+        model has no trainable edge attributes (e.g. hierarchical models).
+    """
+
+    def __call__(
+        self,
+        dataset_name: str,
+        *,
+        node_attributes: "NamedNodesAttributes",
+        node_trainable_tensors: dict[str, Tensor],
+        edge_trainable_modules: dict[tuple[str, str], Any],
+        q_extreme_limit: float = 0.05,
+        settings: Any = None,
+        **kwargs: Any,
+    ) -> Iterable[tuple[Figure, str]]: ...
+
 
 
 def get_node_trainable_tensors(node_attributes: NamedNodesAttributes) -> dict[str, Tensor]:
@@ -243,3 +292,42 @@ def plot_graph_edge_features(
             )
 
     return fig
+
+
+def graph_plot_fn(
+    dataset_name: str,
+    *,
+    node_attributes: NamedNodesAttributes,
+    node_trainable_tensors: dict[str, Tensor],
+    edge_trainable_modules: dict[tuple[str, str], Any],
+    q_extreme_limit: float = 0.05,
+    settings=None,
+    **_kwargs,
+):
+    """Default plug-in function for :class:`GraphTrainableFeaturesPlot`.
+
+    Yields ``(figure, tag)`` pairs. Receives already-resolved graph
+    artifacts from the callback (see :class:`GraphPlotFn` for the full
+    contract). Emits warnings when the corresponding artifacts are empty.
+    """
+    datashader = getattr(settings, "datashader", True)
+
+    if node_trainable_tensors.get(dataset_name) is not None:
+        fig = plot_graph_node_features(
+            node_attributes,
+            node_trainable_tensors,
+            datashader=datashader,
+        )
+        yield fig, f"node_trainable_params_{dataset_name}"
+    else:
+        LOGGER.warning("There are no trainable node attributes to plot.")
+
+    if edge_trainable_modules:
+        fig = plot_graph_edge_features(
+            node_attributes,
+            edge_trainable_modules,
+            q_extreme_limit=q_extreme_limit,
+        )
+        yield fig, f"edge_trainable_params_{dataset_name}"
+    else:
+        LOGGER.warning("There are no trainable edge attributes to plot.")

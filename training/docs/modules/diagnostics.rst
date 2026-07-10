@@ -184,11 +184,323 @@ which is recommended for interactive terminals and
                moisture: [tp, cp, tcw]
                sfc_wind: [10u, 10v]
 
-         - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+         - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+            tag_infix: sample
             dataset_names: ["your_dataset_name"]
             sample_idx: ${diagnostics.plot.sample_idx}
-            per_sample : 6
             parameters: ${diagnostics.plot.parameters}
+            plot_fn:
+               _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.sample_plot_fn
+               _partial_: true
+               per_sample: 6
+
+Pluggable spatial-map plots
+===========================
+
+Spatial map–style callbacks (samples, spectra, histograms, ensembles) are
+all driven by a single :class:`~anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot`
+callback that iterates over datasets, samples and focus areas, and delegates
+the actual figure rendering to a pluggable ``plot_fn``.
+
+The bundled adapters live in
+``anemoi.training.diagnostics.evaluation.plotting.spatial_map``:
+
+- ``sample_plot_fn`` — multi-level forecast sample plot (former ``PlotSample``).
+- ``spectrum_plot_fn`` — power spectrum (former ``PlotSpectrum``).
+- ``histogram_plot_fn`` — per-variable histograms (former ``PlotHistogram``).
+- ``ensemble_plot_fn`` — ensemble member plot (former ``PlotEnsSample``).
+
+Each ``plot_fn`` follows the
+:class:`~anemoi.training.diagnostics.evaluation.plotting.spatial_map.SpatialMapPlotFn`
+protocol and receives keyword-only arguments (``x``, ``y_true``, ``y_pred``,
+``latlons``, ``auxiliary``, ``settings``, plus any plot-specific kwargs bound
+in YAML via ``_partial_: true``).
+
+.. code:: yaml
+
+   # Same callback, different plot_fn → different figures
+   - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+     tag_infix: spectrum
+     sample_idx: 0
+     parameters: ${diagnostics.plot.parameters}
+     plot_fn:
+       _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.spectrum_plot_fn
+       _partial_: true
+       min_delta: 0.01
+
+Plot function contracts
+-----------------------
+
+Three callbacks accept a pluggable ``plot_fn``. Each defines a fixed
+keyword-only signature; anything else in the ``plot_fn:`` YAML block is
+bound as a partial kwarg via ``_partial_: true`` and forwarded to the
+function. All three contracts accept a ``settings`` argument (a
+``PlottingSettings`` instance carrying ``datashader``, ``projection_kind``,
+``colormaps``, ``precip_and_related_fields``, ``asynchronous``) and
+``**kwargs`` so future additions do not break existing implementations.
+
+``SpatialMapPlot`` — per-sample, per-dataset figures
+....................................................
+
+Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot`.
+Protocol:
+:class:`~anemoi.training.diagnostics.evaluation.plotting.spatial_map.SpatialMapPlotFn`.
+
+.. code:: python
+
+   def plot_fn(
+       parameters: dict[int, tuple[str, bool]],
+       *,
+       x: np.ndarray,                       # (n_gridpoints, n_input_vars)
+       y_true: np.ndarray | None,           # (n_gridpoints, n_output_vars) or None
+       y_pred: np.ndarray,                  # (n_gridpoints, n_output_vars)
+       latlons: np.ndarray | None = None,   # (n_gridpoints, 2), [lat, lon]
+       auxiliary: np.ndarray | None = None, # only if with_auxiliary=True
+       settings: PlottingSettings | None = None,
+       **kwargs,                            # plot-specific kwargs from YAML
+   ) -> matplotlib.figure.Figure: ...
+
+Contract notes:
+
+- ``parameters`` is a mapping ``{output_index: (variable_name, is_diagnostic)}``
+  restricted to the intersection of ``diagnostics.plot.parameters`` and the
+  model's output variables.
+- The sample dimension and any leading batch/rollout dims have already been
+  reduced by ``SpatialMapPlot``'s ``process`` step (using ``sample_idx``).
+  ``y_true`` / ``y_pred`` are 2-D arrays over grid points × output variables.
+- ``latlons`` is pre-masked to the active ``focus_area`` when one is set.
+- Return a ``matplotlib.figure.Figure`` — returning ``None`` is not allowed.
+
+``PlotLoss`` — grouped per-variable loss bar chart
+..................................................
+
+Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.PlotLoss`.
+Protocol:
+:class:`~anemoi.training.diagnostics.evaluation.plotting.loss.LossPlotFn`.
+Default: ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``.
+
+.. code:: python
+
+   def plot_fn(
+       loss: np.ndarray,                      # (n_parameters,), in model-output order
+       *,
+       parameter_names: list[str],            # names in model-output order
+       parameter_groups: dict[str, list[str]] | None = None,
+       metadata_variables: dict | None = None,  # from model.metadata["dataset"]
+       settings: PlottingSettings | None = None,
+       **kwargs,
+   ) -> matplotlib.figure.Figure: ...
+
+Contract notes:
+
+- ``PlotLoss`` supplies the **raw** per-variable loss in the model's output
+  order together with the naming/grouping context, and does **not** apply any
+  presentation-specific reordering, grouping or colouring itself.
+- The default ``loss_plot_fn`` reproduces the historic behaviour by calling
+  :func:`argsort_variablename_variablelevel` (sort by variable + level),
+  then :func:`sort_and_color_by_parameter_group` (group + colour), then
+  :func:`plot_loss` (bar-chart render). A custom ``plot_fn`` is free to
+  replace or skip any of these steps.
+- ``loss`` and ``parameter_names`` share the same length and ordering.
+
+``GraphTrainableFeaturesPlot`` — graph node/edge feature plots
+..............................................................
+
+Callback:
+:class:`~anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot`.
+Protocol:
+:class:`~anemoi.training.diagnostics.evaluation.plotting.graph.GraphPlotFn`.
+Default: ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``.
+
+.. code:: python
+
+   def plot_fn(
+       model: torch.nn.Module,              # pl_module.model
+       dataset_name: str,
+       *,
+       q_extreme_limit: float = 0.05,
+       settings: PlottingSettings | None = None,
+       **kwargs,
+   ) -> Iterable[tuple[matplotlib.figure.Figure, str]]: ...
+
+Contract notes:
+
+- ``plot_fn`` is a **generator** (or any iterable) yielding
+  ``(figure, tag)`` pairs. This lets a single call emit multiple figures
+  (e.g. one for node features, one for edge features) under distinct
+  logging tags.
+- ``model`` gives direct access to ``model.node_attributes`` and any
+  encoder/processor/decoder submodules — no adapter layer sits between
+  the callback and the graph.
+
+Adding a new spatial-map plot
+-----------------------------
+
+To add a new plot type, write a function matching the ``SpatialMapPlotFn``
+signature and reference it from YAML — no new callback class or Pydantic
+schema is required.
+
+1. Implement the plot function (in your project or in
+   ``anemoi.training.diagnostics.evaluation.plotting``):
+
+   .. code:: python
+
+      # my_project/plots.py
+      import matplotlib.pyplot as plt
+      import numpy as np
+      from matplotlib.figure import Figure
+
+
+      def bias_map_plot_fn(
+          parameters: dict[int, tuple[str, bool]],
+          *,
+          x,
+          y_true,
+          y_pred,
+          latlons,
+          auxiliary=None,
+          settings=None,
+          cmap: str = "RdBu_r",
+          vmax: float | None = None,
+          **_kwargs,
+      ) -> Figure:
+          """Scatter-map of ``y_pred - y_true`` per plotted parameter."""
+          fig, axes = plt.subplots(1, len(parameters), figsize=(4 * len(parameters), 3))
+          axes = np.atleast_1d(axes)
+          bias = np.asarray(y_pred) - np.asarray(y_true)
+          for ax, (idx, (name, _)) in zip(axes, parameters.items()):
+              limit = vmax if vmax is not None else np.nanpercentile(np.abs(bias[..., idx]), 99)
+              ax.scatter(
+                  latlons[:, 1], latlons[:, 0],
+                  c=bias[..., idx], cmap=cmap, vmin=-limit, vmax=limit, s=1,
+              )
+              ax.set_title(name)
+          return fig
+
+2. Wire it in via the ``plot_fn`` block (any additional keys are bound as
+   partial kwargs):
+
+   .. code:: yaml
+
+      - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+        tag_infix: bias
+        sample_idx: 0
+        parameters: ${diagnostics.plot.parameters}
+        plot_fn:
+          _target_: my_project.plots.bias_map_plot_fn
+          _partial_: true
+          cmap: seismic
+          vmax: 5.0
+
+Example: pressure–latitude (or longitude) cross-section
+-------------------------------------------------------
+
+``SpatialMapPlot`` does not assume the figure is a map — it just delivers
+``x``, ``y_true``, ``y_pred``, ``latlons`` and ``parameters`` and stores
+whatever ``Figure`` the ``plot_fn`` returns. That makes it a good fit for
+vertical cross-sections too.
+
+For a pressure–latitude (or pressure–longitude) plot you need:
+
+- multiple pressure levels of the same variable in
+  ``diagnostics.plot.parameters`` (e.g. ``t_50, t_100, ..., t_1000``);
+- a ``plot_fn`` that groups those parameters by variable prefix, reads the
+  pressure level from the suffix, and bins the values along
+  ``latlons[:, 0]`` (lat) or ``latlons[:, 1]`` (lon).
+
+.. code:: python
+
+   # my_project/plots.py
+   import matplotlib.pyplot as plt
+   import numpy as np
+   from matplotlib.figure import Figure
+
+
+   def zonal_cross_section_plot_fn(
+       parameters: dict[int, tuple[str, bool]],
+       *,
+       x,
+       y_true,
+       y_pred,
+       latlons,
+       auxiliary=None,
+       settings=None,
+       variable: str = "t",     # prefix, e.g. "t" for t_500, t_700, ...
+       axis: str = "lat",       # "lat" or "lon"
+       n_bins: int = 90,
+       **_kwargs,
+   ) -> Figure:
+       """Pressure vs latitude/longitude cross-section for a single variable."""
+       # 1. pick output indices belonging to `variable` and extract pressure levels
+       items = [
+           (idx, int(name.split("_")[-1]))
+           for idx, (name, _) in parameters.items()
+           if name.startswith(f"{variable}_")
+       ]
+       if not items:
+           msg = f"No parameters matching prefix '{variable}_' were requested."
+           raise ValueError(msg)
+       items.sort(key=lambda kv: kv[1])
+       idxs, levels = zip(*items)
+       levels = np.asarray(levels)
+
+       # 2. average onto lat (or lon) bins
+       coord = latlons[:, 0] if axis == "lat" else latlons[:, 1]
+       bin_edges = np.linspace(coord.min(), coord.max(), n_bins + 1)
+       which = np.clip(np.digitize(coord, bin_edges) - 1, 0, n_bins - 1)
+
+       def zonal(field: np.ndarray) -> np.ndarray:
+           field = np.asarray(field)
+           out = np.full((len(idxs), n_bins), np.nan)
+           for b in range(n_bins):
+               mask = which == b
+               if mask.any():
+                   out[:, b] = field[mask][:, list(idxs)].mean(axis=0)
+           return out
+
+       truth = zonal(y_true)
+       pred = zonal(y_pred)
+
+       fig, axes = plt.subplots(1, 3, figsize=(12, 3), sharey=True)
+       centres = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+       for ax, field, title in zip(
+           axes, [truth, pred, pred - truth], ["truth", "pred", "pred - truth"],
+       ):
+           im = ax.pcolormesh(centres, levels, field, shading="auto")
+           ax.invert_yaxis()  # pressure decreasing upward
+           ax.set_xlabel(axis)
+           ax.set_title(title)
+           fig.colorbar(im, ax=ax)
+       axes[0].set_ylabel("pressure [hPa]")
+       return fig
+
+Wire it in as:
+
+.. code:: yaml
+
+   - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+     tag_infix: zonal_t
+     sample_idx: 0
+     parameters: [t_50, t_100, t_250, t_500, t_700, t_850, t_1000]
+     plot_fn:
+       _target_: my_project.plots.zonal_cross_section_plot_fn
+       _partial_: true
+       variable: t
+       axis: lat        # or "lon" for meridional cross-section
+       n_bins: 90
+
+Notes:
+
+- If the variable/level naming in your dataset does not encode the
+  pressure level in the suffix, replace the ``split("_")`` step with a
+  small explicit mapping.
+- ``focus_area`` still applies: pass a ``latlon_bbox`` and the
+  cross-section is restricted to that region for free.
+
+The ``PlotLoss`` and ``GraphTrainableFeaturesPlot`` callbacks follow the
+same pattern (see ``loss_plot_fn`` and ``graph_plot_fn`` in
+``anemoi.training.diagnostics.evaluation.plotting``), so custom loss-bar
+or graph-feature renderings can be swapped in the same way.
 
 Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:

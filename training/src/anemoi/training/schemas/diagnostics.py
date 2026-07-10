@@ -27,13 +27,26 @@ from anemoi.utils.schemas import BaseModel
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphTrainableFeaturesPlotSchema(BaseModel):
+class GraphTrainableFeaturesPlotSchema(PydanticBaseModel):
+    """Config schema for :class:`GraphTrainableFeaturesPlot`.
+
+    Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
+    shared with :class:`SpatialMapPlot` and :class:`PlotLoss`) without
+    extending this schema (``extra='allow'`` on the nested ``plot_fn``).
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
     "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
     every_n_epochs: int | None
     "Epoch frequency to plot at."
+    q_extreme_limit: float = Field(default=0.05)
+    "Quantile edges to represent (used by default plot_fn)."
+    plot_fn: dict[str, Any] | None = Field(default=None)
+    "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
 class FocusAreaSchema(BaseModel):
@@ -52,15 +65,26 @@ class FocusAreaSchema(BaseModel):
         return self
 
 
-class PlotLossSchema(BaseModel):
+class PlotLossSchema(PydanticBaseModel):
+    """Config schema for :class:`PlotLoss`.
+
+    Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
+    shared with :class:`SpatialMapPlot`) without extending this schema
+    (``extra='allow'`` on the nested ``plot_fn``).
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
     target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
     "PlotLoss object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
+    plot_fn: dict[str, Any] | None = Field(default=None)
+    "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -98,97 +122,39 @@ ColormapSchema = Annotated[
 ]
 
 
-class PlotSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
-    "PlotSample object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
+class SpatialMapPlotSchema(PydanticBaseModel):
+    """Config-driven spatial-map plot callback.
+
+    Users may add their own plot function under ``plot_fn`` without extending
+    this schema (``model_config = extra='allow'`` on the nested ``plot_fn``).
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot"] = Field(alias="_target_")
+    "SpatialMapPlot object from anemoi training diagnostics callbacks."
+    tag_infix: str
+    "Short tag inserted into logged artifact names."
     sample_idx: int
-    "Index of sample to plot, must be inside batch size."
+    "Index of sample within the batch to plot."
     parameters: list[str]
-    "List of parameters to plot."
-    accumulation_levels_plot: list[float]
-    "Accumulation levels to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
-    "List of precipitation related fields, by default None."
-    per_sample: int = Field(example=6)
-    "Number of plots per sample, by default 6."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
-    prediction_label: str = Field(default="pred")
-    "Label used for the prediction panels."
-    auxiliary_label: str = Field(default="corrupted targets")
-    "Label used for the optional panel that shows the corrupted target seen by the model."
-
-
-class PlotSpectrumSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSpectrum"] = Field(alias="_target_")
-    "PlotSpectrum object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
-
-
-class PlotHistogramSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotHistogram"] = Field(alias="_target_")
-    "PlotHistogram object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
-    "List of precipitation related fields, by default None."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-    focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
-
-
-class PlotEnsSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotEnsSample"] = Field(alias="_target_")
-    "PlotEnsSample object from anemoi training diagnostics callbacks."
-    dataset_names: list[str] = Field(examples=["data"])
-    "List of dataset names to plot."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    accumulation_levels_plot: list[float]
-    "Accumulation levels to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
-    "List of precipitation related fields, by default None."
-    per_sample: int = Field(example=6)
-    "Number of plots per sample, by default 6."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
+    "Model output parameters to include in the plot."
+    plot_fn: dict[str, Any]
+    "Hydra-instantiable plot function (use ``_partial_: true``)."
+    with_auxiliary: bool = Field(default=False)
+    "Forward the auxiliary tensor (e.g. corrupted targets) to ``plot_fn``."
     members: list[int] | int | None = Field(default=None)
-    "List of ensemble members to plot. If None, plots all members."
+    "Ensemble members to select; None means adapter default (all for ensembles)."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at, by default None."
     focus_area: FocusAreaSchema | None = Field(default=None)
-    "Region of interest to restrict plots to, specified by 'mask_attr_name' or 'latlon_bbox'"
+    "Region of interest to restrict plots to."
 
 
 PlotCallbacks = Annotated[
-    GraphTrainableFeaturesPlotSchema
-    | PlotLossSchema
-    | PlotSampleSchema
-    | PlotSpectrumSchema
-    | PlotHistogramSchema
-    | PlotEnsSampleSchema,
+    GraphTrainableFeaturesPlotSchema | PlotLossSchema | SpatialMapPlotSchema,
     Field(discriminator="target_"),
 ]
 
@@ -231,6 +197,39 @@ class PlotSchema(PydanticBaseModel):
     "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
     datasets_to_plot: list[str] | None = None
     "Dataset names to include in plots."
+
+    @model_validator(mode="after")
+    def _unique_spatial_map_tag_infix(self) -> "PlotSchema":
+        """Ensure every :class:`SpatialMapPlot` entry produces a unique artifact tag.
+
+        The runtime tag has the form
+        ``pred_val_{tag_infix}_{dataset_name}_..._{focus_mask.tag}``, so the
+        uniqueness key is ``(tag_infix, tuple(dataset_names), focus_area)``.
+        Two callbacks that share this triple would silently overwrite each
+        other's logged artifacts.
+        """
+        from collections import Counter
+
+        keys = [
+            (
+                cb.tag_infix,
+                tuple(cb.dataset_names or []),
+                cb.focus_area.model_dump() if cb.focus_area is not None else None,
+            )
+            for cb in (self.callbacks or [])
+            if isinstance(cb, SpatialMapPlotSchema)
+        ]
+        # dicts are unhashable -> compare as sorted repr for the last element
+        hashable = [(k[0], k[1], repr(sorted(k[2].items())) if k[2] else None) for k in keys]
+        duplicates = sorted({k for k, n in Counter(hashable).items() if n > 1})
+        if duplicates:
+            msg = (
+                "Every SpatialMapPlot callback must produce a unique artifact tag "
+                "(tag_infix, dataset_names, focus_area); duplicates: "
+                f"{duplicates}"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class TimeLimitSchema(BaseModel):

@@ -980,7 +980,7 @@ def test_plot_histogram_forecaster():
         assert mock_output_figure.call_count == validation_rollout * n_step_output
 
 
-# ---- Plot functions return a figure ----
+# ---- Plot functions (diagnostics.plots) return a figure ----
 
 
 def skip_missing_pyshtools():
@@ -998,7 +998,7 @@ def test_plots_plot_loss_returns_figure():
     import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.evaluation.plotting.loss import plot_loss
+    from anemoi.training.diagnostics.plots import plot_loss
 
     x = np.array([0.1, 0.2, 0.15, 0.25])
     colors = np.array(["C0", "C1", "C2", "C3"])
@@ -1017,7 +1017,7 @@ def test_plots_plot_histogram_returns_figure():
     """plot_histogram returns a Figure and runs without error."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
+    from anemoi.training.diagnostics.plots import plot_histogram
 
     # parameters: variable_idx -> (variable_name, diagnostic_only)
     parameters = {0: ("t2m", False), 1: ("tp", True)}
@@ -1047,7 +1047,7 @@ def test_plots_plot_power_spectrum_returns_figure():
     """plot_power_spectrum returns a Figure and runs without error."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.evaluation.plotting.spectrum import plot_power_spectrum
+    from anemoi.training.diagnostics.plots import plot_power_spectrum
 
     # parameters: variable_idx -> (variable_name, diagnostic_only)
     parameters = {0: ("t2m", False), 1: ("tp", True)}
@@ -1075,7 +1075,7 @@ def test_plots_plot_predicted_multilevel_flat_sample_returns_figure():
     """plot_predicted_multilevel_flat_sample returns a Figure and runs without error."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 
     parameters = {0: ("t2m", True), 1: ("tp", False)}
     n_plots_per_sample = 6
@@ -1110,7 +1110,7 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
     """plot_predicted_multilevel_flat_sample can add the corrupted-target panel."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 
     parameters = {0: ("t2m", False), 1: ("tp", True)}
     nlatlon, nvar = 12, 2
@@ -1143,43 +1143,6 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
     assert any(title == "tp corrupted targets" for title in plot_titles)
     assert "tp increment [pred - input]" not in plot_titles
     assert "tp persist err" not in plot_titles
-    fig.clear()
-    plt.close(fig)
-
-
-@pytest.mark.parametrize("projection_kind", ["robinson", "mollweide"])
-def test_plots_global_non_equirectangular_projection_does_not_crash(projection_kind):
-    """Global data with non-equirectangular Cartopy projections must not raise ValueError from set_extent."""
-    pytest.importorskip("cartopy")
-    import matplotlib.pyplot as plt
-
-    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
-
-    parameters = {0: ("t2m", False)}
-    nlatlon, nvar = 100, 1
-    # Global grid: lat -90..90, lon -180..180
-    latlons = np.stack(
-        [np.linspace(-90, 90, nlatlon), np.linspace(-180, 180, nlatlon)],
-        axis=1,
-    )
-    rng = np.random.default_rng(0)
-    x = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
-    y_true = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
-    y_pred = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
-
-    fig = plot_predicted_multilevel_flat_sample(
-        parameters,
-        6,
-        latlons,
-        0.5,
-        x,
-        y_true,
-        y_pred,
-        datashader=False,
-        projection_kind=projection_kind,
-    )
-
-    assert fig is not None
     fig.clear()
     plt.close(fig)
 

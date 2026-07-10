@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import Any
+from typing import Protocol
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -15,8 +17,42 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
+from anemoi.training.diagnostics.evaluation.plotting.settings import argsort_variablename_variablelevel
 
 LOGGER = logging.getLogger(__name__)
+
+
+class LossPlotFn(Protocol):
+    """Typing Protocol for :class:`PlotLoss`-compatible plot functions.
+
+    Implementations receive the raw per-variable loss array in the model's
+    output order plus the naming/grouping context, and return a single
+    :class:`~matplotlib.figure.Figure`.
+
+    The callback additionally forwards per-rollout-step context
+    (``step_index``, ``metric_name``, ``task_kwargs``) so that functions such
+    as a per-step annotated bar chart can title/label figures without having
+    to hard-code the rollout schedule. Implementations are free to ignore any
+    of these — the recommended shape is ``**kwargs`` catch-all — but the
+    parameters are declared here so that IDE/mypy signatures document what is
+    passed through. Any additional keyword arguments bound via the
+    ``plot_fn:`` YAML block (``_partial_: true``) are also forwarded through
+    ``**kwargs``.
+    """
+
+    def __call__(
+        self,
+        loss: np.ndarray,
+        *,
+        parameter_names: list[str],
+        parameter_groups: dict[str, list[str]] | None = None,
+        metadata_variables: dict | None = None,
+        step_index: int | None = None,
+        metric_name: str | None = None,
+        task_kwargs: dict | None = None,
+        settings: Any = None,
+        **kwargs: Any,
+    ) -> Figure: ...
 
 
 def sort_and_color_by_parameter_group(
@@ -163,3 +199,37 @@ def plot_loss(
         ax.legend(handles=legend_patches, bbox_to_anchor=(1.01, 1), loc="upper left")
 
     return fig
+
+
+def loss_plot_fn(
+    loss,
+    *,
+    parameter_names,
+    parameter_groups=None,
+    metadata_variables=None,
+    settings=None,  # noqa: ARG001
+    **_kwargs,
+) -> Figure:
+    """Default plug-in function for :class:`PlotLoss`.
+
+    Applies the standard presentation order (sort by variable + level via
+    :func:`argsort_variablename_variablelevel`), then the group-sorting /
+    colouring (via :func:`sort_and_color_by_parameter_group`) and finally
+    delegates the actual rendering to :func:`plot_loss`. Custom ``plot_fn``
+    implementations receive the raw output-index-ordered ``loss`` array plus
+    ``parameter_names``, ``parameter_groups`` and ``metadata_variables`` and
+    are free to ignore or replace any of these steps.
+    """
+    parameter_names = list(parameter_names)
+    argsort_indices = argsort_variablename_variablelevel(
+        parameter_names,
+        metadata_variables=metadata_variables,
+    )
+    parameter_names = [parameter_names[i] for i in argsort_indices]
+    loss = np.asarray(loss)[argsort_indices]
+
+    sort_by_parameter_group, colors, xticks, legend_patches = sort_and_color_by_parameter_group(
+        parameter_names,
+        parameter_groups or {},
+    )
+    return plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
