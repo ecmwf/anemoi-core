@@ -25,6 +25,7 @@ from anemoi.training.distributed.groups import create_reader_process_groups
 from anemoi.training.distributed.groups import get_my_ensemble_comm_group
 from anemoi.training.distributed.groups import get_my_model_comm_group
 from anemoi.training.distributed.groups import get_my_reader_group
+from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -66,7 +67,7 @@ def register_gradient_scaling_hooks(
 def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     """Seed the random number generators for the rank."""
     base_seed = get_base_seed()
-    initial_seed = derive_seed(base_seed, model_comm_group_id)
+    initial_seed = derive_seed(base_seed, SeedContext.MODEL, model_comm_group_id)
     rnd_seed = pl.seed_everything(initial_seed)  # note: workers are seeded independently in dataloader
     np_rng = np.random.default_rng(rnd_seed)
     sanity_rnd = (torch.rand(1)[0], np_rng.random())

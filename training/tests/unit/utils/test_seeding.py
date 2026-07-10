@@ -9,6 +9,7 @@
 
 import pytest
 
+from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 
@@ -35,24 +36,35 @@ def test_get_base_seed_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) ->
 @pytest.mark.parametrize(
     ("base_seed", "keys", "expected_seed"),
     [
-        (19525198, (), 4284267609),
-        (19525198, (0,), 2478688360),
-        (19525198, (1,), 2310896010),
-        (19525198, (0, 5), 3358054325),
+        (19525198, (SeedContext.TRAINER,), 2478688360),
+        (19525198, (SeedContext.MODEL, 0), 1959788892),
+        (19525198, (SeedContext.MODEL, 1), 2516803993),
+        (19525198, (SeedContext.DATALOADER, 5), 3643427004),
     ],
 )
 def test_derive_seed_is_reproducible(base_seed: int, keys: tuple[int, ...], expected_seed: int) -> None:
     assert derive_seed(base_seed, *keys) == expected_seed
 
 
+def test_derive_seed_distinguishes_contexts() -> None:
+    base_seed = 19525198
+    seeds = {
+        derive_seed(base_seed, SeedContext.TRAINER),
+        derive_seed(base_seed, SeedContext.MODEL, 0),
+        derive_seed(base_seed, SeedContext.DATALOADER, 0),
+    }
+
+    assert len(seeds) == 3
+
+
 @pytest.mark.parametrize(
     ("base_seed", "keys"),
     [
-        (0, ()),
-        (42, (0,)),
-        (19525198, (219,)),  # the model comm group that overflowed 2**32 in the old multiply scheme
-        (19525198, (10_000,)),
-        (2**63, (7, 42)),
+        (0, (SeedContext.TRAINER,)),
+        (42, (SeedContext.DATALOADER, 0)),
+        (19525198, (SeedContext.MODEL, 219)),
+        (19525198, (SeedContext.MODEL, 10_000)),
+        (2**63, (SeedContext.DATALOADER, 7)),
     ],
 )
 def test_derive_seed_within_uint32_bounds(base_seed: int, keys: tuple[int, ...]) -> None:

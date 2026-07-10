@@ -15,6 +15,7 @@ import pytest
 from pytest_mock import MockFixture
 
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
 
@@ -87,12 +88,12 @@ class TestMultiDataset:
         multi_dataset.set_epoch(0)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
         seed_epoch_0 = multi_dataset.seed
-        assert seed_epoch_0 == derive_seed(1000, 0)
+        assert seed_epoch_0 == derive_seed(1000, SeedContext.DATALOADER, 0)
 
         multi_dataset.set_epoch(5)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
         seed_epoch_5 = multi_dataset.seed
-        assert seed_epoch_5 == derive_seed(1000, 5)
+        assert seed_epoch_5 == derive_seed(1000, SeedContext.DATALOADER, 5)
 
         assert seed_epoch_0 != seed_epoch_5
 

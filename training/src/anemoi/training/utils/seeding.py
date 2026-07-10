@@ -9,19 +9,30 @@
 
 
 import os
+from enum import IntEnum
 
 import numpy as np
 
 
-def derive_seed(base_seed: int, *keys: int) -> int:
+class SeedContext(IntEnum):
+    """Contexts in which random seeds are used."""
+
+    TRAINER = 0
+    MODEL = 1
+    DATALOADER = 2
+
+
+def derive_seed(base_seed: int, context: SeedContext, *keys: int) -> int:
     """Build a seed accepted by Lightning, NumPy, and PyTorch.
 
     Parameters
     ----------
     base_seed : int
         Base seed shared by all ranks.
+    context : SeedContext
+        Context in which the seed is used.
     *keys : int
-        keys to initalise the independent seeds, by default none.
+        Additional keys used to derive independent seeds, by default none.
 
     Returns
     -------
@@ -29,7 +40,7 @@ def derive_seed(base_seed: int, *keys: int) -> int:
         Seed in the range [0, 2**32 - 1].
 
     """
-    seed_seq = np.random.SeedSequence(entropy=base_seed, spawn_key=keys)
+    seed_seq = np.random.SeedSequence(entropy=base_seed, spawn_key=(context, *keys))
     return int(seed_seq.generate_state(1, dtype=np.uint32)[0])
 
 
