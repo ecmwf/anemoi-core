@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from typing import Any
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
@@ -17,6 +19,80 @@ from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.evaluation.geospatial.maps import map_features
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
+
+
+def get_node_trainable_tensors(node_attributes: NamedNodesAttributes) -> dict[str, Tensor]:
+    """Extract trainable node tensors from node attributes.
+
+    Parameters
+    ----------
+    node_attributes : NamedNodesAttributes
+        Node attributes object.
+
+    Returns
+    -------
+    dict[str, Tensor]
+        Mapping from node-set name to its trainable parameter tensor.
+    """
+    return {name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None}
+
+
+def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
+    """Resolve an edge provider to the specific dataset variant if needed."""
+    if provider is None:
+        return None
+    if isinstance(provider, (dict,)):
+        if dataset_name in provider:
+            return provider[dataset_name]
+        return None
+    # Also handle torch.nn.ModuleDict without importing torch.nn at module level
+    if type(provider).__name__ == "ModuleDict":
+        if dataset_name in provider:
+            return provider[dataset_name]
+        return None
+    return provider
+
+
+def _has_trainable_edge_params(provider: Any) -> bool:
+    """Return True if *provider* holds a trainable parameter."""
+    if provider is None:
+        return False
+    trainable_module = getattr(provider, "trainable", None)
+    if trainable_module is None:
+        return False
+    # Graph providers have TrainableTensor -> .trainable;
+    # parameter is nested as .trainable.trainable.
+    trainable_parameter = getattr(trainable_module, "trainable", None)
+    return trainable_parameter is not None
+
+
+def get_edge_trainable_modules(model: Any, dataset_name: str) -> dict[tuple[str, str], Any]:
+    """Extract trainable edge modules for a given dataset.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model carrying encoder/processor/decoder graph providers.
+    dataset_name : str
+        Dataset name used to select per-dataset providers.
+
+    Returns
+    -------
+    dict[tuple[str, str], Any]
+        Mapping from ``(src_nodes, dst_nodes)`` to graph mapper module,
+        for each edge-set that has a trainable parameter.
+    """
+    trainable_modules = {}
+    provider_specs = (
+        ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
+        ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
+        ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
+    )
+    for provider_name, edge_key in provider_specs:
+        provider = _resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
+        if _has_trainable_edge_params(provider):
+            trainable_modules[edge_key] = provider
+    return trainable_modules
 
 
 def edge_plot(

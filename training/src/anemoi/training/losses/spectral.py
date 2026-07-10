@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -23,24 +23,30 @@ Notes
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 from typing import Literal
 
 import einops
 import torch
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.kcrps import CRPS
 from anemoi.training.losses.kcrps import CRPSBackend
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
+    from torch_geometric.data import HeteroData
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +70,7 @@ class SpectralLoss(BaseLoss):
     """Base class for spectral losses."""
 
     transform: SpectralTransform
+    needs_graph_data: bool = True
 
     def __init__(
         self,
@@ -74,6 +81,10 @@ class SpectralLoss(BaseLoss):
             "dct2d",
         ] = "fft2d",
         *,
+        subgrid: tuple[int, int | None] | None = None,
+        projection_config: object | None = None,
+        graph_data: HeteroData | None = None,
+        data_node_name: str = DEFAULT_DATASET_NAME,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -84,14 +95,26 @@ class SpectralLoss(BaseLoss):
         ----------
         transform
             Spectral transform type.
+        subgrid
+            Optional ``(start, end)`` slice applied to the grid before the transform;
+            ``end=None`` runs to the last gridpoint.
+        projection_config
+            Optional sparse-projection config applied after the slice and before the
+            transform. See
+            :meth:`~anemoi.models.layers.graph_provider.ProjectionGraphProvider.from_config`
+            for the supported modes.
+        graph_data
+            Model graph; required when *projection_config* uses edge or target-grid mode.
+        data_node_name
+            Node type in *graph_data* holding the data-grid coordinates.
         ignore_nans
-            Whether to ignore NaNs in the loss computation.
+            Must be False; spectral losses cannot handle missing values.
         scalers
-            Kept for Hydra/config backwards compatibility. This module does not
-            consume this argument directly (scaling is handled by BaseLoss).
+            Accepted for config backwards-compatibility; scaling is handled by BaseLoss.
         kwargs
-            Additional arguments for the spectral transform.
+            Forwarded to the spectral transform.
         """
+        assert not ignore_nans, "Spectral losses cannot handle missing values; ignore_nans must be False"
         BaseLoss.__init__(self, ignore_nans=ignore_nans)
 
         # Backwards-compatibility: older configs pass scalers to the loss ctor.
@@ -102,6 +125,24 @@ class SpectralLoss(BaseLoss):
         # Enforce loss to be calculated on full grids.
         self.supports_sharding = False
 
+        # subgrid selects a contiguous block of the grid before the transform. This only makes
+        # sense for the Cartesian transforms (FFT2D/DCT2D); spherical harmonic transforms need the
+        # whole domain to compute the spectra, so reject an explicit subgrid for them.
+        if subgrid is not None and transform in ("reduced_sht", "octahedral_sht"):
+            msg = (
+                f"subgrid is not supported for the '{transform}' transform: "
+                "spherical harmonic transforms require the full grid"
+            )
+            raise ValueError(msg)
+        self.subgrid = slice(*(subgrid or (0, None)))
+        self.projection_provider = ProjectionGraphProvider.from_config(
+            projection_config,
+            graph_data=graph_data,
+            data_node_name=data_node_name,
+        )
+        if self.projection_provider is not None:
+            self.projector = SparseProjector()
+
         if transform == "fft2d":
             LOGGER.info("Using FFT2D spectral transform in spectral loss.")
             self.transform = FFT2D(**kwargs)
@@ -110,24 +151,135 @@ class SpectralLoss(BaseLoss):
             self.transform = DCT2D(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
-            # optional args: truncation
+            # optional args: truncation, use_graphed_rfft
             LOGGER.info("Using ReducedSHT spectral transform in spectral loss.")
             self.transform = ReducedSHT(**kwargs)
         elif transform == "octahedral_sht":
             # expected additional args: nlat
-            # optional args: truncation
+            # optional args: truncation, use_graphed_rfft
             LOGGER.info("Using Octahedral SHT spectral transform in spectral loss.")
             self.transform = OctahedralSHT(**kwargs)
         else:
             msg = f"Unknown transform type: {transform}"
             raise ValueError(msg)
 
+    def _select_subgrid(self, x: torch.Tensor) -> torch.Tensor:
+        # Obtain a subgrid by slicing the grid dim as a view, avoiding an explicit index-tensor allocation.
+        index = [slice(None)] * x.ndim
+        index[TensorDim.GRID] = self.subgrid
+        return x[tuple(index)]
+
+    def _select_and_project(self, x: torch.Tensor) -> torch.Tensor:
+        x = self._select_subgrid(x)
+        LOGGER.debug("Spectral loss: shape after subgrid selection: %s", tuple(x.shape))
+        if self.projection_provider is not None:
+            x = self.projector.project(x, self.projection_provider)
+            LOGGER.debug("Spectral loss: shape after projection: %s", tuple(x.shape))
+        return x
+
+    def _to_spectral(self, x: torch.Tensor) -> torch.Tensor:
+        """Select the node subset and optionally project to the target grid, then transform to the spectral domain."""
+        return self.transform.forward(self._select_and_project(x))
+
     def _to_spectral_flat(self, x: torch.Tensor) -> torch.Tensor:
-        """Transform to spectral domain and flatten spectral dimensions."""
-        x_spec = self.transform.forward(x)
-        # flatten only transformed spatial/spectral dims into one "mode" axis
-        spatial_start_dim = x.ndim - 2
-        return x_spec.flatten(start_dim=spatial_start_dim, end_dim=-2)
+        """Transform to spectral domain and flatten the transformed dims into one "mode" axis."""
+        x_spec = self._to_spectral(x)
+        # the transform splits the single grid dim into two spectral dims; flatten them back to one
+        return x_spec.flatten(start_dim=x_spec.ndim - 3, end_dim=-2)
+
+
+class SpectralAMSELoss(SpectralLoss):
+    r"""Adjusted Mean Squared Error (AMSE) loss in spectral domain.
+
+    Implements the AMSE formula from Subich et al. (arXiv:2501.19374, 2025):
+
+    .. math::
+
+        \text{AMSE} = \sum_L \left[
+            \left( \sqrt{S^\text{pred}_L} - \sqrt{S^\text{target}_L} \right)^2
+            + 2 \max\!\left(S^\text{pred}_L,\, S^\text{target}_L\right)
+              \left(1 - \gamma_L \right)
+        \right]
+
+    where
+
+    .. math::
+
+        S_L = \sum_M \left| c_{L,M} \right|^2, \qquad
+        \gamma_L = \frac{
+            \operatorname{Re}\!\left[\sum_M c^\text{pred}_{L,M}
+                \overline{c^\text{target}_{L,M}}\right]
+        }{
+            \sqrt{S^\text{pred}_L}\,\sqrt{S^\text{target}_L} + \varepsilon
+        }.
+
+    The sum over :math:`M` is performed before the nonlinear AMSE computation.
+
+    The physical interpretation of :math:`L` and :math:`M` depends on the
+    spectral transform:
+
+    - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
+      and :math:`M` is the zonal wavenumber, consistent with the original paper.
+      The sum over :math:`M` gives per-total-wavenumber power spectra.
+    - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
+      implementations of ``power_spectral_density()`` and
+      ``cross_spectral_density()`` compatible with the AMSE formulation.
+    """
+
+    def __init__(self, *args, eps: float = 1e-8, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # assert if PSD is defined for the transform, since AMSE relies on it
+        assert hasattr(self.transform, "power_spectral_density") and callable(
+            self.transform.power_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a PSD method"
+        assert hasattr(self.transform, "cross_spectral_density") and callable(
+            self.transform.cross_spectral_density,
+        ), "spectral transform used in SpectralAdjustedMeanSquaredError must contain a cross-spectrum method"
+        self.eps = eps
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[int, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: ProcessGroup | None = None,
+        squash_mode: str = "avg",
+        **kwargs,
+    ) -> torch.Tensor:
+        del kwargs  # unused
+        is_sharded = grid_shard_slice is not None
+        group = group if is_sharded else None
+
+        with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+            # transform to spectral domain: [B, T, E, grid, vars] -> [B, T, E, L, M, vars]
+            # don't flatten to modes here since we need to calculate PSD and coherence per-L
+            pred_spec = self._to_spectral(pred)
+            target_spec = self._to_spectral(target)
+
+            # per-L PSD: [B, T, E, L, vars]
+            psd_pred = self.transform.power_spectral_density(pred_spec)
+            psd_target = self.transform.power_spectral_density(target_spec)
+            # cross-spectrum summed over M: [B, T, E, L, vars]
+            cross = self.transform.cross_spectral_density(pred_spec, target_spec)
+
+            amp_pred = torch.sqrt(psd_pred + self.eps)
+            amp_target = torch.sqrt(psd_target + self.eps)
+            coherence = cross / (amp_pred * amp_target + self.eps)
+
+            # per-L AMSE: [B, T, E, L, vars]
+            amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
+
+        result = self.scale(
+            amse_per_l,
+            scaler_indices,
+            without_scalers=_ensure_without_scalers_has_grid_dimension(without_scalers),
+            grid_shard_slice=grid_shard_slice,
+        )
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class SpectralL2Loss(SpectralLoss):
@@ -147,7 +299,7 @@ class SpectralL2Loss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
         del kwargs  # unused
@@ -181,7 +333,7 @@ class LogSpectralDistance(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -217,7 +369,7 @@ class FourierCorrelationLoss(SpectralLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
@@ -316,22 +468,21 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: str = "avg",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
         group = group if is_sharded else None
 
-        # → [..., modes, vars]
-        pred_spec = self._to_spectral_flat(pred)
-        tgt_spec = self._to_spectral_flat(target)
+        context = torch.amp.autocast(device_type=pred.device.type, enabled=False) if self.no_autocast else nullcontext()
+        with context:
+            # -> [..., modes, vars]
+            pred_spec = self._to_spectral_flat(pred)
+            tgt_spec = self._to_spectral_flat(target)
 
-        pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
-        tgt_spec = einops.rearrange(tgt_spec, "... m v -> (...) v m")  # remove ensemble dim for targets
-        if self.no_autocast:
-            with torch.amp.autocast(device_type="cuda", enabled=False):
-                crps = self._kernel_crps(pred_spec, tgt_spec)
-        else:
-            crps = self._kernel_crps(pred_spec, tgt_spec)
+            pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
+            tgt_spec = einops.rearrange(tgt_spec, "b t 1 m v -> b t v m 1")
+            crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
+
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
 
         scaled = self.scale(

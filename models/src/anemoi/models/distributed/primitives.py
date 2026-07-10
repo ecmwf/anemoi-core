@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -182,6 +182,51 @@ def _gather(
     return _gather_default(input_, dim_, sizes, group)
 
 
+def _expand_sharded_tensor(
+    input_: Tensor,
+    dim_: int,
+    sizes: ShardSizes,
+    group: Optional[ProcessGroup] = None,
+) -> Tensor:
+    """Expand a local shard to the gathered shape without communication.
+
+    Only the local rank slice is materialized from ``input_``. The remaining
+    slices are left uninitialized in the returned tensor.
+    """
+    if dist.get_world_size(group=group) == 1:
+        return input_
+
+    assert (
+        -input_.dim() <= dim_ < input_.dim()
+    ), f"Error, cannot expand along {dim_} for tensor with {input_.dim()} dimensions."
+
+    input_format = get_memory_format(input_)
+    input_ = input_.contiguous(memory_format=input_format)
+    dim = dim_ % input_.dim()
+    rank = dist.get_rank(group=group)
+
+    expected_local_size = sizes[rank]
+    assert input_.shape[dim] == expected_local_size, (
+        f"Error, expected local shard size {expected_local_size} along dimension {dim} "
+        f"for rank {rank}, but got {input_.shape[dim]}"
+    )
+
+    output_shape = list(input_.shape)
+    output_shape[dim] = sum(sizes)
+    output = torch.empty(
+        output_shape,
+        dtype=input_.dtype,
+        layout=input_.layout,
+        device=input_.device,
+        memory_format=input_format,
+    )
+
+    start = sum(sizes[:rank])
+    output.narrow(dim, start, expected_local_size).copy_(input_)
+
+    return output
+
+
 def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
@@ -287,17 +332,18 @@ def _alltoall_transpose(
     Tensor
         Result of the all-to-all exchange
     """
+    # normalise negative dims
+    ndim = input_.dim()
+    dim_split = dim_split % ndim
+    dim_concat = dim_concat % ndim
+    assert dim_split != dim_concat, "Error, all-to-all split and concat dimensions must be different."
+
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return input_
 
     myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
-
-    # normalise negative dims
-    ndim = input_.dim()
-    dim_split = dim_split % ndim
-    dim_concat = dim_concat % ndim
 
     # split input along dim_split
     input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]

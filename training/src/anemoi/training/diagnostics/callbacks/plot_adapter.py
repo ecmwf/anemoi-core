@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0
@@ -39,6 +39,15 @@ class BasePlotAdapter(ABC):
     def is_ensemble(self) -> bool:
         return False
 
+    @property
+    def default_plot_members(self) -> int | list[int] | None:
+        """Default ``members`` selection for plot callbacks that don't request a specific subset.
+
+        ``0`` (first member / deterministic view) for non-ensemble adapters;
+        overridden by :class:`EnsemblePlotAdapterWrapper` to select all members.
+        """
+        return 0
+
     def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
 
@@ -78,7 +87,8 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
-        for rollout_step in range(self._task.validation_rollout):
+        for validation_step_kwargs in self._task.steps("validation"):
+            rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
             output_data = data[output_time_indices, ...]
@@ -146,6 +156,11 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     def is_ensemble(self) -> bool:
         return True
 
+    @property
+    def default_plot_members(self) -> int | list[int] | None:
+        """All members by default for ensemble runs (``None`` = no selection/all)."""
+        return None
+
     def get_loss_plot_batch_start(self, **kwargs) -> int:
         return self._inner.get_loss_plot_batch_start(**kwargs)
 
@@ -158,9 +173,14 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         Parameters
         ----------
         tensor : Any
-            Tensor with shape (..., members, grid, vars)
+            Tensor with shape (..., members, grid, vars).
         members : int | list[int] | None
             Members to select. None returns all members, int/list selects specific members.
+
+        Returns
+        -------
+        Any
+            Tensor with selected ensemble members.
         """
         if members is None:
             return tensor
@@ -169,8 +189,8 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
         return tensor[:, :, members, ...]
 
     def prepare_loss_batch(self, batch: dict) -> dict:
-        """Squeeze ensemble dim to member 0 for loss plotting."""
-        return {dataset: data[:, :, 0, :, :] for dataset, data in batch.items()}
+        """Return the batch for loss plotting."""
+        return batch
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         yield from self._inner.iter_plot_samples(data, output_tensor)

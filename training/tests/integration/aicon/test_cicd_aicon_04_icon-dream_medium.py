@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,7 +12,6 @@
 # This script is not part of a productive ML workflow, but is
 # used for CI/CD!
 import os
-import pathlib
 from functools import reduce
 from operator import getitem
 
@@ -25,7 +24,6 @@ from hydra import initialize
 from omegaconf import DictConfig
 from typeguard import typechecked
 
-import anemoi.training
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
@@ -33,7 +31,6 @@ from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import skip_if_offline
 
 os.environ["ANEMOI_BASE_SEED"] = "42"
-os.environ["ANEMOI_CONFIG_PATH"] = str(pathlib.Path(anemoi.training.__file__).parent / "config")
 mpl.use("agg")
 
 
@@ -73,13 +70,16 @@ def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data:
 
 @pytest.fixture
 @typechecked
-def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float]:
+def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float, int]:
     """Train AICON and return testable objects."""
     trainer = AnemoiTrainer(aicon_config_with_grid)
     initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
     trainer.train()
     final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
-    return trainer, initial_sum, final_sum
+    nhidden_mesh_edges = trainer.model.model.graph_data["hidden", "to", "hidden"]["edge_index"].shape[
+        1
+    ]  # no. of hidden mesh edges
+    return trainer, initial_sum, final_sum, nhidden_mesh_edges
 
 
 @typechecked
@@ -152,8 +152,18 @@ def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
 @pytest.mark.slow
 @typechecked
 def test_aicon_training(trained_aicon: tuple) -> None:
-    _, initial_sum, final_sum = trained_aicon
+    _, initial_sum, final_sum, nhidden_mesh_edges = trained_aicon
     assert initial_sum != final_sum
+
+    # calculate number of multi-mesh edges for global ICON grid RnBm
+    n = 3
+    m = 4  # max_level_multimesh
+    nedges_hidden_total = 0
+    for k in range(m):
+        # no. of mesh edges for level k:
+        nedges_hidden_total += 30 * n**2 * 4**k
+    nedges_hidden_total *= 2  # bidirectional edges
+    assert nhidden_mesh_edges == nedges_hidden_total
 
 
 if __name__ == "__main__":
