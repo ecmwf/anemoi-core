@@ -24,6 +24,8 @@ except ImportError:
     from anemoi.models.triton.utils import fake_tl_type as tl
     from anemoi.models.triton.utils import fake_triton_annotation as triton
 
+if TRITON_AVAILABLE:
+    from anemoi.models.triton.utils import torch_dtype_to_triton
 
 @triton.jit
 def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
@@ -434,16 +436,6 @@ class GraphTransformerFunction(torch.autograd.Function):
         N_src = k.shape[0]
 
         # Infer gradient dtype from incoming gradient tensor
-        def torch_dtype_to_triton(dtype):
-            if dtype == torch.float16:
-                return tl.float16
-            elif dtype == torch.bfloat16:
-                return tl.bfloat16
-            elif dtype == torch.float32:
-                return tl.float32
-            else:
-                raise ValueError(f"Unsupported dtype: {dtype}")
-
         grad_dtype = torch_dtype_to_triton(d_out.dtype)
 
         # Allocate grads and intermediates

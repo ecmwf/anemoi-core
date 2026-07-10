@@ -52,6 +52,10 @@ class FakeTLType:
     """
 
     constexpr = object
+    #similarly, guard against 'tl.float16' etc. invocations
+    float16 = object
+    bfloat16 = object
+    float32 = object
 
 
 fake_triton_annotation = FakeTritonAnnotation()
@@ -121,3 +125,15 @@ def is_triton_available():
     gpus_present = torch.cuda.is_available()
 
     return triton_available and gpus_present
+
+def torch_dtype_to_triton(dtype):
+    """ Converts from torch dtype to corresponding triton type."""
+    if dtype == torch.float16:
+        return tl.float16
+    elif dtype == torch.bfloat16:
+        return tl.bfloat16
+    elif dtype == torch.float32:
+        return tl.float32
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
