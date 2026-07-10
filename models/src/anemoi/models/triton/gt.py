@@ -27,6 +27,7 @@ except ImportError:
 if TRITON_AVAILABLE:
     from anemoi.models.triton.utils import torch_dtype_to_triton
 
+
 @triton.jit
 def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
     """Pads H and C to the nearest power of 2 if needed.
