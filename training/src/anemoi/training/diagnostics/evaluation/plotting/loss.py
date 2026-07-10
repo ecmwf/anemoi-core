@@ -8,8 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import Any
-from typing import Protocol
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -20,39 +18,6 @@ from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 from anemoi.training.diagnostics.evaluation.plotting.settings import argsort_variablename_variablelevel
 
 LOGGER = logging.getLogger(__name__)
-
-
-class LossPlotFn(Protocol):
-    """Typing Protocol for :class:`PlotLoss`-compatible plot functions.
-
-    Implementations receive the raw per-variable loss array in the model's
-    output order plus the naming/grouping context, and return a single
-    :class:`~matplotlib.figure.Figure`.
-
-    The callback additionally forwards per-rollout-step context
-    (``step_index``, ``metric_name``, ``task_kwargs``) so that functions such
-    as a per-step annotated bar chart can title/label figures without having
-    to hard-code the rollout schedule. Implementations are free to ignore any
-    of these — the recommended shape is ``**kwargs`` catch-all — but the
-    parameters are declared here so that IDE/mypy signatures document what is
-    passed through. Any additional keyword arguments bound via the
-    ``plot_fn:`` YAML block (``_partial_: true``) are also forwarded through
-    ``**kwargs``.
-    """
-
-    def __call__(
-        self,
-        loss: np.ndarray,
-        *,
-        parameter_names: list[str],
-        parameter_groups: dict[str, list[str]] | None = None,
-        metadata_variables: dict | None = None,
-        step_index: int | None = None,
-        metric_name: str | None = None,
-        task_kwargs: dict | None = None,
-        settings: Any = None,
-        **kwargs: Any,
-    ) -> Figure: ...
 
 
 def sort_and_color_by_parameter_group(

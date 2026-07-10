@@ -492,15 +492,13 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
 
     The visualization function is supplied via ``plot_fn`` and follows the
     same pluggable pattern as :class:`SpatialMapPlot` and :class:`PlotLoss`.
-    ``plot_fn`` must match the
-    :class:`anemoi.training.diagnostics.evaluation.plotting.graph.GraphPlotFn`
-    protocol and yield ``(figure, tag)`` pairs.
+    ``plot_fn`` must yield ``(figure, tag)`` pairs.
 
     The callback resolves the underlying model and forwards **only**
     already-extracted graph artifacts to ``plot_fn`` (never the raw model
-    object) — see :class:`GraphPlotFn` for the full list of kwargs::
+    object)::
 
-        fn(dataset_name, *, node_attributes, node_trainable_tensors,
+        fn(*, dataset_name, node_attributes, node_trainable_tensors,
            edge_trainable_modules, q_extreme_limit, settings, **kwargs)
             -> Iterable[tuple[Figure, str]]
 
@@ -573,11 +571,9 @@ class PlotLoss(BasePerBatchPlotCallback):
     """Plots the unsqueezed loss over rollouts.
 
     The visualization function is supplied via ``plot_fn`` following the same
-    pluggable pattern as :class:`SpatialMapPlot`. It must match the
-    :class:`anemoi.training.diagnostics.evaluation.plotting.loss.LossPlotFn`
-    protocol and receives the raw per-variable loss array plus the parameter
-    naming/grouping context; it is free to decide how (or whether) to sort,
-    group, colour and render::
+    pluggable pattern as :class:`SpatialMapPlot`. It receives the raw
+    per-variable loss array plus the parameter naming/grouping context, and
+    is free to decide how (or whether) to sort, group, colour and render::
 
         fn(loss, *, parameter_names, parameter_groups, metadata_variables,
            step_index, metric_name, task_kwargs, settings, **kwargs)
@@ -888,10 +884,10 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
 
     Handles the shared plumbing (per-dataset loop, ``process()``, focus mask,
     ``iter_plot_samples``, figure output, tag naming) for any plot function
-    conforming to
-    :class:`anemoi.training.diagnostics.evaluation.plotting.spatial_map.SpatialMapPlotFn`.
-    New spatial plots can be added by writing that function and pointing to it
-    from YAML — no callback subclass or schema entry required.
+    conforming to the ``SpatialMapPlot`` ``plot_fn`` contract (see
+    ``docs/modules/diagnostics.rst``). New spatial plots can be added by
+    writing that function and pointing to it from YAML — no callback subclass
+    or schema entry required.
 
     Example
     -------
@@ -928,7 +924,8 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
         ----------
         plot_fn : Callable
             Plot function (typically a ``functools.partial`` from Hydra with
-            ``_partial_: true``) matching the ``SpatialMapPlotFn`` protocol.
+            ``_partial_: true``) matching the ``SpatialMapPlot`` ``plot_fn``
+            contract documented in ``docs/modules/diagnostics.rst``.
         tag_infix : str
             Short tag inserted into the logged artifact name to distinguish
             this callback's outputs (e.g. ``"sample"``, ``"spec"``, ``"histo"``).

@@ -210,11 +210,10 @@ The bundled adapters live in
 - ``histogram_plot_fn`` — per-variable histograms (former ``PlotHistogram``).
 - ``ensemble_plot_fn`` — ensemble member plot (former ``PlotEnsSample``).
 
-Each ``plot_fn`` follows the
-:class:`~anemoi.training.diagnostics.evaluation.plotting.spatial_map.SpatialMapPlotFn`
-protocol and receives keyword-only arguments (``x``, ``y_true``, ``y_pred``,
-``latlons``, ``auxiliary``, ``settings``, plus any plot-specific kwargs bound
-in YAML via ``_partial_: true``).
+Each ``plot_fn`` receives keyword-only arguments (``x``, ``y_true``,
+``y_pred``, ``latlons``, ``auxiliary``, ``settings``, plus any plot-specific
+kwargs bound in YAML via ``_partial_: true``). The full signature is
+documented in `Plot function contracts`_ below.
 
 .. code:: yaml
 
@@ -239,6 +238,10 @@ function. All three contracts accept a ``settings`` argument (a
 ``colormaps``, ``precip_and_related_fields``, ``asynchronous``) and
 ``**kwargs`` so future additions do not break existing implementations.
 
+There is no runtime type-check on ``plot_fn``: a mismatched signature
+surfaces as a ``TypeError`` on the first call. The contracts below are the
+canonical spec.
+
 Layers and data flow
 ....................
 
@@ -256,11 +259,6 @@ Each of the three pluggable callbacks (``PlotLoss``, ``SpatialMapPlot``,
       │  returns a dict of kwargs                       model_introspection.py)
       ▼
     self.plot_fn(**inputs, **extras)                   ← call site
-      │
-      │  signature declared by
-      ▼
-    <Family>PlotFn (Protocol)                          (evaluation/plotting/
-                                                        {loss,graph,spatial_map}.py)
 
 Concretely:
 
@@ -268,30 +266,26 @@ Concretely:
   the matching ``extract_*_inputs`` helper.
 - ``model_introspection.extract_*_inputs`` is the **only** place that pokes
   at ``pl_module`` (data indices, metadata, graph). It returns a plain
-  ``dict`` whose keys match the corresponding Protocol's kwargs.
+  ``dict`` whose keys match the ``plot_fn`` signature below.
 - The callback splats the dict into ``plot_fn`` alongside per-step extras
   (loss array, ``x``/``y_true``/``y_pred``, ``settings``, …).
-- The Protocol declares the ``plot_fn`` signature so mypy / IDEs can verify
-  custom plot functions.
 
 Family-to-artifact mapping:
 
-+---------------------------------+----------------------------+--------------------------+
-| Callback                        | ``extract_*_inputs`` helper| Protocol                 |
-+=================================+============================+==========================+
-| ``PlotLoss``                    | ``extract_loss_inputs``    | ``LossPlotFn``           |
-+---------------------------------+----------------------------+--------------------------+
-| ``SpatialMapPlot``              | ``extract_spatial_inputs`` | ``SpatialMapPlotFn``     |
-+---------------------------------+----------------------------+--------------------------+
-| ``GraphTrainableFeaturesPlot``  | ``extract_graph_inputs``   | ``GraphPlotFn``          |
-+---------------------------------+----------------------------+--------------------------+
++---------------------------------+-----------------------------+
+| Callback                        | ``extract_*_inputs`` helper |
++=================================+=============================+
+| ``PlotLoss``                    | ``extract_loss_inputs``     |
++---------------------------------+-----------------------------+
+| ``SpatialMapPlot``              | ``extract_spatial_inputs``  |
++---------------------------------+-----------------------------+
+| ``GraphTrainableFeaturesPlot``  | ``extract_graph_inputs``    |
++---------------------------------+-----------------------------+
 
 ``SpatialMapPlot`` — per-sample, per-dataset figures
 ....................................................
 
 Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot`.
-Protocol:
-:class:`~anemoi.training.diagnostics.evaluation.plotting.spatial_map.SpatialMapPlotFn`.
 
 .. code:: python
 
@@ -322,8 +316,6 @@ Contract notes:
 ..................................................
 
 Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.PlotLoss`.
-Protocol:
-:class:`~anemoi.training.diagnostics.evaluation.plotting.loss.LossPlotFn`.
 Default: ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``.
 
 .. code:: python
@@ -355,8 +347,6 @@ Contract notes:
 
 Callback:
 :class:`~anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot`.
-Protocol:
-:class:`~anemoi.training.diagnostics.evaluation.plotting.graph.GraphPlotFn`.
 Default: ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``.
 
 .. code:: python
@@ -389,9 +379,9 @@ Contract notes:
 Adding a new spatial-map plot
 -----------------------------
 
-To add a new plot type, write a function matching the ``SpatialMapPlotFn``
-signature and reference it from YAML — no new callback class or Pydantic
-schema is required.
+To add a new plot type, write a function matching the ``SpatialMapPlot``
+``plot_fn`` signature (see `Plot function contracts`_) and reference it from
+YAML — no new callback class or Pydantic schema is required.
 
 1. Implement the plot function (in your project or in
    ``anemoi.training.diagnostics.evaluation.plotting``):

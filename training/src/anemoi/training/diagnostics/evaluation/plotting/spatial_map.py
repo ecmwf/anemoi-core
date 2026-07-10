@@ -34,37 +34,11 @@ Bind plot-specific kwargs (e.g. ``per_sample``, ``min_delta``, ``log_scale``,
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing import Any
-from typing import Protocol
-
-if TYPE_CHECKING:
-    import numpy as np
-    from matplotlib.figure import Figure
-
-
-class SpatialMapPlotFn(Protocol):
-    """Typing Protocol for :class:`SpatialMapPlot`-compatible plot functions."""
-
-    def __call__(
-        self,
-        parameters: dict[int, tuple[str, bool]],
-        *,
-        x: "np.ndarray",
-        y_true: "np.ndarray | None",
-        y_pred: "np.ndarray",
-        latlons: "np.ndarray | None" = None,
-        auxiliary: "np.ndarray | None" = None,
-        settings: Any = None,
-        **kwargs: Any,
-    ) -> "Figure": ...
-
-
 # --- Thin adapters around the existing evaluation.plotting.* functions ------
 #
 # These preserve the current visual output while letting all four map-style
-# plots be driven by a single callback. Users writing new plots should target
-# :class:`SpatialMapPlotFn` directly rather than importing these adapters.
+# plots be driven by a single callback. See the "Plot function contracts"
+# section of docs/modules/diagnostics.rst for the expected plot_fn signature.
 
 
 def sample_plot_fn(
