@@ -239,6 +239,53 @@ function. All three contracts accept a ``settings`` argument (a
 ``colormaps``, ``precip_and_related_fields``, ``asynchronous``) and
 ``**kwargs`` so future additions do not break existing implementations.
 
+Layers and data flow
+....................
+
+Each of the three pluggable callbacks (``PlotLoss``, ``SpatialMapPlot``,
+``GraphTrainableFeaturesPlot``) has the same three-layer shape:
+
+.. code:: text
+
+    YAML config
+      │  (Hydra + `_partial_: true` build a functools.partial)
+      ▼
+    Callback._plot(pl_module, ...)                     (callbacks/plot.py)
+      │
+      │  extract_<family>_inputs(pl_module, ...)       (evaluation/plotting/
+      │  returns a dict of kwargs                       model_introspection.py)
+      ▼
+    self.plot_fn(**inputs, **extras)                   ← call site
+      │
+      │  signature declared by
+      ▼
+    <Family>PlotFn (Protocol)                          (evaluation/plotting/
+                                                        {loss,graph,spatial_map}.py)
+
+Concretely:
+
+- ``Callback._plot`` is the Lightning glue. It reads the batch and calls
+  the matching ``extract_*_inputs`` helper.
+- ``model_introspection.extract_*_inputs`` is the **only** place that pokes
+  at ``pl_module`` (data indices, metadata, graph). It returns a plain
+  ``dict`` whose keys match the corresponding Protocol's kwargs.
+- The callback splats the dict into ``plot_fn`` alongside per-step extras
+  (loss array, ``x``/``y_true``/``y_pred``, ``settings``, …).
+- The Protocol declares the ``plot_fn`` signature so mypy / IDEs can verify
+  custom plot functions.
+
+Family-to-artifact mapping:
+
++---------------------------------+----------------------------+--------------------------+
+| Callback                        | ``extract_*_inputs`` helper| Protocol                 |
++=================================+============================+==========================+
+| ``PlotLoss``                    | ``extract_loss_inputs``    | ``LossPlotFn``           |
++---------------------------------+----------------------------+--------------------------+
+| ``SpatialMapPlot``              | ``extract_spatial_inputs`` | ``SpatialMapPlotFn``     |
++---------------------------------+----------------------------+--------------------------+
+| ``GraphTrainableFeaturesPlot``  | ``extract_graph_inputs``   | ``GraphPlotFn``          |
++---------------------------------+----------------------------+--------------------------+
+
 ``SpatialMapPlot`` — per-sample, per-dataset figures
 ....................................................
 
@@ -315,9 +362,11 @@ Default: ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``
 .. code:: python
 
    def plot_fn(
-       model: torch.nn.Module,              # pl_module.model
-       dataset_name: str,
        *,
+       dataset_name: str,
+       node_attributes: NamedNodesAttributes,
+       node_trainable_tensors: dict[str, torch.Tensor],
+       edge_trainable_modules: dict[tuple[str, str], torch.nn.Module],
        q_extreme_limit: float = 0.05,
        settings: PlottingSettings | None = None,
        **kwargs,
@@ -329,9 +378,13 @@ Contract notes:
   ``(figure, tag)`` pairs. This lets a single call emit multiple figures
   (e.g. one for node features, one for edge features) under distinct
   logging tags.
-- ``model`` gives direct access to ``model.node_attributes`` and any
-  encoder/processor/decoder submodules — no adapter layer sits between
-  the callback and the graph.
+- ``GraphTrainableFeaturesPlot`` extracts the graph artifacts once via
+  ``extract_graph_inputs`` (unwrapping any DDP wrapper) and passes them
+  as keyword arguments; the plot function never sees the raw model.
+- ``edge_trainable_modules`` is empty for hierarchical models (they carry
+  no trainable edge parameters); ``node_trainable_tensors`` is empty when
+  no trainable node attributes are defined. The default ``graph_plot_fn``
+  logs a warning and skips the corresponding figure in that case.
 
 Adding a new spatial-map plot
 -----------------------------

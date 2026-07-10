@@ -18,18 +18,88 @@ import numpy as np
 import pytest
 import torch
 
+from functools import partial
+
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
-from anemoi.training.diagnostics.callbacks.plot import PlotEnsSample
-from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
 from anemoi.training.diagnostics.callbacks.plot import PlotLoss
-from anemoi.training.diagnostics.callbacks.plot import PlotSample
-from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
+from anemoi.training.diagnostics.callbacks.plot import SpatialMapPlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
+from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
+from anemoi.training.diagnostics.evaluation.plotting.spatial_map import ensemble_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.spatial_map import histogram_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.spatial_map import sample_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.spatial_map import spectrum_plot_fn
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
+
+
+# --- Legacy-name shims used only by this test module ------------------------
+#
+# The historic PlotSample/PlotEnsSample/PlotHistogram/PlotSpectrum callback
+# classes were consolidated into a single SpatialMapPlot callback + pluggable
+# ``plot_fn``. These shim factories rebuild the old-style constructors so
+# the existing test bodies keep working without touching every call site.
+def _wrap_plot_callback(*, plot_fn, tag_infix, with_auxiliary=False, plot_fn_kwargs=None):
+    """Return a callable that builds a SpatialMapPlot wired to ``plot_fn``.
+
+    ``plot_fn_kwargs`` is a mapping of legacy kwargs → default sentinel that
+    the constructor pops from ``**kwargs``, binds into ``plot_fn`` via
+    ``functools.partial`` (dropping ``None`` values), and mirrors as
+    attributes on the callback so legacy assertions such as ``callback.log_scale``
+    keep working.
+    """
+
+    plot_fn_kwargs = plot_fn_kwargs or {}
+
+    def _factory(**kwargs):
+        bound = {}
+        for name, default in plot_fn_kwargs.items():
+            if name in kwargs:
+                bound[name] = kwargs.pop(name)
+            else:
+                bound.setdefault(name, default)
+        cb = SpatialMapPlot(
+            plot_fn=partial(plot_fn, **{k: v for k, v in bound.items() if v is not None}) or plot_fn,
+            tag_infix=tag_infix,
+            with_auxiliary=with_auxiliary,
+            **kwargs,
+        )
+        for name, value in bound.items():
+            setattr(cb, name, value)
+        return cb
+
+    return _factory
+
+
+PlotSample = _wrap_plot_callback(
+    plot_fn=sample_plot_fn,
+    tag_infix="sample",
+    with_auxiliary=True,
+    # legacy tests occasionally pass ensemble-only kwargs to PlotSample; accept-and-ignore
+    plot_fn_kwargs={"accumulation_levels_plot": None, "plot_members": None},
+)
+PlotEnsSample = _wrap_plot_callback(
+    plot_fn=ensemble_plot_fn,
+    tag_infix="ens_sample",
+    plot_fn_kwargs={
+        "accumulation_levels_plot": None,
+        "n_plots_per_sample": 4,
+        "plot_members": None,
+    },
+)
+PlotHistogram = _wrap_plot_callback(
+    plot_fn=histogram_plot_fn,
+    tag_infix="histo",
+    plot_fn_kwargs={"log_scale": False, "precip_and_related_fields": None},
+)
+PlotSpectrum = _wrap_plot_callback(
+    plot_fn=spectrum_plot_fn,
+    tag_infix="spec",
+    plot_fn_kwargs={"min_delta": None},
+)
 
 # Suite of Unit Tests for Plotting Callbacks
 # ------------------------------------------
@@ -92,7 +162,7 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
     model.decoder_graph_provider = None
     model.processor_graph_provider = NoOpGraphProvider()
 
-    edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
+    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
 
     assert edge_modules == {}
 
@@ -113,7 +183,7 @@ def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
     model.decoder_graph_provider = NoOpGraphProvider()
     model.processor_graph_provider = NoOpGraphProvider()
 
-    edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
+    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
 
     assert edge_modules == {}
 
@@ -137,7 +207,7 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
     model.decoder_graph_provider = {"other": TrainableProvider()}
     model.processor_graph_provider = None
 
-    edge_modules = callback.get_edge_trainable_modules(model, dataset_name="data")
+    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
 
     assert edge_modules == {}
 
@@ -549,10 +619,11 @@ _PLOT_LOSS_CONFIG = {
 
 
 def test_plot_loss_sort_and_color_by_parameter_group_small_list():
-    """PlotLoss.sort_and_color_by_parameter_group: <=15 params returns identity sort and correct output shapes."""
-    callback = PlotLoss(parameter_groups={})
+    """sort_and_color_by_parameter_group: <=15 params returns identity sort and correct output shapes."""
+    from anemoi.training.diagnostics.evaluation.plotting.loss import sort_and_color_by_parameter_group
+
     parameter_names = ["t2m", "tp", "u10", "v10"]
-    sort_idx, colors, xticks, legend_patches = callback.sort_and_color_by_parameter_group(parameter_names)
+    sort_idx, colors, xticks, legend_patches = sort_and_color_by_parameter_group(parameter_names, {})
 
     assert sort_idx.shape == (len(parameter_names),)
     assert np.array_equal(sort_idx, np.arange(len(parameter_names)))
@@ -564,16 +635,16 @@ def test_plot_loss_sort_and_color_by_parameter_group_small_list():
 
 
 def test_plot_loss_sort_and_color_by_parameter_group_with_groups():
-    """PlotLoss.sort_and_color_by_parameter_group: with parameter_groups and >15 params returns grouped sort."""
-    callback = PlotLoss(
-        parameter_groups={
-            "pressure": ["tp", "sp"] + [f"p{i}" for i in range(6)],
-            "wind": ["u10", "v10"] + [f"w{i}" for i in range(6)],
-        },
-    )
+    """sort_and_color_by_parameter_group: with parameter_groups and >15 params returns grouped sort."""
+    from anemoi.training.diagnostics.evaluation.plotting.loss import sort_and_color_by_parameter_group
+
+    parameter_groups = {
+        "pressure": ["tp", "sp"] + [f"p{i}" for i in range(6)],
+        "wind": ["u10", "v10"] + [f"w{i}" for i in range(6)],
+    }
     # >15 parameters to trigger the grouping branch (<=15 keeps each param as its own group)
     parameter_names = ["tp", "sp", "p0", "p1", "p2", "p3", "p4", "p5", "u10", "v10", "w0", "w1", "w2", "w3", "w4", "w5"]
-    sort_idx, colors, xticks, legend_patches = callback.sort_and_color_by_parameter_group(parameter_names)
+    sort_idx, colors, xticks, legend_patches = sort_and_color_by_parameter_group(parameter_names, parameter_groups)
 
     assert sort_idx.shape == (len(parameter_names),)
     assert len(colors) == len(parameter_names)
@@ -614,10 +685,10 @@ def test_plot_loss_temporal_downscaler():
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
         patch(
-            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            "anemoi.training.diagnostics.evaluation.plotting.loss.argsort_variablename_variablelevel",
             return_value=np.arange(nvar),
         ),
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.loss.plot_loss", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -672,10 +743,10 @@ def test_plot_loss_single_step_transport():
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
         patch(
-            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            "anemoi.training.diagnostics.evaluation.plotting.loss.argsort_variablename_variablelevel",
             return_value=np.arange(nvar),
         ),
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.loss.plot_loss", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -732,10 +803,10 @@ def test_plot_loss_forecaster():
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
         patch(
-            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            "anemoi.training.diagnostics.evaluation.plotting.loss.argsort_variablename_variablelevel",
             return_value=np.arange(nvar),
         ),
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.loss.plot_loss", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -785,10 +856,10 @@ def test_plot_loss_accepts_processed_cache_kwarg():
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
         patch(
-            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            "anemoi.training.diagnostics.evaluation.plotting.loss.argsort_variablename_variablelevel",
             return_value=np.arange(nvar),
         ),
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.loss.plot_loss", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -833,7 +904,7 @@ def test_plot_spectrum_temporal_downscaler():
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_power_spectrum", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.spectrum.plot_power_spectrum", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -877,7 +948,7 @@ def test_plot_spectrum_forecaster():
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_power_spectrum", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.spectrum.plot_power_spectrum", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -922,7 +993,7 @@ def test_plot_histogram_temporal_downscaler():
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_histogram", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.histogram.plot_histogram", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -966,7 +1037,7 @@ def test_plot_histogram_forecaster():
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
-        patch("anemoi.training.diagnostics.callbacks.plot.plot_histogram", return_value=MagicMock()),
+        patch("anemoi.training.diagnostics.evaluation.plotting.histogram.plot_histogram", return_value=MagicMock()),
     ):
         callback._plot(
             trainer,
@@ -998,7 +1069,7 @@ def test_plots_plot_loss_returns_figure():
     import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_loss
+    from anemoi.training.diagnostics.evaluation.plotting.loss import plot_loss
 
     x = np.array([0.1, 0.2, 0.15, 0.25])
     colors = np.array(["C0", "C1", "C2", "C3"])
@@ -1017,7 +1088,7 @@ def test_plots_plot_histogram_returns_figure():
     """plot_histogram returns a Figure and runs without error."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_histogram
+    from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
 
     # parameters: variable_idx -> (variable_name, diagnostic_only)
     parameters = {0: ("t2m", False), 1: ("tp", True)}
@@ -1047,7 +1118,7 @@ def test_plots_plot_power_spectrum_returns_figure():
     """plot_power_spectrum returns a Figure and runs without error."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_power_spectrum
+    from anemoi.training.diagnostics.evaluation.plotting.spectrum import plot_power_spectrum
 
     # parameters: variable_idx -> (variable_name, diagnostic_only)
     parameters = {0: ("t2m", False), 1: ("tp", True)}
@@ -1075,7 +1146,7 @@ def test_plots_plot_predicted_multilevel_flat_sample_returns_figure():
     """plot_predicted_multilevel_flat_sample returns a Figure and runs without error."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     parameters = {0: ("t2m", True), 1: ("tp", False)}
     n_plots_per_sample = 6
@@ -1110,7 +1181,7 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
     """plot_predicted_multilevel_flat_sample can add the corrupted-target panel."""
     import matplotlib.pyplot as plt
 
-    from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     parameters = {0: ("t2m", False), 1: ("tp", True)}
     nlatlon, nvar = 12, 2

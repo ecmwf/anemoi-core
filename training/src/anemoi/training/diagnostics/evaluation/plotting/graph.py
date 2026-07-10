@@ -58,8 +58,8 @@ class GraphPlotFn(Protocol):
 
     def __call__(
         self,
-        dataset_name: str,
         *,
+        dataset_name: str,
         node_attributes: "NamedNodesAttributes",
         node_trainable_tensors: dict[str, Tensor],
         edge_trainable_modules: dict[tuple[str, str], Any],
@@ -295,8 +295,8 @@ def plot_graph_edge_features(
 
 
 def graph_plot_fn(
-    dataset_name: str,
     *,
+    dataset_name: str,
     node_attributes: NamedNodesAttributes,
     node_trainable_tensors: dict[str, Tensor],
     edge_trainable_modules: dict[tuple[str, str], Any],

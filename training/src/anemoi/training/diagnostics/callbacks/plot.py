@@ -31,10 +31,11 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
-from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
-from anemoi.training.diagnostics.evaluation.plotting.graph import get_node_trainable_tensors
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
+from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
+from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_spatial_inputs
 from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_settings
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
@@ -551,17 +552,11 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         epoch: int,
     ) -> None:
         _ = epoch
-        model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
-
-        node_trainable_tensors = get_node_trainable_tensors(model.node_attributes)
 
         for dataset_name in dataset_names:
-            edge_trainable_modules = get_edge_trainable_modules(model, dataset_name)
+            graph_inputs = extract_graph_inputs(pl_module, dataset_name)
             for fig, tag in self.plot_fn(
-                dataset_name,
-                node_attributes=model.node_attributes,
-                node_trainable_tensors=node_trainable_tensors,
-                edge_trainable_modules=edge_trainable_modules,
+                **graph_inputs,
                 q_extreme_limit=self.q_extreme_limit,
                 settings=self.plotting_settings,
             ):
@@ -654,14 +649,7 @@ class PlotLoss(BasePerBatchPlotCallback):
             self.latlons = {}
 
         for dataset_name in dataset_names:
-
-            data_indices = pl_module.data_indices[dataset_name]
-            parameter_names = list[str](data_indices.model.output.name_to_index.keys())
-            parameter_positions = list[int](data_indices.model.output.name_to_index.values())
-            # reorder parameter_names by position
-            parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
-            metadata = pl_module.model.metadata
-            metadata_variables = metadata["dataset"].get("variables_metadata") if metadata is not None else None
+            loss_inputs = extract_loss_inputs(pl_module, dataset_name, self.parameter_groups)
 
             if not isinstance(self.loss[dataset_name], BaseLoss):
                 LOGGER.warning(
@@ -692,9 +680,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 metric_name = pl_module.task.get_metric_name(**task_kwargs)
                 fig = self.plot_fn(
                     loss,
-                    parameter_names=parameter_names,
-                    parameter_groups=self.parameter_groups,
-                    metadata_variables=metadata_variables,
+                    **loss_inputs,
                     step_index=i,
                     metric_name=metric_name,
                     task_kwargs=task_kwargs,
@@ -1003,13 +989,7 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
         local_rank = pl_module.local_rank
 
         for dataset_name in dataset_names:
-            input_data = pl_module.data_indices[dataset_name].data.input.todict()
-            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
-            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
-            plot_parameters_dict = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (name, name in diagnostics)
-                for name in self.parameters
-            }
+            spatial_inputs = extract_spatial_inputs(pl_module, dataset_name, self.parameters)
 
             data, output_tensor = self.process(
                 pl_module,
@@ -1048,7 +1028,7 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
 
             for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
                 fig = self.plot_fn(
-                    plot_parameters_dict,
+                    **spatial_inputs,
                     x=x,
                     y_true=y_true,
                     y_pred=y_pred,
