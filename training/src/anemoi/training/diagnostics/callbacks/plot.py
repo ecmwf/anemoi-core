@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib.animation as animation
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
@@ -33,12 +32,14 @@ from pydantic import BaseModel as PydanticBaseModel
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
-from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
+from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
+from anemoi.training.diagnostics.evaluation.plotting.graph import get_node_trainable_tensors
 from anemoi.training.diagnostics.evaluation.plotting.graph import plot_graph_edge_features
 from anemoi.training.diagnostics.evaluation.plotting.graph import plot_graph_node_features
 from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
 from anemoi.training.diagnostics.evaluation.plotting.loss import plot_loss
+from anemoi.training.diagnostics.evaluation.plotting.loss import sort_and_color_by_parameter_group
 from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 from anemoi.training.diagnostics.evaluation.plotting.settings import argsort_variablename_variablelevel
 from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_settings
@@ -499,60 +500,6 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         )
         self.q_extreme_limit = q_extreme_limit
 
-    def get_node_trainable_tensors(self, node_attributes: NamedNodesAttributes) -> dict[str, torch.Tensor]:
-        return {
-            name: tt.trainable for name, tt in node_attributes.trainable_tensors.items() if tt.trainable is not None
-        }
-
-    @staticmethod
-    def _resolve_edge_provider(provider: Any, dataset_name: str) -> Any:
-        if provider is None:
-            return None
-        if isinstance(provider, (dict, torch.nn.ModuleDict)):
-            if dataset_name in provider:
-                return provider[dataset_name]
-            return None
-        return provider
-
-    @staticmethod
-    def _has_trainable_edge_params(provider: Any) -> bool:
-        if provider is None:
-            return False
-        trainable_module = getattr(provider, "trainable", None)
-        if trainable_module is None:
-            return False
-        # Graph providers has TrainableTensor -> .trainable;
-        # parameter is nested as .trainable.trainable.
-        trainable_parameter = getattr(trainable_module, "trainable", None)
-        return trainable_parameter is not None
-
-    def get_edge_trainable_modules(
-        self,
-        model: torch.nn.Module,
-        dataset_name: str,
-    ) -> dict[tuple[str, str], torch.Tensor]:
-        # `_graph_name_data` and `_graph_name_hidden` above are the keys for different
-        # layers of nodes in the graphs obtained from the config (e.g., "data", "hidden").
-        # They are not themselves dictionaries; but the identifiers of the dictionaries
-        # of graphs. That is, the “dictionarification” happens one level down.
-        # Here, they are used as keys to track and label different parts of the model
-        # in the plots for one dataset.
-        # Therefore, we don't select `dataset_name` for the `_graph_name_xy`,
-        # but only for the modules (encoder/processor/decoder).
-        trainable_modules = {}
-
-        provider_specs = (
-            ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
-            ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
-            ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
-        )
-        for provider_name, edge_key in provider_specs:
-            provider = self._resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
-            if self._has_trainable_edge_params(provider):
-                trainable_modules[edge_key] = provider
-
-        return trainable_modules
-
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -562,7 +509,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
     ) -> None:
         _ = epoch
         model = pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
-        node_trainable_tensors = self.get_node_trainable_tensors(model.node_attributes)
+        node_trainable_tensors = get_node_trainable_tensors(model.node_attributes)
 
         for dataset_name in dataset_names:
             if dataset_name in node_trainable_tensors and node_trainable_tensors[dataset_name] is not None:
@@ -588,7 +535,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 LOGGER.warning(
                     "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
                 )
-            elif len(edge_trainable_modules := self.get_edge_trainable_modules(model, dataset_name)):
+            elif len(edge_trainable_modules := get_edge_trainable_modules(model, dataset_name)):
                 fig = plot_graph_edge_features(
                     model.node_attributes,
                     edge_trainable_modules,
@@ -639,104 +586,6 @@ class PlotLoss(BasePerBatchPlotCallback):
         if self.parameter_groups is None:
             self.parameter_groups = {}
 
-    def sort_and_color_by_parameter_group(
-        self,
-        parameter_names: list[str],
-    ) -> tuple[np.ndarray, np.ndarray, dict, list]:
-        """Sort parameters by group and prepare colors."""
-
-        def automatically_determine_group(name: str) -> str:
-            # first prefix of parameter name is group name
-            parts = name.split("_")
-            if len(parts) == 1:
-                # if no underscore is present, return full name
-                return parts[0]
-            # else remove last part of name
-            return name[: -len(parts[-1]) - 1]
-
-        # group parameters by their determined group name for > 15 parameters
-        if len(parameter_names) <= 15:
-            # for <= 15 parameters, keep the full name of parameters
-            parameters_to_groups = np.array(parameter_names)
-            sort_by_parameter_group = np.arange(len(parameter_names), dtype=int)
-        else:
-            parameters_to_groups = np.array(
-                [
-                    next(
-                        (
-                            group_name
-                            for group_name, group_parameters in self.parameter_groups.items()
-                            if name in group_parameters
-                        ),
-                        automatically_determine_group(name),
-                    )
-                    for name in parameter_names
-                ],
-            )
-
-            unique_group_list, group_inverse, group_counts = np.unique(
-                parameters_to_groups,
-                return_inverse=True,
-                return_counts=True,
-            )
-
-            # join parameter groups that appear only once and are not given in config-file
-            unique_group_list = np.array(
-                [
-                    (unique_group_list[tn] if count > 1 or unique_group_list[tn] in self.parameter_groups else "other")
-                    for tn, count in enumerate(group_counts)
-                ],
-            )
-            parameters_to_groups = unique_group_list[group_inverse]
-            unique_group_list, group_inverse = np.unique(parameters_to_groups, return_inverse=True)
-
-            # sort parameters by groups
-            sort_by_parameter_group = np.argsort(group_inverse, kind="stable")
-
-        # apply new order to parameters
-        sorted_parameter_names = np.array(parameter_names)[sort_by_parameter_group]
-        parameters_to_groups = parameters_to_groups[sort_by_parameter_group]
-        unique_group_list, group_inverse, group_counts = np.unique(
-            parameters_to_groups,
-            return_inverse=True,
-            return_counts=True,
-        )
-
-        # get a color per group and project to parameter list
-        cmap = "tab10" if len(unique_group_list) <= 10 else "tab20"
-        if len(unique_group_list) > 20:
-            LOGGER.warning("More than 20 groups detected, but colormap has only 20 colors.")
-        # if all groups have count 1 use black color
-        bar_color_per_group = (
-            np.tile("k", len(group_counts))
-            if not np.any(group_counts - 1)
-            else plt.get_cmap(cmap)(np.linspace(0, 1, len(unique_group_list)))
-        )
-
-        # set x-ticks
-        x_tick_positions = np.cumsum(group_counts) - group_counts / 2 - 0.5
-        xticks = dict(zip(unique_group_list, x_tick_positions, strict=False))
-
-        legend_patches = []
-        for group_idx, group in enumerate(unique_group_list):
-            text_label = f"{group}: "
-            string_length = len(text_label)
-            for ii in np.where(group_inverse == group_idx)[0]:
-                text_label += sorted_parameter_names[ii] + ", "
-                string_length += len(sorted_parameter_names[ii]) + 2
-                if string_length > 50:
-                    # linebreak after 50 characters
-                    text_label += "\n"
-                    string_length = 0
-            legend_patches.append(mpatches.Patch(color=bar_color_per_group[group_idx], label=text_label[:-2]))
-
-        return (
-            sort_by_parameter_group,
-            bar_color_per_group[group_inverse],
-            xticks,
-            legend_patches,
-        )
-
     def _plot(
         self,
         trainer: pl.Trainer,
@@ -776,8 +625,9 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
-            sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
+            sort_by_parameter_group, colors, xticks, legend_patches = sort_and_color_by_parameter_group(
                 parameter_names,
+                self.parameter_groups,
             )
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
@@ -1135,22 +985,17 @@ class PlotSample(BasePlotAdditionalMetrics):
 
             local_rank = pl_module.local_rank
 
-            if auxiliary_tensor is not None:
-                latlons, data, output_tensor, auxiliary_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                    auxiliary_tensor,
-                )
-            else:
-                # Apply spatial mask
-                latlons, data, output_tensor = self.focus_mask.apply(
-                    pl_module.model.model._graph_data,
-                    self.latlons[dataset_name],
-                    data,
-                    output_tensor,
-                )
+            # Apply spatial mask. apply() is variadic, so the optional auxiliary
+            # tensor is passed through the same call rather than branching on it.
+            extra_fields = (auxiliary_tensor,) if auxiliary_tensor is not None else ()
+            latlons, data, output_tensor, *masked_extra = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+                *extra_fields,
+            )
+            auxiliary_tensor = masked_extra[0] if masked_extra else None
             auxiliary_by_suffix = {}
             if auxiliary_tensor is not None:
                 auxiliary_by_suffix = {
@@ -1310,13 +1155,90 @@ class PlotEnsSample(PlotSample):
         )
 
 
-class PlotSpectrum(BasePlotAdditionalMetrics):
+class SpatialMetricPlotCallback(BasePlotAdditionalMetrics):
+    """Shared implementation for per-sample metric plots that need no auxiliary tensor.
+
+    Subclasses (:class:`PlotSpectrum`, :class:`PlotHistogram`) differ only in which
+    low-level plot function to call (:meth:`_make_figure`) and the tag infix used to
+    distinguish their logged artifacts (:attr:`tag_infix`).
+    """
+
+    tag_infix: str
+
+    def _make_figure(
+        self,
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,
+        y_true: np.ndarray | None,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        """Create the matplotlib Figure for one (x, y_true, y_pred) triplet."""
+        raise NotImplementedError
+
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_names: list[str],
+        outputs: TrainingStepOutput,
+        batch: dict[str, torch.Tensor],
+        batch_idx: int,
+        epoch: int,
+        processed_cache: dict | None = None,
+    ) -> None:
+        logger = trainer.logger
+        local_rank = pl_module.local_rank
+
+        for dataset_name in dataset_names:
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, processed_cache=processed_cache)
+
+            # Apply spatial mask
+            latlons, data, output_tensor = self.focus_mask.apply(
+                pl_module.model.model._graph_data,
+                self.latlons[dataset_name],
+                data,
+                output_tensor,
+            )
+
+            # Build dictionary of indices and parameters to be plotted
+            input_data = pl_module.data_indices[dataset_name].data.input.todict()
+            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
+            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
+            plot_parameters_dict = {
+                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
+                    name,
+                    name in diagnostics,
+                )
+                for name in self.parameters
+            }
+
+            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+                fig = self._make_figure(plot_parameters_dict, latlons, x, y_true, y_pred)
+
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=(
+                        f"pred_val_{self.tag_infix}_{dataset_name}_{tag_suffix}_"
+                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                    exp_log_tag=(
+                        f"pred_val_{self.tag_infix}_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
+                    ),
+                )
+
+
+class PlotSpectrum(SpatialMetricPlotCallback):
     """Plots TP related metric comparing target and prediction.
 
     The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
 
     - Power Spectrum
     """
+
+    tag_infix = "spec"
 
     def __init__(
         self,
@@ -1355,72 +1277,31 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         self.parameters = parameters
         self.min_delta = min_delta
 
-    def _plot(
+    def _make_figure(
         self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        dataset_names: list[str],
-        outputs: TrainingStepOutput,
-        batch: dict[str, torch.Tensor],
-        batch_idx: int,
-        epoch: int,
-        processed_cache: dict | None = None,
-    ) -> None:
-        logger = trainer.logger
-
-        local_rank = pl_module.local_rank
-        for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, processed_cache=processed_cache)
-
-            # Apply spatial mask
-            latlons, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
-
-            # Build dictionary of indices and parameters to be plotted
-            input_data = pl_module.data_indices[dataset_name].data.input.todict()
-            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
-            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
-            plot_parameters_dict_spectrum = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
-                for name in self.parameters
-            }
-
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
-                fig = plot_power_spectrum(
-                    plot_parameters_dict_spectrum,
-                    latlons,
-                    x,
-                    y_true,
-                    y_pred,
-                    min_delta=self.min_delta,
-                )
-
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=(
-                        f"pred_val_spec_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                    exp_log_tag=(
-                        f"pred_val_spec_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                )
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,
+        x: np.ndarray,
+        y_true: np.ndarray | None,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        return plot_power_spectrum(
+            plot_parameters_dict,
+            latlons,
+            x,
+            y_true,
+            y_pred,
+            min_delta=self.min_delta,
+        )
 
 
-class PlotHistogram(BasePlotAdditionalMetrics):
+class PlotHistogram(SpatialMetricPlotCallback):
     """Plots histograms comparing target and prediction.
 
     The actual increment (output - input) is plot for prognostic variables while the output is plot for diagnostic ones.
     """
+
+    tag_infix = "histo"
 
     def __init__(
         self,
@@ -1471,65 +1352,19 @@ class PlotHistogram(BasePlotAdditionalMetrics):
             self.precip_and_related_fields,
         )
 
-    def _plot(
+    def _make_figure(
         self,
-        trainer: pl.Trainer,
-        pl_module: pl.LightningModule,
-        dataset_names: list[str],
-        outputs: TrainingStepOutput,
-        batch: dict[str, torch.Tensor],
-        batch_idx: int,
-        epoch: int,
-        processed_cache: dict | None = None,
-    ) -> None:
-        logger = trainer.logger
-
-        local_rank = pl_module.local_rank
-
-        for dataset_name in dataset_names:
-
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, processed_cache=processed_cache)
-
-            # Build dictionary of indices and parameters to be plotted
-            input_data = pl_module.data_indices[dataset_name].data.input.todict()
-            index_to_name = {v: k for k, v in input_data["name_to_index"].items()}
-            diagnostics = {index_to_name[int(i)] for i in input_data["diagnostic"]}
-            # Apply spatial mask
-            _, data, output_tensor = self.focus_mask.apply(
-                pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
-                data,
-                output_tensor,
-            )
-
-            plot_parameters_dict_histogram = {
-                pl_module.data_indices[dataset_name].model.output.name_to_index[name]: (
-                    name,
-                    name in diagnostics,
-                )
-                for name in self.parameters
-            }
-
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
-
-                fig = plot_histogram(
-                    plot_parameters_dict_histogram,
-                    x,
-                    y_true,
-                    y_pred,
-                    self.precip_and_related_fields,
-                    self.log_scale,
-                )
-
-                self._output_figure(
-                    logger,
-                    fig,
-                    epoch=epoch,
-                    tag=(
-                        f"pred_val_histo_{dataset_name}_{tag_suffix}_"
-                        f"batch{batch_idx:04d}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                    exp_log_tag=(
-                        f"pred_val_histo_{dataset_name}_{tag_suffix}_rank{local_rank:01d}{self.focus_mask.tag}"
-                    ),
-                )
+        plot_parameters_dict: dict,
+        latlons: np.ndarray,  # noqa: ARG002
+        x: np.ndarray,
+        y_true: np.ndarray | None,
+        y_pred: np.ndarray,
+    ) -> Figure:
+        return plot_histogram(
+            plot_parameters_dict,
+            x,
+            y_true,
+            y_pred,
+            self.precip_and_related_fields,
+            self.log_scale,
+        )
