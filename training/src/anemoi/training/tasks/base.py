@@ -197,6 +197,16 @@ class BaseTask(ABC):
     def load_training_runtime_state_dict(self, state: dict) -> None:  # noqa: B027
         """Restore training runtime state from a training checkpoint."""
 
+    @property
+    def normalize_batch(self) -> bool:
+        """Whether ``on_after_batch_transfer`` should run ``_normalize_batch``.
+
+        Returns ``True`` for all standard tasks. ``SpatialDownscaler`` returns
+        ``False`` because ``ResidualPredictionMode`` needs raw (unnormalized)
+        tensors to compute ``y - interp(x_lres)`` before normalizing.
+        """
+        return True
+
     def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
 

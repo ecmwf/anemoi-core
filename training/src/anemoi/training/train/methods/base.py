@@ -830,8 +830,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
 
-        # Batch normalization
-        batch = self._normalize_batch(batch)
+        # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
+        # Owned by the model; applied before normalization so projectors see raw values.
+        for ds_name, projector in self.model.spatial_pre_processors.items():
+            if ds_name in batch:
+                batch[ds_name] = projector(batch[ds_name])
+
+        # Batch normalization — skipped when the task defers it (e.g. SpatialDownscaler,
+        # where ResidualPredictionMode needs raw tensors to compute y - interp(x_lres)).
+        if self.task.normalize_batch:
+            batch = self._normalize_batch(batch)
 
         # Prepare scalers, e.g. init delayed scalers and update scalers
         self._prepare_loss_scalers()

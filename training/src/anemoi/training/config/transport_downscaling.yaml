@@ -1,0 +1,29 @@
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- system: example
+- graph: multi_scale
+- model: graphtransformer_transport_tendency_edm
+- task: spatial_downscaler
+- training: edm_diffusion
+- _self_
+
+
+# set to true to switch on config validation
+config_validation: True
+
+data:
+  spatial_processors:
+    in_lres:
+      _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
+      edges_name: [in_lres, to, out_hres]
+      row_normalize: True
+
+training:
+  transport:
+    prediction_mode: residual
+    training_condition:
+      kind: log_normal
+      mean: 0.0
+      std: 3.5
