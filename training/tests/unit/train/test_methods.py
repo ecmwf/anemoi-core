@@ -22,6 +22,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.layers.diffusion import NoiseLevelUncertainty
 from anemoi.models.preprocessing import Processors
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantSettings
@@ -492,6 +493,166 @@ def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() 
         "grid_dim": -2,
         "grid_shard_sizes": shard_sizes,
     }
+
+
+class _WeightedMeanLoss(torch.nn.Module):
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: torch.Tensor,
+        **_kwargs: Any,
+    ) -> torch.Tensor:
+        return ((pred - target) ** 2 * weights).mean()
+
+
+def _edm2_loss_module(logvar: float) -> SimpleNamespace:
+    head = NoiseLevelUncertainty(num_channels=4)
+    with torch.no_grad():
+        head.linear.bias.fill_(logvar)
+    return SimpleNamespace(
+        loss={"data": _WeightedMeanLoss()},
+        model_comm_group=None,
+        grid_dim=-2,
+        grid_shard_sizes={"data": None},
+        uncertainty_weighting_enabled=True,
+        uncertainty_warmup_steps=0,
+        uncertainty_logvar_clamp=8.0,
+        uncertainty_net=head,
+        global_step=0,
+    )
+
+
+def test_edm2_transport_loss_is_per_sample_nll() -> None:
+    """EDM2 applies exp(-logvar) per sample and adds logvar once."""
+    logvar = torch.log(torch.tensor(2.0)).item()
+    module = _edm2_loss_module(logvar)
+    objective = EDMDiffusionTransportObjective(module)
+    pred = torch.ones(2, 1, 1, 3, 1, requires_grad=True)
+    target = torch.zeros_like(pred)
+    sigma = {"data": torch.ones(2, 1, 1, 1, 1)}
+
+    result = objective.compute_loss(
+        pred,
+        target,
+        dataset_name="data",
+        weights={"data": torch.ones_like(sigma["data"])},
+        uncertainty_condition=sigma,
+    )
+    result.backward()
+
+    assert result.item() == pytest.approx(0.5 + logvar)
+    assert pred.grad is not None
+    assert module.uncertainty_net.linear.bias.grad is not None
+
+
+def test_edm2_zero_initialisation_preserves_baseline_loss() -> None:
+    module = _edm2_loss_module(logvar=0.0)
+    objective = EDMDiffusionTransportObjective(module)
+    pred = torch.ones(2, 1, 1, 3, 1)
+    target = torch.zeros_like(pred)
+    sigma = {"data": torch.ones(2, 1, 1, 1, 1)}
+
+    result = objective.compute_loss(
+        pred,
+        target,
+        dataset_name="data",
+        weights={"data": torch.ones_like(sigma["data"])},
+        uncertainty_condition=sigma,
+    )
+
+    assert result.item() == pytest.approx(1.0)
+
+
+def test_edm2_is_not_applied_to_validation_loss() -> None:
+    module = _edm2_loss_module(logvar=torch.log(torch.tensor(2.0)).item())
+    objective = EDMDiffusionTransportObjective(module)
+    pred = torch.ones(2, 1, 1, 3, 1)
+    target = torch.zeros_like(pred)
+    sigma = {"data": torch.ones(2, 1, 1, 1, 1)}
+
+    result = objective.compute_loss(
+        pred,
+        target,
+        dataset_name="data",
+        weights={"data": torch.ones_like(sigma["data"])},
+        uncertainty_condition=sigma,
+        validation_mode=True,
+    )
+
+    assert result.item() == pytest.approx(1.0)
+
+
+def test_edm2_warmup_preserves_ddp_parameter_connection() -> None:
+    module = _edm2_loss_module(logvar=torch.log(torch.tensor(2.0)).item())
+    module.uncertainty_warmup_steps = 10
+    objective = EDMDiffusionTransportObjective(module)
+    pred = torch.ones(2, 1, 1, 3, 1, requires_grad=True)
+    target = torch.zeros_like(pred)
+    sigma = {"data": torch.ones(2, 1, 1, 1, 1)}
+
+    result = objective.compute_loss(
+        pred,
+        target,
+        dataset_name="data",
+        weights={"data": torch.ones_like(sigma["data"])},
+        uncertainty_condition=sigma,
+    )
+    result.backward()
+
+    assert result.item() == pytest.approx(1.0)
+    assert module.uncertainty_net.linear.bias.grad is not None
+    assert torch.equal(
+        module.uncertainty_net.linear.bias.grad,
+        torch.zeros_like(module.uncertainty_net.linear.bias.grad),
+    )
+
+
+def test_transport_configures_edm2_head() -> None:
+    module = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(module)
+    module.config = DictConfig(
+        {
+            "training": {
+                "transport": {
+                    "objective": "edm_diffusion",
+                    "uncertainty_weighting": {
+                        "enabled": True,
+                        "num_channels": 8,
+                        "max_period": 1000,
+                        "warmup_steps": 4,
+                        "logvar_clamp": 6.0,
+                    },
+                },
+            },
+        },
+    )
+
+    module._configure_uncertainty_weighting()
+
+    assert module.uncertainty_weighting_enabled
+    assert module.uncertainty_warmup_steps == 4
+    assert module.uncertainty_logvar_clamp == 6.0
+    assert isinstance(module.uncertainty_net, NoiseLevelUncertainty)
+    assert "uncertainty_net.linear.weight" in dict(module.named_parameters())
+
+
+def test_edm2_rejects_non_diffusion_objective() -> None:
+    module = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(module)
+    module.config = DictConfig(
+        {
+            "training": {
+                "transport": {
+                    "objective": "stochastic_interpolant",
+                    "uncertainty_weighting": {"enabled": True},
+                },
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="only supported for the edm_diffusion"):
+        module._configure_uncertainty_weighting()
 
 
 # ── StochasticInterpolantTransportObjective: prepare ─────────────────────────

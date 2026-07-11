@@ -14,6 +14,7 @@ import logging
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.layers.diffusion import NoiseLevelUncertainty
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
@@ -399,6 +400,7 @@ class BaseTransportTraining(BaseTrainingModule):
             y_full,
             grid_shard_slice=grid_shard_slice,
             dataset_name=dataset_name,
+            validation_mode=validation_mode,
             **kwargs,
         )
 
@@ -439,7 +441,33 @@ class TransportTraining(BaseTransportTraining):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._validate_model_transport_objective()
+        self._configure_uncertainty_weighting()
         self._transport_objective = self._get_transport_objective_cls()(self)
+
+    def _configure_uncertainty_weighting(self) -> None:
+        """Register the training-only EDM2 uncertainty head when enabled."""
+        config = getattr(self.config.training.transport, "uncertainty_weighting", None)
+        self.uncertainty_weighting_enabled = bool(getattr(config, "enabled", False))
+        self.uncertainty_warmup_steps = int(getattr(config, "warmup_steps", 0) or 0)
+        clamp = getattr(config, "logvar_clamp", None)
+        self.uncertainty_logvar_clamp = float(clamp) if clamp is not None else None
+
+        if not self.uncertainty_weighting_enabled:
+            return
+        if self.config.training.transport.objective != "edm_diffusion":
+            msg = "EDM2 uncertainty weighting is only supported for the edm_diffusion transport objective."
+            raise ValueError(msg)
+
+        num_channels = int(getattr(config, "num_channels", 32))
+        max_period = int(getattr(config, "max_period", 10000))
+        self.uncertainty_net = NoiseLevelUncertainty(num_channels=num_channels, max_period=max_period)
+        LOGGER.info(
+            "EDM2 uncertainty weighting enabled (num_channels=%d, max_period=%d, warmup_steps=%d, " "logvar_clamp=%s)",
+            num_channels,
+            max_period,
+            self.uncertainty_warmup_steps,
+            self.uncertainty_logvar_clamp,
+        )
 
     def _validate_model_transport_objective(self) -> None:
         """Check that training and inference use the same transport objective."""
@@ -530,6 +558,7 @@ class TransportTraining(BaseTransportTraining):
             metric_prediction=metric_prediction,
             metric_target=metric_target,
             weights=prepared_objective.weights,
+            uncertainty_condition=prepared_objective.condition,
             validation_mode=validation_mode,
             pred_layout=prepared_objective.pred_layout,
             target_layout=prepared_objective.loss_target_layout,

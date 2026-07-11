@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import torch
 
 from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
@@ -17,9 +17,6 @@ from anemoi.training.train.methods.transport_base import PreparedPredictionTarge
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.index_space import IndexSpace
-
-if TYPE_CHECKING:
-    import torch
 
 
 class EDMDiffusionTransportObjective(TransportObjective):
@@ -73,14 +70,38 @@ class EDMDiffusionTransportObjective(TransportObjective):
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         weights: dict[str, torch.Tensor] | None = None,
+        uncertainty_condition: dict[str, torch.Tensor] | None = None,
+        validation_mode: bool = False,
         **_kwargs,
     ) -> torch.Tensor:
-        """Compute EDM diffusion loss with noise weighting."""
+        """Compute EDM diffusion loss with optional EDM2 uncertainty weighting."""
         assert weights is not None, f"{self.__class__.__name__} requires weights for EDM diffusion loss computation."
 
         loss = self.module.loss[dataset_name]
+        effective_weights = weights[dataset_name]
+        logvar = None
+        uncertainty_active = False
+        if getattr(self.module, "uncertainty_weighting_enabled", False) and not validation_mode:
+            assert uncertainty_condition is not None, "EDM2 uncertainty weighting requires the sampled sigma."
+            sigma = uncertainty_condition[dataset_name]
+            sigma_per_sample = sigma[:, 0, :, 0, 0]
+            logvar_flat = self.module.uncertainty_net(sigma_per_sample.log() / 4.0)
+            clamp = self.module.uncertainty_logvar_clamp
+            if clamp is not None:
+                logvar_flat = logvar_flat.clamp(-clamp, clamp)
+            logvar = logvar_flat.reshape(sigma_per_sample.shape).view(
+                sigma.shape[0],
+                1,
+                sigma.shape[2],
+                1,
+                1,
+            )
+            uncertainty_active = int(self.module.global_step) >= self.module.uncertainty_warmup_steps
+            if uncertainty_active:
+                effective_weights = effective_weights * torch.exp(-logvar)
+
         loss_kwargs = {
-            "weights": weights[dataset_name],
+            "weights": effective_weights,
             "grid_shard_slice": grid_shard_slice,
             "group": self.module.model_comm_group,
         }
@@ -94,7 +115,13 @@ class EDMDiffusionTransportObjective(TransportObjective):
                 grid_shard_sizes=self.module.grid_shard_sizes[dataset_name],
             )
 
-        return loss(y_pred, y, **loss_kwargs)
+        loss_value = loss(y_pred, y, **loss_kwargs)
+        if uncertainty_active:
+            loss_value = loss_value.float().sum() + logvar.float().mean()
+        elif logvar is not None:
+            # Keep DDP reduction hooks active for the registered head during warmup.
+            loss_value = loss_value + 0.0 * logvar.sum()
+        return loss_value
 
     def _noise_target(
         self,

@@ -34,6 +34,12 @@ method:
 transport:
   prediction_mode: state
   objective: edm_diffusion
+  uncertainty_weighting:
+    enabled: false
+    num_channels: 32
+    max_period: 10000
+    warmup_steps: 0
+    logvar_clamp: 8.0
 
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy

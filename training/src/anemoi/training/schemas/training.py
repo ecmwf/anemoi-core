@@ -751,11 +751,36 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
     "Training method."
 
 
+class UncertaintyWeightingSchema(BaseModel):
+    """EDM2 adaptive uncertainty weighting configuration."""
+
+    enabled: bool = False
+    "Enable EDM2 uncertainty weighting for the EDM diffusion objective."
+    num_channels: PositiveInt = 32
+    "Number of sinusoidal embedding channels. Must be even."
+    max_period: PositiveInt = 10000
+    "Maximum period of the sinusoidal noise embedding."
+    warmup_steps: NonNegativeInt = 0
+    "Number of optimiser steps before applying uncertainty weighting."
+    logvar_clamp: NonNegativeFloat | None = 8.0
+    "Optional symmetric clamp for predicted log-variance."
+
+    @field_validator("num_channels")
+    @classmethod
+    def validate_even_num_channels(cls, value: int) -> int:
+        if value % 2:
+            msg = "num_channels must be even."
+            raise ValueError(msg)
+        return value
+
+
 class TransportTrainingConfigSchema(BaseModel):
     prediction_mode: Literal["state", "tendency"] = "state"
     "Endpoint semantics for the transport objective."
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Transport objective used to perturb targets and train the model."
+    uncertainty_weighting: UncertaintyWeightingSchema = Field(default_factory=UncertaintyWeightingSchema)
+    "EDM2 adaptive uncertainty weighting applied to the EDM diffusion loss."
 
 
 class TransportTrainingSchema(BaseTrainingSchema):

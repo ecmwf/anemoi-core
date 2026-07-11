@@ -12,6 +12,7 @@ import math
 import pytest
 import torch
 
+from anemoi.models.layers.diffusion import NoiseLevelUncertainty
 from anemoi.models.layers.diffusion import RandomFourierEmbeddings
 from anemoi.models.layers.diffusion import SinusoidalEmbeddings
 
@@ -309,3 +310,42 @@ class TestNoiseEmbeddingsComparison:
 
         assert random_output.device.type == device
         assert sinusoidal_output.device.type == device
+
+
+class TestNoiseLevelUncertainty:
+    """Tests for the EDM2 uncertainty head."""
+
+    def test_zero_initialisation_is_no_op(self) -> None:
+        head = NoiseLevelUncertainty(num_channels=32)
+        output = head(torch.randn(2, 3))
+
+        assert output.shape == (6,)
+        assert output.dtype == torch.float32
+        assert torch.equal(output, torch.zeros_like(output))
+
+    def test_initialisation_preserves_rng_state(self) -> None:
+        torch.manual_seed(42)
+        state_before = torch.random.get_rng_state()
+
+        NoiseLevelUncertainty(num_channels=32)
+
+        assert torch.equal(torch.random.get_rng_state(), state_before)
+
+    def test_projection_learns_from_noise_level(self) -> None:
+        head = NoiseLevelUncertainty(num_channels=4)
+        with torch.no_grad():
+            head.linear.weight.fill_(0.5)
+        c_noise = torch.tensor([-1.0, 0.0, 1.0], requires_grad=True)
+
+        output = head(c_noise)
+        output.sum().backward()
+
+        assert output.shape == (3,)
+        assert not torch.equal(output[0], output[2])
+        assert c_noise.grad is not None
+        assert torch.isfinite(c_noise.grad).all()
+
+    @pytest.mark.parametrize("num_channels", [0, 3, -2])
+    def test_rejects_invalid_channel_count(self, num_channels: int) -> None:
+        with pytest.raises(ValueError, match="positive even"):
+            NoiseLevelUncertainty(num_channels=num_channels)
