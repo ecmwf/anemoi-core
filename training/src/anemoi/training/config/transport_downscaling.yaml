@@ -1,29 +1,381 @@
 defaults:
-- data: zarr
-- dataloader: native_grid
-- diagnostics: evaluation
-- system: example
-- graph: multi_scale
-- model: graphtransformer_transport_tendency_edm
-- task: spatial_downscaler
-- training: edm_diffusion
-- _self_
+  - data: zarr
+  - dataloader: native_grid
+  - diagnostics: evaluation
+  - system: slurm
+  - graph: multi_scale
+  - model: graphtransformer_transport_tendency_edm
+  - task: spatial_downscaler
+  - training: edm_diffusion
+  - _self_
 
+config_validation: false
 
-# set to true to switch on config validation
-config_validation: True
-
+# ============================================================
+# Data — per-dataset variable config and processors
+# ============================================================
 data:
+  frequency: 1h
+  datasets:
+    in_lres:
+      forcing: []
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            none:
+              - 2t
+    in_hres:
+      forcing:
+        - cos_julian_day
+        - cos_latitude
+        - cos_local_time
+        - cos_longitude
+        - lsm
+        - sin_julian_day
+        - sin_latitude
+        - sin_local_time
+        - sin_longitude
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: none
+    out_hres:
+      forcing: []
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            none: []
+
+  # Spatial pre-processor: reprojects in_lres onto the hres grid before
+  # ResidualPredictionMode computes y - interp(x_lres).
   spatial_processors:
     in_lres:
       _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
       edges_name: [in_lres, to, out_hres]
       row_normalize: True
 
+# ============================================================
+# Training method — TransportTraining + residual prediction mode
+# ============================================================
 training:
+  max_steps: 100000
+  max_epochs: 10
+  precision: bf16-mixed
+  deterministic: false
+  accum_grad_batches: 1
+  num_sanity_val_steps: 1
+  loss_gradient_scaling: false
+
+  gradient_clip:
+    val: 1.0
+    algorithm: norm
+
+  optimization:
+    lr: 0.001
+    optimizer:
+      _target_: torch.optim.AdamW
+      weight_decay: 0.01
+      betas: [0.9, 0.95]
+      eps: 1.0e-08
+    pl_lr_scheduler:
+      interval: step
+
   transport:
     prediction_mode: residual
     training_condition:
       kind: log_normal
       mean: 0.0
       std: 3.5
+
+  scalers:
+    datasets:
+      out_hres:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            2t: 2
+        nan_mask_weights:
+          _target_: anemoi.training.losses.scalers.NaNMaskScaler
+        node_weights:
+          _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+          nodes_name: out_hres
+          nodes_attribute_name: area_weight
+          norm: unit-sum
+
+  training_loss:
+    datasets:
+      out_hres:
+        _target_: anemoi.training.losses.WeightedMSELoss
+        scalers: [general_variable, nan_mask_weights, node_weights]
+        ignore_nans: true
+
+  validation_metrics:
+    datasets:
+      out_hres:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: [node_weights]
+          ignore_nans: true
+
+  variable_groups:
+    datasets:
+      out_hres:
+        default: sfc
+
+  metrics:
+    datasets:
+      out_hres:
+        - 2t
+
+  submodules_to_freeze: []
+
+# ============================================================
+# System — paths and hardware
+# ============================================================
+system:
+  hardware:
+    accelerator: auto
+    num_gpus_per_model: 1
+    num_gpus_per_node: 1
+    num_nodes: 1
+
+  input:
+    dataset: ???          # hres zarr (used for in_hres and out_hres)
+    dataset_lres: ???     # lres zarr (used for in_lres)
+    graph: ???            # path to graph .pt file
+    truncation: ???       # lres->hres sparse projection matrix (.npz)
+  output:
+    root: ${oc.env:SCRATCH}/aifs/downscaling/
+
+# ============================================================
+# Dataloader — three datasets: in_lres, in_hres, out_hres
+# ============================================================
+dataloader:
+  prefetch_factor: 2
+  pin_memory: true
+  read_group_size: 1
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  limit_batches:
+    training: 1000
+    validation: 1000
+    test: 20
+
+  training:
+    datasets:
+      in_lres:
+        dataset_config:
+          dataset: ${system.input.dataset_lres}
+          frequency: ${data.frequency}
+          select: [2t]
+        start: 1900
+        end: '1900-10-31'
+      in_hres:
+        dataset_config:
+          dataset: ${system.input.dataset}
+          frequency: ${data.frequency}
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: 1900
+        end: '1900-10-31'
+      out_hres:
+        dataset_config:
+          dataset: ${system.input.dataset}
+          frequency: ${data.frequency}
+          select: [2t]
+        start: 1900
+        end: '1900-10-31'
+
+  validation:
+    datasets:
+      in_lres:
+        dataset_config:
+          dataset: ${system.input.dataset_lres}
+          frequency: ${data.frequency}
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+      in_hres:
+        dataset_config:
+          dataset: ${system.input.dataset}
+          frequency: ${data.frequency}
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: '1900-11-01'
+        end: '1900-12-31'
+      out_hres:
+        dataset_config:
+          dataset: ${system.input.dataset}
+          frequency: ${data.frequency}
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+
+  test:
+    datasets:
+      in_lres:
+        dataset_config:
+          dataset: ${system.input.dataset_lres}
+          frequency: ${data.frequency}
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+      in_hres:
+        dataset_config:
+          dataset: ${system.input.dataset}
+          frequency: ${data.frequency}
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: '1900-11-01'
+        end: '1900-12-31'
+      out_hres:
+        dataset_config:
+          dataset: ${system.input.dataset}
+          frequency: ${data.frequency}
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+
+# ============================================================
+# Graph — one node group per dataset + hidden
+# ============================================================
+graph:
+  overwrite: true
+  nodes:
+    in_hres:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${system.input.dataset}
+      attributes: ${graph.attributes.nodes}
+    out_hres:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${system.input.dataset}
+      attributes: ${graph.attributes.nodes}
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.TriNodes
+        resolution: 5
+      attributes: ${graph.attributes.nodes}
+    in_lres:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${system.input.dataset_lres}
+      attributes: ${graph.attributes.nodes}
+  edges:
+    - source_name: in_hres
+      target_name: hidden
+      edge_builders:
+        - _target_: anemoi.graphs.edges.CutOffEdges
+          cutoff_factor: 0.7
+      attributes: ${graph.attributes.edges}
+    - source_name: hidden
+      target_name: hidden
+      edge_builders:
+        - _target_: anemoi.graphs.edges.MultiScaleEdges
+          x_hops: 1
+          scale_resolutions: [5]
+      attributes: ${graph.attributes.edges}
+    - source_name: hidden
+      target_name: out_hres
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 3
+          source_mask_attr_name: null
+          target_mask_attr_name: null
+      attributes: ${graph.attributes.edges}
+    - source_name: in_lres
+      target_name: hidden
+      edge_builders:
+        - _target_: anemoi.graphs.edges.CutOffEdges
+          cutoff_factor: 0.7
+      attributes: ${graph.attributes.edges}
+    - source_name: in_lres
+      target_name: out_hres
+      edge_builders:
+        - _target_: anemoi.graphs.edges.KNNEdges
+          num_nearest_neighbours: 3
+          source_mask_attr_name: null
+          target_mask_attr_name: null
+      attributes: ${graph.attributes.edges}
+  attributes:
+    nodes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        norm: unit-max
+    edges:
+      edge_length:
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-std
+      edge_dirs:
+        _target_: anemoi.graphs.edges.attributes.EdgeDirection
+        norm: unit-std
+
+# ============================================================
+# Diagnostics
+# ============================================================
+diagnostics:
+  plot:
+    parameters:
+      - 2t
+    precip_and_related_fields: []
+    datasets_to_plot:
+      - out_hres
+    callbacks: []
+  log:
+    mlflow:
+      enabled: True
+      offline: False
+      authentication: True
+      log_model: false
+      tracking_uri: 'https://mlflow.ecmwf.int'
+      experiment_name: ds-diffusion-transport
+      project_name: Anemoi
+      system: true
+      terminal: true
+      run_name: ???
+      on_resume_create_child: true
+      expand_hyperparams:
+        - config
+      http_max_retries: 35
+      max_params_length: 2000
+    interval: 100
