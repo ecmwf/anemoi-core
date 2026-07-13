@@ -21,11 +21,12 @@ os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 import pandas as pd
 import pytest
 import torch
+from hydra import compose
+from hydra import initialize
 from omegaconf import OmegaConf
 from torch.testing import assert_close
 
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.utils.config import load_config
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
 # cuDNN autotuning picks different kernels per run; disable for reproducibility.
@@ -40,13 +41,19 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.slow
 def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
-    # Load without resolving: interpolations such as
-    # system.input.graph = ${system.output.root}/... depend on system.output.root,
-    # which is only set below. Resolving eagerly would collapse them to MISSING.
-    config = load_config(
-        "training/tests/integration/config/atmo_integration_test.yaml",
-        resolve=False,
+    # compose leaves interpolations such as
+    # system.input.graph = ${system.output.root}/... unresolved; they depend on
+    # system.output.root, which is only set below, and we resolve afterwards.
+    # config_path is relative to this file; the autouse set_working_directory fixture
+    # (integration/conftest.py) chdirs to the repo root so Path.cwd() resolves the yaml.
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_accuracy"):
+        template = compose(config_name="config", overrides=["model=graphtransformer"])
+
+    modifications = OmegaConf.load(
+        Path.cwd() / "training/tests/integration/config/accuracy_testing/test_global.yaml",
     )
+    modifications.pop("defaults", None)  # defaults are applied by compose above
+    config = OmegaConf.merge(template, modifications)
 
     config.system.output.root = str(tmp_path)
     config.diagnostics.log.mlflow.tracking_uri = mlflow_server
