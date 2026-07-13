@@ -45,7 +45,7 @@ diagnostics:
         plot_fn:
           _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.ensemble_plot_fn
           _partial_: true
-          n_plots_per_sample: 2
+          n_plots_per_sample: 4
           accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
 
       # Deterministic callbacks are also overloaded.

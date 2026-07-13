@@ -95,11 +95,20 @@ def get_edge_trainable_modules(model: Any, dataset_name: str) -> dict[tuple[str,
         Mapping from ``(src_nodes, dst_nodes)`` to graph mapper module,
         for each edge-set that has a trainable parameter.
     """
+    from anemoi.models.models import AnemoiModelEncProcDecHierarchical
+
+    if isinstance(model, AnemoiModelEncProcDecHierarchical):
+        LOGGER.warning(
+            "Edge trainable features are not supported for Hierarchical models, skipping plot generation.",
+        )
+        return {}
+
     trainable_modules = {}
+    hidden = model._graph_name_hidden
     provider_specs = (
-        ("encoder_graph_provider", (dataset_name, model._graph_name_hidden)),
-        ("decoder_graph_provider", (model._graph_name_hidden, dataset_name)),
-        ("processor_graph_provider", (model._graph_name_hidden, model._graph_name_hidden)),
+        ("encoder_graph_provider", (dataset_name, hidden)),
+        ("decoder_graph_provider", (hidden, dataset_name)),
+        ("processor_graph_provider", (hidden, hidden)),
     )
     for provider_name, edge_key in provider_specs:
         provider = _resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
