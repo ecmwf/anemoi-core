@@ -75,7 +75,7 @@ of dataset-keyed dictionaries.
 
 **Focus Area**
 
-Plotting callbacks (such as ``PlotSample`` and ``PlotLoss``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
+Plotting callbacks (such as ``PlotSample`` and ``LossCurvePlot``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
 
 * **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
 * **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
@@ -176,7 +176,7 @@ which is recommended for interactive terminals and
             latlon_bbox: [18.0, 73.0, 54.0, 135.0]
 
       callbacks:
-         - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+         - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
             dataset_names: ["your_dataset_name"]
             # group parameters by categories when visualizing contributions to the loss
             # one-parameter groups are possible to highlight individual parameters
@@ -227,6 +227,14 @@ documented in `Plot function contracts`_ below.
        _partial_: true
        min_delta: 0.01
 
+Since a single run can register many instances of ``SpatialMapPlot``,
+``LossCurvePlot`` or ``GraphFeaturePlot`` (one per ``plot_fn``), MLflow
+artifacts are grouped by ``plot_fn`` name rather than callback class name —
+e.g. figures from ``sample_plot_fn`` and ``histogram_plot_fn`` land under
+separate ``sample_plot_fn`` / ``histogram_plot_fn`` folders instead of all
+being dumped into one ``SpatialMapPlot`` folder. Callbacks without a
+pluggable ``plot_fn`` still use their class name.
+
 Plot function contracts
 -----------------------
 
@@ -245,8 +253,8 @@ canonical spec.
 Layers and data flow
 ....................
 
-Each of the three pluggable callbacks (``PlotLoss``, ``SpatialMapPlot``,
-``GraphTrainableFeaturesPlot``) has the same three-layer shape:
+Each of the three pluggable callbacks (``LossCurvePlot``, ``SpatialMapPlot``,
+``GraphFeaturePlot``) has the same three-layer shape:
 
 .. code:: text
 
@@ -275,11 +283,11 @@ Family-to-artifact mapping:
 +---------------------------------+-----------------------------+
 | Callback                        | ``extract_*_inputs`` helper |
 +=================================+=============================+
-| ``PlotLoss``                    | ``extract_loss_inputs``     |
+| ``LossCurvePlot``                    | ``extract_loss_inputs``     |
 +---------------------------------+-----------------------------+
 | ``SpatialMapPlot``              | ``extract_spatial_inputs``  |
 +---------------------------------+-----------------------------+
-| ``GraphTrainableFeaturesPlot``  | ``extract_graph_inputs``    |
+| ``GraphFeaturePlot``  | ``extract_graph_inputs``    |
 +---------------------------------+-----------------------------+
 
 ``SpatialMapPlot`` — per-sample, per-dataset figures
@@ -312,10 +320,10 @@ Contract notes:
 - ``latlons`` is pre-masked to the active ``focus_area`` when one is set.
 - Return a ``matplotlib.figure.Figure`` — returning ``None`` is not allowed.
 
-``PlotLoss`` — grouped per-variable loss bar chart
+``LossCurvePlot`` — grouped per-variable loss bar chart
 ..................................................
 
-Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.PlotLoss`.
+Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.LossCurvePlot`.
 Default: ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``.
 
 .. code:: python
@@ -332,7 +340,7 @@ Default: ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``.
 
 Contract notes:
 
-- ``PlotLoss`` supplies the **raw** per-variable loss in the model's output
+- ``LossCurvePlot`` supplies the **raw** per-variable loss in the model's output
   order together with the naming/grouping context, and does **not** apply any
   presentation-specific reordering, grouping or colouring itself.
 - The default ``loss_plot_fn`` reproduces the historic behaviour by calling
@@ -342,11 +350,11 @@ Contract notes:
   replace or skip any of these steps.
 - ``loss`` and ``parameter_names`` share the same length and ordering.
 
-``GraphTrainableFeaturesPlot`` — graph node/edge feature plots
+``GraphFeaturePlot`` — graph node/edge feature plots
 ..............................................................
 
 Callback:
-:class:`~anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot`.
+:class:`~anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot`.
 Default: ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``.
 
 .. code:: python
@@ -368,7 +376,7 @@ Contract notes:
   ``(figure, tag)`` pairs. This lets a single call emit multiple figures
   (e.g. one for node features, one for edge features) under distinct
   logging tags.
-- ``GraphTrainableFeaturesPlot`` extracts the graph artifacts once via
+- ``GraphFeaturePlot`` extracts the graph artifacts once via
   ``extract_graph_inputs`` (unwrapping any DDP wrapper) and passes them
   as keyword arguments; the plot function never sees the raw model.
 - ``edge_trainable_modules`` is empty for hierarchical models (they carry
@@ -540,7 +548,7 @@ Notes:
 - ``focus_area`` still applies: pass a ``latlon_bbox`` and the
   cross-section is restricted to that region for free.
 
-The ``PlotLoss`` and ``GraphTrainableFeaturesPlot`` callbacks follow the
+The ``LossCurvePlot`` and ``GraphFeaturePlot`` callbacks follow the
 same pattern (see ``loss_plot_fn`` and ``graph_plot_fn`` in
 ``anemoi.training.diagnostics.evaluation.plotting``), so custom loss-bar
 or graph-feature renderings can be swapped in the same way.

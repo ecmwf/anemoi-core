@@ -239,10 +239,18 @@ class BasePlotCallback(Callback, ABC):
     def artifact_subfolder(self) -> str:
         """Return the artifact subfolder name for experiment logging.
 
-        Used by MLflow to organize artifacts into per-callback folders.
-        Derived automatically from the concrete callback class name.
+        Used by MLflow to organize artifacts into per-callback folders. If
+        the callback has a pluggable ``plot_fn``, the folder is derived from
+        it instead of the class name — a single run can register several
+        instances of the same callback class (e.g. multiple ``SpatialMapPlot``
+        entries, one per ``plot_fn``), which would otherwise all collapse
+        into one generic, hard-to-navigate folder.
         """
-        return type(self).__name__
+        plot_fn = getattr(self, "plot_fn", None)
+        if plot_fn is None:
+            return type(self).__name__
+        fn = getattr(plot_fn, "func", plot_fn)  # unwrap functools.partial from Hydra
+        return getattr(fn, "__name__", type(self).__name__)
 
     @rank_zero_only
     def _output_figure(
@@ -381,7 +389,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         """Hook for subclasses to transform the batch before plotting.
 
         Default: no-op. Override to inject callback-specific batch preparation
-        (e.g. :class:`PlotLoss` uses ``pl_module.plot_adapter.prepare_loss_batch``).
+        (e.g. :class:`LossCurvePlot` uses ``pl_module.plot_adapter.prepare_loss_batch``).
         """
         del pl_module
         return batch
@@ -491,11 +499,11 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             )
 
 
-class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
+class GraphFeaturePlot(BasePerEpochPlotCallback):
     """Visualize the node & edge trainable features defined.
 
     The visualization function is supplied via ``plot_fn`` and follows the
-    same pluggable pattern as :class:`SpatialMapPlot` and :class:`PlotLoss`.
+    same pluggable pattern as :class:`SpatialMapPlot` and :class:`LossCurvePlot`.
     ``plot_fn`` must yield ``(figure, tag)`` pairs.
 
     The callback resolves the underlying model and forwards **only**
@@ -521,7 +529,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
         plot_fn: Any = None,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
-        """Initialise the GraphTrainableFeaturesPlot callback.
+        """Initialise the GraphFeaturePlot callback.
 
         Parameters
         ----------
@@ -571,7 +579,7 @@ class GraphTrainableFeaturesPlot(BasePerEpochPlotCallback):
                 )
 
 
-class PlotLoss(BasePerBatchPlotCallback):
+class LossCurvePlot(BasePerBatchPlotCallback):
     """Plots the unsqueezed loss over rollouts.
 
     The visualization function is supplied via ``plot_fn`` following the same
@@ -604,7 +612,7 @@ class PlotLoss(BasePerBatchPlotCallback):
         plot_fn: Any = None,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
-        """Initialise the PlotLoss callback.
+        """Initialise the LossCurvePlot callback.
 
         Parameters
         ----------

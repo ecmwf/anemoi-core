@@ -10,6 +10,7 @@
 # ruff: noqa: ANN001, ANN201
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 from typing import ClassVar
 from unittest.mock import MagicMock
@@ -18,10 +19,7 @@ import numpy as np
 import pytest
 import torch
 
-from functools import partial
-
-from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
-from anemoi.training.diagnostics.callbacks.plot import PlotLoss
+from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
 from anemoi.training.diagnostics.callbacks.plot import SpatialMapPlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
@@ -42,7 +40,13 @@ from anemoi.training.utils.masks import NoOutputMask
 # classes were consolidated into a single SpatialMapPlot callback + pluggable
 # ``plot_fn``. These shim factories rebuild the old-style constructors so
 # the existing test bodies keep working without touching every call site.
-def _wrap_plot_callback(*, plot_fn, tag_infix, with_auxiliary=False, plot_fn_kwargs=None):
+def _wrap_plot_callback(
+    *,
+    plot_fn,
+    tag_infix,
+    with_auxiliary=False,
+    plot_fn_kwargs=None,
+) -> Callable[..., SpatialMapPlot]:
     """Return a callable that builds a SpatialMapPlot wired to ``plot_fn``.
 
     ``plot_fn_kwargs`` is a mapping of legacy kwargs → default sentinel that
@@ -51,10 +55,9 @@ def _wrap_plot_callback(*, plot_fn, tag_infix, with_auxiliary=False, plot_fn_kwa
     attributes on the callback so legacy assertions such as ``callback.log_scale``
     keep working.
     """
-
     plot_fn_kwargs = plot_fn_kwargs or {}
 
-    def _factory(**kwargs):
+    def _factory(**kwargs) -> SpatialMapPlot:
         bound = {}
         for name, default in plot_fn_kwargs.items():
             if name in kwargs:
@@ -103,8 +106,8 @@ PlotSpectrum = _wrap_plot_callback(
 
 # Suite of Unit Tests for Plotting Callbacks
 # ------------------------------------------
-# Tests to check PlotHistogram, PlotSpectrum, PlotLoss, PlotSample instantiation
-# Tests to check PlotHistogram, PlotSpectrum, PlotLoss, PlotSample plot methods
+# Tests to check PlotHistogram, PlotSpectrum, LossCurvePlot, PlotSample instantiation
+# Tests to check PlotHistogram, PlotSpectrum, LossCurvePlot, PlotSample plot methods
 # Tests to check plot_loss, plot_histogram, plot_spectrum, plot_predicted_multilevel_flat_sample return a figure
 
 
@@ -133,12 +136,12 @@ def test_plot_spectrum_instantiation():
 
 
 def test_plot_loss_instantiation():
-    """PlotLoss can be instantiated with optional parameter_groups."""
-    callback = PlotLoss(parameter_groups={})
+    """LossCurvePlot can be instantiated with optional parameter_groups."""
+    callback = LossCurvePlot(parameter_groups={})
     assert callback.parameter_groups == {}
     assert callback.dataset_names == ["data"]
 
-    callback2 = PlotLoss(
+    callback2 = LossCurvePlot(
         parameter_groups={"group_a": ["t2m", "tp"], "group_b": ["u10", "v10"]},
         dataset_names=["data"],
     )
@@ -147,8 +150,6 @@ def test_plot_loss_instantiation():
 
 
 def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
-    callback = GraphTrainableFeaturesPlot()
-
     class DummyModel:
         pass
 
@@ -168,8 +169,6 @@ def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():
 
 
 def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
-    callback = GraphTrainableFeaturesPlot()
-
     class NoOpGraphProvider:
         trainable = None
 
@@ -189,8 +188,6 @@ def test_graph_trainable_features_plot_handles_noop_mapper_graph_providers():
 
 
 def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_map():
-    callback = GraphTrainableFeaturesPlot()
-
     class TrainableTensor:
         trainable = object()
 
@@ -603,7 +600,7 @@ def test_process_cache_ensemble_list_members():
     assert len(cache) == 2, f"expected 2 cache entries after adding members=[0], got {len(cache)}"
 
 
-# ---- PlotLoss ----
+# ---- LossCurvePlot ----
 
 _PLOT_LOSS_CONFIG = {
     "system": {"output": {"plots": None}},
@@ -653,12 +650,12 @@ def test_plot_loss_sort_and_color_by_parameter_group_with_groups():
 
 
 def test_plot_loss_temporal_downscaler():
-    """PlotLoss._plot uses output_times=1 only one figure is produced."""
+    """LossCurvePlot._plot uses output_times=1 only one figure is produced."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
 
-    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -704,12 +701,12 @@ def test_plot_loss_temporal_downscaler():
 
 
 def test_plot_loss_single_step_transport():
-    """PlotLoss._plot with a one-step transport model produces one figure."""
+    """LossCurvePlot._plot with a one-step transport model produces one figure."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
 
-    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -762,12 +759,12 @@ def test_plot_loss_single_step_transport():
 
 
 def test_plot_loss_forecaster():
-    """PlotLoss._plot uses one figure per rollout step."""
+    """LossCurvePlot._plot uses one figure per rollout step."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
 
-    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -822,12 +819,12 @@ def test_plot_loss_forecaster():
 
 
 def test_plot_loss_accepts_processed_cache_kwarg():
-    """PlotLoss._plot accepts and ignores processed_cache without error and still produces figures."""
+    """LossCurvePlot._plot accepts and ignores processed_cache without error and still produces figures."""
     from unittest.mock import patch
 
     from anemoi.training.losses.mse import MSELoss
 
-    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
     nvar = 3
@@ -1344,8 +1341,10 @@ def test_ensemble_plot_ens_sample_instantiation():
 
 @pytest.mark.parametrize("projection_kind", ["robinson", "mollweide"])
 def test_sample_plot_fn_global_non_equirectangular_projection_does_not_crash(projection_kind):
-    """Global data with non-equirectangular Cartopy projections must not raise
-    ValueError from set_extent (regression test for Robinson/Mollweide extent clamp)."""
+    """Global data with non-equirectangular Cartopy projections must not raise.
+
+    ValueError from set_extent (regression test for Robinson/Mollweide extent clamp).
+    """
     pytest.importorskip("cartopy")
     import matplotlib.pyplot as plt
 

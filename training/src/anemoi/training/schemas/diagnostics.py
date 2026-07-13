@@ -27,18 +27,18 @@ from anemoi.utils.schemas import BaseModel
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphTrainableFeaturesPlotSchema(PydanticBaseModel):
-    """Config schema for :class:`GraphTrainableFeaturesPlot`.
+class GraphFeaturePlotSchema(PydanticBaseModel):
+    """Config schema for :class:`GraphFeaturePlot`.
 
     Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
-    shared with :class:`SpatialMapPlot` and :class:`PlotLoss`) without
+    shared with :class:`SpatialMapPlot` and :class:`LossCurvePlot`) without
     extending this schema (``extra='allow'`` on the nested ``plot_fn``).
     """
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
-    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot"] = Field(alias="_target_")
+    "GraphFeaturePlot object from anemoi training diagnostics callbacks."
     dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
     "List of dataset names to plot. Defaults to ``['data']``."
     every_n_epochs: int | None
@@ -65,8 +65,8 @@ class FocusAreaSchema(BaseModel):
         return self
 
 
-class PlotLossSchema(PydanticBaseModel):
-    """Config schema for :class:`PlotLoss`.
+class LossCurvePlotSchema(PydanticBaseModel):
+    """Config schema for :class:`LossCurvePlot`.
 
     Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
     shared with :class:`SpatialMapPlot`) without extending this schema
@@ -75,8 +75,8 @@ class PlotLossSchema(PydanticBaseModel):
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
-    "PlotLoss object from anemoi training diagnostics callbacks."
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LossCurvePlot"] = Field(alias="_target_")
+    "LossCurvePlot object from anemoi training diagnostics callbacks."
     dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
     "List of dataset names to plot. Defaults to ``['data']``."
     parameter_groups: dict[str, list[str]]
@@ -154,7 +154,7 @@ class SpatialMapPlotSchema(PydanticBaseModel):
 
 
 PlotCallbacks = Annotated[
-    GraphTrainableFeaturesPlotSchema | PlotLossSchema | SpatialMapPlotSchema,
+    GraphFeaturePlotSchema | LossCurvePlotSchema | SpatialMapPlotSchema,
     Field(discriminator="target_"),
 ]
 

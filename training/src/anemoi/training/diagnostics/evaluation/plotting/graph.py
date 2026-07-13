@@ -268,7 +268,7 @@ def graph_plot_fn(
     settings: PlottingSettings | None = None,
     **_kwargs,
 ) -> Generator[tuple[Figure, str], None, None]:
-    """Default plug-in function for :class:`GraphTrainableFeaturesPlot`.
+    """Default plug-in function for :class:`GraphFeaturePlot`.
 
     Yields ``(figure, tag)`` pairs. Receives already-resolved graph
     artifacts from the callback (``dataset_name``, ``node_attributes``,

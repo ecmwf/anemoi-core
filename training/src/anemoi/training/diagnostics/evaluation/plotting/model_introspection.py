@@ -43,13 +43,13 @@ __all__ = [
 ]
 
 
-def unwrap_anemoi_model(pl_module: "pl.LightningModule") -> Any:
+def unwrap_anemoi_model(pl_module: pl.LightningModule) -> Any:
     """Return the underlying anemoi model, unwrapping DDP / interface layers."""
     return pl_module.model.module.model if hasattr(pl_module.model, "module") else pl_module.model.model
 
 
-def extract_graph_inputs(pl_module: "pl.LightningModule", dataset_name: str) -> dict[str, Any]:
-    """Return kwargs for a ``GraphTrainableFeaturesPlot`` ``plot_fn``.
+def extract_graph_inputs(pl_module: pl.LightningModule, dataset_name: str) -> dict[str, Any]:
+    """Return kwargs for a ``GraphFeaturePlot`` ``plot_fn``.
 
     Keys: ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
     ``edge_trainable_modules``. ``edge_trainable_modules`` is empty for
@@ -65,11 +65,11 @@ def extract_graph_inputs(pl_module: "pl.LightningModule", dataset_name: str) -> 
 
 
 def extract_loss_inputs(
-    pl_module: "pl.LightningModule",
+    pl_module: pl.LightningModule,
     dataset_name: str,
     parameter_groups: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    """Return kwargs for a ``PlotLoss`` ``plot_fn``.
+    """Return kwargs for a ``LossCurvePlot`` ``plot_fn``.
 
     Keys: ``parameter_names`` (sorted by output-index), ``parameter_groups``
     (user-supplied grouping config), ``metadata_variables`` (dataset
@@ -91,7 +91,7 @@ def extract_loss_inputs(
 
 
 def extract_spatial_inputs(
-    pl_module: "pl.LightningModule",
+    pl_module: pl.LightningModule,
     dataset_name: str,
     parameters: list[str],
 ) -> dict[str, Any]:

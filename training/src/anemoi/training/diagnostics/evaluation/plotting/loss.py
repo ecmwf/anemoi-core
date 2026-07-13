@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,15 +7,23 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
+from typing import Any
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 from anemoi.training.diagnostics.evaluation.plotting.settings import argsort_variablename_variablelevel
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
+    from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -167,15 +175,15 @@ def plot_loss(
 
 
 def loss_plot_fn(
-    loss,
+    loss: np.ndarray,
     *,
-    parameter_names,
-    parameter_groups=None,
-    metadata_variables=None,
-    settings=None,  # noqa: ARG001
+    parameter_names: list[str],
+    parameter_groups: dict[str, list[str]] | None = None,
+    metadata_variables: dict[str, Any] | None = None,
+    settings: PlottingSettings | None = None,  # noqa: ARG001
     **_kwargs,
 ) -> Figure:
-    """Default plug-in function for :class:`PlotLoss`.
+    """Default plug-in function for :class:`LossCurvePlot`.
 
     Applies the standard presentation order (sort by variable + level via
     :func:`argsort_variablename_variablelevel`), then the group-sorting /

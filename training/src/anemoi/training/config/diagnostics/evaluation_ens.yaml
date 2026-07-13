@@ -29,7 +29,7 @@ plot:
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
 
     # Deterministic callbacks are also overloaded.
-    - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+    - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
       dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       # group parameters by categories when visualizing contributions to the loss
       # one-parameter groups are possible to highlight individual parameters
@@ -55,7 +55,7 @@ plot:
       plot_fn:
         _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.histogram_plot_fn
         _partial_: true
-    - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+    - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
       dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       every_n_epochs: ${diagnostics.plot.frequency.epoch}
 

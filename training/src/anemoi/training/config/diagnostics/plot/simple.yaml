@@ -41,7 +41,7 @@ focus_areas:
 
 callbacks:
   # Add plot callbacks here
-  - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+  - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
     # group parameters by categories when visualizing contributions to the loss
     # one-parameter groups are possible to highlight individual parameters
     dataset_names: ["data"] #TODO can make this a default in pydantic and remove here

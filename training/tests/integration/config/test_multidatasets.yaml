@@ -57,10 +57,10 @@ diagnostics:
     parameters: ["tp"]
     datasets_to_plot: ["era5", "cerra"] # Default dataset names to use in the plot callbacks
     callbacks:
-      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         every_n_epochs: 5
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         parameter_groups:
           moisture: []

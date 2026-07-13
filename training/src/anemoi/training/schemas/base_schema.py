@@ -95,7 +95,7 @@ _DEPRECATED_TARGETS: dict[str, str] = {
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotLoss' "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
@@ -110,7 +110,17 @@ _DEPRECATED_TARGETS: dict[str, str] = {
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotLoss": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
         "instead and update your config accordingly."
     ),
     "anemoi.models.layers.activations.GLU": (

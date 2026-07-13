@@ -137,14 +137,14 @@ def test_add_plotting_callback(monkeypatch):
     # Add plotting callback
     import anemoi.training.diagnostics.callbacks.plot as plot
 
-    class PlotLoss:
+    class LossCurvePlot:
         def __init__(self, plotting_settings=None):
             pass
 
-    monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
+    monkeypatch.setattr(plot, "LossCurvePlot", LossCurvePlot)
 
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
+    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.LossCurvePlot"}]
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
@@ -215,7 +215,7 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
         data_indices=data_indices,
     )
 
-    callback = plot_mod.PlotLoss.__new__(plot_mod.PlotLoss)
+    callback = plot_mod.LossCurvePlot.__new__(plot_mod.LossCurvePlot)
     callback.every_n_batches = 1
     callback.dataset_names = ["data"]
     callback.parameter_groups = {}

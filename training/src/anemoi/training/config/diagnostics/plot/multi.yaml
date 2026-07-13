@@ -51,7 +51,7 @@ focus_areas:
 
 callbacks:
   # Add plot callbacks here
-  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
     every_n_epochs: 5
     dataset_names: ${diagnostics.plot.datasets_to_plot}
     # `plot_fn` is optional — omit to use the default. Provide a Hydra-instantiable
@@ -59,7 +59,7 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn
       _partial_: true
-  - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+  - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
     dataset_names: ${diagnostics.plot.datasets_to_plot}
     parameter_groups:
       moisture: [tp, cp, tcw]
