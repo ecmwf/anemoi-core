@@ -34,6 +34,14 @@ Bind plot-specific kwargs (e.g. ``per_sample``, ``min_delta``, ``log_scale``,
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+from typing import Any
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
 # --- Thin adapters around the existing evaluation.plotting.* functions ------
 #
 # These preserve the current visual output while letting all four map-style
@@ -42,24 +50,22 @@ from __future__ import annotations
 
 
 def sample_plot_fn(
-    parameters,
+    parameters: dict,
     *,
-    x,
-    y_true,
-    y_pred,
-    latlons,
-    auxiliary=None,
-    settings=None,
+    x: np.ndarray,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    latlons: np.ndarray,
+    auxiliary: np.ndarray | None = None,
+    settings: Any | None = None,
     per_sample: int = 6,
-    accumulation_levels_plot=None,
+    accumulation_levels_plot: list | None = None,
     prediction_label: str = "pred",
     auxiliary_label: str = "corrupted targets",
-    **_kwargs,
-):
+    **_kwargs: Any,
+) -> Figure:
     """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample)."""
-    from anemoi.training.diagnostics.evaluation.plotting.sample import (
-        plot_predicted_multilevel_flat_sample,
-    )
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     return plot_predicted_multilevel_flat_sample(
         parameters,
@@ -80,17 +86,17 @@ def sample_plot_fn(
 
 
 def spectrum_plot_fn(
-    parameters,
+    parameters: dict,
     *,
-    x,
-    y_true,
-    y_pred,
-    latlons,
-    auxiliary=None,  # noqa: ARG001
-    settings=None,  # noqa: ARG001
+    x: np.ndarray,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    latlons: np.ndarray,
+    auxiliary: np.ndarray | None = None,  # noqa: ARG001
+    settings: Any | None = None,  # noqa: ARG001
     min_delta: float | None = None,
-    **_kwargs,
-):
+    **_kwargs: Any,
+) -> Figure:
     """Adapter for ``plot_power_spectrum`` (PlotSpectrum)."""
     from anemoi.training.diagnostics.evaluation.plotting.spectrum import plot_power_spectrum
 
@@ -98,17 +104,17 @@ def spectrum_plot_fn(
 
 
 def histogram_plot_fn(
-    parameters,
+    parameters: dict,
     *,
-    x,
-    y_true,
-    y_pred,
-    latlons=None,  # noqa: ARG001
-    auxiliary=None,  # noqa: ARG001
-    settings=None,
+    x: np.ndarray,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    latlons: np.ndarray | None = None,  # noqa: ARG001
+    auxiliary: np.ndarray | None = None,  # noqa: ARG001
+    settings: Any | None = None,
     log_scale: bool = False,
-    **_kwargs,
-):
+    **_kwargs: Any,
+) -> Figure:
     """Adapter for ``plot_histogram`` (PlotHistogram)."""
     from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
 
@@ -123,21 +129,19 @@ def histogram_plot_fn(
 
 
 def ensemble_plot_fn(
-    parameters,
+    parameters: dict,
     *,
-    x,  # noqa: ARG001
-    y_true,
-    y_pred,
-    latlons,
-    auxiliary=None,  # noqa: ARG001
-    settings=None,
-    accumulation_levels_plot=None,
+    x: np.ndarray,  # noqa: ARG001
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    latlons: np.ndarray,
+    auxiliary: np.ndarray | None = None,  # noqa: ARG001
+    settings: Any | None = None,
+    accumulation_levels_plot: list | None = None,
     n_plots_per_sample: int = 4,
-    **_kwargs,
-):
+    **_kwargs: Any,
+) -> Figure:
     """Adapter for ``plot_predicted_ensemble`` (PlotEnsSample)."""
-    import numpy as np
-
     from anemoi.training.diagnostics.evaluation.plotting.ensemble import plot_predicted_ensemble
 
     return plot_predicted_ensemble(

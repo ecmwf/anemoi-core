@@ -11,7 +11,6 @@
 from abc import ABC
 from abc import abstractmethod
 
-import matplotlib.cm as cm
 from matplotlib import colormaps as mpl_colormaps
 from matplotlib.colors import Colormap
 from matplotlib.colors import ListedColormap
