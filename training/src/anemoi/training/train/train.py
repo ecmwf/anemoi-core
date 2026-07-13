@@ -44,6 +44,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -222,9 +223,20 @@ class AnemoiTrainer(ABC):
                     and hasattr(data_node_cfg, "node_builder")
                     and hasattr(data_node_cfg.node_builder, "dataset")
                 ):
-                    # Pass the full dataset_config (not just the "dataset" key) so that
-                    # options like check_variables_compatibility are forwarded to open_dataset.
-                    data_node_cfg.node_builder.dataset = reader_cfg if isinstance(reader_cfg, (DictConfig, dict)) else dataset_path
+                    # Forward any extra open_dataset kwargs (e.g. check_variables_compatibility)
+                    # that are not part of the standard DatasetConfigSchema fields.
+                    # Schema-managed keys (frequency, select, drop, etc.) are excluded to avoid
+                    # forwarding complex validated objects or None defaults (e.g. select: None).
+                    graph_dataset_value: str | dict = dataset_path
+                    if isinstance(reader_cfg, (DictConfig, dict)):
+                        _schema_keys = set(DatasetConfigSchema.model_fields.keys())
+                        extra = {
+                            k: v for k, v in dict(reader_cfg).items()
+                            if k not in _schema_keys and v is not None
+                        }
+                        if extra:
+                            graph_dataset_value = {"dataset": dataset_path, **extra}
+                    data_node_cfg.node_builder.dataset = graph_dataset_value
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
