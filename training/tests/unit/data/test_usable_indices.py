@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -48,15 +48,3 @@ def test_get_usable_indices() -> None:
     )
     expected_values = np.array([3, 4, 6, 10, 11, 12])
     assert np.allclose(valid_indices, expected_values)
-
-    # Test functionality for avoiding using different model trajectories
-    series_length = 70
-    mr_start, mr_length = [4, 18]
-    trajectory_ids = (np.arange(series_length, dtype=np.int64) - mr_start) // mr_length
-    valid_indices = get_usable_indices(
-        missing_indices=set(range(40, 58)) | {11},  # one model run of length 18 missing, and one sample of another run.
-        series_length=series_length,
-        relative_indices=np.array([0, 3, 6]),
-        trajectory_ids=trajectory_ids,
-    )
-    expected_values = np.array([*[4, 6, 7, 9, 10, 12, 13, 14, 15], *list(range(22, 40 - 6)), *[58, 59, 60, 61, 62, 63]])

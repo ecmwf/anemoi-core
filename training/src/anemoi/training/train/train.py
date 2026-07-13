@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -330,7 +330,11 @@ class AnemoiTrainer(ABC):
         from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
         ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
-        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
+        compat_cfg = self.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
 
     @cached_property
     def model(self) -> pl.LightningModule:
@@ -548,6 +552,22 @@ class AnemoiTrainer(ABC):
 
         if self.config.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
+        # For GPU, check if 'cuda' is available
+        # For historical reasons, on AMD GPUs the API is still called 'cuda' even though ROCm is used.
+        if (
+            self.config.system.hardware.accelerator == "gpu" or self.config.system.hardware.accelerator == "cuda"
+        ) and not torch.cuda.is_available():
+            msg = (
+                "GPU accelerator requested but running on GPUs is not possible. "
+                "Possible reasons include no GPUs being available on the node,"
+                "or PyTorch not being installed with CUDA/ROCm support. "
+                "*Note* on aarch64 systems, the default torch wheel does not have CUDA/ROCm support."
+                "To install PyTorch with CUDA support on aarch64, you should pass the index-url argument to pip install"
+                "e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`"
+                "Please check your setup and run "
+                "`python -c 'import torch; print(torch.cuda.is_available())'` to confirm GPU support.",
+            )
+            raise RuntimeError(msg)
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
@@ -722,7 +742,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 
