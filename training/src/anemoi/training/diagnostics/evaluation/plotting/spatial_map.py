@@ -57,9 +57,7 @@ def sample_plot_fn(
     **_kwargs,
 ):
     """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample)."""
-    from anemoi.training.diagnostics.evaluation.plotting.sample import (
-        plot_predicted_multilevel_flat_sample,
-    )
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     return plot_predicted_multilevel_flat_sample(
         parameters,
