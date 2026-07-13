@@ -81,12 +81,16 @@ class PlottingSettings(PydanticBaseModel):
                 projection_kind,
             )
             projection_kind = "equirectangular"
+        from hydra.utils import instantiate
+
+        raw_colormaps = OmegaConf.select(plot_cfg, "colormaps", default=None)
+        colormaps = instantiate(raw_colormaps) if raw_colormaps is not None else None
         return cls(
             datashader=plot_cfg.datashader,
             projection_kind=projection_kind,
             asynchronous=plot_cfg.asynchronous,
             save_basedir=save_basedir,
-            colormaps=OmegaConf.select(plot_cfg, "colormaps", default=None),
+            colormaps=colormaps,
             precip_and_related_fields=OmegaConf.select(plot_cfg, "precip_and_related_fields", default=None),
             focus_areas=OmegaConf.select(plot_cfg, "focus_areas", default=None),
             dataset_names=OmegaConf.select(plot_cfg, "datasets_to_plot", default=None),
@@ -878,7 +882,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
 
 
-
 class SpatialMapPlot(BasePlotAdditionalMetrics):
     """Generic, config-driven spatial-map plot callback.
 
@@ -1046,4 +1049,3 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
                         f"rank{local_rank:01d}{self.focus_mask.tag}"
                     ),
                 )
-

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,6 +11,7 @@ import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import colormaps as mpl_colormaps
 from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import Colormap
 from matplotlib.colors import Normalize
@@ -19,6 +20,7 @@ from matplotlib.figure import Figure
 
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
+from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
 
 LOGGER = logging.getLogger(__name__)
@@ -74,7 +76,7 @@ def plot_ensemble_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
-    transform: object | None = None,
+    data_crs: object | None = None,
 ) -> None:
     """Use this when plotting ensembles.
 
@@ -115,8 +117,8 @@ def plot_ensemble_sample(
     """
     precip_and_related_fields = precip_and_related_fields if precip_and_related_fields is not None else []
     if vname in precip_and_related_fields:
-        truth *= 1000.0
-        pred_ens *= 1000.0
+        truth = truth * 1000.0
+        pred_ens = pred_ens * 1000.0
         norm = BoundaryNorm(clevels, len(clevels) + 1)
     else:
         combined_data = np.concatenate((truth.flatten(), pred_ens.flatten()))
@@ -138,9 +140,9 @@ def plot_ensemble_sample(
         truth,
         cmap=cmap,
         norm=norm,
-        title=f"{vname[0]} target",
+        title=f"{vname} target",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     single_plot(
         fig,
@@ -150,9 +152,9 @@ def plot_ensemble_sample(
         ens_mean,
         cmap=cmap,
         norm=norm,
-        title=f"{vname[0]} pred mean",
+        title=f"{vname} pred mean",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     single_plot(
         fig,
@@ -162,9 +164,9 @@ def plot_ensemble_sample(
         ens_mean - truth,
         cmap=error_cmap,
         norm=TwoSlopeNorm(vcenter=0.0),
-        title=f"{vname[0]} ens mean err",
+        title=f"{vname} ens mean err",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     single_plot(
         fig,
@@ -172,9 +174,9 @@ def plot_ensemble_sample(
         pc_lon,
         pc_lat,
         ens_sd,
-        title=f"{vname[0]} ens sd",
+        title=f"{vname} ens sd",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
 
     for i_ens in range(nens):
@@ -186,9 +188,9 @@ def plot_ensemble_sample(
             np.take(pred_ens, i_ens, axis=ens_dim) - ens_mean,
             cmap=error_cmap,
             norm=TwoSlopeNorm(vcenter=0.0),
-            title=f"{vname[0]}_{i_ens + 1} - mean",
+            title=f"{vname}_{i_ens + 1} - mean",
             datashader=datashader,
-            transform=transform,
+            data_crs=data_crs,
         )
 
 
@@ -241,11 +243,11 @@ def plot_predicted_ensemble(
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
     plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = MapProjection.for_plot(latlons, plot_kind)
+    (pc_lon, pc_lat), proj, data_crs = MapProjection.for_plot(latlons, plot_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     subplot_kw = {"projection": proj} if proj is not None else {}
-    fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, subplot_kw=subplot_kw)
+    fig, axs = plt.subplots(n_plots_x, n_plots_y, figsize=figsize, layout=LAYOUT, subplot_kw=subplot_kw)
 
     colormaps = colormaps if colormaps is not None else {}
     precip_and_related_fields = precip_and_related_fields if precip_and_related_fields is not None else []
@@ -256,11 +258,12 @@ def plot_predicted_ensemble(
         yt = y_true[..., variable_idx].squeeze()
         _axs = axs[plot_idx, :] if n_plots_x > 1 else axs
 
-        cmap = colormaps["default"].get_cmap() if colormaps.get("default") else plt.colormaps["viridis"]
-        error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else plt.colormaps["bwr"]
+        cmap = colormaps["default"].get_cmap() if colormaps.get("default") else mpl_colormaps.get_cmap("viridis")
+        error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else mpl_colormaps.get_cmap("bwr")
         for key in colormaps:
             if key not in ["default", "error"] and variable_name in colormaps[key].variables:
                 cmap = colormaps[key].get_cmap()
+                break
 
         plot_ensemble_sample(
             fig=fig,
@@ -276,7 +279,7 @@ def plot_predicted_ensemble(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
-            transform=transform,
+            data_crs=data_crs,
         )
 
     return fig

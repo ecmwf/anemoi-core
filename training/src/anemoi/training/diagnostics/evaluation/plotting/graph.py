@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,21 +7,29 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Any
+from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
-from matplotlib.figure import Figure
-from torch import Tensor
 
-from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.evaluation.geospatial.maps import map_features
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
+from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from matplotlib.figure import Figure
+    from torch import Tensor
+
+    from anemoi.models.layers.graph import NamedNodesAttributes
+    from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -174,7 +182,7 @@ def plot_graph_node_features(
     ncols = max(tt.shape[1] for tt in trainable_tensors.values())
 
     figsize = (ncols * 4, nrows * 3)
-    fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout="tight")
+    fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, (mesh, trainable_tensor) in enumerate(trainable_tensors.items()):
         latlons = node_attributes.get_coordinates(mesh).cpu().numpy()
@@ -192,7 +200,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
-                transform=None,
+                data_crs=None,
             )
 
     return fig
@@ -222,7 +230,7 @@ def plot_graph_edge_features(
     nrows = len(trainable_modules)
     ncols = max(tt.trainable.trainable.shape[1] for tt in trainable_modules.values())
     figsize = (ncols * 4, nrows * 3)
-    fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout="tight")
+    fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, ((src, dst), graph_mapper) in enumerate(trainable_modules.items()):
         src_coords = node_attributes.get_coordinates(src).cpu().numpy()
@@ -257,9 +265,9 @@ def graph_plot_fn(
     node_trainable_tensors: dict[str, Tensor],
     edge_trainable_modules: dict[tuple[str, str], Any],
     q_extreme_limit: float = 0.05,
-    settings=None,
+    settings: PlottingSettings | None = None,
     **_kwargs,
-):
+) -> Generator[tuple[Figure, str], None, None]:
     """Default plug-in function for :class:`GraphTrainableFeaturesPlot`.
 
     Yields ``(figure, tag)`` pairs. Receives already-resolved graph

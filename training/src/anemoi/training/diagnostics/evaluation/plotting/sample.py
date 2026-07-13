@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from datashader.mpl_ext import dsshow
+from matplotlib import colormaps as mpl_colormaps
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
 from matplotlib.colors import Colormap
@@ -89,7 +90,7 @@ def single_plot(
     norm: Normalize | None = None,
     title: str | None = None,
     datashader: bool = False,
-    transform: object | None = None,
+    data_crs: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -113,8 +114,9 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
-    transform:
-        Projection for the plot, by default None
+    data_crs:
+        Cartopy CRS describing the coordinate system of lon/lat (always PlateCarree when
+        using a non-equirectangular axes projection), by default None
 
     Returns
     -------
@@ -123,17 +125,10 @@ def single_plot(
     if cmap is None:
         cmap = "viridis"
     if not datashader:
-        psc = ax.scatter(
-            lon,
-            lat,
-            c=data,
-            cmap=cmap,
-            s=1,
-            alpha=1.0,
-            norm=norm,
-            rasterized=False,
-            transform=transform,
-        )
+        scatter_kwargs = {"c": data, "cmap": cmap, "s": 1, "alpha": 1.0, "norm": norm, "rasterized": False}
+        if data_crs is not None:
+            scatter_kwargs["transform"] = data_crs
+        psc = ax.scatter(lon, lat, **scatter_kwargs)
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         lower_limit = 25
@@ -151,21 +146,21 @@ def single_plot(
             ax=ax,
         )
 
-    if transform is not None:
-        # Clamp to PlateCarree's valid range to avoid NaN from non-equirectangular
-        # projections (e.g. Robinson, Mollweide) when the data spans the whole globe.
-        x0 = max(lon.min() - 0.1, -180.0)
-        x1 = min(lon.max() + 0.1, 180.0)
-        y0 = max(lat.min() - 0.1, -90.0)
-        y1 = min(lat.max() + 0.1, 90.0)
-        ax.set_extent([x0, x1, y0, y1], crs=transform)
+    ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
+    dy, dx = ymax - ymin, xmax - xmin
+    ybuffer, xbuffer = dy * 0.05, dx * 0.05
+    if data_crs is not None:
+        # For near-global data, set_extent with degree coords can produce NaN/Inf
+        # in projected space (e.g. Robinson at ±90° lat). Skip it and let Cartopy
+        # use the projection's natural global extent instead.
+        is_global = dy > 150 or dx > 340
+        if not is_global:
+            ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=data_crs)
     else:
-        xmin, xmax = max(lon.min(), -np.pi), min(lon.max(), np.pi)
-        ymin, ymax = max(lat.min(), -np.pi / 2), min(lat.max(), np.pi / 2)
-        ax.set_xlim((xmin - 0.1, xmax + 0.1))
-        ax.set_ylim((ymin - 0.1, ymax + 0.1))
+        ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
+        ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
 
-    map_features.plot(ax)
+    map_features.plot(ax, data_crs=data_crs)
 
     if title is not None:
         ax.set_title(title)
@@ -251,7 +246,7 @@ def plot_flat_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
-    transform: object | None = None,
+    data_crs: object | None = None,
     prediction_label: str = "pred",
     auxiliary: np.ndarray | None = None,
     auxiliary_label: str = "corrupted targets",
@@ -369,8 +364,10 @@ def plot_flat_sample(
                 norm=norms[ii],
                 title=titles[ii],
                 datashader=datashader,
-                transform=transform,
+                data_crs=data_crs,
             )
+        else:
+            ax[ii].axis("off")
 
 
 def plot_predicted_multilevel_flat_sample(
@@ -436,7 +433,7 @@ def plot_predicted_multilevel_flat_sample(
     n_plots_y = max(n_plots_per_sample, 7 if auxiliary is not None else 6)
 
     plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = MapProjection.for_plot(latlons, plot_kind)
+    (pc_lon, pc_lat), proj, data_crs = MapProjection.for_plot(latlons, plot_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     subplot_kw = {"projection": proj} if proj is not None else {}
@@ -456,11 +453,12 @@ def plot_predicted_multilevel_flat_sample(
         ya = None if auxiliary is None else (auxiliary if auxiliary.ndim == 1 else auxiliary[..., variable_idx])
         ya = None if ya is None else ya.reshape(-1)
 
-        cmap = colormaps["default"].get_cmap() if colormaps.get("default") else plt.colormaps["viridis"]
-        error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else plt.colormaps["bwr"]
+        cmap = colormaps["default"].get_cmap() if colormaps.get("default") else mpl_colormaps.get_cmap("viridis")
+        error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else mpl_colormaps.get_cmap("bwr")
         for key in colormaps:
             if key not in ["default", "error"] and variable_name in colormaps[key].variables:
                 cmap = colormaps[key].get_cmap()
+                break
 
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
         plot_flat_sample(
@@ -477,7 +475,7 @@ def plot_predicted_multilevel_flat_sample(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
-            transform=transform,
+            data_crs=data_crs,
             prediction_label=prediction_label,
             auxiliary=ya,
             auxiliary_label=auxiliary_label,
