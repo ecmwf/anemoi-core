@@ -97,9 +97,10 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
         if aligned.empty:
             msg = f"Runs {run_id1} and {run_id2} share no common steps"
             raise ValueError(msg)
+        # assert_close does not accept pandas Series; hand it the underlying arrays.
         assert_close(
-            aligned.loc[:, "loss_1"],
-            aligned.loc[:, "loss_2"],
+            aligned.loc[:, "loss_1"].to_numpy(),
+            aligned.loc[:, "loss_2"].to_numpy(),
             msg=lambda msg: f"Loss curve for run {trainer.run_id} does not match reference\n{msg}",
         )
 
