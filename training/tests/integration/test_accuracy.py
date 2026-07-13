@@ -38,7 +38,7 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.mlflow
 @pytest.mark.slow
-def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
+def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     # Load without resolving: interpolations such as
     # system.input.graph = ${system.output.root}/... depend on system.output.root,
@@ -68,7 +68,6 @@ def test_config_build(tmp_path: Path, mlflow_server: str) -> None:
 
     # Printed so a failing run's ID can be promoted to the new reference_id.
     LOGGER.info("Run ID from trainer: %s", trainer.run_id)
-    print(f"Run ID from trainer: {trainer.run_id}")  # noqa: T201
 
     def get_loss_df(run_id: str) -> pd.DataFrame:
         history = client.get_metric_history(run_id, metric)
