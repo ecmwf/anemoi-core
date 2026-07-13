@@ -52,7 +52,6 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
     modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/accuracy_testing/test_global.yaml",
     )
-    modifications.pop("defaults", None)  # defaults are applied by compose above
     config = OmegaConf.merge(template, modifications)
 
     config.system.output.root = str(tmp_path)
