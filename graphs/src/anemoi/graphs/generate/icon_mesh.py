@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -127,7 +127,8 @@ class ICONMultiMesh:
     def multi_mesh_edges(self) -> np.ndarray:
         """Returns the multi-mesh edges as an arrays of vertex indices."""
         # concatenate edge-vertex lists (= edges of the multi-level mesh):
-        return np.concatenate([edges for edges in self.edge_vertices], axis=0)
+        edges = np.concatenate([edges for edges in self.edge_vertices], axis=0)
+        return np.concatenate([edges, np.fliplr(edges)])
 
     def _read_vertices_data(self):
         LOGGER.debug(f"{type(self).__name__}: read vertices data from ICON grid file '{self.grid_filename}'")
@@ -147,9 +148,9 @@ class ICONMultiMesh:
         cell_vertices: np.ndarray,
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Creates a new mesh with only the vertices at the desired level."""
-        vertex_mask = self.reflvl_vertex < self.max_level
+        vertex_mask = self.reflvl_vertex <= self.max_level
         num_vertices = vertex_mask.shape[0]
-        vertex_glb2loc = np.zeros(num_vertices, dtype=int)
+        vertex_glb2loc = np.full(num_vertices, -1, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
         return (
             [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]],

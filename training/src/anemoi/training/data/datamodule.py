@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,23 +9,20 @@
 
 
 import logging
-from collections.abc import Callable
 from functools import cached_property
 
-import numpy as np
 import pytorch_lightning as pl
-from hydra.utils import instantiate
 from torch.utils.data import DataLoader
-from torch_geometric.data import HeteroData
 
-from anemoi.datasets import open_dataset
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.grid_indices import BaseGridIndices
+from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
-from anemoi.utils.dates import frequency_to_seconds
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,20 +30,21 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
-    def __init__(self, config: BaseSchema, graph_data: HeteroData) -> None:
+    def __init__(self, config: BaseSchema, task: BaseTask) -> None:
         """Initialize Multi-dataset data module.
 
         Parameters
         ----------
         config : BaseSchema
             Job configuration with multi-dataset specification
-        graph_data : HeteroData
-            Graph data for the model
+        task : BaseTask
+            Task defining the problem to solve
         """
         super().__init__()
 
         self.config = config
-        self.graph_data = graph_data
+        self.task = task
+
         self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
         self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
         self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
@@ -63,15 +61,38 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not self.config.dataloader.pin_memory:
             LOGGER.info("Data loader memory pinning disabled.")
 
+        self.epoch = 0
+
     @cached_property
     def statistics(self) -> dict:
         """Return statistics from all training datasets."""
         return self.ds_train.statistics
 
     @cached_property
-    def statistics_tendencies(self) -> dict:
+    def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        return self.ds_train.statistics_tendencies
+        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
+
+        # If the task defines a fixed tendency_delta (e.g. TemporalDownscaler uses 1h
+        # per-step differences rather than cumulative offsets from t=0), use that
+        # delta for every lead time so all steps share the same tendency statistics.
+        tendency_delta = getattr(self.task, "tendency_delta", None)
+        tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
+
+        stats_by_dataset: dict[str, dict | None] = {}
+        for dataset_name, dataset in self.ds_train.data_readers.items():
+            stats_by_lead = {
+                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
+            }
+            if all(stats is None for stats in stats_by_lead.values()):
+                stats_by_dataset[dataset_name] = None
+                continue
+            stats_by_lead["lead_times"] = lead_times
+            stats_by_dataset[dataset_name] = stats_by_lead
+
+        if not any(stats is not None for stats in stats_by_dataset.values()):
+            return None
+        return stats_by_dataset
 
     @cached_property
     def metadata(self) -> dict:
@@ -81,13 +102,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def supporting_arrays(self) -> dict:
         """Return supporting arrays from all training datasets."""
-        supporting_arrays = self.ds_train.supporting_arrays
-        for dataset_name, grid_indices in self.grid_indices.items():
-            if dataset_name in supporting_arrays:
-                supporting_arrays[dataset_name] = supporting_arrays[dataset_name] | grid_indices.supporting_arrays
-            else:
-                supporting_arrays[dataset_name] = grid_indices.supporting_arrays
-        return supporting_arrays
+        return self.ds_train.supporting_arrays
 
     @cached_property
     def data_indices(self) -> dict[str, IndexCollection]:
@@ -100,81 +115,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             indices[dataset_name] = IndexCollection(data_config[dataset_name], name_to_index)
         return indices
 
-    def relative_date_indices(self, val_rollout: int = 1) -> list:
-        """Determine a list of relative time indices to load for each batch."""
-        if hasattr(self.config.training, "explicit_times"):
-            return sorted(set(self.config.training.explicit_times.input + self.config.training.explicit_times.target))
-
-        # Calculate indices using multistep, timeincrement and rollout
-        rollout_cfg = getattr(getattr(self.config, "training", None), "rollout", None)
-
-        rollout_max = getattr(rollout_cfg, "max", None)
-        rollout_start = getattr(rollout_cfg, "start", 1)
-        rollout_epoch_increment = getattr(rollout_cfg, "epoch_increment", 0)
-
-        rollout_value = rollout_start
-        if rollout_cfg and rollout_epoch_increment > 0 and rollout_max is not None:
-            rollout_value = rollout_max
-        else:
-            LOGGER.warning("Falling back rollout to: %s", rollout_value)
-
-        rollout = max(rollout_value, val_rollout)
-        multi_step = self.config.training.multistep_input
-        return list(range(multi_step + rollout))
-
-    def add_trajectory_ids(self, data_reader: Callable) -> Callable:
-        """Add trajectory IDs to data reader for forecast trajectory tracking."""
-        if not hasattr(self.config.dataloader, "model_run_info"):
-            data_reader.trajectory_ids = None
-            return data_reader
-
-        mr_start = np.datetime64(self.config.dataloader.model_run_info.start)
-        mr_len = self.config.dataloader.model_run_info.length
-
-        if hasattr(self.config.training, "rollout") and self.config.training.rollout.max is not None:
-            max_rollout_index = max(self.relative_date_indices(self.config.training.rollout.max))
-            assert (
-                max_rollout_index < mr_len
-            ), f"Requested data length {max_rollout_index + 1} longer than model run length {mr_len}"
-
-        data_reader.trajectory_ids = (data_reader.dates - mr_start) // np.timedelta64(
-            mr_len * frequency_to_seconds(self.config.data.frequency),
-            "s",
-        )
-        return data_reader
-
-    @cached_property
-    def grid_indices(self) -> dict[str, type[BaseGridIndices]]:
-        """Initialize grid indices for spatial sharding for each dataset."""
-        grid_indices_dict = {}
-
-        # Each dataset can have its own grid indices configuration
-        grid_indices_config = get_multiple_datasets_config(self.config.dataloader.grid_indices)
-        for dataset_name, grid_config in grid_indices_config.items():
-            grid_indices = instantiate(grid_config, reader_group_size=self.config.dataloader.read_group_size)
-            grid_indices.setup(self.graph_data[dataset_name])
-            grid_indices_dict[dataset_name] = grid_indices
-
-        return grid_indices_dict
-
     @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(
-            self.train_dataloader_config,
-            shuffle=True,
-            label="training",
-        )
+        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
 
     @cached_property
     def ds_valid(self) -> MultiDataset:
         """Create multi-dataset for validation."""
-        return self._get_dataset(
-            self.valid_dataloader_config,
-            shuffle=False,
-            val_rollout=self.config.dataloader.validation_rollout,
-            label="validation",
-        )
+        return self._get_dataset(self.valid_dataloader_config, shuffle=False, label="validation")
 
     @cached_property
     def ds_test(self) -> MultiDataset:
@@ -183,29 +132,68 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def _get_dataset(
         self,
-        datasets: dict[str, dict],
+        config: dict[str, dict],
         shuffle: bool = True,
-        val_rollout: int = 0,
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {}
-        for name, dataset_config in datasets.items():
-            data_reader = open_dataset(dataset_config)
-            data_reader = self.add_trajectory_ids(data_reader)  # NOTE: Functionality to be moved to anemoi datasets
-            data_readers[name] = data_reader
+        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
         return MultiDataset(
             data_readers=data_readers,
-            relative_date_indices=self.relative_date_indices(val_rollout),
-            timestep=self.config.data.timestep,
+            relative_date_indices=relative_date_indices,
             shuffle=shuffle,
-            grid_indices=self.grid_indices,
             label=label,
+            epoch=self.epoch,
+            rollout=len(tuple(self.task.steps(label))),
         )
+
+    def set_epoch(self, epoch: int) -> None:
+        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        self.epoch = epoch
+
+        for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
+            if dataset_name not in self.__dict__:
+                continue
+
+            dataset = self.__dict__[dataset_name]
+            # Store the current rollout length, and refresh the time steps that must
+            # be loaded for it. The task provides both values: steps() gives the rollout
+            # length, and get_offsets() gives the time steps via compute_relative_date_indices().
+            dataset.set_epoch(
+                epoch,
+                rollout=len(tuple(self.task.steps(label))),
+                relative_date_indices=compute_relative_date_indices(
+                    self.task,
+                    dataset.data_readers,
+                    mode=label,
+                ),
+            )
+
+    def _persistent_workers(self) -> bool:
+        """Return whether DataLoader workers can persist across epochs."""
+        rollout = getattr(self.task, "rollout", None)
+        if rollout is None:
+            return True
+        # Workers could also be persisted once rollout.step >= rollout.maximum,
+        # but that would make resumed runs behave differently from uninterrupted
+        # runs.
+        return rollout.epoch_increment == 0
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
+
+        extra = {}
+
+        if self.config.dataloader.get("multiprocessing_context", None) is not None:
+            import multiprocessing
+
+            ctx = self.config.dataloader.multiprocessing_context
+            extra["multiprocessing_context"] = multiprocessing.get_context(ctx)
+
+            LOGGER.info("Using multiprocessing context '%s' for dataloader workers.", ctx)
+
         return DataLoader(
             ds,
             batch_size=self.config.dataloader.batch_size[stage],
@@ -213,7 +201,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=True,
+            persistent_workers=self._persistent_workers(),
+            **extra,
         )
 
     def train_dataloader(self) -> DataLoader:
@@ -237,13 +226,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
-        timesteps = {
-            "relative_date_indices_training": self.relative_date_indices(),
-            "timestep": self.config.data.timestep,
-        }
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
-            metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,

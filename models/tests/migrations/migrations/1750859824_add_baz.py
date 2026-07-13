@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -22,10 +22,4 @@ metadata = MigrationMetadata(
 def migrate(ckpt: CkptType) -> CkptType:
     """Migrate the checkpoint"""
     ckpt["baz"] = "baz"
-    return ckpt
-
-
-def rollback(ckpt: CkptType) -> CkptType:
-    """Rollback the migration"""
-    del ckpt["baz"]
     return ckpt

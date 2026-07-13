@@ -69,8 +69,14 @@ training:
         node_weights:
           weight_frac_of_total: 0.25
 
+task:
+  validation_rollout: 2
 
 diagnostics:
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
+      rollout: [1, 2]
+      every_n_batches: 4
   plot:
     # Parameters to plot
     parameters:

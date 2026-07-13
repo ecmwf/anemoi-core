@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -28,7 +28,7 @@ class AnemoiDatasetNodeSchema(BaseModel):
         ..., alias="_target_"
     )
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
-    dataset: str | list | dict  # TODO(Helen): Discuss schema with Baudouin
+    dataset: str | list | dict | None  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
 

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -20,77 +20,107 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.training.data.dataset import NativeGridDataset
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.training.utils.usable_indices import get_usable_indices
-from anemoi.utils.dates import frequency_to_seconds
+from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.training.utils.time_indices import offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
 
 class MultiDataset(IterableDataset):
-    """Multi-dataset wrapper that returns synchronized samples from multiple datasets."""
+    """Multi-dataset wrapper that returns synchronized samples from multiple data readers."""
 
     def __init__(
         self,
-        data_readers: dict,
-        grid_indices: dict,
-        relative_date_indices: list,
-        timestep: str = "6h",
+        data_readers: dict[str, BaseAnemoiReader],
+        relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
+        epoch: int = 0,
+        rollout: int = 1,
     ) -> None:
-        """Initialize multi-dataset with synchronized datasets.
+        """Initialize multi-dataset with synchronized data readers.
 
         Parameters
         ----------
-        datasets_config : dict
+        data_readers : dict[str, BaseAnemoiReader]
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
-        grid_indices_config : dict
-            Dictionary mapping dataset names to their grid_indices
-            Format: {"dataset_a": grid_indices_a, "dataset_b": grid_indices_b, ...}
-        relative_date_indices: list
-            list of time indices to load from the data relative to the current sample
-        timestep : str, optional
-            the time frequency of the samples, by default '6h'
+        relative_date_indices : dict[str, TimeIndices]
+            Precomputed relative date indices for each data reader
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "multi"
+        epoch : int, optional
+            Epoch used for deterministic epoch-dependent shuffling, by default 0
+        rollout : int, optional
+            Rollout length represented by the loaded relative date indices, by default 1
         """
+        self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
-        self.timestep = timestep
         self.dataset_names = list(data_readers.keys())
+        self.epoch = epoch
+        self.rollout = rollout
 
-        # Create individual NativeGridDataset for each dataset with its own grid_indices
-        self.datasets = {}
-        for name, data_reader in data_readers.items():
-            if name not in grid_indices:
-                msg = f"No grid_indices configuration found for dataset '{name}'"
-                raise ValueError(msg)
-
-            self.datasets[name] = NativeGridDataset(
-                data_reader=data_reader,
-                grid_indices=grid_indices[name],
-                timestep=timestep,
+        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
+        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
+        # intersection would silently keep only sequence-0 samples and produce
+        # semantically meaningless alignment between the two encoders.
+        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
+        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
+        if single_seq and multi_seq:
+            msg = (
+                "Currently mixing single-sequence datasets (global time axis) with "
+                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
+                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
             )
+            raise ValueError(msg)
 
-        # relative_date_indices are computed in terms of data frequency
-        # data_relative_date_indices are in terms of the specific dataset
-        self.data_relative_date_indices = np.array(
-            [self.timeincrement * idx for idx in relative_date_indices],
-            dtype=np.int64,
-        )
+        # Compute valid (sequence, position) anchors and a flat index over them
+        # that the shuffle/shard logic operates on.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
 
-        LOGGER.info(
-            "MultiDataset initialized with %d datasets (%s), %d valid indices each",
-            len(self.datasets),
-            ", ".join(self.dataset_names),
-            len(self.valid_date_indices),
-        )
+        # Normalize the date indices to use slices where possible.
+        self.relative_date_indices = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
 
+        self._lazy_init_model_and_reader_group_info()
+
+    def set_epoch(
+        self,
+        epoch: int,
+        *,
+        rollout: int | None = None,
+        relative_date_indices: dict[str, TimeIndices] | None = None,
+    ) -> None:
+        """Set epoch-dependent sampling state before DataLoader workers are launched."""
+        self.epoch = epoch
+        if rollout is not None:
+            self.rollout = rollout
+        if relative_date_indices is None:
+            return
+
+        # Recompute valid (sequence, position) anchors for the updated rollout.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+
+        # Normalize the date indices to use slices where possible.
+        self.relative_date_indices = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
+
+    def _lazy_init_model_and_reader_group_info(self) -> None:
+        """Lazy initialize model and reader group info."""
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_rank = 0
         self.model_comm_num_groups = 1
@@ -107,122 +137,61 @@ class MultiDataset(IterableDataset):
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
+        self.shard_sizes = None
+
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
 
     def _collect(self, attr_name: str) -> dict:
-        """Helper method to collect attributes from all datasets."""
-        combined_attr = {}
-        for name, dataset in self.datasets.items():
-            combined_attr[name] = getattr(dataset, attr_name)
-        return combined_attr
-
-    def _apply_to_all_datasets(self, method_name: str, *args, **kwargs) -> None:
-        """Call a method by name with given arguments on all datasets."""
-        for dataset in self.datasets.values():
-            getattr(dataset, method_name)(*args, **kwargs)
+        """Helper method to collect attributes from all data readers."""
+        return {name: getattr(dataset, attr_name) for name, dataset in self.data_readers.items()}
 
     @cached_property
     def statistics(self) -> dict[str, dict]:
-        """Return combined statistics from all datasets."""
+        """Return combined statistics from all data readers."""
         return self._collect("statistics")
 
     @cached_property
-    def statistics_tendencies(self) -> dict[str, dict | None]:
-        """Return combined tendency statistics from all datasets."""
-        return self._collect("statistics_tendencies")
-
-    @cached_property
     def metadata(self) -> dict[str, dict]:
-        """Return combined metadata from all datasets."""
+        """Return combined metadata from all data readers."""
         return self._collect("metadata")
 
     @cached_property
     def supporting_arrays(self) -> dict[str, dict]:
-        """Return combined supporting arrays from all datasets."""
+        """Return combined supporting arrays from all data readers."""
         return self._collect("supporting_arrays")
 
     @cached_property
     def variables(self) -> dict[str, list[str]]:
-        """Return combined variables from all datasets."""
+        """Return combined variables from all data readers."""
         return self._collect("variables")
 
     @property
     def data(self) -> dict:
-        """Return data from all datasets as dictionary."""
+        """Return data from all data readers as dictionary."""
         return self._collect("data")
 
     @cached_property
     def name_to_index(self) -> dict[str, dict]:
-        """Return combined name_to_index mapping from all datasets."""
+        """Return combined name_to_index mapping from all data readers."""
         return self._collect("name_to_index")
 
     @cached_property
     def resolution(self) -> dict[str, str]:
-        """Return combined resolution from all datasets."""
+        """Return combined resolution from all data readers."""
         return self._collect("resolution")
 
     @cached_property
     def frequency(self) -> datetime.timedelta:
-        """Return combined frequency from all datasets."""
+        """Return combined frequency from all data readers."""
         freqs = self._collect("frequency")
         freq_ref = None
         for name, freq in freqs.items():
             if freq_ref is None:
                 freq_ref = freq
-            assert freq == freq_ref, f"Dataset '{name}' has different frequency than other datasets"
+            assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
-
-    @cached_property
-    def timeincrement(self) -> int:
-        try:
-            frequency = frequency_to_seconds(self.frequency)
-        except ValueError as e:
-            msg = f"Error in data frequency, {self.frequency}"
-            raise ValueError(msg) from e
-
-        try:
-            timestep = frequency_to_seconds(self.timestep)
-        except ValueError as e:
-            msg = f"Error in timestep, {self.timestep}"
-            raise ValueError(msg) from e
-
-        assert timestep % frequency == 0, (
-            f"Timestep ({self.timestep} == {timestep}) isn't a "
-            f"multiple of data frequency ({self.frequency} == {frequency})."
-        )
-
-        LOGGER.info(
-            "Timeincrement set to %s for data with frequency, %s, and timestep, %s",
-            timestep // frequency,
-            frequency,
-            timestep,
-        )
-        return timestep // frequency
-
-    @cached_property
-    def valid_date_indices(self) -> np.ndarray:
-        """Return valid date indices.
-
-        A date t is valid if we can sample the elements t + i
-        for every relative_date_index i.
-        """
-        valid_date_indices_ref = None
-        for ds in self.datasets.values():
-            valid_date_indices = get_usable_indices(
-                ds.data.missing,
-                len(ds.data),
-                self.data_relative_date_indices,
-                ds.data.trajectory_ids,
-            )
-            if valid_date_indices_ref is None:
-                valid_date_indices_ref = valid_date_indices
-            assert np.array_equal(
-                valid_date_indices_ref,
-                valid_date_indices,
-            ), "Datasets have different valid_date_indices, cannot synchronize samples"
-        return valid_date_indices_ref
 
     def set_comm_group_info(
         self,
@@ -232,6 +201,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
+        shard_sizes: dict[str, ShardSizes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -249,6 +219,8 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
+        shard_sizes : dict[str, ShardSizes]
+            Shard sizes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -259,6 +231,8 @@ class MultiDataset(IterableDataset):
 
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
+
+        self.shard_sizes = shard_sizes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
@@ -313,7 +287,7 @@ class MultiDataset(IterableDataset):
         )
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Initialize all datasets for this worker."""
+        """Initialize all data readers for this worker."""
         self.worker_id = worker_id
 
         # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
@@ -339,30 +313,56 @@ class MultiDataset(IterableDataset):
         )
 
         base_seed = get_base_seed()
+        seed = base_seed + self.epoch
 
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
-        sanity_rnd = self.rng.random(1)
+        torch.manual_seed(seed)
+        random.seed(seed)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed=seed)
+        sanity_rnd = self.rng.random(1)[0]
         LOGGER.info(
-            ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
+            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
             worker_id,
             self.label,
             os.getpid(),
-            base_seed,
+            self.epoch,
+            self.rollout,
+            seed,
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        start = index + self.data_relative_date_indices[0]
-        end = index + self.data_relative_date_indices[-1] + 1
-        if len(self.data_relative_date_indices) > 1:
-            timeincrement = self.data_relative_date_indices[1] - self.data_relative_date_indices[0]
-        else:
-            timeincrement = 1  # single time step
+    @cached_property
+    def shard_shapes(self) -> dict[str, list]:
+        """Return shard shapes for all data readers."""
+        shard_shapes = {}
+        for name, dataset in self.data_readers.items():
+            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
+        return shard_shapes
 
-        time_steps = slice(start, end, timeincrement)
-        return {name: dataset.get_sample(time_steps, self.reader_group_rank) for name, dataset in self.datasets.items()}
+    def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
+        """Get the grid shard slice according to the reader rank."""
+        start, end = get_partition_range(
+            partition_sizes=self.shard_shapes[dataset_name],
+            partition_id=reader_group_rank,
+        )
+        return slice(start, end)
+
+    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
+        sequence, position = (int(v) for v in self.anchors[index])
+        x = {}
+        for name, dataset in self.data_readers.items():
+            time_steps = offset_time_indices(position, self.relative_date_indices[name])
+            # self.shard_sizes is lazily initalised to None
+            # This if statement guards against the case where shard_sizes is not set
+            # (e.g. if set_comm_group_info hasn't been called yet)
+            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
+                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
+                grid_indices = slice(start, end)
+            else:
+                grid_indices = slice(None)
+            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
+
+        return x
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.
@@ -374,7 +374,7 @@ class MultiDataset(IterableDataset):
             Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
         """
         # Get the shuffled indices from the primary dataset
-        # All datasets will use the same shuffled indices for synchronization
+        # All data readers will use the same shuffled indices for synchronization
         if self.shuffle:
             shuffled_chunk_indices = self.rng.choice(
                 self.valid_date_indices,
@@ -391,6 +391,7 @@ class MultiDataset(IterableDataset):
             self.worker_id,
             shuffled_chunk_indices[:10],
         )
+
         # TODO(): improve this...
         for i in shuffled_chunk_indices:
             yield self.get_sample(i)
@@ -403,7 +404,7 @@ class MultiDataset(IterableDataset):
 
     def tree(self) -> Tree:
         tree = Tree(f"{self.__class__.__name__}")
-        for name, dataset in self.datasets.items():
+        for name, dataset in self.data_readers.items():
             subtree = dataset.tree(prefix=name)
             tree.add(subtree)
         return tree

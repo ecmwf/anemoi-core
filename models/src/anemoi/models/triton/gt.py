@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -212,7 +212,7 @@ def _gt_bwd_dst_pass(
 
     if num_edges == 0:
         # store D_j = <d_out, out> = 0 and dQ = 0
-        zeros = tl.zeros((H_pad,), dtype=out_dtype)
+        zeros = tl.zeros((H_pad,), dtype=tl.float32)
         tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
@@ -258,7 +258,7 @@ def _gt_bwd_dst_pass(
         e_idx += 1
 
     # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj.to(out_dtype), mask=H_mask)
+    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
@@ -283,7 +283,7 @@ def _gt_bwd_src_pass(
     D_K_ptr,  # [N_src * H * C]
     D_V_ptr,  # [N_src * H * C]
     D_E_ptr,  # [M * H * C]
-    N_src: tl.constexpr,
+    N_src,
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
@@ -405,9 +405,25 @@ class GraphTransformerFunction(torch.autograd.Function):
         row, colptr, rowptr, edge_ids, edge_dst = [x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst)]
 
         N_dst, H, C = q.shape
-        out = torch.empty_like(q)
+        out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
         m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
+        # fix: write output in float32 for backward stability, then cast back to input dtype at the end of forward
+        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
+
+        # Save tensors for backward
+        ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+        return out_saved.to(q.dtype)
+
+    @staticmethod
+    def backward(ctx, d_out):
+        d_out = d_out.contiguous()
+        q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+
+        N_dst, H, C = q.shape
+        N_src = k.shape[0]
+
+        # Infer gradient dtype from incoming gradient tensor
         def torch_dtype_to_triton(dtype):
             if dtype == torch.float16:
                 return tl.float16
@@ -418,36 +434,21 @@ class GraphTransformerFunction(torch.autograd.Function):
             else:
                 raise ValueError(f"Unsupported dtype: {dtype}")
 
-        out_dtype = torch_dtype_to_triton(q.dtype)
-        ctx.out_dtype = out_dtype
-
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out, N_dst, H, C, out_dtype)
-
-        # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst)
-        return out
-
-    @staticmethod
-    def backward(ctx, d_out):
-        d_out = d_out.contiguous()
-        q, k, v, e, out, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
-
-        N_dst, H, C = q.shape
-        N_src = k.shape[0]
+        grad_dtype = torch_dtype_to_triton(d_out.dtype)
 
         # Allocate grads and intermediates
         dQ = torch.empty_like(q)
         dK = torch.empty_like(k)
         dV = torch.empty_like(v)
         dE = torch.empty_like(e)
-        D = torch.empty((N_dst, H), device=q.device, dtype=q.dtype)
+        D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
         # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out, m, row, colptr, d_out, dQ, D, N_dst, H, C, ctx.out_dtype)
+        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
 
         # Pass B: source nodes (accumulate dK, dV, dE)
         _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, ctx.out_dtype
+            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype
         )
 
         return dQ, dK, dV, dE, None, None

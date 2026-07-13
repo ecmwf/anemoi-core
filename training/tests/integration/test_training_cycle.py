@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,14 +9,17 @@
 
 import logging
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
+from anemoi.training.train.evaluate import AnemoiEvaluator
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -27,27 +30,72 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 LOGGER = logging.getLogger(__name__)
 
 
+def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
+    """Recursively check that the metadata dictionary conforms to the expected schema.
+
+    This is a simplified schema validation that only checks for the presence of expected keys.
+    Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
+    """
+    for key, subschema in schema.items():
+
+        if key == "__datasets__":
+            dataset_names = data.get("dataset_names", [])
+            for ds in dataset_names:
+                assert ds in data, f"{path}: dataset '{ds}' missing"
+                assert_keys_exist(data[ds], subschema, f"{path}.{ds}")
+            continue
+
+        assert key in data, f"{path}: missing key '{key}'"
+
+        if isinstance(subschema, dict):
+            assert isinstance(data[key], dict), f"{path}.{key} should be dict"
+            assert_keys_exist(data[key], subschema, f"{path}.{key}")
+
+        if subschema is list:
+            assert isinstance(data[key], list), f"{path}.{key} should be list"
+
+
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_architecture_configs(
-    architecture_config: tuple[DictConfig, str, str],
+def test_training_cycle_global(
+    global_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url, _ = architecture_config
+    cfg, url, _ = global_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_architecture_configs(architecture_config: tuple[DictConfig, str, str]) -> None:
-    cfg, _, _ = architecture_config
+def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
     BaseSchema(**cfg)
 
 
-def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_accepts_unknown_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    # projection_kind is a free-form string; unknown values are validated lazily at
+    # runtime in Projection.from_kind, not at schema load time.
+    cfg, _, _ = global_config
+    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    validated = BaseSchema(**cfg)
+    assert validated.diagnostics.plot.projection_kind == "invalid_projection"
+
+
+def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    cfg, _, _ = global_config
+    cfg.config_validation = False
+    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg_obj = OmegaConf.to_object(cfg)
+    unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
+    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
+
+
+def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
     from anemoi.training.diagnostics.logger import get_mlflow_logger
     from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
-    config, _, _ = base_global_config
+    config = gnn_config_mlflow
     if config.config_validation:
         OmegaConf.resolve(config)
         config = BaseSchema(**config)
@@ -56,10 +104,27 @@ def test_config_validation_mlflow_configs(base_global_config: tuple[DictConfig, 
         config = OmegaConf.to_object(config)
         config = UnvalidatedBaseSchema(**DictConfig(config))
 
-    logger = get_mlflow_logger(config)
+    from anemoi.training.schemas.base_schema import convert_to_omegaconf
 
-    if config.diagnostics.log.mlflow.enabled:
-        assert Path(config.diagnostics.log.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
+    config = convert_to_omegaconf(config)
+
+    # Minimal inputs required by get_mlflow_logger
+    run_id = None
+    fork_run_id = None
+    paths = config.system.output
+    logger_config = config.diagnostics.log
+
+    logger_cfg = getattr(logger_config, "mlflow", None)
+    if getattr(logger_cfg, "enabled", False):
+        LOGGER.info("%s logger enabled", "MLFLOW")
+
+        logger = get_mlflow_logger(
+            run_id=run_id,
+            fork_run_id=fork_run_id,
+            paths=paths,
+            logger_config=logger_config,
+        )
+        assert Path(logger_config.mlflow.save_dir) == Path(config.system.output.logs.mlflow)
         assert isinstance(logger, AnemoiMLflowLogger)
 
 
@@ -86,7 +151,9 @@ def test_training_cycle_stretched(
     cfg, urls = stretched_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
 def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
@@ -103,7 +170,9 @@ def test_training_cycle_multidatasets(
     cfg, urls = multidatasets_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
 def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
@@ -117,7 +186,9 @@ def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_a
     cfg, urls = lam_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
 @skip_if_offline
@@ -142,11 +213,26 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
+@skip_if_offline
 def test_config_validation_ensemble(ensemble_config: tuple[DictConfig, str]) -> None:
     cfg, _ = ensemble_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = ensemble_graph_multiscale_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_ensemble_truncated_connection(
+    ensemble_truncated_connection_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_truncated_connection_config
     BaseSchema(**cfg)
 
 
@@ -176,7 +262,9 @@ def test_training_cycle_autoencoder(
     cfg, urls = autoencoder_config
     for url in urls:
         get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
 def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
@@ -208,17 +296,20 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer = AnemoiTrainer(cfg)
     trainer.train()
 
-    assert trainer.model.trainer.global_step == 6
+    expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
+    assert (
+        trainer.model.trainer.global_step == expected_global_step
+    ), f"Expected global_step={expected_global_step}, got {trainer.model.trainer.global_step}"
 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 3, "Expected 3 checkpoints after second run"
 
 
 @skip_if_offline
 def test_loading_checkpoint(
-    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: callable,
 ) -> None:
-    cfg, url = architecture_config_with_checkpoint
+    cfg, url = global_config_with_checkpoint
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.model
@@ -227,42 +318,51 @@ def test_loading_checkpoint(
 @skip_if_offline
 @pytest.mark.slow
 def test_restart_from_existing_checkpoint(
-    architecture_config_with_checkpoint: tuple[DictConfig, str],
+    global_config_with_checkpoint: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    cfg, url = architecture_config_with_checkpoint
+    cfg, url = global_config_with_checkpoint
     get_test_archive(url)
     AnemoiTrainer(cfg).train()
 
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_interpolator(
-    interpolator_config: tuple[DictConfig, str],
+def test_training_cycle_temporal_downscaler(
+    temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
 ) -> None:
-    """Full training-cycle smoke-test for the temporal interpolation task."""
-    cfg, url = interpolator_config
+    """Full training-cycle smoke-test for the temporal downscaler task."""
+    cfg, url = temporal_downscaler_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_interpolator(interpolator_config: tuple[DictConfig, str]) -> None:
-    """Schema-level validation for the temporal interpolation config."""
-    cfg, _ = interpolator_config
+def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple[DictConfig, str]) -> None:
+    """Schema-level validation for the temporal downscaler config."""
+    cfg, _ = temporal_downscaler_config
     BaseSchema(**cfg)
 
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_diffusion(diffusion_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
-    cfg, url = diffusion_config
+def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+    cfg, url = edm_transport_config
     get_test_archive(url)
-    AnemoiTrainer(cfg).train()
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
-def test_config_validation_diffusion(diffusion_config: tuple[DictConfig, str]) -> None:
-    cfg, _ = diffusion_config
+def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = edm_transport_config
+    BaseSchema(**cfg)
+
+
+def test_config_validation_stochastic_interpolant(stochastic_interpolant_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = stochastic_interpolant_config
     BaseSchema(**cfg)
 
 
@@ -288,3 +388,72 @@ def test_training_cycle_mlflow_dry_run(
 
     # Run training
     AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_imerg_target(
+    imerg_target_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = imerg_target_config
+    get_test_archive(url)
+    AnemoiTrainer(cfg).train()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_multidatasets_edm_transport(
+    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
+    get_test_archive: callable,
+) -> None:
+    cfg, urls = multidatasets_edm_transport_config
+    for url in urls:
+        get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = temporal_downscaler_ensemble_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_temporal_downscaler_ensemble(
+    temporal_downscaler_ensemble_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = temporal_downscaler_ensemble_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_evaluator(
+    gnn_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config
+    get_test_archive(url)
+    training_cfg = deepcopy(cfg)
+    training_cfg.diagnostics.plot.callbacks = []
+    training_cfg.dataloader.limit_batches.validation = 0
+    AnemoiTrainer(training_cfg).train()
+
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    checkpoint_dir = run_dirs[0]
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.load_weights_only = True
+    evaluator = AnemoiEvaluator(cfg)
+    evaluator.evaluate()

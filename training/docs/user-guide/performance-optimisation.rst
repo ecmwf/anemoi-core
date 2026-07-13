@@ -142,6 +142,51 @@ inform you about which num_chunks parameter to change.
 
       export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=... ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR=...
 
+Gradient Checkpointing
+======================
+
+Gradient checkpointing is a technique that trades compute time for memory.
+During backpropagation, intermediate activations are normally stored to
+compute gradients. With gradient checkpointing enabled, these activations
+are recomputed on-the-fly during the backward pass instead of being stored.
+
+This can significantly reduce peak memory usage at the cost of increased
+computation time.
+
+Gradient checkpointing is **enabled by default** for all model components
+(encoder, processor, decoder). To disable it for faster training when
+memory is not a constraint:
+
+.. code:: yaml
+
+   model:
+     encoder:
+       gradient_checkpointing: False
+     processor:
+       gradient_checkpointing: False
+     decoder:
+       gradient_checkpointing: False
+
+You can also enable/disable checkpointing independently for each component.
+For example, to only checkpoint the mappers (encoder and decoder), which
+typically have the highest peak memory usage:
+
+.. code:: yaml
+
+   model:
+     encoder:
+       gradient_checkpointing: True
+     processor:
+       gradient_checkpointing: False
+     decoder:
+       gradient_checkpointing: True
+
+.. note::
+
+   Disabling gradient checkpointing will increase memory usage but can
+   lead to pronounced speedups in training. This is recommended when you
+   have sufficient GPU memory and want to maximize training throughput.
+
 Shard model over more GPUs
 ==========================
 
@@ -232,10 +277,8 @@ their recommended settings
 
 .. note::
 
-   Longer rollout increases the CPU memory required by the dataloaders.
-   It can be beneficial to break rollout runs into multiple runs (e.g.
-   rollout 1->6 and rollout 7->12) and tune the number of workers for
-   both runs accordingly.
+   Dataloader CPU memory can increase as the active rollout length
+   grows. Longer rollouts might require reducing the number of workers.
 
 Change attention backend
 ========================
@@ -270,6 +313,26 @@ Triton is the default backend when using the GraphTransformer processor.
 However it requires the 'triton' library to be installed. On AMD systems
 the library is called 'pytorch-triton-rocm'. Triton is not officially
 supported on CPUs.
+
+.. note::
+
+   The attention backend for both the Transformer and GraphTransformer
+   processors can be overridden at runtime using environment variables,
+   without modifying the model config. This is useful when switching
+   backends at inference time.
+
+   .. code:: bash
+
+      # Override the Transformer attention backend
+      export ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND='scaled_dot_product_attention'
+
+      # Override the GraphTransformer attention backend
+      export ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND='pyg'
+
+   The override is applied once on the first forward pass. Valid values
+   are the same as the corresponding config options (e.g.
+   ``flash_attention``, ``scaled_dot_product_attention`` for the
+   Transformer; ``triton``, ``pyg`` for the GraphTransformer).
 
 Compiling
 =========

@@ -1,10 +1,19 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import torch
 
 
 class SparseProjector(torch.nn.Module):
-    """Applies sparse projection matrix to input tensors.
+    """Applies a sparse projection matrix to input tensors.
 
-    Stateless projector that receives matrix as input to forward().
+    Stateless: the matrix is passed to :meth:`forward`, not stored.
     """
 
     def __init__(self, autocast: bool = False) -> None:
@@ -26,7 +35,7 @@ class SparseProjector(torch.nn.Module):
         x : torch.Tensor
             Input tensor
         projection_matrix : torch.Tensor
-            Sparse projection matrix (assumed to be on correct device)
+            Sparse projection matrix (assumed to be on the correct device)
 
         Returns
         -------
@@ -38,3 +47,14 @@ class SparseProjector(torch.nn.Module):
             for i in range(x.shape[0]):
                 out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
         return torch.stack(out)
+
+    def project(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
+        """Project ``batch`` of shape ``[..., nodes, vars]`` through the *provider*'s matrix.
+
+        Handles arbitrary leading dimensions; the *provider* supplies the matrix via ``get_edges(device=...)``.
+        """
+        input_shape = batch.shape
+        batch = batch.reshape(-1, *input_shape[-2:])
+        projection_matrix = provider.get_edges(device=batch.device)
+        batch = self(batch, projection_matrix)
+        return batch.reshape(*input_shape[:-2], *batch.shape[-2:])

@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -17,6 +17,7 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import PointWiseMapperComponent
 from .common_components import TransformerModelComponent
 
 
@@ -38,7 +39,12 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"shard_strategy": str, "graph_attention_backend": str, "edge_pre_mlp": bool}
+        allowed_extras = {
+            "shard_strategy": str,
+            "graph_attention_backend": str,
+            "edge_pre_mlp": bool,
+            "gradient_checkpointing": bool,
+        }
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:
@@ -64,3 +70,8 @@ class TransformerEncoderSchema(TransformerModelComponent):
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)
     "Use alibi slopes for attention implementation. Default to False."
+
+
+class PointWiseForwardMapperSchema(PointWiseMapperComponent):
+    target_: Literal["anemoi.models.layers.mapper.PointWiseForwardMapper"] = Field(..., alias="_target_")
+    "Point-wise encoder object from anemoi.models.layers.mapper."

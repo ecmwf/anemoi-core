@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -167,6 +167,15 @@ def test_scale_tensor_two_dim(
 
     torch.testing.assert_close(scale.scale(input_tensor), output)
     torch.testing.assert_close(scale.scale_iteratively(input_tensor), output)
+
+
+@pytest.mark.parametrize("method_name", ["scale", "scale_iteratively"])
+def test_scale_tensor_subset_indices_requires_tuple(method_name: str) -> None:
+    scale = ScaleTensor()
+    x = torch.ones((1, 1, 1, 4, 5), dtype=torch.float32)
+
+    with pytest.raises(TypeError, match="must be a tuple"):
+        getattr(scale, method_name)(x, subset_indices=[Ellipsis, [1, 3]])
 
 
 @pytest.mark.parametrize("subset_id", ["test", 0])

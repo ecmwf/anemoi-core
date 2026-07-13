@@ -5,6 +5,8 @@ keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
@@ -23,7 +25,10 @@ processor:
   num_layers: 16
   num_chunks: 2
   mlp_extra_layers: 0
+  mlp_hidden_ratio: 1.0 # GNN only; use 1.0 for no expansion, ~2.67 for gated variants (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 encoder:
@@ -32,7 +37,10 @@ encoder:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 1
   mlp_extra_layers: 0
+  mlp_hidden_ratio: 1.0 # GNN only; use 1.0 for no expansion, ~2.67 for gated variants (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 decoder:
@@ -41,7 +49,10 @@ decoder:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 1
   mlp_extra_layers: 0
+  mlp_hidden_ratio: 1.0 # GNN only; use 1.0 for no expansion, ~2.67 for gated variants (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
 
 residual:

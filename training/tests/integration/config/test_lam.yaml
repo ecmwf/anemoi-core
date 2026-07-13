@@ -55,7 +55,14 @@ data:
             - "sin_julian_day"
             - "sin_local_time"
 
+task:
+  validation_rollout: 2
+
 diagnostics:
+  callbacks:
+    - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
+      rollout: [1, 2]
+      every_n_batches: 4
   plot:
     # Parameters to plot
     parameters:
@@ -83,14 +90,15 @@ diagnostics:
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
         precip_and_related_fields: [tp]
         colormaps: ${diagnostics.plot.colormaps}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-        dataset_names: ["data"]
-        # every_n_batches: 100 # Override for batch frequency
-        # min_delta: 0.01 # Minimum distance between two consecutive points
-        sample_idx: ${diagnostics.plot.sample_idx}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        parameters:
-        - tp
+      #! DEACTIVATING UNTIL PYSHTOOLS FIX FOR 3.13
+      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
+      #   dataset_names: ["data"]
+      #   # every_n_batches: 100 # Override for batch frequency
+      #   # min_delta: 0.01 # Minimum distance between two consecutive points
+      #   sample_idx: ${diagnostics.plot.sample_idx}
+      #   every_n_batches: ${diagnostics.plot.frequency.batch}
+      #   parameters:
+      #   - tp
       - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
         dataset_names: ["data"]
         sample_idx: ${diagnostics.plot.sample_idx}

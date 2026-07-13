@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,7 +14,7 @@ from anemoi.models.migrations import MigrationMetadata
 metadata = MigrationMetadata(
     versions={
         "migration": "1.0.0",
-        "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
+        "anemoi-models": "0.12.0",
     },
 )
 # <-- END DO NOT CHANGE

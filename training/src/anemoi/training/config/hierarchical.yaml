@@ -5,7 +5,8 @@ defaults:
 - system: example
 - graph: hierarchical_3level
 - model: graphtransformer
-- training: default
+- task: forecaster
+- training: single
 - _self_
 
 config_validation: True
@@ -22,6 +23,7 @@ model:
   keep_batch_sharded: False # not yet supported for Hierarchical
   model:
     _target_: anemoi.models.models.AnemoiModelEncProcDecHierarchical
+    hidden_nodes_name: ["hidden_1", "hidden_2", "hidden_3"]
   enable_hierarchical_level_processing: True
   level_process_num_layers: 2
   processor:

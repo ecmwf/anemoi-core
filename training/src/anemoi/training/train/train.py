@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -25,21 +25,29 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from packaging import version
+from pytorch_lightning.loggers.logger import Logger
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import load_graph_from_file
+from anemoi.graphs.create import validate_loaded_graph
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
-from anemoi.training.diagnostics.logger import get_tensorboard_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
@@ -77,6 +85,20 @@ class AnemoiTrainer(ABC):
 
             LOGGER.info("Skipping config validation.")
 
+        self.config = convert_to_omegaconf(self.config)
+
+        # Optionally override the torch default BLAS backend.
+        _blas_backend = self.config.training.get("preferred_blas_backend", None)
+        if _blas_backend:
+            if hasattr(torch.backends.cuda, "preferred_blas_library"):
+                torch.backends.cuda.preferred_blas_library(_blas_backend)
+                LOGGER.info("BLAS backend forced to %r (config.training.preferred_blas_backend)", _blas_backend)
+            else:
+                LOGGER.warning(
+                    "config.training.preferred_blas_backend=%r ignored: API unavailable in this PyTorch version",
+                    _blas_backend,
+                )
+
         self.start_from_checkpoint = (
             bool(self.config.training.run_id)
             or bool(self.config.training.fork_run_id)
@@ -103,9 +125,14 @@ class AnemoiTrainer(ABC):
         self._log_information()
 
     @cached_property
+    def task(self) -> BaseTask:
+        """Task instance."""
+        return instantiate(self.config.task)
+
+    @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
-        datamodule = AnemoiDatasetsDataModule(convert_to_omegaconf(self.config), self.graph_data)
+        datamodule = AnemoiDatasetsDataModule(self.config, self.task)
         # Multi-dataset case: store num_features per dataset
         self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
         # Log information for each dataset
@@ -141,38 +168,6 @@ class AnemoiTrainer(ABC):
         )
         return initial_seed
 
-    def _create_graph_for_dataset(self, dataset_path: str, dataset_name: str) -> HeteroData:
-        """Create graph for a specific dataset, overriding the dataset path in config."""
-        # Determine filename
-        if (graph_filename := self.config.system.input.graph) is not None:
-            graph_filename = Path(graph_filename)
-            if graph_filename.name.endswith(".pt"):
-                graph_name = graph_filename.name.replace(".pt", f"_{dataset_name}.pt")
-                graph_filename = graph_filename.parent / graph_name
-
-            # Try loading existing
-            if graph_filename.exists() and not self.config.graph.overwrite:
-                from anemoi.graphs.utils import get_distributed_device
-
-                LOGGER.info("Loading graph data from %s", graph_filename)
-                return torch.load(graph_filename, map_location=get_distributed_device(), weights_only=False)
-        else:
-            graph_filename = None
-
-        # Create new graph
-        from anemoi.graphs.create import GraphCreator
-
-        graph_config = convert_to_omegaconf(self.config).graph
-
-        # ALWAYS override dataset from dataloader config (ignore dummy in graph config)
-        if hasattr(graph_config.nodes, "data") and hasattr(graph_config.nodes.data.node_builder, "dataset"):
-            graph_config.nodes.data.node_builder.dataset = dataset_path
-
-        return GraphCreator(config=graph_config).create(
-            save_path=graph_filename,
-            overwrite=self.config.graph.overwrite,
-        )
-
     @cached_property
     @abstractmethod
     def profiler(self) -> None:
@@ -180,36 +175,173 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def graph_data(self) -> HeteroData | dict[str, HeteroData]:
-        """Graph data. Always uses dataset paths from dataloader config."""
-        graphs = {}
-        dataset_configs = get_multiple_datasets_config(convert_to_omegaconf(self.config).dataloader.training)
-        for dataset_name, dataset_config in dataset_configs.items():
-            LOGGER.info("Creating graph for dataset '%s'", dataset_name)
-            graphs[dataset_name] = self._create_graph_for_dataset(dataset_config.dataset, dataset_name)
-        return graphs
+    def _dataset_names(self) -> list[str]:
+        """Dataset names derived from the dataloader training config."""
+        return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
+
+    @cached_property
+    def graph_data(self) -> HeteroData:
+        """Graph data built or loaded for the current trainer config."""
+        dataset_names = self._dataset_names
+        graph_cfg = self.config.graph
+        graph_path = self.config.system.input.graph
+        save_path = Path(graph_path) if graph_path else None
+
+        # Existing-graph mode: path given but no nodes/edges defined — load as-is.
+        is_existing = (
+            graph_path is not None
+            and not graph_cfg.overwrite
+            and not getattr(graph_cfg, "nodes", None)
+            and not getattr(graph_cfg, "edges", None)
+        )
+        if is_existing:
+            if not save_path.exists():
+                msg = f"Existing graph file not found: {save_path}"
+                raise FileNotFoundError(msg)
+            graph = load_graph_from_file(save_path)
+            fused = uses_fused_dataset_graph(graph, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            validate_loaded_graph(graph, required)
+            return graph
+
+        # Build mode: expand config and create graph via GraphCreator.
+        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
+
+        if not uses_fused_dataset_graph(graph_cfg, dataset_names):
+            if len(dataset_names) == 1:
+                dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
+                dataset_name = dataset_names[0]
+                reader_cfg = dataset_configs[dataset_name].dataset_config
+                dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
+                if dataset_path is None:
+                    msg = f"Dataset source is None for dataset '{dataset_name}'."
+                    raise ValueError(msg)
+                data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
+                if (
+                    data_node_cfg is not None
+                    and hasattr(data_node_cfg, "node_builder")
+                    and hasattr(data_node_cfg.node_builder, "dataset")
+                ):
+                    data_node_cfg.node_builder.dataset = dataset_path
+            else:
+                msg = (
+                    "Multiple datasets require a fused graph config with one node group per dataset. "
+                    f"Received datasets {dataset_names} but graph nodes "
+                    f"{list(graph_cfg.nodes.keys())}."
+                )
+                raise ValueError(msg)
+
+        # Try loading existing saved graph before rebuilding.
+        overwrite = graph_cfg.get("overwrite", False)
+        if save_path and save_path.exists() and not overwrite:
+            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+            graph = load_graph_from_file(save_path)
+            validate_loaded_graph(graph, required)
+            return graph
+
+        return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
+
+    def _validate_transfer_learning_datasets(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate dataset compatibility between checkpoint and config for transfer learning.
+
+        This method handles multiple transfer learning scenarios when loading a checkpoint:
+
+        - **Scenario 1**: Exact match (checkpoint datasets == config datasets)
+          All weights are loaded normally.
+
+        - **Scenario 2**: Adding datasets (config has datasets not in checkpoint)
+          Missing datasets will have their encoder & decoder weights randomly initialized.
+          The shared processor weights are still transferred.
+
+        - **Scenario 3**: Removing datasets (checkpoint has datasets not in config)
+          Extra datasets in checkpoint are ignored (their weights are not loaded).
+
+        - **Scenario 4**: Swapping datasets (combination of scenarios 2 and 3)
+          Some datasets are added (randomly initialized), others are removed (ignored).
+
+        -----
+        - Logs warnings for datasets that are missing or ignored
+        - Logs info summary of loaded and initialized datasets
+        - The shared processor weights are always transferred
+        """
+        loaded_datasets = []
+        initialized_datasets = []
+
+        # Check if checkpoint has multi-dataset format
+        if not isinstance(model._ckpt_model_name_to_index, dict):
+            return
+
+        # Validate each dataset in current config against checkpoint
+        for dataset_name, data_indices in self.data_indices.items():
+            if dataset_name in model._ckpt_model_name_to_index:
+                # Dataset found in checkpoint - validate variables match
+                ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                loaded_datasets.append(dataset_name)
+            else:
+                # Dataset not found in checkpoint - will be randomly initialized
+                LOGGER.warning(
+                    "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
+                    dataset_name,
+                )
+                initialized_datasets.append(dataset_name)
+
+        # Check for datasets in checkpoint but not in config
+        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        if ignored_datasets:
+            for ignored_dataset in ignored_datasets:
+                LOGGER.warning(
+                    "Dataset '%s' found in checkpoint but NOT in config. "
+                    "Encoder & decoder weights for '%s' will be ignored.",
+                    ignored_dataset,
+                    ignored_dataset,
+                )
+
+        # Log summary of what was loaded
+        if loaded_datasets:
+            LOGGER.info("Successfully loaded weights for datasets: %s", loaded_datasets)
+        if initialized_datasets:
+            LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
+
+    def _validate_transfer_learning_units(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate variable unit compatibility between checkpoint and current dataset.
+
+        Compares the variables_metadata stored on the model (extracted from the checkpoint
+        during loading) with the current dataset's variables_metadata. For shared datasets,
+        the variables are assumed to match exactly.
+
+        Raises
+        ------
+        ValueError
+            If variables have incompatible units between checkpoint and dataset.
+
+        Warns
+        -----
+        If variables_metadata is missing from either the checkpoint or the current dataset,
+        a warning is logged and the check is skipped.
+        """
+        from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
+
+        ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
+        compat_cfg = self.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
 
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
-
         kwargs = {
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
+            "task": self.task,
             "data_indices": self.data_indices,
             "graph_data": self.graph_data,
             "metadata": self.metadata,
@@ -218,8 +350,9 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        model_task = get_class(self.config.training.model_task)
-        model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
+        training_method_cfg = self.config.training.method
+        training_method_cls = get_class(training_method_cfg._target_)
+        model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -232,33 +365,35 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = model_task.load_from_checkpoint(
+
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu,
+                # The model will be sent to GPU when trainer.fit() is called
+                model = training_method_cls.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",
                 )
 
             model.data_indices = self.data_indices
-            # check data indices in original checkpoint and current data indices are the same
-            for data_indices in self.data_indices.values():
-                data_indices.compare_variables(model._ckpt_model_name_to_index, data_indices.name_to_index)
+            # Validate data indices between checkpoint and current config
+            self._validate_transfer_learning_datasets(model)
+            # Validate variable units between checkpoint and current dataset
+            self._validate_transfer_learning_units(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
             LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
             for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
-                LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                is_found = freeze_submodule_by_name(model.model.model, submodule_name)
+                if is_found:
+                    LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                else:
+                    LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
 
         return model
-
-    @rank_zero_only
-    def _get_mlflow_run_id(self) -> str:
-        run_id = self.mlflow_logger.run_id
-        # for resumed runs or offline runs logging this can be useful
-        LOGGER.info("Mlflow Run id: %s", run_id)
-        return run_id
 
     @cached_property
     def run_id(self) -> str:
@@ -273,29 +408,14 @@ class AnemoiTrainer(ABC):
             return self.config.training.run_id
 
         # When we rely on mlflow to create a new run ID
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.logger and self.logger.logger_name == "mlflow":
             # if using mlflow with a new run get the run_id from mlflow
-            return self._get_mlflow_run_id()
+            return self.mlflow_logger.run_id
 
         # When no run ID is provided a random one is generated
         import uuid
 
         return str(uuid.uuid4())
-
-    @cached_property
-    def wandb_logger(self) -> pl.loggers.WandbLogger:
-        """WandB logger."""
-        return get_wandb_logger(self.config, self.model)
-
-    @cached_property
-    def mlflow_logger(self) -> pl.loggers.MLFlowLogger:
-        """Mlflow logger."""
-        return get_mlflow_logger(self.config)
-
-    @cached_property
-    def tensorboard_logger(self) -> pl.loggers.TensorBoardLogger:
-        """TensorBoard logger."""
-        return get_tensorboard_logger(self.config)
 
     def _get_warm_start_checkpoint(self) -> Path | None:
         """Returns the warm start checkpoint path if specified."""
@@ -335,7 +455,15 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        return get_callbacks(self.config.model_dump(by_alias=True))
+        callbacks_context = CallbacksContext(
+            diagnostics=self.config.diagnostics,
+            checkpoints_output=self.config.system.output.checkpoints,
+            plots_output=self.config.system.output.plots,
+            wandb_enabled=getattr(getattr(self.config.diagnostics.log, "wandb", None), "enabled", False),
+            mlflow_enabled=getattr(getattr(self.config.diagnostics.log, "mlflow", None), "enabled", False),
+            weight_averaging_config=getattr(self.config.training, "weight_averaging", None),
+        )
+        return get_callbacks(callbacks_context)
 
     @cached_property
     def metadata(self) -> dict:
@@ -344,7 +472,7 @@ class AnemoiTrainer(ABC):
             "seed": self.initial_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
-            "task": None,  # will be populated in BaseGraphModule
+            "task": None,  # will be populated in BaseTrainingModule
         }
         # Store metadata needed in inference in a separate dict "metadata_inference"
         # For each group, we add a dictionary with:
@@ -355,9 +483,10 @@ class AnemoiTrainer(ABC):
 
         md_dict = {
             "version": "2.0",
-            "config": convert_to_omegaconf(self.config),
+            "config": self.config,
             "seed": self.initial_seed,
             "run_id": self.run_id,
+            "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
             "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
@@ -366,6 +495,7 @@ class AnemoiTrainer(ABC):
             "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
+        self.task.fill_metadata(md_dict)
         return map_config_to_primitives(md_dict)
 
     @cached_property
@@ -373,18 +503,42 @@ class AnemoiTrainer(ABC):
         return self.datamodule.supporting_arrays
 
     @cached_property
-    def loggers(self) -> list:
-        loggers = []
-        if self.config.diagnostics.log.wandb.enabled:
-            LOGGER.info("W&B logger enabled")
-            loggers.append(self.wandb_logger)
-        if self.config.diagnostics.log.tensorboard.enabled:
-            LOGGER.info("TensorBoard logger enabled")
-            loggers.append(self.tensorboard_logger)
-        if self.config.diagnostics.log.mlflow.enabled:
-            LOGGER.info("MLFlow logger enabled")
-            loggers.append(self.mlflow_logger)
-        return loggers
+    def _logger_kwargs(self) -> dict:
+        """Shared keyword arguments for all loggers."""
+        return {
+            "run_id": self.config.training.run_id,
+            "fork_run_id": self.config.training.fork_run_id,
+            "paths": self.config.system.output,
+            "logger_config": self.config.diagnostics.log,
+        }
+
+    @cached_property
+    def mlflow_logger(self) -> None:
+        """Lazily initialize and cache the MLflow logger."""
+        LOGGER.info("Initializing MLflow logger lazily...")
+        return get_mlflow_logger(**self._logger_kwargs)
+
+    @cached_property
+    def wandb_logger(self) -> None:
+        """Lazily initialize and cache the W&B logger."""
+        LOGGER.info("Initializing W&B logger lazily...")
+        kwargs = self._logger_kwargs.update({"model": self.model})
+        return get_wandb_logger(**kwargs)
+
+    @cached_property
+    def logger(self) -> Logger | None:
+        """Lazily build all enabled logger."""
+        diagnostics_log = self.config.diagnostics.log
+
+        logger_types = ("wandb", "mlflow")
+
+        for logger_type in logger_types:
+            logger_cfg = getattr(diagnostics_log, logger_type, None)
+            if getattr(logger_cfg, "enabled", False):
+                LOGGER.info("%s logger enabled", logger_type.upper())
+                return getattr(self, f"{logger_type}_logger")
+
+        return False  # No logger enabled
 
     @cached_property
     def accelerator(self) -> str:
@@ -398,6 +552,22 @@ class AnemoiTrainer(ABC):
 
         if self.config.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
+        # For GPU, check if 'cuda' is available
+        # For historical reasons, on AMD GPUs the API is still called 'cuda' even though ROCm is used.
+        if (
+            self.config.system.hardware.accelerator == "gpu" or self.config.system.hardware.accelerator == "cuda"
+        ) and not torch.cuda.is_available():
+            msg = (
+                "GPU accelerator requested but running on GPUs is not possible. "
+                "Possible reasons include no GPUs being available on the node,"
+                "or PyTorch not being installed with CUDA/ROCm support. "
+                "*Note* on aarch64 systems, the default torch wheel does not have CUDA/ROCm support."
+                "To install PyTorch with CUDA support on aarch64, you should pass the index-url argument to pip install"
+                "e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`"
+                "Please check your setup and run "
+                "`python -c 'import torch; print(torch.cuda.is_available())'` to confirm GPU support.",
+            )
+            raise RuntimeError(msg)
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
@@ -425,24 +595,25 @@ class AnemoiTrainer(ABC):
         )
         LOGGER.info(
             "Effective learning rate: %.3e",
-            int(total_number_of_model_instances) * self.config.training.lr.rate,
+            int(total_number_of_model_instances) * self.config.training.optimization.lr,
         )
 
         if self.config.training.max_epochs is not None and self.config.training.max_steps not in (None, -1):
+            lr_scheduler_cfg = getattr(self.config.training.optimization, "lr_scheduler", None)
             LOGGER.info(
                 "Training limits: max_epochs=%d, max_steps=%d. "
                 "Training will stop when either limit is reached first. "
-                "Learning rate scheduler will run for %d steps.",
+                "Learning rate scheduler: %s.",
                 self.config.training.max_epochs,
                 self.config.training.max_steps,
-                self.config.training.lr.iterations,
+                lr_scheduler_cfg or "none",
             )
 
     def _get_server2server_lineage(self) -> None:
         """Get the server2server lineage."""
         self.parent_run_server2server = None
         self.fork_run_server2server = None
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.logger and self.logger.logger_name == "mlflow":
             self.parent_run_server2server = self.mlflow_logger._parent_run_server2server
             LOGGER.info("Parent run server2server: %s", self.parent_run_server2server)
             self.fork_run_server2server = self.mlflow_logger._fork_run_server2server
@@ -480,7 +651,7 @@ class AnemoiTrainer(ABC):
         This is used to check the run can be restarted from the checkpoint.
         """
         self.dry_run = False
-        if self.config.diagnostics.log.mlflow.enabled:
+        if self.logger and self.logger.logger_name == "mlflow":
             # Check if the run ID is dry - e.g. without a checkpoint
             self.dry_run = (
                 self.mlflow_logger._parent_dry_run and not Path(self.config.system.output.checkpoints.root).is_dir()
@@ -493,7 +664,7 @@ class AnemoiTrainer(ABC):
     def prepare_compilation(self) -> None:
 
         if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model_dump(by_alias=True).model.compile)
+            self.model = mark_for_compilation(self.model, self.config.model.compile)
         if hasattr(self.config.training, "recompile_limit"):
             torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
             torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
@@ -502,7 +673,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
-            convert_to_omegaconf(self.config).training.strategy,
+            self.config.training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
@@ -543,7 +714,7 @@ class AnemoiTrainer(ABC):
             precision=self.config.training.precision,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
-            logger=self.loggers,
+            logger=self.logger,
             profiler=self.profiler,
             log_every_n_steps=self.config.diagnostics.log.interval,
             # run a fixed no of batches per epoch (helpful when debugging)
@@ -571,7 +742,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

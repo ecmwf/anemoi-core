@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,6 +10,9 @@
 import logging
 
 import pytorch_lightning as pl
+from omegaconf import OmegaConf
+
+from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +34,14 @@ class CheckVariableOrder(pl.callbacks.Callback):
     def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
         """Compare variables between model and data indices."""
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
-            data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
+            # Only compare if dataset exists in model (handles transfer learning scenarios)
+            if dataset_name in model_name_to_index and dataset_name in data_name_to_index:
+                data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
+            else:
+                LOGGER.debug(
+                    "Skipping variable comparison for dataset '%s' (not found in checkpoint)",
+                    dataset_name,
+                )
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.
@@ -46,6 +56,23 @@ class CheckVariableOrder(pl.callbacks.Callback):
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
         self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._check_variable_units(trainer, pl_module)
+
+    @staticmethod
+    def _check_variable_units(trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Check unit compatibility between checkpoint and current dataset.
+
+        Raises
+        ------
+        ValueError
+            If variables have incompatible units between checkpoint and dataset.
+        """
+        ckpt_variables_metadata = getattr(pl_module, "_ckpt_variables_metadata", None)
+        compat_cfg = trainer.datamodule.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, trainer.datamodule.metadata, **compat_options)
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.
