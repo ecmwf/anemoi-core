@@ -229,7 +229,9 @@ class BaseLoss(nn.Module, ABC):
             # Sparse observations: we average over the spatial dimension. Unlike
             # gridded fields there is no node weighting that normalises over grid points,
             # and the number of observations varies per sample, so we do a mean-reduce.
-            space_time_reduced = torch.mean(out, dim=layout.grid, keepdim=True)
+            # We handle empty batches by reducing with a size-safe mean
+            n_grid = out.shape[layout.grid]
+            space_time_reduced = torch.sum(out, dim=layout.grid, keepdim=True) / max(n_grid, 1)
         else:
             # Gridded fields: the grid and time dimensions are summed because
             # 1. the normalisation over grid points is handled in the node weighting

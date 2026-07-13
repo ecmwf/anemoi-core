@@ -27,11 +27,11 @@ class SingleTraining(BaseTrainingModule):
 
     def _step(
         self,
-        batch: Batch,
+        batch: "Batch",
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).data.dtype, device=self.device, requires_grad=False)
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 

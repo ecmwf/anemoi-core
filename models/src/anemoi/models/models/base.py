@@ -11,6 +11,7 @@
 import logging
 from abc import abstractmethod
 from typing import Optional
+from collections import defaultdict
 
 import torch
 from hydra.utils import instantiate
@@ -140,7 +141,11 @@ class BaseGraphModel(nn.Module):
             hidden=self._graph_name_hidden,
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
-        self.use_encoder_data_output = {"data": True, "grid": True, "obs": False}
+
+        # HACK: returns True for "data" and "grid" labels, False for everything else (obs)
+        # TODO: this info should come through the config, not be hardcoded here.
+        # The model should not know about the dataset names.
+        self.use_encoder_data_output = defaultdict(bool, {"data": True, "grid": True})
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -292,27 +297,46 @@ class BaseGraphModel(nn.Module):
         """
         return {dataset_name: batch.shard_sizes.get(dataset_name) is not None for dataset_name in batch.keys()}
 
-    def _get_consistent_dim(self, x: dict[str, "Tensor | list[Tensor]"], dim: int) -> int:
-        """Return a dimension size that is consistent across all datasets.
+    # Canonical gridded axis order: the integer passed to _get_consistent_dim indexes this tuple
+    # TODO: Should this be defined here?
+    _AXIS_BY_POSITION = ("batch", "time", "ensemble", "grid", "variables")
 
-        Sparse-observation datasets carry their per-sample tensors as
-        ``list[Tensor]`` (the list itself is the batch axis — no leading
-        batch dim is added on collation). For ``dim == 0`` (batch size)
-        the list length plays the role of ``shape[0]``. For other
-        dimensions the per-sample tensor uses a different layout
-        (``(E, N, V)``) so we cannot map the gridded ``dim`` index onto
-        it; in that case list entries are skipped and the size is
-        derived from the tensor entries only.
+    def _get_consistent_dim(self, x: dict[str, Tensor | list[Tensor]], dim: int) -> int:
+        """Return a logical dimension size that is consistent across all datasets.
+
+        dim is a gridded physical position (e.g. 0==batch, 2==ensemble). It gets
+        resolved to a logical axis name and looked up through each dataset's own TensorLayout
+
+        - batch:
+          for tabular datasets the outer list is the batch axis, i.e. len(data)
+          for gridded datasets it is shape[layout.batch]
+        - other axes (e.g. "ensemble") are read from the (per-sample) tensor at the layout
+          position. Tabular observation datasets contribute an implicit singleton size==1.
         """
+        axis_name = self._AXIS_BY_POSITION[dim]
         dim_sizes: list[int] = []
         for _x in x.values():
-            if isinstance(_x.data, list):
-                if dim == 0:
+            layout = _x.layout
+
+            if axis_name == "batch":
+                if isinstance(_x.data, list):
+                    # Tabular observations: the outer list is the batch axis
                     dim_sizes.append(len(_x.data))
-                # Other dims live in a different per-sample layout for
-                # sparse datasets — skip and rely on tensor entries.
+                elif layout.batch is not None:
+                    dim_sizes.append(_x.data.shape[layout.batch])
                 continue
-            dim_sizes.append(_x.data.shape[dim])
+
+            axis_pos = getattr(layout, axis_name)
+            if axis_pos is None:
+                # Axis not materialised for this dataset -> implicit singleton.
+                dim_sizes.append(1)
+                continue
+
+            if isinstance(_x.data, list):
+                if len(_x.data) > 0:
+                    dim_sizes.append(_x.data[0].shape[axis_pos])
+            else:
+                dim_sizes.append(_x.data.shape[axis_pos])
 
         assert dim_sizes, f"_get_consistent_dim: no entries available for dim={dim}"
         # Assert all datasets have the same sizes

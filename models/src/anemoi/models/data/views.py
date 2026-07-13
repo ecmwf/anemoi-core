@@ -38,6 +38,21 @@ def create_source_view(**kwargs) -> "SourceView":
     return TabularSourceView(**kwargs)
 
 
+def _fancy_variable_index(
+    indices: slice | Sequence[int] | torch.Tensor,
+) -> slice | list[int] | Sequence[int] | torch.Tensor:
+    """Return a variable index safe for dimension-preserving indexing.
+
+    Statistics are stored as numpy arrays, so a tensor index is converted
+    to a plain list of ints (preserving the variable axis).
+
+    Slices and other sequence indices are returned unchanged.
+    """
+    if isinstance(indices, torch.Tensor):
+        return indices.tolist()
+    return indices
+
+
 @dataclass(frozen=True, slots=True)
 class FlatView:
     """A flattened view of the data, coordinates and timedeltas for a single sample.
@@ -205,6 +220,11 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.device
 
+    @property
+    def dtype(self) -> torch.dtype:
+        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
+        return self.data.dtype
+
     def flatten(self) -> FlatView:
         current_pattern = self.layout.pattern
         flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
@@ -307,7 +327,7 @@ class GriddedSourceView(SourceView):
         """
         new_data = self._index_vars(self.data, indices)
         new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
-        new_statistics = {k: v[indices] for k, v in self.statistics.items()}
+        new_statistics = {k: v[_fancy_variable_index(indices)] for k, v in self.statistics.items()}
         return self.clone(data=new_data, variables=new_variables, statistics=new_statistics)
 
     def index_select(self, dim: int, index: torch.Tensor) -> "GriddedSourceView":
@@ -379,6 +399,13 @@ class TabularSourceView(SourceView):
         ), f"{self.__class__.__name__} data must be a non-empty list of tensors."
         return self.data[0].device
 
+    @property
+    def dtype(self) -> torch.dtype:
+        assert (
+            isinstance(self.data, list) and len(self.data) > 0
+        ), f"{self.__class__.__name__} data must be a non-empty list of tensors."
+        return self.data[0].dtype
+
     def flatten(self) -> FlatView:
         if len(self.data) > 1:
             data = torch.cat(self.data, dim=0)
@@ -443,6 +470,7 @@ class TabularSourceView(SourceView):
         # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
 
         losses = []
+        non_empty = []
         for i, (pred, target) in enumerate(zip(self.data, other.data)):
             assert (
                 pred.shape == target.shape
@@ -461,8 +489,15 @@ class TabularSourceView(SourceView):
                     **kwargs,
                 )
             )
+            # Handle empty batches: a fully-empty worker returns a graph-connected 0
+            non_empty.append(pred.shape[self.layout.grid] > 0)
 
-        return torch.mean(torch.stack(losses))
+        stacked = torch.stack(losses)
+        num_non_empty = sum(non_empty)
+        # Divide by the number of non-empty samples (>= 1) rather than the batch size.
+        # When every sample is empty, the stacked tensor is all-zero and graph-connected,
+        # so summing and dividing by 1 preserves the zero gradient path.
+        return stacked.sum() / max(num_non_empty, 1)
 
     def allgather(self, group: ProcessGroup | None) -> "TabularSourceView":
         """Allgather this view across the given process group.
@@ -557,7 +592,7 @@ class TabularSourceView(SourceView):
         """
         new_data = [self._index_vars(t, indices) for t in self.data]
         new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
-        new_statistics = {k: v[indices] for k, v in self.statistics.items()}
+        new_statistics = {k: v[_fancy_variable_index(indices)] for k, v in self.statistics.items()}
         return self.clone(data=new_data, variables=new_variables, statistics=new_statistics)
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSourceView":

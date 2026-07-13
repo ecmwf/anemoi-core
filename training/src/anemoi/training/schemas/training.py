@@ -138,10 +138,10 @@ class VariableMaskingScalerSchema(BaseModel):
     "Flag to invert the variable mask."
 
 
-class NaNMaskScalerSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
-    use_processors_tendencies: bool = Field(default=False)
-    "Flag to include processors for tendencies when building the loss mask."
+# class NaNMaskScalerSchema(BaseModel):
+#     target_: Literal["anemoi.training.losses.scalers.NaNMaskScaler"] = Field(..., alias="_target_")
+#     use_processors_tendencies: bool = Field(default=False)
+#     "Flag to include processors for tendencies when building the loss mask."
 
 
 class TendencyScalerTargets(StrEnum):
@@ -235,7 +235,7 @@ ScalerSchema = (
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
-    | NaNMaskScalerSchema
+    # | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
     | UniformTimeStepScalerSchema
