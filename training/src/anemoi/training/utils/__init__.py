@@ -7,6 +7,4 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.training.utils.config import load_config
-
-__all__ = ["load_config"]
+__all__: list[str] = []
