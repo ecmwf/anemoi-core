@@ -47,7 +47,7 @@ def test_piecewise_sigma_schedule_has_one_transition_and_terminal_zero() -> None
 
     assert schedule.shape == (9,)
     assert schedule[-1].item() == 0.0
-    assert torch.count_nonzero(schedule == 10.0).item() == 1
+    assert torch.count_nonzero(torch.isclose(schedule, torch.tensor(10.0, dtype=schedule.dtype))).item() == 1
     assert torch.all(schedule[:-1] > 0)
     assert torch.all(schedule[1:] <= schedule[:-1])
 

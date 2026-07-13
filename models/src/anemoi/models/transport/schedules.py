@@ -203,7 +203,7 @@ class ExponentialSigmaSchedule(SigmaSchedule):
 
 
 class PiecewiseSigmaSchedule(SigmaSchedule):
-    """Experimental two-segment EDM schedule with a denser low-noise region.
+    """Two-segment EDM schedule with a denser low-noise region.
 
     ``num_steps_high`` and ``num_steps_low`` split the complete solver budget,
     including the terminal denoising step. The two positive segments meet once at
@@ -494,7 +494,7 @@ SIGMA_SCHEDULES = {
     "linear": LinearSigmaSchedule,
     "cosine": CosineSigmaSchedule,
     "exponential": ExponentialSigmaSchedule,
-    "experimental_piecewise": PiecewiseSigmaSchedule,
+    "piecewise": PiecewiseSigmaSchedule,
 }
 
 TIME_SCHEDULES = {
