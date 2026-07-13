@@ -56,6 +56,17 @@ jobs:
               #SBATCH --gpus=1
               #SBATCH --gres=gpu:1
               #SBATCH --mem=64G
+          - test_name: test_accuracy
+            pip_extras: all,tests
+            pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+            timeout_minutes: 120
+            sbatch_options: |
+              #SBATCH --job-name=anemoi_core_pytest_accuracy
+              #SBATCH --time=01:00:00
+              #SBATCH --qos=ng
+              #SBATCH --gpus=1
+              #SBATCH --gres=gpu:1
+              #SBATCH --mem=64G
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
