@@ -24,18 +24,15 @@ diagnostics:
   plot:
     parameters: [tp]
     callbacks:
-      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-      #   parameters: [tp]
-      #   output_steps: 1
-      #   dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
-      #   sample_idx: ${diagnostics.plot.sample_idx}
-      #   every_n_batches: ${diagnostics.plot.frequency.batch}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
-        dataset_names: ${diagnostics.plot.datasets_to_plot} #TODO can make this a default in pydantic and remove here
+      - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+        tag_infix: histogram
+        dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
-        precip_and_related_fields: ${diagnostics.plot.precip_and_related_fields}
         parameters: [tp]
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.histogram_plot_fn
+          _partial_: true
 
 
 training:
