@@ -25,7 +25,8 @@ diagnostics:
     focus_areas:
       europe:
         latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-    asynchronous: False # Whether to plot asynchronously
+    settings:
+      asynchronous: false
     callbacks:
       # Add plot callbacks here
       - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot

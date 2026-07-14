@@ -77,25 +77,42 @@ class PlottingSettings(PydanticBaseModel):
 
     @classmethod
     def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | Path | None) -> "PlottingSettings":
-        """Construct from a validated diagnostics.plot config node."""
-        projection_kind = plot_cfg.projection_kind
-        if plot_cfg.datashader and projection_kind != "equirectangular":
+        """Construct from a validated diagnostics.plot config node.
+
+        Rendering settings are read from the ``plot_cfg.settings`` sub-node.
+        All fields fall back to the Pydantic model defaults when absent from the
+        config, so the YAML only needs to specify values that differ from the
+        defaults.
+        """
+        _defaults = cls.model_fields
+        settings_cfg = OmegaConf.select(plot_cfg, "settings", default=None) or OmegaConf.create({})
+
+        datashader = OmegaConf.select(settings_cfg, "datashader", default=_defaults["datashader"].default)
+        projection_kind = OmegaConf.select(
+            settings_cfg,
+            "projection_kind",
+            default=_defaults["projection_kind"].default,
+        )
+        asynchronous = OmegaConf.select(settings_cfg, "asynchronous", default=_defaults["asynchronous"].default)
+
+        if datashader and projection_kind != "equirectangular":
             LOGGER.warning(
                 "datashader=True requires equirectangular projection; ignoring projection_kind=%s",
                 projection_kind,
             )
             projection_kind = "equirectangular"
+
         from hydra.utils import instantiate
 
-        raw_colormaps = OmegaConf.select(plot_cfg, "colormaps", default=None)
+        raw_colormaps = OmegaConf.select(settings_cfg, "colormaps", default=None)
         colormaps = instantiate(raw_colormaps) if raw_colormaps is not None else None
         return cls(
-            datashader=plot_cfg.datashader,
+            datashader=datashader,
             projection_kind=projection_kind,
-            asynchronous=plot_cfg.asynchronous,
+            asynchronous=asynchronous,
             save_basedir=save_basedir,
             colormaps=colormaps,
-            precip_and_related_fields=OmegaConf.select(plot_cfg, "precip_and_related_fields", default=None),
+            precip_and_related_fields=OmegaConf.select(settings_cfg, "precip_and_related_fields", default=None),
             focus_areas=OmegaConf.select(plot_cfg, "focus_areas", default=None),
             dataset_names=OmegaConf.select(plot_cfg, "datasets_to_plot", default=None),
         )

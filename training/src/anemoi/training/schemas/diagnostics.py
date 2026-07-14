@@ -233,10 +233,16 @@ class PlottingFrequency(BaseModel):
     "Frequency of the plotting in number of epochs."
 
 
-class PlotSchema(PydanticBaseModel):
-    asynchronous: bool
+class PlotSettingsSchema(PydanticBaseModel):
+    """Rendering settings shared across all plot callbacks in a run.
+
+    These map 1:1 to :class:`PlottingSettings` in ``plot.py`` and are read
+    from the ``diagnostics.plot.settings`` config sub-node.
+    """
+
+    asynchronous: bool = True
     "Handle plotting tasks without blocking the model training."
-    datashader: bool
+    datashader: bool = True
     "Use Datashader to plot."
     projection_kind: str = Field(
         default="equirectangular",
@@ -254,12 +260,17 @@ class PlotSchema(PydanticBaseModel):
     subclass ``MapProjection``.
     Must be ``'equirectangular'`` when ``datashader`` is ``True``.
     """
-    callbacks: list[PlotCallbacks] = Field(example=[])
-    "List of plotting functions to call."
     colormaps: dict | None = None
     "Variable-specific colormaps keyed by 'default', 'error', or variable name group."
     precip_and_related_fields: list[str] | None = None
     "Names of precipitation and related fields that use a special colormap."
+
+
+class PlotSchema(PydanticBaseModel):
+    settings: PlotSettingsSchema = Field(default_factory=PlotSettingsSchema)
+    "Rendering settings (datashader, projection, colormaps, etc.)."
+    callbacks: list[PlotCallbacks] = Field(example=[])
+    "List of plotting functions to call."
     focus_areas: dict | None = None
     "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
     datasets_to_plot: list[str] | None = None

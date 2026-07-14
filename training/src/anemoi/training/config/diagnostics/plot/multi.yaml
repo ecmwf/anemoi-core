@@ -1,61 +1,29 @@
-asynchronous: True # Whether to plot asynchronously
-projection_kind: equirectangular  # or lambert_conformal (requires cartopy)
-datashader: True # Choose which technique to use for plotting
-frequency: # Frequency of the plotting
-  batch: 750
-  epoch: 5
+defaults:
+  - settings_base
 
-# Parameters to plot
-parameters:
-- z_500
-- t_850
-- u_850
-- v_850
-- 2t
-- 10u
-- 10v
-- sp
-- tp
-- cp
+datasets_to_plot: ["era5", "cerra"]
 
-# Sample index
-sample_idx: 0
-
-# Precipitation and related fields
-precip_and_related_fields: [tp, cp]
-
-# select colormaps
-colormaps:
-  default:
-    _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
-    name: viridis
-  # in order to use distinctipy, you need to install the package
-  # default:
-  #   _target_: anemoi.training.utils.custom_colormaps.DistinctipyColormap
-  #   n_colors: 8
-  error:
-    _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
-    name: bwr
-  precip:
-    _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
-    clevels: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
-    variables: ${diagnostics.plot.precip_and_related_fields}
-
-datasets_to_plot: ["era5", "cerra"] # Default dataset names to use in the plot callbacks
-
-focus_areas:
-  europe:
-    latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-  china:
-    latlon_bbox: [18.0, 73.0, 54.0, 135.0]
+settings:
+  colormaps:
+    default:
+      _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+      name: viridis
+    # in order to use distinctipy, you need to install the package
+    # default:
+    #   _target_: anemoi.training.utils.custom_colormaps.DistinctipyColormap
+    #   n_colors: 8
+    error:
+      _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+      name: bwr
+    precip:
+      _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+      clevels: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
+      variables: ${diagnostics.plot.settings.precip_and_related_fields}
 
 callbacks:
-  # Add plot callbacks here
   - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
     every_n_epochs: 5
     dataset_names: ${diagnostics.plot.datasets_to_plot}
-    # `plot_fn` is optional — omit to use the default. Provide a Hydra-instantiable
-    # partial to swap in a custom visualisation (yielding `(figure, tag)` pairs).
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn
       _partial_: true
@@ -65,8 +33,6 @@ callbacks:
       moisture: [tp, cp, tcw]
       sfc_wind: [10u, 10v]
     every_n_batches: ${diagnostics.plot.frequency.batch}
-    # `plot_fn` is optional — omit to use the default. Provide a Hydra-instantiable
-    # partial to swap in a custom bar chart / rendering.
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn
       _partial_: true
