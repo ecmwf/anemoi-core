@@ -15,14 +15,12 @@ transport:
     warmup_steps: 0
     logvar_clamp: 8.0
 
-# EDM diffusion supplies per-sample weights, so every target dataset uses
-# a loss implementation that applies those weights.
+# ERA5 is an input/source dataset here; CERRA is the supervised high-resolution
+# target. EDM diffusion supplies per-sample weights, so the target loss applies
+# them explicitly.
 training_loss:
   datasets:
-    era5:
-      _target_: anemoi.training.losses.WeightedMSELoss
-      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-      ignore_nans: false
+    era5: null
     cerra:
       _target_: anemoi.training.losses.WeightedMSELoss
       scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']

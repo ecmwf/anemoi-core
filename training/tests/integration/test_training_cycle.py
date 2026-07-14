@@ -420,11 +420,8 @@ def test_config_validation_multidatasets_edm_transport(
 ) -> None:
     cfg, _ = multidatasets_edm_transport_config
     BaseSchema(**cfg)
-    assert all(
-        cfg.training.training_loss.datasets[dataset_name]._target_
-        == "anemoi.training.losses.WeightedMSELoss"
-        for dataset_name in ("era5", "cerra")
-    )
+    assert cfg.training.training_loss.datasets.era5 is None
+    assert cfg.training.training_loss.datasets.cerra._target_ == "anemoi.training.losses.WeightedMSELoss"
 
 
 @skip_if_offline
