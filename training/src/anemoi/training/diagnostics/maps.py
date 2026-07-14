@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
 from anemoi.training import diagnostics
-from anemoi.training.diagnostics.projections import Projection
+from anemoi.training.diagnostics.projections import MapProjection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,13 +23,13 @@ LOGGER = logging.getLogger(__name__)
 class Coastlines:
     """Class to plot coastlines from a GeoJSON file."""
 
-    def __init__(self, projection: Projection | None = None) -> None:
+    def __init__(self, projection: MapProjection | None = None) -> None:
         """Initialise the Coastlines object.
 
         Parameters
         ----------
-        projection : Projection | None, optional
-            Projection (e.g. Projection.equirectangular() or Projection.lambert_conformal(latlon)).
+        projection : MapProjection | None, optional
+            MapProjection (e.g. MapProjection.equirectangular() or MapProjection.lambert_conformal(latlon)).
             By default None (uses equirectangular).
 
         Raises
@@ -52,33 +52,41 @@ class Coastlines:
         with self.continents_file.open("rt") as file:
             self.data = json.load(file)
 
-        self.projection = projection or Projection.equirectangular()
+        self.projection = projection or MapProjection.equirectangular()
         self.process_data()
 
     def process_data(self) -> None:
-        lines = []
+        lines_proj = []
+        lines_deg = []
         for feature in self.data["features"]:
             coords = feature["geometry"]["coordinates"]
             x, y = zip(*coords, strict=False)
-            lines.append(list(zip(*self.projection(x, y), strict=False)))
-        self.lines = LineCollection(lines, linewidth=0.5, color="black")
+            lines_proj.append(list(zip(*self.projection(x, y), strict=False)))
+            lines_deg.append(list(zip(x, y, strict=False)))
+        self.lines = LineCollection(lines_proj, linewidth=0.5, color="black")
+        self.lines_degrees = LineCollection(lines_deg, linewidth=0.5, color="black")
 
-    def plot_continents(self, ax: plt.Axes) -> None:
+    def plot_continents(self, ax: plt.Axes, data_crs: object | None = None) -> None:
         # Add the lines to the axis as a collection
         # Note that we have to provide a copy of the lines, because of Matplotlib
-        ax.add_collection(copy.copy(self.lines))
+        if data_crs is not None:
+            lc = copy.copy(self.lines_degrees)
+            lc.set_transform(data_crs)
+            ax.add_collection(lc)
+        else:
+            ax.add_collection(copy.copy(self.lines))
 
 
 class Borders:
     """Class to plot country borders from a local GeoJSON file."""
 
-    def __init__(self, projection: Projection | None = None) -> None:
+    def __init__(self, projection: MapProjection | None = None) -> None:
         """Initialize border data and projection.
 
         Parameters
         ----------
-        projection : Projection | None
-            Projection (e.g. Projection.equirectangular() or Projection.lambert_conformal(latlon)).
+        projection : MapProjection | None
+            MapProjection (e.g. MapProjection.equirectangular() or MapProjection.lambert_conformal(latlon)).
             Defaults to equirectangular.
         """
         try:
@@ -96,11 +104,12 @@ class Borders:
         with self.borders_file.open("rt") as file:
             self.data = json.load(file)
 
-        self.projection = projection or Projection.equirectangular()
+        self.projection = projection or MapProjection.equirectangular()
         self.process_data()
 
     def process_data(self) -> None:
-        lines = []
+        lines_proj = []
+        lines_deg = []
         for feature in self.data["features"]:
             geometry = feature["geometry"]
             geom_type = geometry["type"]
@@ -110,20 +119,28 @@ class Borders:
             if geom_type == "Polygon":
                 for ring in coords:
                     lon, lat = zip(*ring, strict=False)
-                    lines.append(list(zip(*self.projection(lon, lat), strict=False)))
+                    lines_proj.append(list(zip(*self.projection(lon, lat), strict=False)))
+                    lines_deg.append(list(zip(lon, lat, strict=False)))
             elif geom_type == "MultiPolygon":
                 for polygon in coords:
                     for ring in polygon:
                         lon, lat = zip(*ring, strict=False)
-                        lines.append(list(zip(*self.projection(lon, lat), strict=False)))
+                        lines_proj.append(list(zip(*self.projection(lon, lat), strict=False)))
+                        lines_deg.append(list(zip(lon, lat, strict=False)))
 
         # Using a dashed linestyle to distinguish borders from coastlines
-        self.lines = LineCollection(lines, linewidth=0.5, color="black", linestyle=":")
+        self.lines = LineCollection(lines_proj, linewidth=0.5, color="black", linestyle=":")
+        self.lines_degrees = LineCollection(lines_deg, linewidth=0.5, color="black", linestyle=":")
 
-    def plot_borders(self, ax: plt.Axes) -> None:
+    def plot_borders(self, ax: plt.Axes, data_crs: object | None = None) -> None:
         # Add the lines to the axis as a collection
         # Note that we have to provide a copy of the lines, because of Matplotlib
-        ax.add_collection(copy.copy(self.lines))
+        if data_crs is not None:
+            lc = copy.copy(self.lines_degrees)
+            lc.set_transform(data_crs)
+            ax.add_collection(lc)
+        else:
+            ax.add_collection(copy.copy(self.lines))
 
 
 class MapFeatures:
@@ -146,16 +163,16 @@ class MapFeatures:
         self.continents = continents
         self.borders = borders
 
-    def plot(self, ax: plt.Axes) -> None:
+    def plot(self, ax: plt.Axes, data_crs: object | None = None) -> None:
 
         if self.continents:
             try:
-                self.continents.plot_continents(ax)
+                self.continents.plot_continents(ax, data_crs=data_crs)
             except (AttributeError, RuntimeError) as exc:
                 LOGGER.warning("Failed to plot continents: %s", exc)
         if self.borders:
             try:
-                self.borders.plot_borders(ax)
+                self.borders.plot_borders(ax, data_crs=data_crs)
             except (AttributeError, RuntimeError) as exc:
                 LOGGER.warning("Failed to plot borders: %s", exc)
 
