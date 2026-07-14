@@ -100,19 +100,25 @@ class BaseGraphModel(nn.Module):
 
     def _build_dataset_routing(self, model_config: DotDict) -> None:
         """Builds the dataset routing for encoders and decoders."""
-        self.dataset2encoder = {}
+        self.dataset2encoder: dict[str, str] = {}
+        self.encoder2datasets: dict[str, list[str]] = {}
         for encoder_name, encoder_config in model_config.model.encoders.items():
             datasets_to_encode = encoder_config["datasets"]
+            self.encoder2datasets[encoder_name] = datasets_to_encode
             assert len(datasets_to_encode) == 1, "Each encoder must be associated with exactly one dataset for now."
             for d in datasets_to_encode:
                 self.dataset2encoder[d] = str(encoder_name)
 
-        self.dataset2decoder = {}
+        self.dataset2decoder: dict[str, str] = {}
+        self.decoder2datasets: dict[str, list[str]] = {}
         for decoder_name, decoder_config in model_config.model.decoders.items():
             datasets_to_decode = decoder_config["datasets"]
+            self.decoder2datasets[decoder_name] = datasets_to_decode
             assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = str(decoder_name)
+
+        self.target_datasets = list(self.dataset2decoder.keys())
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property

@@ -51,10 +51,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.encoder = torch.nn.ModuleDict()
         for encoder_name, encoder_config in model_config.model.encoders.items():
+            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
+            assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
+                f"All datasets for encoder {encoder_name} must have the same input dimension, "
+                f"but got {encoder_in_channels_src}."
+            )
+
             self.encoder[str(encoder_name)] = instantiate(
                 encoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.input_dim[dataset_name],
+                in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.num_channels,
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
@@ -79,6 +85,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.target_datasets:
+                LOGGER.info(f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder.")
+                continue
+
             decoder_config = model_config.model.decoders[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
