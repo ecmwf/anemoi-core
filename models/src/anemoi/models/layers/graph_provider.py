@@ -41,7 +41,7 @@ def create_graph_provider(
     src_size: Optional[int] = None,
     dst_size: Optional[int] = None,
     trainable_size: int = 0,
-    graph_dir: Optional[Path] = None,
+    dataset_name: Optional[str] = None,
 ) -> "BaseGraphProvider":
     """Factory function to create appropriate graph provider.
 
@@ -61,17 +61,14 @@ def create_graph_provider(
         Destination grid size (for static mode)
     trainable_size : int, optional
         Trainable tensor size, by default 0
-    graph_dir : Path, optional
-        Directory containing graph files (for file-based provider)
     Returns
     -------
     BaseGraphProvider
         Appropriate graph provider instance
     """
     if graph:
-        print("graph type:", type(graph))
         if isinstance(graph, Path) and graph.is_dir():
-            return FileGraphProvider(graph_dir=graph, src_size=src_size, dst_size=dst_size, edge_attributes=edge_attributes, trainable_size=trainable_size)
+            return FileGraphProvider(graph_dir=graph, src_size=src_size, dst_size=dst_size, dataset_name=dataset_name, edge_attributes=edge_attributes, trainable_size=trainable_size)
         else:
             return StaticGraphProvider(
                 graph=graph,
@@ -706,6 +703,7 @@ class FileGraphProvider(BaseGraphProvider):
         src_size: str,
         dst_size: str,
         graph_dir: Union[str, Path],
+        dataset_name: str = None,
         edge_attributes: Optional[list[str]] = None,
         trainable_size: int = 0,
         extension: str = ".pt",
@@ -718,6 +716,7 @@ class FileGraphProvider(BaseGraphProvider):
         super().__init__()
         self.src_name = src_size
         self.dst_name = dst_size
+        self.graph_name = dataset_name if dataset_name is not None else "graph"
         self.edge_attributes = edge_attributes
         self.trainable_size = trainable_size
 
@@ -754,15 +753,8 @@ class FileGraphProvider(BaseGraphProvider):
             self.src_size is not None or self.dst_size is not None
         ), "Graph must have at least one of src_size or dst_size attributes"
 
-        self.edge_attributes: list[str] = getattr(graph, "edge_attribute_names", None)
-        assert (
-            self.edge_attributes is not None
-        ), "Graph must have 'edge_attribute_names' attribute listing edge attribute tensor names"
-
         edge_attr_tensor = torch.cat([graph[(self.src_name, "to", self.dst_name)][attr] for attr in self.edge_attributes], axis=1)
 
-        # --- trainable_size ---
-        self.trainable_size: int = int(getattr(graph, "trainable_size", 0))
 
         self._edge_dim = edge_attr_tensor.shape[1] + self.trainable_size
 
@@ -802,9 +794,6 @@ class FileGraphProvider(BaseGraphProvider):
             graph.dst_size == self.dst_size
         ), f"Graph dst_size {graph.dst_size} does not match expected {self.dst_size}"
         assert (
-            list(getattr(graph, "edge_attribute_names", [])) == self.edge_attributes
-        ), f"Graph edge_attribute_names {getattr(graph, 'edge_attribute_names', None)} do not match expected {self.edge_attributes}"
-        assert (
             int(getattr(graph, "trainable_size", 0)) == self.trainable_size
         ), f"Graph trainable_size {getattr(graph, 'trainable_size', 0)} does not match expected {self.trainable_size}"
         return graph
@@ -823,7 +812,6 @@ class FileGraphProvider(BaseGraphProvider):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-        graph_name: str = None,
         device: Optional[torch.device] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edges from a specific loaded graph.
@@ -852,10 +840,11 @@ class FileGraphProvider(BaseGraphProvider):
         tuple[Tensor, Adj, Optional[ShardSizes]]
             Edge attributes, expanded edge index, and optional edge_shard_sizes.
         """
-        full_graph = self._dataset[graph_name]
+
+        full_graph = self._dataset[self.graph_name]
         src_size = full_graph[self.src_name].num_nodes
         dst_size = full_graph[self.dst_name].num_nodes
-        graph = self._dataset[graph_name][(self.src_name, "to", self.dst_name)].to(device)
+        graph = self._dataset[self.graph_name][(self.src_name, "to", self.dst_name)].to(device)
 
         edge_attr = torch.cat([graph[attr] for attr in self.edge_attributes], axis=1)
         edge_attr = self.trainable(edge_attr, batch_size).to(device)
@@ -870,11 +859,12 @@ class FileGraphProvider(BaseGraphProvider):
             [edge_index + i * edge_inc for i in range(batch_size)],
             dim=1,
         )
+        edge_index = edge_index.to(torch.int64)
+        edge_attr = edge_attr.to(torch.float16)
 
         if shard_edges:
             # ensure correct dtypes for sharding
-            edge_index = edge_index.to(torch.int64)
-            edge_attr = edge_attr.to(torch.float16)
+            
             return shard_edges_1hop(
                 edge_attr, edge_index, src_size * batch_size, dst_size * batch_size, model_comm_group
             )

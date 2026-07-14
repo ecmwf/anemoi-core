@@ -233,12 +233,13 @@ class AnemoiTrainer(ABC):
         # Try loading existing saved graph before rebuilding.
         overwrite = graph_cfg.get("overwrite", False)
         if save_path and save_path.exists() and not overwrite:
-            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
-            graph = load_graph_from_file(save_path)
-            validate_loaded_graph(graph, required)
-            return graph
-
+            if save_path.suffix == ".pt":
+                fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
+                required = dataset_names if fused else [DEFAULT_DATASET_NAME]
+                graph = load_graph_from_file(save_path)
+                validate_loaded_graph(graph, required)
+                return graph
+            return save_path  # Assume the filename is a path or a dict of paths: return path for graph provider
         return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
 
     def _validate_transfer_learning_datasets(
