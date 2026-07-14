@@ -71,6 +71,14 @@ class ConfigGenerator(Command):
         dump.add_argument("--config-name", "-n", default="dev", help="Name of the configuration")
         dump.add_argument("--output", "-o", default="./config.yaml", type=Path, help="Output file path")
         dump.add_argument("--overwrite", "-f", action="store_true")
+        dump.add_argument("--sort", "-s", action="store_true", help="Sort keys alphabetically in the output YAML")
+
+        help_msg = "Export the JSON schema of the training configuration."
+        subparsers.add_parser(
+            "schema",
+            help=help_msg,
+            description=help_msg,
+        )
 
     def run(self, args: argparse.Namespace) -> None:
 
@@ -96,7 +104,13 @@ class ConfigGenerator(Command):
 
         if args.subcommand == "dump":
             LOGGER.info("Dumping config to %s", args.output)
-            self.dump_config(args.config_path, args.config_name, args.output)
+            self.dump_config(args.config_path, args.config_name, args.output, sort=args.sort)
+            return
+
+        if args.subcommand == "schema":
+            import json
+
+            print(json.dumps(BaseSchema.model_json_schema(), indent=2))  # noqa: T201
             return
 
     def traverse_config(self, destination_dir: Path | str) -> None:
@@ -187,14 +201,14 @@ class ConfigGenerator(Command):
             OmegaConf.resolve(cfg)
             BaseSchema(**cfg)
 
-    def dump_config(self, config_path: Path | None, name: str, output: Path) -> None:
+    def dump_config(self, config_path: Path | None, name: str, output: Path, sort: bool = False) -> None:
         """Dump config files in one YAML file, composed from ``config_path`` when given."""
         with _initialize_hydra(config_path):
             cfg = compose(config_name=name)
 
         LOGGER.info("Dumping file in %s.", output)
         with output.open("w") as f:
-            f.write(OmegaConf.to_yaml(cfg))
+            f.write(OmegaConf.to_yaml(cfg, sort_keys=sort))
 
 
 @contextlib.contextmanager

@@ -66,9 +66,16 @@ class PlottingSettings(PydanticBaseModel):
     @classmethod
     def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | Path | None) -> "PlottingSettings":
         """Construct from a validated diagnostics.plot config node."""
+        projection_kind = plot_cfg.projection_kind
+        if plot_cfg.datashader and projection_kind != "equirectangular":
+            LOGGER.warning(
+                "datashader=True requires equirectangular projection; ignoring projection_kind=%s",
+                projection_kind,
+            )
+            projection_kind = "equirectangular"
         return cls(
             datashader=plot_cfg.datashader,
-            projection_kind=plot_cfg.projection_kind,
+            projection_kind=projection_kind,
             asynchronous=plot_cfg.asynchronous,
             save_basedir=save_basedir,
             colormaps=OmegaConf.select(plot_cfg, "colormaps", default=None),
