@@ -75,7 +75,7 @@ processor:
 
 encoders:
   0:
-    mapper: 
+    mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       hidden_dim: ${model.num_channels}
       trainable_size: ${model.trainable_parameters.data2hidden}
@@ -95,7 +95,7 @@ encoders:
 
 decoder:
   0:
-    mapper: 
+    mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       hidden_dim: ${model.num_channels}
       trainable_size: ${model.trainable_parameters.hidden2data}

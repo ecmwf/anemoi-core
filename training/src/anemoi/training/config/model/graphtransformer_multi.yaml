@@ -64,7 +64,7 @@ encoders:
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-      hidden_dim: ${model.num_channels} 
+      hidden_dim: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp

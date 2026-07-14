@@ -175,7 +175,9 @@ class Forecaster(BaseTask):
 
         for i in range(keep_steps):
             if y_pred is None:
-                assert len(data_indices.model.input.prognostic) == 0, "No prognostic variables in the model input, but y_pred is None."
+                assert (
+                    len(data_indices.model.input.prognostic) == 0
+                ), "No prognostic variables in the model input, but y_pred is None."
                 continue
 
             # Get prognostic variables
@@ -222,7 +224,7 @@ class Forecaster(BaseTask):
         for dataset_name in x:
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
-                y_pred.get(dataset_name, None),
+                y_pred.get(dataset_name),
                 batch[dataset_name],
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],

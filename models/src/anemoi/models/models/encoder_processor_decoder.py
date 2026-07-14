@@ -23,7 +23,6 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
@@ -92,7 +91,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             if dataset_name not in self.target_datasets:
-                LOGGER.info(f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder.")
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
+                )
                 continue
 
             decoder_config = model_config.model.decoders[self.dataset2decoder[dataset_name]]

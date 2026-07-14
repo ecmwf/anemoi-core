@@ -58,10 +58,10 @@ class SumAggregator(BaseLatentAggregator):
     def __init__(self, num_channels: dict[str, int]) -> None:
         super().__init__(num_channels)
         self._hidden_dim = list(num_channels.values())[0]
-        assert all(ch == self._hidden_dim for ch in num_channels.values()), (
-            f"All latent tensors must have the same channel dimension for {self.__class__.__name__}."
-        )
-        
+        assert all(
+            ch == self._hidden_dim for ch in num_channels.values()
+        ), f"All latent tensors must have the same channel dimension for {self.__class__.__name__}."
+
     @property
     def hidden_dim(self) -> int:
         return self._hidden_dim
@@ -79,10 +79,10 @@ class MeanAggregator(BaseLatentAggregator):
     def __init__(self, num_channels: dict[str, int]) -> None:
         super().__init__(num_channels)
         self._hidden_dim = list(num_channels.values())[0]
-        assert all(ch == self._hidden_dim for ch in num_channels.values()), (
-            f"All latent tensors must have the same channel dimension for {self.__class__.__name__}."
-        )
-        
+        assert all(
+            ch == self._hidden_dim for ch in num_channels.values()
+        ), f"All latent tensors must have the same channel dimension for {self.__class__.__name__}."
+
     @property
     def hidden_dim(self) -> int:
         return self._hidden_dim
