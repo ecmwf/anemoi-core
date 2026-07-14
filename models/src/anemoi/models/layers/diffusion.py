@@ -51,6 +51,8 @@ class NoiseLevelUncertainty(torch.nn.Module):
         if num_channels <= 0 or num_channels % 2:
             msg = "num_channels must be a positive even integer."
             raise ValueError(msg)
+        if max_period <= 0:
+            raise ValueError("max_period must be positive.")
 
         self.embedding = SinusoidalEmbeddings(num_channels=num_channels, max_period=max_period)
         # nn.Linear initialisation consumes random numbers before the parameters

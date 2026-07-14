@@ -8,3 +8,22 @@ method:
 transport:
   prediction_mode: state
   objective: edm_diffusion
+  uncertainty_weighting:
+    enabled: false
+    num_channels: 32
+    max_period: 10000
+    warmup_steps: 0
+    logvar_clamp: 8.0
+
+# EDM diffusion supplies per-sample weights, so every target dataset uses
+# a loss implementation that applies those weights.
+training_loss:
+  datasets:
+    era5:
+      _target_: anemoi.training.losses.WeightedMSELoss
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+      ignore_nans: false
+    cerra:
+      _target_: anemoi.training.losses.WeightedMSELoss
+      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
+      ignore_nans: false

@@ -29,6 +29,30 @@ from anemoi.training.utils.index_space import IndexSpace
 LOGGER = logging.getLogger(__name__)
 
 
+_UNCERTAINTY_STATE_PREFIX = "uncertainty_net."
+
+
+def _make_uncertainty_checkpoint_compatible(
+    state_dict: dict[str, torch.Tensor],
+    model_state_dict: dict[str, torch.Tensor],
+    uncertainty_enabled: bool,
+) -> None:
+    """Make EDM2 head state optional without relaxing other checkpoint checks."""
+    if uncertainty_enabled:
+        # A baseline checkpoint has no head parameters. Keep the newly constructed
+        # (zero-initialised) head in that case so strict loading still succeeds.
+        for key, value in model_state_dict.items():
+            if key.startswith(_UNCERTAINTY_STATE_PREFIX) and key not in state_dict:
+                state_dict[key] = value.detach().clone()
+        return
+
+    # A non-EDM2 model must be able to resume from an EDM2 checkpoint without
+    # inheriting a training-only module that is absent from its parameter set.
+    for key in tuple(state_dict):
+        if key.startswith(_UNCERTAINTY_STATE_PREFIX):
+            del state_dict[key]
+
+
 class PredictionMode:
     """Prepare either state targets or tendency targets for transport training."""
 
@@ -469,6 +493,41 @@ class TransportTraining(BaseTransportTraining):
             self.uncertainty_logvar_clamp,
         )
 
+    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+        super().on_load_checkpoint(checkpoint)
+
+        state_dict = checkpoint.get("state_dict")
+        checkpoint_uncertainty_parameter_count = 0
+        if isinstance(state_dict, dict):
+            checkpoint_uncertainty_parameter_count = sum(
+                key.startswith(_UNCERTAINTY_STATE_PREFIX) and key.endswith((".weight", ".bias"))
+                for key in state_dict
+            )
+            _make_uncertainty_checkpoint_compatible(
+                state_dict,
+                self.state_dict(),
+                self.uncertainty_weighting_enabled,
+            )
+
+        optimizer_states = checkpoint.get("optimizer_states")
+        if isinstance(optimizer_states, list):
+            target_parameter_count = sum(parameter.requires_grad for parameter in self.parameters())
+            uncertainty_parameter_count = (
+                sum(
+                    parameter.requires_grad
+                    for name, parameter in self.named_parameters()
+                    if name.startswith(_UNCERTAINTY_STATE_PREFIX)
+                )
+                if self.uncertainty_weighting_enabled
+                else checkpoint_uncertainty_parameter_count
+            )
+            _make_uncertainty_optimizer_compatible(
+                optimizer_states,
+                target_parameter_count,
+                uncertainty_parameter_count,
+                self.uncertainty_weighting_enabled,
+            )
+
     def _validate_model_transport_objective(self) -> None:
         """Check that training and inference use the same transport objective."""
         training_objective = self.config.training.transport.objective
@@ -566,3 +625,47 @@ class TransportTraining(BaseTransportTraining):
         )
 
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=[y_pred], plot_kwargs=plot_kwargs)
+
+
+def _make_uncertainty_optimizer_compatible(
+    optimizer_states: list[dict],
+    target_parameter_count: int,
+    uncertainty_parameter_count: int,
+    uncertainty_enabled: bool,
+) -> None:
+    """Keep Lightning optimizer state compatible when the EDM2 head changes."""
+    for optimizer_state in optimizer_states:
+        param_groups = optimizer_state.get("param_groups")
+        if not isinstance(param_groups, list) or not param_groups:
+            continue
+
+        checkpoint_parameter_ids = [
+            parameter_id
+            for group in param_groups
+            for parameter_id in group.get("params", [])
+        ]
+        checkpoint_parameter_count = len(checkpoint_parameter_ids)
+
+        if uncertainty_enabled:
+            missing_count = target_parameter_count - checkpoint_parameter_count
+            if missing_count != uncertainty_parameter_count:
+                continue
+            next_parameter_id = max(checkpoint_parameter_ids, default=-1) + 1
+            new_parameter_ids = list(range(next_parameter_id, next_parameter_id + missing_count))
+            param_groups[-1].setdefault("params", []).extend(new_parameter_ids)
+            continue
+
+        extra_count = checkpoint_parameter_count - target_parameter_count
+        if extra_count != uncertainty_parameter_count:
+            continue
+        head_parameter_ids = set(checkpoint_parameter_ids[-extra_count:])
+        for group in param_groups:
+            group["params"] = [
+                parameter_id
+                for parameter_id in group.get("params", [])
+                if parameter_id not in head_parameter_ids
+            ]
+        state = optimizer_state.get("state")
+        if isinstance(state, dict):
+            for parameter_id in head_parameter_ids:
+                state.pop(parameter_id, None)

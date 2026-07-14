@@ -43,6 +43,8 @@ from anemoi.training.train.methods.stochastic_interpolant import StochasticInter
 from anemoi.training.train.methods.transport import StatePredictionMode
 from anemoi.training.train.methods.transport import TendencyPredictionMode
 from anemoi.training.train.methods.transport import TransportTraining
+from anemoi.training.train.methods.transport import _make_uncertainty_checkpoint_compatible
+from anemoi.training.train.methods.transport import _make_uncertainty_optimizer_compatible
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
@@ -653,6 +655,219 @@ def test_edm2_rejects_non_diffusion_objective() -> None:
 
     with pytest.raises(ValueError, match="only supported for the edm_diffusion"):
         module._configure_uncertainty_weighting()
+
+
+def test_edm2_checkpoint_state_is_ignored_when_disabled() -> None:
+    state_dict = {
+        "model.weight": torch.ones(1),
+        "uncertainty_net.linear.weight": torch.ones(1, 4),
+        "uncertainty_net.linear.bias": torch.ones(1),
+    }
+
+    _make_uncertainty_checkpoint_compatible(
+        state_dict,
+        {"model.weight": torch.zeros(1)},
+        uncertainty_enabled=False,
+    )
+
+    assert state_dict == {"model.weight": torch.ones(1)}
+
+
+def test_edm2_checkpoint_state_is_initialised_when_enabled() -> None:
+    head = NoiseLevelUncertainty(num_channels=4)
+    model_state_dict = {f"uncertainty_net.{key}": value for key, value in head.state_dict().items()}
+    state_dict = {"model.weight": torch.ones(1)}
+
+    _make_uncertainty_checkpoint_compatible(
+        state_dict,
+        {"model.weight": torch.zeros(1), **model_state_dict},
+        uncertainty_enabled=True,
+    )
+
+    for key, value in model_state_dict.items():
+        assert key in state_dict
+        assert torch.equal(state_dict[key], value)
+
+
+def test_edm2_checkpoint_optimizer_state_is_ignored_when_disabled() -> None:
+    optimizer_state = {
+        "state": {0: {"step": torch.tensor(1)}, 1: {"step": torch.tensor(1)}, 2: {"step": torch.tensor(1)}},
+        "param_groups": [{"params": [0, 1, 2], "lr": 1.0}],
+    }
+
+    _make_uncertainty_optimizer_compatible(
+        [optimizer_state],
+        target_parameter_count=1,
+        uncertainty_parameter_count=2,
+        uncertainty_enabled=False,
+    )
+
+    assert optimizer_state["param_groups"][0]["params"] == [0]
+    assert set(optimizer_state["state"]) == {0}
+
+
+def test_edm2_checkpoint_optimizer_state_adds_new_head_when_enabled() -> None:
+    optimizer_state = {
+        "state": {0: {"step": torch.tensor(1)}},
+        "param_groups": [{"params": [0], "lr": 1.0}],
+    }
+
+    _make_uncertainty_optimizer_compatible(
+        [optimizer_state],
+        target_parameter_count=3,
+        uncertainty_parameter_count=2,
+        uncertainty_enabled=True,
+    )
+
+    assert optimizer_state["param_groups"][0]["params"] == [0, 1, 2]
+    assert set(optimizer_state["state"]) == {0}
+
+
+class _MultiScaleWeightedMeanLoss(torch.nn.Module):
+    """Return a per-scale vector, like ``MultiscaleLossWrapper``.
+
+    Used to check that EDM2 collapses a multi-scale loss with ``.sum()`` and adds
+    the log-variance term exactly once (not once per scale).
+    """
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: torch.Tensor,
+        **_kwargs: Any,
+    ) -> torch.Tensor:
+        base = ((pred - target) ** 2 * weights).mean()
+        return torch.stack([base, 0.5 * base])
+
+
+def _edm2_module_with_head(head: NoiseLevelUncertainty, loss: torch.nn.Module) -> SimpleNamespace:
+    return SimpleNamespace(
+        loss={"data": loss},
+        model_comm_group=None,
+        grid_dim=-2,
+        grid_shard_sizes={"data": None},
+        uncertainty_weighting_enabled=True,
+        uncertainty_warmup_steps=0,
+        uncertainty_logvar_clamp=8.0,
+        uncertainty_net=head,
+        global_step=0,
+    )
+
+
+def test_edm2_loss_varies_per_sample_not_by_batch_mean() -> None:
+    """EDM2 weights each sample by its own exp(-logvar), not exp(-mean(logvar)).
+
+    With sigma (hence logvar) varying across the batch and unequal per-sample
+    errors, the correct per-sample objective differs from the old batch-mean
+    approximation. Every other EDM2 test here uses a constant logvar and so cannot
+    tell the two apart; this test pins the port's intentional change.
+    """
+    head = NoiseLevelUncertainty(num_channels=4)
+    with torch.no_grad():
+        head.linear.weight.fill_(0.5)  # non-zero: logvar depends on sigma
+        head.linear.bias.fill_(0.2)
+    module = _edm2_module_with_head(head, _WeightedMeanLoss())
+    objective = EDMDiffusionTransportObjective(module)
+
+    # (batch=2, time=1, ensemble=1, grid=3, var=1) with unequal per-sample errors.
+    pred = torch.zeros(2, 1, 1, 3, 1)
+    target = torch.zeros(2, 1, 1, 3, 1)
+    target[0] = 3.0  # sample 0 squared error 9
+    target[1] = 1.0  # sample 1 squared error 1
+    sigma = {"data": torch.tensor([0.5, 4.0]).view(2, 1, 1, 1, 1)}
+    weights = {"data": torch.ones_like(sigma["data"])}
+
+    result = objective.compute_loss(
+        pred,
+        target,
+        dataset_name="data",
+        weights=weights,
+        uncertainty_condition=sigma,
+    )
+
+    # Reference values recomputed exactly as the implementation does.
+    sigma_be = sigma["data"][:, 0, :, 0, 0]
+    logvar = head(sigma_be.log() / 4.0).reshape(2, 1, 1, 1, 1)
+    squared_error = (pred - target) ** 2  # weights are ones
+    per_sample = (squared_error * torch.exp(-logvar)).mean() + logvar.mean()
+    batch_mean = squared_error.mean() / torch.exp(logvar.mean()) + logvar.mean()
+
+    assert result.item() == pytest.approx(per_sample.item())
+    # The fixture must actually discriminate the two formulations.
+    assert abs(per_sample.item() - batch_mean.item()) > 1e-3
+    assert result.item() != pytest.approx(batch_mean.item())
+
+
+def test_edm2_collapses_multiscale_vector_and_adds_logvar_once() -> None:
+    """A multi-scale loss vector is summed and the log-variance is added once."""
+    head = NoiseLevelUncertainty(num_channels=4)
+    logvar = torch.log(torch.tensor(2.0)).item()  # exp(-logvar) = 0.5
+    with torch.no_grad():
+        head.linear.bias.fill_(logvar)
+    module = _edm2_module_with_head(head, _MultiScaleWeightedMeanLoss())
+    objective = EDMDiffusionTransportObjective(module)
+
+    pred = torch.ones(2, 1, 1, 3, 1)
+    target = torch.zeros_like(pred)
+    sigma = {"data": torch.ones(2, 1, 1, 1, 1)}
+
+    result = objective.compute_loss(
+        pred,
+        target,
+        dataset_name="data",
+        weights={"data": torch.ones_like(sigma["data"])},
+        uncertainty_condition=sigma,
+    )
+
+    # base.mean()=1 -> effective 0.5 -> scales [0.5, 0.25] -> sum 0.75; + logvar once.
+    assert result.item() == pytest.approx(0.75 + logvar)
+
+
+def test_edm2_step_trains_head_through_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The EDM2 head receives gradients through the checkpointed ``_step``.
+
+    Exercises the ``uncertainty_condition`` plumbing and the head's autograd
+    reconnection during activation-checkpoint recomputation (use_reentrant=False).
+    """
+
+    class _DummyTransportWrapper:
+        def __init__(self, inner: DummyTransportModel) -> None:
+            self.model = inner
+
+    monkeypatch.setattr(TransportTraining, "global_step", 0, raising=False)
+
+    data_indices = _data_indices_single()
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION, task=task)
+    forecaster.model = _DummyTransportWrapper(
+        DummyTransportModel(num_output_variables=len(next(iter(data_indices.values())).model.output)),
+    )
+    forecaster._prediction_mode = StatePredictionMode(forecaster)
+    forecaster._transport_objective = EDMDiffusionTransportObjective(forecaster)
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {"data": DummyLoss()}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    forecaster.uncertainty_weighting_enabled = True
+    forecaster.uncertainty_warmup_steps = 0
+    forecaster.uncertainty_logvar_clamp = 8.0
+    forecaster.uncertainty_net = NoiseLevelUncertainty(num_channels=8)
+
+    b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn(b, 2, e, g, v)}
+    output = forecaster._step(batch={"data": batch["data"]}, validation_mode=False)
+
+    assert torch.isfinite(output.loss)
+    output.loss.backward()
+    grad = forecaster.uncertainty_net.linear.bias.grad
+    assert grad is not None
+    assert torch.isfinite(grad).all()
 
 
 # ── StochasticInterpolantTransportObjective: prepare ─────────────────────────

@@ -349,3 +349,7 @@ class TestNoiseLevelUncertainty:
     def test_rejects_invalid_channel_count(self, num_channels: int) -> None:
         with pytest.raises(ValueError, match="positive even"):
             NoiseLevelUncertainty(num_channels=num_channels)
+
+    def test_rejects_invalid_max_period(self) -> None:
+        with pytest.raises(ValueError, match="max_period must be positive"):
+            NoiseLevelUncertainty(max_period=0)

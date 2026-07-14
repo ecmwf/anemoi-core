@@ -415,6 +415,18 @@ def test_training_cycle_multidatasets_edm_transport(
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 
+def test_config_validation_multidatasets_edm_transport(
+    multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
+) -> None:
+    cfg, _ = multidatasets_edm_transport_config
+    BaseSchema(**cfg)
+    assert all(
+        cfg.training.training_loss.datasets[dataset_name]._target_
+        == "anemoi.training.losses.WeightedMSELoss"
+        for dataset_name in ("era5", "cerra")
+    )
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_temporal_downscaler_ensemble(
