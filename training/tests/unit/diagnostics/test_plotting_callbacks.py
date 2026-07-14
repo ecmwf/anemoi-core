@@ -19,15 +19,15 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
 from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
-from anemoi.training.diagnostics.callbacks.plot import SpatialMapPlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
+from anemoi.training.diagnostics.evaluation.plotting.batch_output import ensemble_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.batch_output import histogram_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.batch_output import sample_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.batch_output import spectrum_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
-from anemoi.training.diagnostics.evaluation.plotting.spatial_map import ensemble_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.spatial_map import histogram_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.spatial_map import sample_plot_fn
-from anemoi.training.diagnostics.evaluation.plotting.spatial_map import spectrum_plot_fn
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -37,7 +37,7 @@ from anemoi.training.utils.masks import NoOutputMask
 # --- Legacy-name shims used only by this test module ------------------------
 #
 # The historic PlotSample/PlotEnsSample/PlotHistogram/PlotSpectrum callback
-# classes were consolidated into a single SpatialMapPlot callback + pluggable
+# classes were consolidated into a single BatchOutputPlot callback + pluggable
 # ``plot_fn``. These shim factories rebuild the old-style constructors so
 # the existing test bodies keep working without touching every call site.
 def _wrap_plot_callback(
@@ -46,8 +46,8 @@ def _wrap_plot_callback(
     tag_infix,
     with_auxiliary=False,
     plot_fn_kwargs=None,
-) -> Callable[..., SpatialMapPlot]:
-    """Return a callable that builds a SpatialMapPlot wired to ``plot_fn``.
+) -> Callable[..., BatchOutputPlot]:
+    """Return a callable that builds a BatchOutputPlot wired to ``plot_fn``.
 
     ``plot_fn_kwargs`` is a mapping of legacy kwargs → default sentinel that
     the constructor pops from ``**kwargs``, binds into ``plot_fn`` via
@@ -57,14 +57,14 @@ def _wrap_plot_callback(
     """
     plot_fn_kwargs = plot_fn_kwargs or {}
 
-    def _factory(**kwargs) -> SpatialMapPlot:
+    def _factory(**kwargs) -> BatchOutputPlot:
         bound = {}
         for name, default in plot_fn_kwargs.items():
             if name in kwargs:
                 bound[name] = kwargs.pop(name)
             else:
                 bound.setdefault(name, default)
-        cb = SpatialMapPlot(
+        cb = BatchOutputPlot(
             plot_fn=partial(plot_fn, **{k: v for k, v in bound.items() if v is not None}) or plot_fn,
             tag_infix=tag_infix,
             with_auxiliary=with_auxiliary,

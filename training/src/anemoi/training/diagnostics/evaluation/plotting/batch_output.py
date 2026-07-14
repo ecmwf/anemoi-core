@@ -9,7 +9,7 @@
 
 """Shared contract and adapters for spatial-map plot functions.
 
-Every spatial-map plot function used by :class:`SpatialMapPlot` follows the
+Every spatial-map plot function used by :class:`BatchOutputPlot` follows the
 same signature. This decouples the *what to draw* from the *how to loop over
 samples/datasets/focus areas*, so new plots can be added without writing a new
 callback subclass or schema.

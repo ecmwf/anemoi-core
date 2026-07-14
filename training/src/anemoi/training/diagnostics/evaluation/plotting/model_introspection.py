@@ -95,7 +95,7 @@ def extract_spatial_inputs(
     dataset_name: str,
     parameters: list[str],
 ) -> dict[str, Any]:
-    """Return kwargs for a ``SpatialMapPlot`` ``plot_fn``.
+    """Return kwargs for a ``BatchOutputPlot`` ``plot_fn``.
 
     Keys: ``parameters`` — mapping ``output_index -> (name, is_diagnostic)``.
     Per-batch tensors (``x``, ``y_true``, ``y_pred``, ``auxiliary``,

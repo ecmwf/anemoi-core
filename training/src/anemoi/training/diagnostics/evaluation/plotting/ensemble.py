@@ -21,45 +21,8 @@ from matplotlib.figure import Figure
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
-from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_ticks
 
 LOGGER = logging.getLogger(__name__)
-
-
-def plot_rank_histograms(
-    parameters: dict[int, str],
-    rh: np.ndarray,
-) -> Figure:
-    """Plots one rank histogram per target variable.
-
-    Parameters
-    ----------
-    parameters : Dict[int, str]
-        Dictionary of target variables
-    rh : np.ndarray
-        Rank histogram data of shape (nens, nvar)
-
-    Returns
-    -------
-    Figure
-        The figure object handle.
-    """
-    fig, ax = plt.subplots(1, len(parameters), figsize=(len(parameters) * 4.5, 4))
-    n_ens = rh.shape[0] - 1
-    rh = rh.astype(float)
-
-    if not isinstance(ax, np.ndarray):
-        ax = np.array([ax])
-
-    for plot_idx, (_variable_idx, variable_name) in enumerate(parameters.items()):
-        rh_ = rh[:, plot_idx]
-        ax[plot_idx].bar(np.arange(0, n_ens + 1), rh_ / rh_.sum(), linewidth=1, color="blue", width=0.7)
-        ax[plot_idx].hlines(rh_.mean() / rh_.sum(), xmin=-0.5, xmax=n_ens + 0.5, linestyles="--", colors="red")
-        ax[plot_idx].set_title(f"{variable_name[0]} ranks")
-        _hide_axes_ticks(ax[plot_idx])
-
-    fig.tight_layout()
-    return fig
 
 
 def plot_ensemble_sample(

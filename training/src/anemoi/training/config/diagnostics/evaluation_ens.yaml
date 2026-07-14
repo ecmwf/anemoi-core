@@ -15,7 +15,7 @@ callbacks:
 plot:
   callbacks:
     # Add plot callbacks here.
-    - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+    - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
       tag_infix: ens
       dataset_names: ["data"]
       sample_idx: ${diagnostics.plot.sample_idx}
@@ -23,7 +23,7 @@ plot:
       every_n_batches: ${diagnostics.plot.frequency.batch}
       members: null  # None for all members, list for specific members
       plot_fn:
-        _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.ensemble_plot_fn
+        _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn
         _partial_: true
         n_plots_per_sample: 2
         accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
@@ -37,36 +37,36 @@ plot:
         moisture: [tp, cp, tcw]
         sfc_wind: [10u, 10v]
       every_n_batches: ${diagnostics.plot.frequency.batch}
-    - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+    - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
       tag_infix: spec
       dataset_names: ["data"]
       sample_idx: ${diagnostics.plot.sample_idx}
       parameters: ${diagnostics.plot.parameters}
       every_n_batches: ${diagnostics.plot.frequency.batch}
       plot_fn:
-        _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.spectrum_plot_fn
+        _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn
         _partial_: true
-    - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+    - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
       tag_infix: histo
       dataset_names: ["data"]
       sample_idx: ${diagnostics.plot.sample_idx}
       parameters: ${diagnostics.plot.parameters}
       every_n_batches: ${diagnostics.plot.frequency.batch}
       plot_fn:
-        _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.histogram_plot_fn
+        _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
         _partial_: true
     - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
       dataset_names: ["data"] #TODO can make this a default in pydantic and remove here
       every_n_epochs: ${diagnostics.plot.frequency.epoch}
 
-    # Overloaded SpatialMapPlot with sample_plot_fn returns per-member deterministic sample plots
-    # - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+    # Overloaded BatchOutputPlot with sample_plot_fn returns per-member deterministic sample plots
+    # - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     #   tag_infix: sample
     #   sample_idx: ${diagnostics.plot.sample_idx}
     #   parameters: ${diagnostics.plot.parameters}
     #   every_n_batches: ${diagnostics.plot.frequency.batch}
     #   plot_fn:
-    #     _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.sample_plot_fn
+    #     _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
     #     _partial_: true
     #     per_sample: 6
     #     accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm

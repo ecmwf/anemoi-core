@@ -24,14 +24,14 @@ diagnostics:
   plot:
     parameters: [tp]
     callbacks:
-      - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
         tag_infix: histogram
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
         parameters: [tp]
         plot_fn:
-          _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.histogram_plot_fn
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
           _partial_: true
 
 

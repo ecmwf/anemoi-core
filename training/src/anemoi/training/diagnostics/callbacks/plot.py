@@ -36,6 +36,10 @@ from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_spatial_inputs
+from anemoi.training.diagnostics.evaluation.plotting.protocols import BatchOutputPlotFn
+from anemoi.training.diagnostics.evaluation.plotting.protocols import GraphPlotFn
+from anemoi.training.diagnostics.evaluation.plotting.protocols import LossPlotFn
+from anemoi.training.diagnostics.evaluation.plotting.protocols import validate_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_settings
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
@@ -242,7 +246,7 @@ class BasePlotCallback(Callback, ABC):
         Used by MLflow to organize artifacts into per-callback folders. If
         the callback has a pluggable ``plot_fn``, the folder is derived from
         it instead of the class name — a single run can register several
-        instances of the same callback class (e.g. multiple ``SpatialMapPlot``
+        instances of the same callback class (e.g. multiple ``BatchOutputPlot``
         entries, one per ``plot_fn``), which would otherwise all collapse
         into one generic, hard-to-navigate folder.
         """
@@ -503,7 +507,7 @@ class GraphFeaturePlot(BasePerEpochPlotCallback):
     """Visualize the node & edge trainable features defined.
 
     The visualization function is supplied via ``plot_fn`` and follows the
-    same pluggable pattern as :class:`SpatialMapPlot` and :class:`LossCurvePlot`.
+    same pluggable pattern as :class:`BatchOutputPlot` and :class:`LossCurvePlot`.
     ``plot_fn`` must yield ``(figure, tag)`` pairs.
 
     The callback resolves the underlying model and forwards **only**
@@ -553,6 +557,7 @@ class GraphFeaturePlot(BasePerEpochPlotCallback):
         )
         self.q_extreme_limit = q_extreme_limit
         self.plot_fn = plot_fn if plot_fn is not None else _default_graph_plot_fn
+        validate_plot_fn(self.plot_fn, GraphPlotFn, "GraphFeaturePlot")
 
     def _plot(
         self,
@@ -583,7 +588,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
     """Plots the unsqueezed loss over rollouts.
 
     The visualization function is supplied via ``plot_fn`` following the same
-    pluggable pattern as :class:`SpatialMapPlot`. It receives the raw
+    pluggable pattern as :class:`BatchOutputPlot`. It receives the raw
     per-variable loss array plus the parameter naming/grouping context, and
     is free to decide how (or whether) to sort, group, colour and render::
 
@@ -638,6 +643,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
         if self.parameter_groups is None:
             self.parameter_groups = {}
         self.plot_fn = plot_fn if plot_fn is not None else _default_loss_plot_fn
+        validate_plot_fn(self.plot_fn, LossPlotFn, "LossCurvePlot")
 
     def _plot(
         self,
@@ -890,12 +896,12 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
 
 
-class SpatialMapPlot(BasePlotAdditionalMetrics):
+class BatchOutputPlot(BasePlotAdditionalMetrics):
     """Generic, config-driven spatial-map plot callback.
 
     Handles the shared plumbing (per-dataset loop, ``process()``, focus mask,
     ``iter_plot_samples``, figure output, tag naming) for any plot function
-    conforming to the ``SpatialMapPlot`` ``plot_fn`` contract (see
+    conforming to the ``BatchOutputPlot`` ``plot_fn`` contract (see
     ``docs/modules/diagnostics.rst``). New spatial plots can be added by
     writing that function and pointing to it from YAML — no callback subclass
     or schema entry required.
@@ -904,7 +910,7 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
     -------
     .. code-block:: yaml
 
-        - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+        - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
           tag_infix: my_map
           sample_idx: 0
           parameters: [z_500, 2t]
@@ -929,13 +935,13 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
         focus_area: dict | None = None,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
-        """Initialise the SpatialMapPlot callback.
+        """Initialise the BatchOutputPlot callback.
 
         Parameters
         ----------
         plot_fn : Callable
             Plot function (typically a ``functools.partial`` from Hydra with
-            ``_partial_: true``) matching the ``SpatialMapPlot`` ``plot_fn``
+            ``_partial_: true``) matching the ``BatchOutputPlot`` ``plot_fn``
             contract documented in ``docs/modules/diagnostics.rst``.
         tag_infix : str
             Short tag inserted into the logged artifact name to distinguish
@@ -960,6 +966,7 @@ class SpatialMapPlot(BasePlotAdditionalMetrics):
             plotting_settings=plotting_settings,
         )
         self.plot_fn = plot_fn
+        validate_plot_fn(self.plot_fn, BatchOutputPlotFn, "BatchOutputPlot")
         self.tag_infix = tag_infix
         self.parameters = parameters
         self.with_auxiliary = with_auxiliary

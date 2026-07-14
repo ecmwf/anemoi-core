@@ -27,11 +27,50 @@ from anemoi.utils.schemas import BaseModel
 LOGGER = logging.getLogger(__name__)
 
 
+class GraphPlotFnSchema(PydanticBaseModel):
+    """Hydra config for a :class:`GraphFeaturePlot` plot function.
+
+    The ``_target_`` must resolve to a callable that accepts at minimum:
+    ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
+    ``edge_trainable_modules``.
+
+    Built-in options
+    ----------------
+    - ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn",] = Field(alias="_target_")
+    "Dotted import path to the plot function."
+    partial_: bool = Field(default=True, alias="_partial_")
+    "Must be true — the callback binds the remaining arguments at call time."
+
+
+class LossPlotFnSchema(PydanticBaseModel):
+    """Hydra config for a :class:`LossCurvePlot` plot function.
+
+    The ``_target_`` must resolve to a callable that accepts at minimum:
+    ``loss`` and ``parameter_names``.
+
+    Built-in options
+    ----------------
+    - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn",] = Field(alias="_target_")
+    "Dotted import path to the plot function."
+    partial_: bool = Field(default=True, alias="_partial_")
+    "Must be true — the callback binds the remaining arguments at call time."
+
+
 class GraphFeaturePlotSchema(PydanticBaseModel):
     """Config schema for :class:`GraphFeaturePlot`.
 
     Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
-    shared with :class:`SpatialMapPlot` and :class:`LossCurvePlot`) without
+    shared with :class:`BatchOutputPlot` and :class:`LossCurvePlot`) without
     extending this schema (``extra='allow'`` on the nested ``plot_fn``).
     """
 
@@ -45,7 +84,7 @@ class GraphFeaturePlotSchema(PydanticBaseModel):
     "Epoch frequency to plot at."
     q_extreme_limit: float = Field(default=0.05)
     "Quantile edges to represent (used by default plot_fn)."
-    plot_fn: dict[str, Any] | None = Field(default=None)
+    plot_fn: GraphPlotFnSchema | None = Field(default=None)
     "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
@@ -69,7 +108,7 @@ class LossCurvePlotSchema(PydanticBaseModel):
     """Config schema for :class:`LossCurvePlot`.
 
     Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
-    shared with :class:`SpatialMapPlot`) without extending this schema
+    shared with :class:`BatchOutputPlot`) without extending this schema
     (``extra='allow'`` on the nested ``plot_fn``).
     """
 
@@ -83,7 +122,7 @@ class LossCurvePlotSchema(PydanticBaseModel):
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
-    plot_fn: dict[str, Any] | None = Field(default=None)
+    plot_fn: LossPlotFnSchema | None = Field(default=None)
     "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
@@ -122,24 +161,52 @@ ColormapSchema = Annotated[
 ]
 
 
-class SpatialMapPlotSchema(PydanticBaseModel):
-    """Config-driven spatial-map plot callback.
+class BatchOutputPlotFnSchema(PydanticBaseModel):
+    """Hydra config for a :class:`BatchOutputPlot` plot function.
 
-    Users may add their own plot function under ``plot_fn`` without extending
-    this schema (``model_config = extra='allow'`` on the nested ``plot_fn``).
+    The ``_target_`` must resolve to a callable that accepts at minimum:
+    ``parameters``, ``x``, ``y_true``, ``y_pred``, ``latlons``.
+
+    Built-in options
+    ----------------
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn``
     """
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot"] = Field(alias="_target_")
-    "SpatialMapPlot object from anemoi training diagnostics callbacks."
+    target_: Literal[
+        "anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn",
+        "anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn",
+        "anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn",
+        "anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn",
+    ] = Field(alias="_target_")
+    "Dotted import path to the plot function."
+    partial_: bool = Field(default=True, alias="_partial_")
+    "Must be true — the callback binds the remaining arguments at call time."
+
+
+class BatchOutputPlotSchema(PydanticBaseModel):
+    """Config-driven batch-output plot callback.
+
+    Users may subclass or supply a custom ``plot_fn`` by pointing ``_target_``
+    to their own function. Signature validation happens at runtime in
+    :meth:`BatchOutputPlot.__init__`.
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot"] = Field(alias="_target_")
+    "BatchOutputPlot object from anemoi training diagnostics callbacks."
     tag_infix: str
     "Short tag inserted into logged artifact names."
     sample_idx: int
     "Index of sample within the batch to plot."
     parameters: list[str]
     "Model output parameters to include in the plot."
-    plot_fn: dict[str, Any]
+    plot_fn: BatchOutputPlotFnSchema
     "Hydra-instantiable plot function (use ``_partial_: true``)."
     with_auxiliary: bool = Field(default=False)
     "Forward the auxiliary tensor (e.g. corrupted targets) to ``plot_fn``."
@@ -154,7 +221,7 @@ class SpatialMapPlotSchema(PydanticBaseModel):
 
 
 PlotCallbacks = Annotated[
-    GraphFeaturePlotSchema | LossCurvePlotSchema | SpatialMapPlotSchema,
+    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema,
     Field(discriminator="target_"),
 ]
 
@@ -199,8 +266,8 @@ class PlotSchema(PydanticBaseModel):
     "Dataset names to include in plots."
 
     @model_validator(mode="after")
-    def _unique_spatial_map_tag_infix(self) -> "PlotSchema":
-        """Ensure every :class:`SpatialMapPlot` entry produces a unique artifact tag.
+    def _unique_batch_output_tag_infix(self) -> "PlotSchema":
+        """Ensure every :class:`BatchOutputPlot` entry produces a unique artifact tag.
 
         The runtime tag has the form
         ``pred_val_{tag_infix}_{dataset_name}_..._{focus_mask.tag}``, so the
@@ -217,14 +284,14 @@ class PlotSchema(PydanticBaseModel):
                 cb.focus_area.model_dump() if cb.focus_area is not None else None,
             )
             for cb in (self.callbacks or [])
-            if isinstance(cb, SpatialMapPlotSchema)
+            if isinstance(cb, BatchOutputPlotSchema)
         ]
         # dicts are unhashable -> compare as sorted repr for the last element
         hashable = [(k[0], k[1], repr(sorted(k[2].items())) if k[2] else None) for k in keys]
         duplicates = sorted({k for k, n in Counter(hashable).items() if n > 1})
         if duplicates:
             msg = (
-                "Every SpatialMapPlot callback must produce a unique artifact tag "
+                "Every BatchOutputPlot callback must produce a unique artifact tag "
                 "(tag_infix, dataset_names, focus_area); duplicates: "
                 f"{duplicates}"
             )

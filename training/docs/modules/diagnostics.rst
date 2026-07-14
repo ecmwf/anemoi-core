@@ -75,7 +75,7 @@ of dataset-keyed dictionaries.
 
 **Focus Area**
 
-Plotting callbacks (such as ``PlotSample`` and ``LossCurvePlot``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
+Plotting callbacks (such as ``BatchOutputPlot`` and ``LossCurvePlot``) support a ``focus_area`` parameter. This allows you to restrict the geographic scope of plots to specific regions or masks. A focus area can be defined in two ways:
 
 * **Mask Name**: A ``mask_attr_name`` string referencing a boolean mask defined within the graph data.
 * **Lat/Lon Bounds**: A ``latlon_bbox`` list specifying a bounding box: ``[lat_min, lon_min, lat_max, lon_max]``.
@@ -184,56 +184,55 @@ which is recommended for interactive terminals and
                moisture: [tp, cp, tcw]
                sfc_wind: [10u, 10v]
 
-         - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+         - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
             tag_infix: sample
             dataset_names: ["your_dataset_name"]
             sample_idx: ${diagnostics.plot.sample_idx}
             parameters: ${diagnostics.plot.parameters}
             plot_fn:
-               _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.sample_plot_fn
+               _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
                _partial_: true
                per_sample: 6
 
-Pluggable spatial-map plots
-===========================
+Pluggable batch-output plots
+============================
 
-Spatial map–style callbacks (samples, spectra, histograms, ensembles) are
-all driven by a single :class:`~anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot`
+Batch-output–style callbacks (samples, spectra, histograms, ensembles) are
+all driven by a single :class:`~anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot`
 callback that iterates over datasets, samples and focus areas, and delegates
 the actual figure rendering to a pluggable ``plot_fn``.
 
-The bundled adapters live in
-``anemoi.training.diagnostics.evaluation.plotting.spatial_map``:
+The bundled plot functions live in
+``anemoi.training.diagnostics.evaluation.plotting.batch_output``:
 
-- ``sample_plot_fn`` — multi-level forecast sample plot (former ``PlotSample``).
-- ``spectrum_plot_fn`` — power spectrum (former ``PlotSpectrum``).
-- ``histogram_plot_fn`` — per-variable histograms (former ``PlotHistogram``).
-- ``ensemble_plot_fn`` — ensemble member plot (former ``PlotEnsSample``).
+- ``sample_plot_fn`` — multi-level forecast sample plot (replaces ``PlotSample``).
+- ``spectrum_plot_fn`` — power spectrum (replaces ``PlotSpectrum``).
+- ``histogram_plot_fn`` — per-variable histograms (replaces ``PlotHistogram``).
+- ``ensemble_plot_fn`` — ensemble member plot (replaces ``PlotEnsSample``).
 
 Each ``plot_fn`` receives keyword-only arguments (``x``, ``y_true``,
 ``y_pred``, ``latlons``, ``auxiliary``, ``settings``, plus any plot-specific
 kwargs bound in YAML via ``_partial_: true``). The full signature is
-documented in `Plot function contracts`_ below.
+documented in `Plot function contracts`_ below and enforced at callback
+initialisation time by :func:`~anemoi.training.diagnostics.evaluation.plotting.protocols.validate_plot_fn`.
 
 .. code:: yaml
 
    # Same callback, different plot_fn → different figures
-   - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
      tag_infix: spectrum
      sample_idx: 0
      parameters: ${diagnostics.plot.parameters}
      plot_fn:
-       _target_: anemoi.training.diagnostics.evaluation.plotting.spatial_map.spectrum_plot_fn
+       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn
        _partial_: true
        min_delta: 0.01
 
-Since a single run can register many instances of ``SpatialMapPlot``,
+Since a single run can register many instances of ``BatchOutputPlot``,
 ``LossCurvePlot`` or ``GraphFeaturePlot`` (one per ``plot_fn``), MLflow
 artifacts are grouped by ``plot_fn`` name rather than callback class name —
 e.g. figures from ``sample_plot_fn`` and ``histogram_plot_fn`` land under
-separate ``sample_plot_fn`` / ``histogram_plot_fn`` folders instead of all
-being dumped into one ``SpatialMapPlot`` folder. Callbacks without a
-pluggable ``plot_fn`` still use their class name.
+separate folders instead of all being dumped into one ``BatchOutputPlot`` folder.
 
 Plot function contracts
 -----------------------
@@ -246,14 +245,15 @@ function. All three contracts accept a ``settings`` argument (a
 ``colormaps``, ``precip_and_related_fields``, ``asynchronous``) and
 ``**kwargs`` so future additions do not break existing implementations.
 
-There is no runtime type-check on ``plot_fn``: a mismatched signature
-surfaces as a ``TypeError`` on the first call. The contracts below are the
-canonical spec.
+The contracts are enforced at callback ``__init__`` time via
+:func:`~anemoi.training.diagnostics.evaluation.plotting.protocols.validate_plot_fn`,
+which checks that the resolved callable accepts the required parameters.
+The full API reference for the three Protocols is at the bottom of this page.
 
 Layers and data flow
 ....................
 
-Each of the three pluggable callbacks (``LossCurvePlot``, ``SpatialMapPlot``,
+Each of the three pluggable callbacks (``LossCurvePlot``, ``BatchOutputPlot``,
 ``GraphFeaturePlot``) has the same three-layer shape:
 
 .. code:: text
@@ -280,20 +280,21 @@ Concretely:
 
 Family-to-artifact mapping:
 
-+---------------------------------+-----------------------------+
-| Callback                        | ``extract_*_inputs`` helper |
-+=================================+=============================+
-| ``LossCurvePlot``                    | ``extract_loss_inputs``     |
-+---------------------------------+-----------------------------+
-| ``SpatialMapPlot``              | ``extract_spatial_inputs``  |
-+---------------------------------+-----------------------------+
-| ``GraphFeaturePlot``  | ``extract_graph_inputs``    |
-+---------------------------------+-----------------------------+
++----------------------+-----------------------------+
+| Callback             | ``extract_*_inputs`` helper |
++======================+=============================+
+| ``LossCurvePlot``    | ``extract_loss_inputs``     |
++----------------------+-----------------------------+
+| ``BatchOutputPlot``  | ``extract_spatial_inputs``  |
++----------------------+-----------------------------+
+| ``GraphFeaturePlot`` | ``extract_graph_inputs``    |
++----------------------+-----------------------------+
 
-``SpatialMapPlot`` — per-sample, per-dataset figures
-....................................................
+``BatchOutputPlot`` — per-sample, per-dataset figures
+.....................................................
 
-Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot`.
+Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot`.
+Protocol: :class:`~anemoi.training.diagnostics.evaluation.plotting.protocols.BatchOutputPlotFn`.
 
 .. code:: python
 
@@ -315,15 +316,16 @@ Contract notes:
   restricted to the intersection of ``diagnostics.plot.parameters`` and the
   model's output variables.
 - The sample dimension and any leading batch/rollout dims have already been
-  reduced by ``SpatialMapPlot``'s ``process`` step (using ``sample_idx``).
+  reduced by ``BatchOutputPlot``'s ``process`` step (using ``sample_idx``).
   ``y_true`` / ``y_pred`` are 2-D arrays over grid points × output variables.
 - ``latlons`` is pre-masked to the active ``focus_area`` when one is set.
 - Return a ``matplotlib.figure.Figure`` — returning ``None`` is not allowed.
 
 ``LossCurvePlot`` — grouped per-variable loss bar chart
-..................................................
+.......................................................
 
 Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.LossCurvePlot`.
+Protocol: :class:`~anemoi.training.diagnostics.evaluation.plotting.protocols.LossPlotFn`.
 Default: ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``.
 
 .. code:: python
@@ -351,10 +353,10 @@ Contract notes:
 - ``loss`` and ``parameter_names`` share the same length and ordering.
 
 ``GraphFeaturePlot`` — graph node/edge feature plots
-..............................................................
+....................................................
 
-Callback:
-:class:`~anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot`.
+Callback: :class:`~anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot`.
+Protocol: :class:`~anemoi.training.diagnostics.evaluation.plotting.protocols.GraphPlotFn`.
 Default: ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``.
 
 .. code:: python
@@ -384,12 +386,13 @@ Contract notes:
   no trainable node attributes are defined. The default ``graph_plot_fn``
   logs a warning and skips the corresponding figure in that case.
 
-Adding a new spatial-map plot
------------------------------
+Adding a new batch-output plot
+------------------------------
 
-To add a new plot type, write a function matching the ``SpatialMapPlot``
+To add a new plot type, write a function matching the ``BatchOutputPlot``
 ``plot_fn`` signature (see `Plot function contracts`_) and reference it from
-YAML — no new callback class or Pydantic schema is required.
+YAML — no new callback class or Pydantic schema is required. The callback
+will validate the signature at initialisation time.
 
 1. Implement the plot function (in your project or in
    ``anemoi.training.diagnostics.evaluation.plotting``):
@@ -429,11 +432,12 @@ YAML — no new callback class or Pydantic schema is required.
           return fig
 
 2. Wire it in via the ``plot_fn`` block (any additional keys are bound as
-   partial kwargs):
+   partial kwargs). Because ``_target_`` is not one of the built-in options,
+   set ``_partial_: true`` and pass any extra kwargs directly:
 
    .. code:: yaml
 
-      - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
         tag_infix: bias
         sample_idx: 0
         parameters: ${diagnostics.plot.parameters}
@@ -443,93 +447,24 @@ YAML — no new callback class or Pydantic schema is required.
           cmap: seismic
           vmax: 5.0
 
-Example: pressure–latitude (or longitude) cross-section
--------------------------------------------------------
+   .. note::
 
-``SpatialMapPlot`` does not assume the figure is a map — it just delivers
+      Custom ``_target_`` values are not in the Pydantic ``Literal`` for
+      ``plot_fn._target_``, so schema validation will reject them. Override
+      ``BatchOutputPlotFnSchema`` in your own schema, or set
+      ``model_config = {"extra": "allow"}`` on a subclass, to permit them.
+
+Example: pressure–latitude cross-section
+-----------------------------------------
+
+``BatchOutputPlot`` does not assume the figure is a map — it just delivers
 ``x``, ``y_true``, ``y_pred``, ``latlons`` and ``parameters`` and stores
 whatever ``Figure`` the ``plot_fn`` returns. That makes it a good fit for
 vertical cross-sections too.
 
-For a pressure–latitude (or pressure–longitude) plot you need:
-
-- multiple pressure levels of the same variable in
-  ``diagnostics.plot.parameters`` (e.g. ``t_50, t_100, ..., t_1000``);
-- a ``plot_fn`` that groups those parameters by variable prefix, reads the
-  pressure level from the suffix, and bins the values along
-  ``latlons[:, 0]`` (lat) or ``latlons[:, 1]`` (lon).
-
-.. code:: python
-
-   # my_project/plots.py
-   import matplotlib.pyplot as plt
-   import numpy as np
-   from matplotlib.figure import Figure
-
-
-   def zonal_cross_section_plot_fn(
-       parameters: dict[int, tuple[str, bool]],
-       *,
-       x,
-       y_true,
-       y_pred,
-       latlons,
-       auxiliary=None,
-       settings=None,
-       variable: str = "t",     # prefix, e.g. "t" for t_500, t_700, ...
-       axis: str = "lat",       # "lat" or "lon"
-       n_bins: int = 90,
-       **_kwargs,
-   ) -> Figure:
-       """Pressure vs latitude/longitude cross-section for a single variable."""
-       # 1. pick output indices belonging to `variable` and extract pressure levels
-       items = [
-           (idx, int(name.split("_")[-1]))
-           for idx, (name, _) in parameters.items()
-           if name.startswith(f"{variable}_")
-       ]
-       if not items:
-           msg = f"No parameters matching prefix '{variable}_' were requested."
-           raise ValueError(msg)
-       items.sort(key=lambda kv: kv[1])
-       idxs, levels = zip(*items)
-       levels = np.asarray(levels)
-
-       # 2. average onto lat (or lon) bins
-       coord = latlons[:, 0] if axis == "lat" else latlons[:, 1]
-       bin_edges = np.linspace(coord.min(), coord.max(), n_bins + 1)
-       which = np.clip(np.digitize(coord, bin_edges) - 1, 0, n_bins - 1)
-
-       def zonal(field: np.ndarray) -> np.ndarray:
-           field = np.asarray(field)
-           out = np.full((len(idxs), n_bins), np.nan)
-           for b in range(n_bins):
-               mask = which == b
-               if mask.any():
-                   out[:, b] = field[mask][:, list(idxs)].mean(axis=0)
-           return out
-
-       truth = zonal(y_true)
-       pred = zonal(y_pred)
-
-       fig, axes = plt.subplots(1, 3, figsize=(12, 3), sharey=True)
-       centres = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-       for ax, field, title in zip(
-           axes, [truth, pred, pred - truth], ["truth", "pred", "pred - truth"],
-       ):
-           im = ax.pcolormesh(centres, levels, field, shading="auto")
-           ax.invert_yaxis()  # pressure decreasing upward
-           ax.set_xlabel(axis)
-           ax.set_title(title)
-           fig.colorbar(im, ax=ax)
-       axes[0].set_ylabel("pressure [hPa]")
-       return fig
-
-Wire it in as:
-
 .. code:: yaml
 
-   - _target_: anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot
+   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
      tag_infix: zonal_t
      sample_idx: 0
      parameters: [t_50, t_100, t_250, t_500, t_700, t_850, t_1000]
@@ -537,16 +472,7 @@ Wire it in as:
        _target_: my_project.plots.zonal_cross_section_plot_fn
        _partial_: true
        variable: t
-       axis: lat        # or "lon" for meridional cross-section
-       n_bins: 90
-
-Notes:
-
-- If the variable/level naming in your dataset does not encode the
-  pressure level in the suffix, replace the ``split("_")`` step with a
-  small explicit mapping.
-- ``focus_area`` still applies: pass a ``latlon_bbox`` and the
-  cross-section is restricted to that region for free.
+       axis: lat
 
 The ``LossCurvePlot`` and ``GraphFeaturePlot`` callbacks follow the
 same pattern (see ``loss_plot_fn`` and ``graph_plot_fn`` in
@@ -572,6 +498,11 @@ also possible for users to add callbacks using the same structure:
    :show-inheritance:
 
 .. automodule:: anemoi.training.diagnostics.callbacks.plot
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.diagnostics.evaluation.plotting.protocols
    :members:
    :no-undoc-members:
    :show-inheritance:
