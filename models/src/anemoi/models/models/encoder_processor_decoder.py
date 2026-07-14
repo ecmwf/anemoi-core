@@ -23,6 +23,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
@@ -62,9 +63,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
-                hidden_dim=self.num_channels,
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
+
+        # Latent aggregator: combines encoder outputs before the processor
+        self.latent_aggregator = instantiate(
+            model_config.model.latent_aggregator,
+            num_channels={encoder_name: encoder.hidden_dim for encoder_name, encoder in self.encoder.items()},
+        )
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
@@ -78,7 +84,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
-            num_channels=self.num_channels,
+            num_channels=self.latent_aggregator.hidden_dim,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
 
@@ -100,13 +106,23 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.decoder = torch.nn.ModuleDict()
         for decoder_name, decoder_config in model_config.model.decoders.items():
+            decoder_in_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same target dimension, "
+                f"but got {decoder_in_channels_dst}."
+            )
+            decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same output dimension, "
+                f"but got {decoder_output_channels_dst}."
+            )
+
             self.decoder[str(decoder_name)] = instantiate(
                 decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.num_channels,
-                in_channels_dst=self.target_dim[dataset_name],
-                hidden_dim=self.num_channels,
-                out_channels_dst=self.output_dim[dataset_name],
+                in_channels_src=self.processor.num_channels,
+                in_channels_dst=decoder_in_channels_dst,
+                out_channels_dst=decoder_output_channels_dst,
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
@@ -283,10 +299,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
             x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
+            dataset_latents[encoder_name] = x_latent
 
         # Combine all dataset latents
-        x_latent = sum(dataset_latents.values())
+        x_latent = self.latent_aggregator(dataset_latents)
 
         # Processor
         (
@@ -313,7 +329,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in dataset_names:
+        for dataset_name in self.target_datasets:
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,

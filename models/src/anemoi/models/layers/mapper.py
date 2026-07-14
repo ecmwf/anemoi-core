@@ -685,6 +685,11 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             **kwargs,
         )
 
+        if self.in_channels_src != self.hidden_dim:
+            self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+        else:
+            self.emb_nodes_src = nn.Identity()
+
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
@@ -697,6 +702,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
 
     def pre_process(self, x):
         x_src, x_dst = x
+        x_src = self.emb_nodes_src(x_src)
         x_dst = self.emb_nodes_dst(x_dst)
         return x_src, x_dst
 

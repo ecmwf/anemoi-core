@@ -24,11 +24,15 @@ from .common_components import TransformerModelComponent
 class GNNDecoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNBackwardMapper"] = Field(..., alias="_target_")
     "GNN decoder object from anemoi.models.layers.mapper."
+    hidden_dim: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the GNN decoder. Default to 512."
 
 
 class GraphTransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GraphTransformerBackwardMapper"] = Field(..., alias="_target_")
     "Graph Transformer Decoder object from anemoi.models.layers.mapper."
+    hidden_dim: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the Graph Transformer decoder. Default to 512."
     trainable_size: NonNegativeInt = Field(example=8)
     "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
@@ -62,6 +66,8 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
 class TransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.TransformerBackwardMapper"] = Field(..., alias="_target_")
     "Transformer Encoder object from anemoi.models.layers.mapper."
+    hidden_dim: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the GNN encoder. Default to 512."
     window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
