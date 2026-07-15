@@ -14,6 +14,7 @@ from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import model_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -68,21 +69,36 @@ class TemporalDownscalerSchema(BaseModel):
     "Whether to include the right boundary in the output."
 
 
-class DownscalerSchema(BaseModel):
+class SpatialDownscalerSchema(BaseModel):
     """Configuration for spatial residual downscaling."""
 
-    target_: Literal["anemoi.training.tasks.Downscaler"] = Field(..., alias="_target_")
+    target_: Literal["anemoi.training.tasks.SpatialDownscaler"] = Field(..., alias="_target_")
     "Task class path for the spatial downscaling task."
     input_datasets: list[str] = Field(..., min_length=1)
     "Datasets supplied as spatially coarse/source inputs."
     output_datasets: list[str] = Field(..., min_length=1)
     "Datasets predicted as spatially fine/target outputs."
-    input_offset: str = Field(default="0H", example="0H")
-    "Physical offset of the source state."
-    output_offset: str = Field(default="0H", example="0H")
-    "Physical offset of the target state."
+    input_offsets: list[int] = Field(..., min_length=1)
+    "Dataset-relative integer offsets of the source state(s)."
+    output_offsets: list[int] = Field(..., min_length=1)
+    "Dataset-relative integer offsets of the target state(s). Must be a subset of `input_offsets`."
+
+    @model_validator(mode="after")
+    def _validate_offsets(self) -> "SpatialDownscalerSchema":
+        if len(set(self.input_offsets)) != len(self.input_offsets):
+            raise ValueError(f"input_offsets contains duplicates: {self.input_offsets}")
+        if len(set(self.output_offsets)) != len(self.output_offsets):
+            raise ValueError(f"output_offsets contains duplicates: {self.output_offsets}")
+        missing = sorted(set(self.output_offsets) - set(self.input_offsets))
+        if missing:
+            raise ValueError(
+                f"output_offsets {missing} have no matching input_offsets; "
+                f"output_offsets must be a subset of input_offsets ({sorted(set(self.input_offsets))}).",
+            )
+        return self
+
 
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema | DownscalerSchema,
+    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema | SpatialDownscalerSchema,
     Discriminator("target_"),
 ]

@@ -1,0 +1,5 @@
+_target_: anemoi.training.tasks.SpatialDownscaler
+input_datasets: [input, output]
+output_datasets: [output]
+input_offsets: [0]
+output_offsets: [0]

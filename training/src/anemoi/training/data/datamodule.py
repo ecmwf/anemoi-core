@@ -26,6 +26,7 @@ from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.tasks.spatial_downscaler import bind_task_frequency
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
@@ -225,6 +226,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        bind_task_frequency(self.task, data_readers)
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
         return MultiDataset(
@@ -248,6 +250,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # Store the current rollout length, and refresh the time steps that must
             # be loaded for it. The task provides both values: steps() gives the rollout
             # length, and get_offsets() gives the time steps via compute_relative_date_indices().
+            bind_task_frequency(self.task, dataset.data_readers)
             dataset.set_epoch(
                 epoch,
                 rollout=len(tuple(self.task.steps(label))),
