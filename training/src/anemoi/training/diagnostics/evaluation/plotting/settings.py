@@ -14,6 +14,10 @@ from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLeve
 
 LAYOUT = "tight"
 
+# Default precipitation accumulation levels in mm, used when accumulation_levels_plot
+# is not specified in the plot_fn config.
+DEFAULT_ACCUMULATION_LEVELS: list[float] = [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+
 
 def argsort_variablename_variablelevel(data: list[str], metadata_variables: dict | None = None) -> list[int]:
     """Custom sort key to process the strings.

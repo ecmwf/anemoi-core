@@ -22,46 +22,45 @@ from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.schemas.training import GenericSchema
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphPlotFnSchema(PydanticBaseModel):
+class GraphPlotFnSchema(GenericSchema):
     """Hydra config for a :class:`GraphFeaturePlot` plot function.
 
     The ``_target_`` must resolve to a callable that accepts at minimum:
     ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
-    ``edge_trainable_modules``.
+    ``edge_trainable_modules``. See :class:`GraphPlotFn` for the full contract.
 
     Built-in options
     ----------------
     - ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``
+
+    Custom functions are accepted — pass any dotted import path and bind
+    extra kwargs via ``_partial_: true``.
     """
 
-    model_config = {"extra": "allow", "populate_by_name": True}
-
-    target_: Literal["anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn",] = Field(alias="_target_")
-    "Dotted import path to the plot function."
     partial_: bool = Field(default=True, alias="_partial_")
     "Must be true — the callback binds the remaining arguments at call time."
 
 
-class LossPlotFnSchema(PydanticBaseModel):
+class LossPlotFnSchema(GenericSchema):
     """Hydra config for a :class:`LossCurvePlot` plot function.
 
     The ``_target_`` must resolve to a callable that accepts at minimum:
-    ``loss`` and ``parameter_names``.
+    ``loss`` and ``parameter_names``. See :class:`LossPlotFn` for the full contract.
 
     Built-in options
     ----------------
     - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
+
+    Custom functions are accepted — pass any dotted import path and bind
+    extra kwargs via ``_partial_: true``.
     """
 
-    model_config = {"extra": "allow", "populate_by_name": True}
-
-    target_: Literal["anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn",] = Field(alias="_target_")
-    "Dotted import path to the plot function."
     partial_: bool = Field(default=True, alias="_partial_")
     "Must be true — the callback binds the remaining arguments at call time."
 
@@ -161,11 +160,12 @@ ColormapSchema = Annotated[
 ]
 
 
-class BatchOutputPlotFnSchema(PydanticBaseModel):
+class BatchOutputPlotFnSchema(GenericSchema):
     """Hydra config for a :class:`BatchOutputPlot` plot function.
 
     The ``_target_`` must resolve to a callable that accepts at minimum:
     ``parameters``, ``x``, ``y_true``, ``y_pred``, ``latlons``.
+    See :class:`BatchOutputPlotFn` for the full contract.
 
     Built-in options
     ----------------
@@ -173,17 +173,11 @@ class BatchOutputPlotFnSchema(PydanticBaseModel):
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn``
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn``
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn``
+
+    Custom functions are accepted — pass any dotted import path and bind
+    extra kwargs via ``_partial_: true``.
     """
 
-    model_config = {"extra": "allow", "populate_by_name": True}
-
-    target_: Literal[
-        "anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn",
-        "anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn",
-        "anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn",
-        "anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn",
-    ] = Field(alias="_target_")
-    "Dotted import path to the plot function."
     partial_: bool = Field(default=True, alias="_partial_")
     "Must be true — the callback binds the remaining arguments at call time."
 

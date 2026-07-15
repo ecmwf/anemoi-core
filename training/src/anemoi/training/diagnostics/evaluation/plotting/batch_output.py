@@ -7,29 +7,47 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Shared contract and adapters for spatial-map plot functions.
+"""Built-in plot function adapters for :class:`BatchOutputPlot`.
 
-Every spatial-map plot function used by :class:`BatchOutputPlot` follows the
-same signature. This decouples the *what to draw* from the *how to loop over
-samples/datasets/focus areas*, so new plots can be added without writing a new
-callback subclass or schema.
+Each adapter wraps an underlying plotting function with the shared
+:class:`BatchOutputPlotFn` signature. All plot-specific kwargs have
+code-defined defaults, so they are **optional** in the YAML config —
+only specify them to override the default.
 
-Contract
---------
-A spatial-map plot function must accept (all as keyword-only where noted)::
+Built-in plot functions and their optional kwargs
+-------------------------------------------------
 
-    fn(parameters: dict[int, tuple[str, bool]],
-       *,
-       x: np.ndarray,
-       y_true: np.ndarray,
-       y_pred: np.ndarray,
-       latlons: np.ndarray | None = None,
-       auxiliary: np.ndarray | None = None,
-       settings: "PlottingSettings" | None = None,
-       **plot_specific_kwargs) -> matplotlib.figure.Figure
+``sample_plot_fn``
+    Sample map plot (input vs prediction vs truth per variable).
 
-Bind plot-specific kwargs (e.g. ``per_sample``, ``min_delta``, ``log_scale``,
-``colormaps``) in the YAML using Hydra's ``_partial_: true``.
+    - ``per_sample`` (int, default ``6``): number of samples per variable row.
+    - ``accumulation_levels_plot`` (list, default ``DEFAULT_ACCUMULATION_LEVELS``):
+      colour levels in mm for precipitation fields.
+    - ``prediction_label`` (str, default ``"pred"``): label for the prediction panel.
+    - ``auxiliary_label`` (str, default ``"corrupted targets"``): label for the
+      auxiliary panel (only shown when ``with_auxiliary: true`` on the callback).
+
+``spectrum_plot_fn``
+    Power spectrum plot.
+
+    - ``min_delta`` (float, default ``None``): minimum delta for spectrum plot.
+
+``histogram_plot_fn``
+    Histogram plot.
+
+    - ``log_scale`` (bool, default ``False``): use log scale on the y-axis.
+
+``ensemble_plot_fn``
+    Ensemble spread/mean/error map plot.
+
+    - ``accumulation_levels_plot`` (list, default ``DEFAULT_ACCUMULATION_LEVELS``):
+      colour levels in mm for precipitation fields.
+    - ``n_plots_per_sample`` (int, default ``4``): number of fixed panels per
+      variable row (target, pred mean, mean error, ens sd).
+
+Rendering settings (datashader, projection, colormaps, precip_and_related_fields)
+are read from the ``settings`` object passed by the callback — configure them
+under ``diagnostics.plot.settings`` in the YAML, not inside ``plot_fn``.
 """
 
 from __future__ import annotations
@@ -66,12 +84,14 @@ def sample_plot_fn(
 ) -> Figure:
     """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample)."""
     from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
+    from anemoi.training.diagnostics.evaluation.plotting.settings import DEFAULT_ACCUMULATION_LEVELS
 
+    levels = accumulation_levels_plot if accumulation_levels_plot is not None else DEFAULT_ACCUMULATION_LEVELS
     return plot_predicted_multilevel_flat_sample(
         parameters,
         per_sample,
         latlons,
-        accumulation_levels_plot,
+        levels,
         x,
         y_true,
         y_pred,
@@ -143,12 +163,14 @@ def ensemble_plot_fn(
 ) -> Figure:
     """Adapter for ``plot_predicted_ensemble`` (PlotEnsSample)."""
     from anemoi.training.diagnostics.evaluation.plotting.ensemble import plot_predicted_ensemble
+    from anemoi.training.diagnostics.evaluation.plotting.settings import DEFAULT_ACCUMULATION_LEVELS
 
+    levels = accumulation_levels_plot if accumulation_levels_plot is not None else DEFAULT_ACCUMULATION_LEVELS
     return plot_predicted_ensemble(
         parameters=parameters,
         n_plots_per_sample=n_plots_per_sample,
         latlons=latlons,
-        clevels=accumulation_levels_plot,
+        clevels=levels,
         y_true=np.asarray(y_true).squeeze(),
         y_pred=np.asarray(y_pred).squeeze(),
         datashader=getattr(settings, "datashader", True),
