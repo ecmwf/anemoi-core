@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -53,7 +53,12 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
         # This is a check to allow backwards compatibilty of the configs, as the extra fields are not required.
-        allowed_extras = {"graph_attention_backend": str, "edge_pre_mlp": bool, "gradient_checkpointing": bool}
+        allowed_extras = {
+            "shard_strategy": str,
+            "graph_attention_backend": str,
+            "edge_pre_mlp": bool,
+            "gradient_checkpointing": bool,
+        }
         extras = getattr(self, "__pydantic_extra__", {}) or {}
         for extra_field, value in extras.items():
             if extra_field not in allowed_extras:

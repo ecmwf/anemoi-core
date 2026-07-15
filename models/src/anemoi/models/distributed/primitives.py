@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -182,6 +182,51 @@ def _gather(
     return _gather_default(input_, dim_, sizes, group)
 
 
+def _expand_sharded_tensor(
+    input_: Tensor,
+    dim_: int,
+    sizes: ShardSizes,
+    group: Optional[ProcessGroup] = None,
+) -> Tensor:
+    """Expand a local shard to the gathered shape without communication.
+
+    Only the local rank slice is materialized from ``input_``. The remaining
+    slices are left uninitialized in the returned tensor.
+    """
+    if dist.get_world_size(group=group) == 1:
+        return input_
+
+    assert (
+        -input_.dim() <= dim_ < input_.dim()
+    ), f"Error, cannot expand along {dim_} for tensor with {input_.dim()} dimensions."
+
+    input_format = get_memory_format(input_)
+    input_ = input_.contiguous(memory_format=input_format)
+    dim = dim_ % input_.dim()
+    rank = dist.get_rank(group=group)
+
+    expected_local_size = sizes[rank]
+    assert input_.shape[dim] == expected_local_size, (
+        f"Error, expected local shard size {expected_local_size} along dimension {dim} "
+        f"for rank {rank}, but got {input_.shape[dim]}"
+    )
+
+    output_shape = list(input_.shape)
+    output_shape[dim] = sum(sizes)
+    output = torch.empty(
+        output_shape,
+        dtype=input_.dtype,
+        layout=input_.layout,
+        device=input_.device,
+        memory_format=input_format,
+    )
+
+    start = sum(sizes[:rank])
+    output.narrow(dim, start, expected_local_size).copy_(input_)
+
+    return output
+
+
 def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup] = None) -> Tensor:
     """All-reduce the input tensor across model parallel group."""
     # Modified from
@@ -287,17 +332,18 @@ def _alltoall_transpose(
     Tensor
         Result of the all-to-all exchange
     """
+    # normalise negative dims
+    ndim = input_.dim()
+    dim_split = dim_split % ndim
+    dim_concat = dim_concat % ndim
+    assert dim_split != dim_concat, "Error, all-to-all split and concat dimensions must be different."
+
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return input_
 
     myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
-
-    # normalise negative dims
-    ndim = input_.dim()
-    dim_split = dim_split % ndim
-    dim_concat = dim_concat % ndim
 
     # split input along dim_split
     input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]
@@ -322,3 +368,105 @@ def _alltoall_transpose(
     _alltoallwrapper(output_list, input_list, group=group)
 
     return torch.cat(output_list, dim=dim_concat).contiguous(memory_format=input_format)
+
+
+def _halo_exchange(
+    x: Tensor,
+    send_indices: tuple[Tensor, ...],
+    recv_counts: tuple[int, ...],
+    group: ProcessGroup,
+) -> Tensor:
+    """Forward halo exchange: gather inner node features and send to peers.
+
+    For each peer rank *r*, gathers ``x[send_indices[r]]`` and sends it
+    to rank *r*.  Receives ``recv_counts[r]`` rows from rank *r*.
+    Returns *x* concatenated with the received halo rows, preserving the
+    ordering expected by the relabeled local edge index.
+
+    Parameters
+    ----------
+    x : Tensor
+        Local node features, shape ``(num_local, ...)``.
+    send_indices : tuple[Tensor, ...]
+        Per-rank local indices of inner nodes to send.  Length = world size.
+    recv_counts : tuple[int, ...]
+        Per-rank number of halo rows to receive.  Length = world size.
+    group : ProcessGroup
+        Communication group.
+
+    Returns
+    -------
+    Tensor
+        ``(num_local + sum(recv_counts), ...)`` — local followed by halo rows.
+    """
+    comm_size = dist.get_world_size(group=group)
+    if comm_size == 1:
+        return x
+
+    send_list = [x[idx].contiguous() for idx in send_indices]
+    recv_list = [torch.empty((count, *x.shape[1:]), dtype=x.dtype, device=x.device) for count in recv_counts]
+
+    _alltoallwrapper(recv_list, send_list, group=group)
+
+    return torch.cat([x] + recv_list, dim=0)
+
+
+def _halo_exchange_bwd(
+    grad_output: Tensor,
+    send_indices: tuple[Tensor, ...],
+    recv_counts: tuple[int, ...],
+    num_local_nodes: int,
+    group: ProcessGroup,
+) -> Tensor:
+    """Backward of halo exchange.
+
+    Splits *grad_output* into local and per-rank halo gradient portions.
+    Sends halo gradients back to the ranks that originally owned those
+    nodes and accumulates the received gradients at the ``send_indices``
+    positions via scatter-add.
+
+    Parameters
+    ----------
+    grad_output : Tensor
+        Gradient w.r.t. the halo-exchange output, shape ``(total_nodes, ...)``.
+    send_indices : tuple[Tensor, ...]
+        Per-rank local indices (same as in the forward pass).
+    recv_counts : tuple[int, ...]
+        Per-rank halo counts (same as in the forward pass).
+    num_local_nodes : int
+        Number of local (inner) nodes.
+    group : ProcessGroup
+        Communication group.
+
+    Returns
+    -------
+    Tensor
+        Gradient w.r.t. the halo-exchange input, shape ``(num_local_nodes, ...)``.
+    """
+    comm_size = dist.get_world_size(group=group)
+    if comm_size == 1:
+        return grad_output
+
+    grad_local = grad_output[:num_local_nodes].clone()
+
+    # split halo portion into per-rank chunks (same ordering as forward recv)
+    halo_grads = list(torch.split(grad_output[num_local_nodes:], list(recv_counts), dim=0))
+
+    # reverse exchange: send halo grads to originating ranks,
+    # receive grads for inner nodes we sent in the forward pass
+    send_counts = [idx.size(0) for idx in send_indices]
+    recv_list = [
+        torch.empty((count, *grad_output.shape[1:]), dtype=grad_output.dtype, device=grad_output.device)
+        for count in send_counts
+    ]
+    send_list = [g.contiguous() for g in halo_grads]
+
+    _alltoallwrapper(recv_list, send_list, group=group)
+
+    # scatter-add: accumulate received gradients into local grad
+    all_recv = torch.cat(recv_list, dim=0)
+    all_indices = torch.cat(list(send_indices), dim=0)
+    if all_recv.numel() > 0:
+        grad_local.index_add_(0, all_indices, all_recv)
+
+    return grad_local

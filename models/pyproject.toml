@@ -61,7 +61,7 @@ optional-dependencies.migrations = [
   "rich",
 ]
 optional-dependencies.spectral = [ "anemoi-transform>=0.1.2", "torch-dct>=0.1.6" ]
-optional-dependencies.tests = [ "anemoi-models[spectral]", "hypothesis>=6.11", "pytest>=8" ]
+optional-dependencies.tests = [ "anemoi-models[spectral]", "hypothesis>=6.11", "pytest>=8", "pytest-mock>=3" ]
 urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
 urls.Issues = "https://github.com/ecmwf/anemoi-models/issues"
@@ -71,13 +71,13 @@ urls.Repository = "https://github.com/ecmwf/anemoi-models/"
 scripts.anemoi-models = "anemoi.models.__main__:main"
 
 [tool.setuptools_scm]
-root = ".."
+version_file = "src/anemoi/models/_version.py"
 version_scheme = "post-release"
 local_scheme = "no-local-version"
-git_describe_command = "git describe --dirty --tags --long --match 'models-*[0-9]*'"
+root = ".."
 tag_regex = "^models-(?P<version>[vV]?[0-9]+[^-]*)"
-version_file = "src/anemoi/models/_version.py"
 fallback_version = "0.0.0"
+git_describe_command = "git describe --dirty --tags --long --match 'models-*[0-9]*'"
 
 [tool.ruff]
 lint.extend-select = [ "TID251" ]  # banned API usage

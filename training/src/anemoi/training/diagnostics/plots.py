@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,11 +10,11 @@
 
 import logging
 
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import numpy as np
 import pandas as pd
+from matplotlib import colormaps as mpl_colormaps
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
@@ -27,7 +27,7 @@ from torch import Tensor
 
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.training.diagnostics.maps import map_features
-from anemoi.training.diagnostics.projections import Projection
+from anemoi.training.diagnostics.projections import MapProjection
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 LOGGER = logging.getLogger(__name__)
@@ -244,7 +244,7 @@ def plot_power_spectrum(
     if n_plots_x == 1:
         ax = [ax]
 
-    pc_lon, pc_lat = Projection.equirectangular().project(latlons)
+    pc_lon, pc_lat = MapProjection.equirectangular().project(latlons)
 
     # Calculate delta_lat on the projected grid
     delta_lat = abs(np.diff(pc_lat))
@@ -482,7 +482,6 @@ def _setup_figure_and_colormaps(
     n_plots_x: int,
     n_plots_y: int,
     latlons: np.ndarray,
-    datashader: bool,
     projection_kind: str,
     colormaps: dict[str, Colormap] | None = None,
 ) -> tuple[Figure, np.ndarray, np.ndarray, np.ndarray, object, dict]:
@@ -496,23 +495,20 @@ def _setup_figure_and_colormaps(
         Number of columns (panels per variable).
     latlons : np.ndarray
         Lat/lon coordinates array, shape (n_points, 2).
-    datashader : bool
-        If True, force equirectangular projection (datashader limitation).
     projection_kind : str
-        Projection name when *datashader* is False.
+        Projection name for the plot.
     colormaps : dict[str, Colormap] | None, optional
         Colormap configuration dict, by default None.
 
     Returns
     -------
     tuple
-        (fig, axs, pc_lon, pc_lat, transform, colormaps)
+        (fig, axs, pc_lon, pc_lat, data_crs, colormaps)
     """
-    plot_kind = "equirectangular" if datashader else projection_kind
-    (pc_lon, pc_lat), proj, transform = Projection.for_plot(latlons, plot_kind)
+    (pc_lon, pc_lat), axes_crs, data_crs = MapProjection.for_plot(latlons, projection_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
-    subplot_kw = {"projection": proj} if proj is not None else {}
+    subplot_kw = {"projection": axes_crs} if axes_crs is not None else {}
     fig, axs = plt.subplots(
         n_plots_x,
         n_plots_y,
@@ -521,7 +517,7 @@ def _setup_figure_and_colormaps(
         subplot_kw=subplot_kw,
     )
     colormaps = colormaps if colormaps is not None else {}
-    return fig, axs, pc_lon, pc_lat, transform, colormaps
+    return fig, axs, pc_lon, pc_lat, data_crs, colormaps
 
 
 def _resolve_variable_colormaps(
@@ -542,8 +538,8 @@ def _resolve_variable_colormaps(
     tuple[Colormap, Colormap]
         (cmap, error_cmap)
     """
-    cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+    cmap = colormaps.default.get_cmap() if colormaps.get("default") else mpl_colormaps.get_cmap("viridis")
+    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else mpl_colormaps.get_cmap("bwr")
     for key in colormaps:
         if key not in ["default", "error"] and variable_name in colormaps[key].variables:
             cmap = colormaps[key].get_cmap()
@@ -563,6 +559,9 @@ def plot_predicted_multilevel_flat_sample(
     precip_and_related_fields: list | None = None,
     colormaps: dict[str, Colormap] | None = None,
     projection_kind: str = "equirectangular",
+    prediction_label: str = "pred",
+    auxiliary: np.ndarray | None = None,
+    auxiliary_label: str = "corrupted targets",
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -599,11 +598,10 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
-    fig, axs, pc_lon, pc_lat, transform, colormaps = _setup_figure_and_colormaps(
+    fig, axs, pc_lon, pc_lat, data_crs, colormaps = _setup_figure_and_colormaps(
         n_plots_x=len(parameters),
-        n_plots_y=n_plots_per_sample,
+        n_plots_y=max(n_plots_per_sample, 7 if auxiliary is not None else 6),
         latlons=latlons,
-        datashader=datashader,
         projection_kind=projection_kind,
         colormaps=colormaps,
     )
@@ -618,6 +616,8 @@ def plot_predicted_multilevel_flat_sample(
             else None
         )
         yp = (y_pred if y_pred.ndim == 1 else y_pred[..., variable_idx]).reshape(-1)
+        ya = None if auxiliary is None else (auxiliary if auxiliary.ndim == 1 else auxiliary[..., variable_idx])
+        ya = None if ya is None else ya.reshape(-1)
 
         cmap, error_cmap = _resolve_variable_colormaps(colormaps, variable_name)
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
@@ -635,7 +635,11 @@ def plot_predicted_multilevel_flat_sample(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
-            transform=transform,
+            data_crs=data_crs,
+            prediction_label=prediction_label,
+            auxiliary=ya,
+            auxiliary_label=auxiliary_label,
+            diagnostic_only=diagnostic_only,
         )
     return fig
 
@@ -662,6 +666,18 @@ def _scale_precip_fields(
     return input_, truth, pred
 
 
+def _scale_auxiliary_precip_field(
+    vname: str,
+    precip_fields: list,
+    auxiliary: np.ndarray | None,
+) -> np.ndarray | None:
+    """Convert auxiliary precipitation-like fields from m to mm."""
+    if auxiliary is not None and vname in precip_fields:
+        return auxiliary * 1000.0
+
+    return auxiliary
+
+
 def _compute_main_norm(
     vname: str,
     precip_fields: list,
@@ -674,12 +690,43 @@ def _compute_main_norm(
     if vname in precip_fields:
         return BoundaryNorm(clevels, len(clevels) + 1)
 
-    combined = np.concatenate((input_, pred)) if truth is None else np.concatenate((input_, truth, pred))
+    arrays = [input_, pred] if truth is None else [input_, truth, pred]
+    combined = np.concatenate(arrays)
 
     return Normalize(
         vmin=np.nanmin(combined),
         vmax=np.nanmax(combined),
     )
+
+
+def _build_flat_sample_data(
+    ax: plt.Axes,
+    input_: np.ndarray,
+    truth: np.ndarray | None,
+    pred: np.ndarray,
+    auxiliary: np.ndarray | None,
+    diagnostic_only: bool,
+) -> list[np.ndarray | None]:
+    """Build flat sample panels before normalization and plotting."""
+    n_panels = 7 if auxiliary is not None else 6
+    data = [None for _ in range(n_panels)]
+
+    if truth is not None:
+        data[1:4] = [truth, pred, truth - pred]
+        if not diagnostic_only:
+            data[5] = truth - input_
+    else:
+        data[2] = pred
+        if not diagnostic_only:
+            data[4] = pred - input_
+        ax[1].axis("off")
+        ax[3].axis("off")
+        ax[5].axis("off")
+
+    if auxiliary is not None:
+        data[6] = auxiliary if diagnostic_only else auxiliary - input_
+
+    return data
 
 
 def plot_flat_sample(
@@ -696,7 +743,11 @@ def plot_flat_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
-    transform: object | None = None,
+    data_crs: object | None = None,
+    prediction_label: str = "pred",
+    auxiliary: np.ndarray | None = None,
+    auxiliary_label: str = "corrupted targets",
+    diagnostic_only: bool = False,
 ) -> None:
     """Plot a "flat" 1D sample.
 
@@ -731,6 +782,8 @@ def plot_flat_sample(
         Colormap for the plot
     error_cmap : Colormap, optional
         Colormap for the error plot
+    diagnostic_only : bool, optional
+        Whether the variable is diagnostic-only and should omit input, increment, and persistence panels.
 
     Returns
     -------
@@ -744,31 +797,25 @@ def plot_flat_sample(
         truth,
         pred,
     )
+    auxiliary = _scale_auxiliary_precip_field(vname, precip_and_related_fields, auxiliary)
 
-    data = [None for _ in range(6)]
-    # truth, prediction and prediction error (when truth is not None)
-    if truth is not None:
-        data[1:4] = [truth, pred, truth - pred]
-        data[5] = truth - input_
-    else:
-        data[2] = pred
-        data[4] = pred - input_
-        ax[1].axis("off")
-        ax[3].axis("off")
-        ax[5].axis("off")
+    n_panels = 7 if auxiliary is not None else 6
+    data = _build_flat_sample_data(ax, input_, truth, pred, auxiliary, diagnostic_only)
     # default titles for 6 plots
     titles = [
         f"{vname} input",
         f"{vname} target",
-        f"{vname} pred",
-        f"{vname} pred err",
-        f"{vname} increment [pred - input]",
+        f"{vname} {prediction_label}",
+        f"{vname} {prediction_label} err",
+        f"{vname} increment [{prediction_label} - input]",
         f"{vname} persist err",
     ]
+    if auxiliary is not None:
+        titles.append(f"{vname} {auxiliary_label}")
     # colormaps
-    cmaps = [cmap] * 3 + [error_cmap] * 3
+    cmaps = [cmap] * 3 + [error_cmap] * 3 + ([error_cmap] if auxiliary is not None else [])
     # normalizations for significant colormaps
-    norms = [None for _ in range(6)]
+    norms = [None for _ in range(n_panels)]
     norms[3:6] = [TwoSlopeNorm(vcenter=0.0)] * 3  # center the error colormaps at 0
 
     main_norm = _compute_main_norm(
@@ -781,8 +828,7 @@ def plot_flat_sample(
     )
     norms[1] = main_norm
     norms[2] = main_norm
-
-    if np.nansum(input_) != 0:
+    if not diagnostic_only:
         # prognostic fields: plot input and increment as well
         data[0] = input_
         if data[4] is None:
@@ -797,14 +843,23 @@ def plot_flat_sample(
         norms[4] = norm_error
         if truth is not None:
             norms[5] = norm_error
+        if auxiliary is not None:
+            norms[6] = norm_error
 
     else:
         # diagnostic fields: omit input and increment plots
         ax[0].axis("off")
         ax[4].axis("off")
         ax[5].axis("off")
+        if auxiliary is not None:
+            auxiliary_delta = data[6]
+            norms[6] = TwoSlopeNorm(
+                vmin=min(-0.00001, np.nanmin(auxiliary_delta)),
+                vcenter=0.0,
+                vmax=max(0.00001, np.nanmax(auxiliary_delta)),
+            )
 
-    for ii in range(6):
+    for ii in range(n_panels):
         if data[ii] is not None:
             single_plot(
                 fig,
@@ -816,8 +871,10 @@ def plot_flat_sample(
                 norm=norms[ii],
                 title=titles[ii],
                 datashader=datashader,
-                transform=transform,
+                data_crs=data_crs,
             )
+        else:
+            ax[ii].axis("off")
 
 
 def single_plot(
@@ -830,7 +887,7 @@ def single_plot(
     norm: str | None = None,
     title: str | None = None,
     datashader: bool = False,
-    transform: object | None = None,
+    data_crs: object | None = None,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -857,8 +914,9 @@ def single_plot(
         Title for plot, by default None
     datashader: bool, optional
         Scatter plot, by default False
-    transform:
-        Projection for the plot, by default None
+    data_crs:
+        CRS of the input data (``ccrs.PlateCarree()`` for Cartopy axes, ``None`` for
+        plain matplotlib axes), by default None
 
     Returns
     -------
@@ -867,17 +925,10 @@ def single_plot(
     if cmap is None:
         cmap = "viridis"
     if not datashader:
-        psc = ax.scatter(
-            lon,
-            lat,
-            c=data,
-            cmap=cmap,
-            s=1,
-            alpha=1.0,
-            norm=norm,
-            rasterized=False,
-            transform=transform,
-        )
+        scatter_kwargs = {"c": data, "cmap": cmap, "s": 1, "alpha": 1.0, "norm": norm, "rasterized": False}
+        if data_crs is not None:
+            scatter_kwargs["transform"] = data_crs
+        psc = ax.scatter(lon, lat, **scatter_kwargs)
 
     else:
         import datashader as dsh
@@ -903,14 +954,19 @@ def single_plot(
     ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
     dy, dx = ymax - ymin, xmax - xmin
     ybuffer, xbuffer = dy * 0.05, dx * 0.05
-    if transform is not None:
-        ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=transform)
+    if data_crs is not None:
+        # For near-global data, set_extent with degree coords can produce NaN/Inf
+        # in projected space (e.g. Robinson at ±90° lat). Skip it and let Cartopy
+        # use the projection's natural global extent instead.
+        is_global = dy > 150 or dx > 340
+        if not is_global:
+            ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=data_crs)
     else:
         ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
         ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
 
-    # Add map features (always equirectangular coastlines/borders)
-    map_features.plot(ax)
+    # Add map features; pass data_crs so Cartopy axes get correctly projected lines
+    map_features.plot(ax, data_crs=data_crs)
 
     if title is not None:
         ax.set_title(title)
@@ -929,7 +985,7 @@ def get_scatter_frame(
     vmax: int | None = None,
 ) -> [plt.Axes, PathCollection]:
     """Create a scatter plot for a single frame of an animation."""
-    pc_lon, pc_lat = Projection.equirectangular().project(latlons)
+    pc_lon, pc_lat = MapProjection.equirectangular().project(latlons)
 
     scatter_frame = ax.scatter(
         pc_lon,
@@ -1044,7 +1100,7 @@ def plot_graph_node_features(
                 data=node_features[..., i],
                 title=f"{mesh} trainable feature #{i + 1}",
                 datashader=datashader,
-                transform=None,
+                data_crs=None,
             )
 
     return fig
@@ -1130,7 +1186,7 @@ def plot_rank_histograms(
     if not isinstance(ax, np.ndarray):
         ax = np.array([ax])
 
-    for plot_idx, (_variable_idx, variable_name) in enumerate(parameters.items()):
+    for plot_idx, (_, variable_name) in enumerate(parameters.items()):
         rh_ = rh[:, plot_idx]
         ax[plot_idx].bar(np.arange(0, n_ens + 1), rh_ / rh_.sum(), linewidth=1, color="blue", width=0.7)
         ax[plot_idx].hlines(rh_.mean() / rh_.sum(), xmin=-0.5, xmax=n_ens + 0.5, linestyles="--", colors="red")
@@ -1192,11 +1248,10 @@ def plot_predicted_ensemble(
     n_plots_y = nens + n_plots_per_sample
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
-    fig, axs, pc_lon, pc_lat, transform, colormaps = _setup_figure_and_colormaps(
+    fig, axs, pc_lon, pc_lat, data_crs, colormaps = _setup_figure_and_colormaps(
         n_plots_x=n_plots_x,
         n_plots_y=n_plots_y,
         latlons=latlons,
-        datashader=datashader,
         projection_kind=projection_kind,
         colormaps=colormaps,
     )
@@ -1224,7 +1279,7 @@ def plot_predicted_ensemble(
             precip_and_related_fields=precip_and_related_fields,
             cmap=cmap,
             error_cmap=error_cmap,
-            transform=transform,
+            data_crs=data_crs,
         )
 
     return fig
@@ -1244,7 +1299,7 @@ def plot_ensemble_sample(
     precip_and_related_fields: list | None = None,
     cmap: Colormap | None = None,
     error_cmap: Colormap | None = None,
-    transform: object | None = None,
+    data_crs: object | None = None,
 ) -> None:
     """Use this when plotting ensembles.
 
@@ -1312,7 +1367,7 @@ def plot_ensemble_sample(
         norm=norm,
         title=f"{vname} target",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     # ensemble mean
     single_plot(
@@ -1325,7 +1380,7 @@ def plot_ensemble_sample(
         norm=norm,
         title=f"{vname} pred mean",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     # ensemble spread
     single_plot(
@@ -1338,7 +1393,7 @@ def plot_ensemble_sample(
         norm=TwoSlopeNorm(vcenter=0.0),
         title=f"{vname} ens mean err",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
     # ensemble mean error
     single_plot(
@@ -1349,7 +1404,7 @@ def plot_ensemble_sample(
         ens_sd,
         title=f"{vname} ens sd",
         datashader=datashader,
-        transform=transform,
+        data_crs=data_crs,
     )
 
     # ensemble members (difference from mean)
@@ -1365,5 +1420,5 @@ def plot_ensemble_sample(
             norm=TwoSlopeNorm(vcenter=0.0),
             title=f"{vname}_{i_ens + 1} - mean",
             datashader=datashader,
-            transform=transform,
+            data_crs=data_crs,
         )

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -140,7 +140,10 @@ class BaseDDPStrategy(DDPStrategy):
         dict
             A dictionary containing the shard sizes for each dataset.
         """
-        shard_sizes = trainer.model.module.shard_sizes
+        # For training, the model is wrapped in DDP and the LightningModule is accessible via trainer.model.module
+        # For evaluation, the model is not wrapped in DDP and the LightningModule is accessible via trainer.model
+        model = getattr(trainer.model, "module", trainer.model)
+        shard_sizes = model.shard_sizes
         assert shard_sizes is not None, "Shard shapes should be set after setup"
         return shard_sizes
 

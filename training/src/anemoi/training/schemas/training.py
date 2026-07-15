@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -72,9 +72,13 @@ class WeightAveragingSchema(GenericSchema):
 
     Example:
         weight_averaging:
-          _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+          _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
           decay: 0.999
           update_starting_at_step: 1000
+
+    The stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes also instantiate
+    but pair parameters/buffers positionally; that is unsafe with anemoi imputers and
+    updating loss scalers (a warning will be logged).
     """
 
 
@@ -252,11 +256,33 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     mae = "anemoi.training.losses.MAELoss"
     logcosh = "anemoi.training.losses.LogCoshLoss"
     huber = "anemoi.training.losses.HuberLoss"
-    fcl = "anemoi.training.losses.spectral.FourierCorrelationLoss"
-    lsd = "anemoi.training.losses.spectral.LogSpectralDistance"
-    logfft2d = "anemoi.training.losses.spectral.LogFFT2Distance"
-    spectral_crps = "anemoi.training.losses.spectral.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.spectral.SpectralL2Loss"
+    fcl = "anemoi.training.losses.FourierCorrelationLoss"
+    lsd = "anemoi.training.losses.LogSpectralDistance"
+    logfft2d = "anemoi.training.losses.LogFFT2Distance"
+    spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
+    spectral_l2 = "anemoi.training.losses.SpectralL2Loss"
+    spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
+
+
+class CheckVariablesCompatibilitySchema(BaseModel):
+    """Options forwarded to ``Variable.check_compatibility`` / ``Variable.compatible``.
+
+    Each field may be set to ``True`` to skip the check for all variables, or to a list
+    of variable names to skip only those specific variables.
+    """
+
+    ignore_units: bool | list[str] = False
+    """Ignore unit mismatches.  ``True`` skips all unit checks; a list of variable names
+    skips only those variables."""
+    ignore_processing_period: bool | list[str] = False
+    """Ignore accumulation-period mismatches.  ``True`` skips all period checks; a list of
+    variable names skips only those variables."""
+    ignore_time_processing: bool | list[str] = False
+    """Ignore time-processing type mismatches.  ``True`` skips all time-processing checks;
+    a list of variable names skips only those variables."""
+    ignore_type_of_level: bool | list[str] = False
+    """Ignore mismatches in pressure level status.  ``True`` skips all type-of-level checks;
+    a list of variable names skips only those variables."""
 
 
 class BaseLossSchema(BaseModel):
@@ -268,6 +294,10 @@ class BaseLossSchema(BaseModel):
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
     predicted_variables: list[str] | None = None
     target_variables: list[str] | None = None
+    check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
+        default_factory=CheckVariablesCompatibilitySchema,
+    )
+    "Options forwarded to ``Variable.check_compatibility`` when checking predicted vs. target variable units."
 
 
 class CRPSSchema(BaseLossSchema):
@@ -406,11 +436,83 @@ class HuberLossSchema(BaseLossSchema):
     "Threshold for Huber loss."
 
 
+class SpectralProjectionConfigSchema(BaseModel):
+    """Configuration for sparse projection applied before the spectral transform.
+
+    Exactly one mode must be configured:
+
+    - **File mode**: provide ``matrix_path``.
+    - **Edge mode**: provide ``edges_name``.
+    - **Target-grid mode**: provide ``num_nearest_neighbours`` and ``sigma``
+      together with either ``grid`` or ``node_builder``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # --- file mode ---
+    matrix_path: str | None = None
+
+    # --- edge mode ---
+    edges_name: tuple[str, str, str] | None = None
+
+    # --- target-grid mode ---
+    num_nearest_neighbours: int | None = None
+    sigma: float | None = None
+    grid: str | None = None
+    node_builder: dict | None = None
+    target_node_name: str = "target_grid"
+
+    # --- shared (edge and target-grid modes) ---
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+
+    @model_validator(mode="after")
+    def check_mode(self) -> Self:
+        has_matrix = self.matrix_path is not None
+        has_edges = self.edges_name is not None
+        has_target_grid = self.num_nearest_neighbours is not None
+
+        if has_matrix and has_edges:
+            msg = "projection_config: 'matrix_path' and 'edges_name' are mutually exclusive"
+            raise ValueError(msg)
+        if has_matrix and has_target_grid:
+            msg = "projection_config: 'matrix_path' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if has_edges and has_target_grid:
+            msg = "projection_config: 'edges_name' and target-grid keys are mutually exclusive"
+            raise ValueError(msg)
+        if not (has_matrix or has_edges or has_target_grid):
+            msg = "projection_config must specify 'matrix_path', 'edges_name', or target-grid keys"
+            raise ValueError(msg)
+        if has_target_grid and self.sigma is None:
+            msg = "projection_config: target-grid mode requires 'sigma'"
+            raise ValueError(msg)
+        if has_target_grid and self.grid is None and self.node_builder is None:
+            msg = "projection_config: target-grid mode requires 'grid' or 'node_builder'"
+            raise ValueError(msg)
+        return self
+
+
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
+    subgrid: tuple[int, int | None] | str | None = None
+    """Optional slice or string to select a subgrid before the transform."""
+    projection_config: SpectralProjectionConfigSchema | None = None
+    """Optional sparse projection applied to the data before the spectral transform."""
+
+    @model_validator(mode="after")
+    def check_subgrid_transform(self) -> Self:
+        if self.subgrid is not None and self.transform in ("reduced_sht", "octahedral_sht"):
+            msg = (
+                f"subgrid is not supported for the '{self.transform}' transform: "
+                "spherical harmonic transforms require the full grid"
+            )
+            raise ValueError(msg)
+        return self
 
     class Config(BaseModel.Config):
         """Override to allow extra parameters for spectral transforms."""
@@ -427,11 +529,12 @@ def _loss_discriminator(v: Any) -> str:
     if target == "anemoi.training.losses.CRPS":
         return "crps"
     if target in {
-        "anemoi.training.losses.spectral.FourierCorrelationLoss",
-        "anemoi.training.losses.spectral.LogSpectralDistance",
-        "anemoi.training.losses.spectral.LogFFT2Distance",
-        "anemoi.training.losses.spectral.SpectralCRPSLoss",
-        "anemoi.training.losses.spectral.SpectralL2Loss",
+        "anemoi.training.losses.FourierCorrelationLoss",
+        "anemoi.training.losses.LogSpectralDistance",
+        "anemoi.training.losses.LogFFT2Distance",
+        "anemoi.training.losses.SpectralCRPSLoss",
+        "anemoi.training.losses.SpectralL2Loss",
+        "anemoi.training.losses.SpectralAMSELoss",
     }:
         return "spectral"
     if target == "anemoi.training.losses.HuberLoss":
@@ -560,7 +663,6 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
-    "This flag picks a task to train for, examples: forecaster, autoencoder, temporal_downscaler.."
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)
@@ -569,6 +671,10 @@ class BaseTrainingSchema(BaseModel):
     "Load only the weights from the checkpoint, not the optimiser state."
     transfer_learning: bool = Field(example=False)
     "Flag to activate transfer learning mode when loading a checkpoint."
+    check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
+        default_factory=CheckVariablesCompatibilitySchema,
+    )
+    "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
@@ -615,30 +721,53 @@ class BaseTrainingSchema(BaseModel):
     "Number of ensemble members per device. Default is 1 for non-ensemble forecasting."
 
 
+class SingleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.SingleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the single training method."
+
+
+class EnsembleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.EnsembleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the ensemble training method."
+
+
+class TransportTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.TransportTraining"] = Field(..., alias="_target_")
+    "Hydra target for the transport training method."
+
+
+def _training_method_discriminator(v: Any) -> str:
+    method = v.get("method", {}) if hasattr(v, "get") else getattr(v, "method", None)
+    return method.get("_target_", "") if hasattr(method, "get") else getattr(method, "target_", "")
+
+
 class SingleTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.SingleTraining",] = Field(..., alias="training_method")
-    "Training objective."
+    method: SingleTrainingMethodSchema
+    "Training method."
 
 
 class EnsembleTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.EnsembleTraining",] = Field(..., alias="training_method")
-    "Training objective."
+    method: EnsembleTrainingMethodSchema
+    "Training method."
 
 
-class DiffusionTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTraining"] = Field(..., alias="training_method")
-    "Training objective."
+class TransportTrainingConfigSchema(BaseModel):
+    prediction_mode: Literal["state", "tendency"] = "state"
+    "Endpoint semantics for the transport objective."
+    objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
+    "Transport objective used to perturb targets and train the model."
 
 
-class DiffusionTendencyTrainingSchema(BaseTrainingSchema):
-    training_method: Literal["anemoi.training.train.methods.DiffusionTendencyTraining"] = Field(
-        ...,
-        alias="training_method",
-    )
-    "Training objective."
+class TransportTrainingSchema(BaseTrainingSchema):
+    method: TransportTrainingMethodSchema
+    "Training method."
+    transport: TransportTrainingConfigSchema = Field(default_factory=TransportTrainingConfigSchema)
+    "Transport training configuration."
 
 
 TrainingSchema = Annotated[
-    SingleTrainingSchema | EnsembleTrainingSchema | DiffusionTrainingSchema | DiffusionTendencyTrainingSchema,
-    Discriminator("training_method"),
+    Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
+    | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
+    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
+    Discriminator(_training_method_discriminator),
 ]

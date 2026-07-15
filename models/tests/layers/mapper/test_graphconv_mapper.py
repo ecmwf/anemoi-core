@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -195,6 +195,39 @@ class TestGNNForwardMapper(TestGNNBaseMapper):
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
 
+    def test_unsorted_edge_flag_reaches_sharding(self, mapper_init, mapper, pair_tensor, graph_provider, monkeypatch):
+        x = pair_tensor
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=None)
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size, shard_edges=False)
+        called = {}
+
+        def fake_shard_edges_1hop(
+            edge_attr,
+            edge_index,
+            src_size,
+            dst_size,
+            model_comm_group,
+            edges_are_dst_sorted=True,
+        ):
+            called["edges_are_dst_sorted"] = edges_are_dst_sorted
+            return edge_attr, edge_index, None
+
+        monkeypatch.setattr("anemoi.models.layers.mapper.shard_edges_1hop", fake_shard_edges_1hop)
+
+        x_src, x_dst = mapper.forward(
+            x,
+            batch_size,
+            shard_info,
+            edge_attr,
+            edge_index,
+            edges_are_dst_sorted=False,
+        )
+
+        assert called["edges_are_dst_sorted"] is False
+        assert x_src.shape == torch.Size([self.NUM_SRC_NODES, mapper_init.hidden_dim])
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.hidden_dim])
+
 
 class TestGNNBackwardMapper(TestGNNBaseMapper):
     """Test the GNNBackwardMapper class."""
@@ -267,3 +300,38 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             assert (
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+    def test_unsorted_edge_flag_reaches_sharding(self, mapper_init, mapper, graph_provider, device, monkeypatch):
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=None)
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.hidden_dim, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.hidden_dim, device=device),
+        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size, shard_edges=False)
+        called = {}
+
+        def fake_shard_edges_1hop(
+            edge_attr,
+            edge_index,
+            src_size,
+            dst_size,
+            model_comm_group,
+            edges_are_dst_sorted=True,
+        ):
+            called["edges_are_dst_sorted"] = edges_are_dst_sorted
+            return edge_attr, edge_index, None
+
+        monkeypatch.setattr("anemoi.models.layers.mapper.shard_edges_1hop", fake_shard_edges_1hop)
+
+        result = mapper.forward(
+            x,
+            batch_size,
+            shard_info,
+            edge_attr,
+            edge_index,
+            edges_are_dst_sorted=False,
+        )
+
+        assert called["edges_are_dst_sorted"] is False
+        assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
