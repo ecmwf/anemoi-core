@@ -7,9 +7,11 @@
 # nor does it submit to any jurisdiction.
 #
 
-from anemoi.utils.schemas import BaseModel
-from pydantic import Field
 from enum import Enum
+
+from pydantic import Field
+
+from anemoi.utils.schemas import BaseModel
 
 
 class DefinedAggregatorMethods(str, Enum):
@@ -21,5 +23,3 @@ class DefinedAggregatorMethods(str, Enum):
 class AggregatorSchema(BaseModel):
     target_: DefinedAggregatorMethods = Field(..., alias="_target_")
     "Aggregator object from anemoi.models.layers.aggregator."
-
-

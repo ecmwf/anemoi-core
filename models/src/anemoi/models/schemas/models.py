@@ -31,6 +31,7 @@ from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
+from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -45,7 +46,6 @@ from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
-from .aggregator import AggregatorSchema  # noqa: TC001
 
 LOGGER = logging.getLogger(__name__)
 
