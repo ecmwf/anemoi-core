@@ -115,6 +115,7 @@ different graph types:
    Transformers)
 -  **DynamicGraphProvider**: For on-the-fly graph construction (future)
 -  **ProjectionGraphProvider**: For sparse projection matrices
+-  **FileGraphProvider**: For loading pre-computed graphs from disk
 
 **************
  Data Indices

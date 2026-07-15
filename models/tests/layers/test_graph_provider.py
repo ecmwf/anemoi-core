@@ -31,16 +31,15 @@ def _make_fake_graph(seed: int = 0) -> HeteroData:
     rng = torch.Generator().manual_seed(seed)
 
     graph = HeteroData()
-    graph.edge_index = torch.stack(
+    graph[("data", "to", "hidden")]["edge_index"] = torch.stack(
         [
             torch.randint(0, NUM_SRC_NODES, (NUM_EDGES,), generator=rng),
             torch.randint(0, NUM_DST_NODES, (NUM_EDGES,), generator=rng),
         ]
     )
-    graph["edge_length"] = torch.randn(NUM_EDGES, EDGE_ATTR_DIM, generator=rng)
-    graph.edge_attribute_names = ["edge_length"]
-    graph.src_size = NUM_SRC_NODES
-    graph.dst_size = NUM_DST_NODES
+    graph[("data", "to", "hidden")]["edge_length"] = torch.randn(NUM_EDGES, EDGE_ATTR_DIM, generator=rng)
+    graph["data"].num_nodes = NUM_SRC_NODES
+    graph["hidden"].num_nodes = NUM_DST_NODES
     return graph
 
 
@@ -52,7 +51,7 @@ def graph_dir(tmp_path: Path) -> Path:
 
     for i in range(4):
         g = _make_fake_graph(seed=i)
-        torch.save(g, graphs_path / f"graph_{i:03d}.pt")
+        torch.save(g, graphs_path / f"graph_{i:01d}.pt")
 
     return graphs_path
 
@@ -66,6 +65,10 @@ def test_file_graph_provider_len(graph_dir: Path) -> None:
     """Provider reports correct number of graph files."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
         num_workers=1,
         pin_memory=False,
     )
@@ -76,6 +79,10 @@ def test_file_graph_provider_edge_dim(graph_dir: Path) -> None:
     """edge_dim matches the attribute width."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
         num_workers=1,
         pin_memory=False,
     )
@@ -86,29 +93,38 @@ def test_file_graph_provider_iteration(graph_dir: Path) -> None:
     """Iterating over the provider yields all graphs."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
         num_workers=1,
         pin_memory=False,
     )
 
-    loaded = list(provider)
-    assert len(loaded) == 4
+    print(provider._dataset)
+    assert len(provider) == 4
 
-    for g in loaded:
-        assert hasattr(g, "edge_index")
-        assert g.edge_index.shape == (2, NUM_EDGES)
+    for g in provider:
+        assert hasattr(g[("data", "to", "hidden")], "edge_index")
+        assert g[("data", "to", "hidden")].edge_index.shape == (2, NUM_EDGES)
 
 
 def test_file_graph_provider_get_edges_no_shard(graph_dir: Path) -> None:
     """get_edges returns correct shapes without sharding."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
         num_workers=1,
         pin_memory=False,
     )
 
     # Load a graph and pass it to get_edges
-    graph = provider._dataset[0]
-    edge_attr, edge_index, shard_sizes = provider.get_edges(batch_size=1, graph=graph, shard_edges=False)
+    edge_attr, edge_index, shard_sizes = provider.get_edges(
+        batch_size=1, shard_edges=False, device=torch.device("cuda:0")
+    )
 
     assert edge_attr.shape == (NUM_EDGES, EDGE_ATTR_DIM)
     assert edge_index.shape == (2, NUM_EDGES)
@@ -119,28 +135,21 @@ def test_file_graph_provider_get_edges_batch_expansion(graph_dir: Path) -> None:
     """get_edges expands edges correctly for batch_size > 1."""
     provider = FileGraphProvider(
         graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
         num_workers=1,
         pin_memory=False,
     )
 
     batch_size = 3
-    graph = provider._dataset[0]
-    edge_attr, edge_index, _ = provider.get_edges(batch_size=batch_size, graph=graph, shard_edges=False)
+    edge_attr, edge_index, _ = provider.get_edges(
+        batch_size=batch_size, shard_edges=False, device=torch.device("cuda:0")
+    )
 
     assert edge_attr.shape == (NUM_EDGES * batch_size, EDGE_ATTR_DIM)
     assert edge_index.shape == (2, NUM_EDGES * batch_size)
-
-
-def test_file_graph_provider_get_edges_default_graph(graph_dir: Path) -> None:
-    """get_edges falls back to first graph when graph=None."""
-    provider = FileGraphProvider(
-        graph_dir=graph_dir,
-        num_workers=1,
-        pin_memory=False,
-    )
-
-    edge_attr, edge_index, _ = provider.get_edges(batch_size=1, shard_edges=False)
-    assert edge_attr.shape[0] == NUM_EDGES
 
 
 def test_file_graph_provider_missing_dir(tmp_path: Path) -> None:
@@ -148,6 +157,10 @@ def test_file_graph_provider_missing_dir(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         FileGraphProvider(
             graph_dir=tmp_path / "nonexistent",
+            src_size="data",
+            dst_size="hidden",
+            edge_attributes=["edge_length"],
+            dataset_name="graph_1",
             num_workers=1,
             pin_memory=False,
         )
@@ -160,6 +173,10 @@ def test_file_graph_provider_empty_dir(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         FileGraphProvider(
             graph_dir=empty,
+            src_size="data",
+            dst_size="hidden",
+            edge_attributes=["edge_length"],
+            dataset_name="graph_1",
             num_workers=1,
             pin_memory=False,
         )

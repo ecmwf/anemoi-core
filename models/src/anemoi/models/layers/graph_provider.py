@@ -22,10 +22,8 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
-from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch_geometric.data import HeteroData
-from torch_geometric.loader.dataloader import Collater as PyGCollater
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
@@ -773,6 +771,7 @@ class _GraphFileDataset(Dataset):
 
         self.paths = {path.parts[-1].split(".")[0]: path for path in self.paths}
         self.names = list(self.paths.keys())
+        print("Graph files found:", self.names)
 
         LOGGER.info("Found %d graph file(s) in %s", len(self.paths), self.graph_dir)
 
@@ -786,6 +785,11 @@ class _GraphFileDataset(Dataset):
 
     def __repr__(self) -> str:
         return f"_GraphFileDataset(n={len(self)}, dir={self.graph_dir})"
+
+    def __iter__(self) -> Iterator[HeteroData]:
+        """Iterate over all graph files in the dataset."""
+        for name in self.names:
+            yield self[name]
 
 
 class FileGraphProvider(BaseGraphProvider):
@@ -854,21 +858,6 @@ class FileGraphProvider(BaseGraphProvider):
         # Build dataset and dataloader
         self._dataset = _GraphFileDataset(self.graph_dir, extension=extension)
         self.names = self._dataset.names
-
-        collate_fn = PyGCollater(dataset=None, follow_batch=[], exclude_keys=[])
-
-        loader_kwargs: dict = dict(
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-            persistent_workers=(num_workers > 0),
-            collate_fn=collate_fn,
-            prefetch_factor=prefetch_factor,
-        )
-
-        self._dataloader = DataLoader(self._dataset, **loader_kwargs)
-
         # Peek at the first graph to derive metadata
         first_graph = self._dataset[self.names[0]].cuda(non_blocking=True)
         self._init_from_graph(first_graph)
@@ -901,18 +890,13 @@ class FileGraphProvider(BaseGraphProvider):
         """Return the edge dimension."""
         return self._edge_dim
 
-    @property
-    def dataloader(self) -> DataLoader:
-        """Return the underlying DataLoader."""
-        return self._dataloader
-
     def __len__(self) -> int:
         """Return the number of graph files."""
         return len(self._dataset)
 
     def __iter__(self) -> Iterator[HeteroData]:
-        """Iterate over graphs loaded by the DataLoader."""
-        return iter(self._dataloader)
+        """Iterate over the loaded graphs."""
+        return iter(self._dataset)
 
     def __getitem__(self, index: int) -> HeteroData:
         """Get a specific subgraph by index."""
@@ -938,32 +922,20 @@ class FileGraphProvider(BaseGraphProvider):
     def get_edges(
         self,
         batch_size: int = 1,
-        src_coords: Optional[Tensor] = None,
-        dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         device: Optional[torch.device] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edges from a specific loaded graph.
 
-        Use ``iter(provider)`` or ``provider.dataloader`` to iterate over
-        graphs, then pass the loaded graph to this method.
-
         Parameters
         ----------
         batch_size : int, optional
             Number of times to expand the edge index.
-        src_coords : Tensor, optional
-            Unused.
-        dst_coords : Tensor, optional
-            Unused.
         model_comm_group : ProcessGroup, optional
             Model communication group.
         shard_edges : bool, optional
             Whether to shard edges, by default True.
-        graph : HeteroData, optional
-            A graph loaded from the dataloader.  If None, the first graph
-            in the dataset is loaded.
 
         Returns
         -------
