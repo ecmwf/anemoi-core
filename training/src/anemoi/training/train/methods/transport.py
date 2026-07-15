@@ -309,8 +309,8 @@ class ResidualPredictionMode(PredictionMode):
                 "training.transport.prediction_mode='residual' requires model.model.residual_prediction "
                 "to map each target dataset to a source dataset."
             )
-        processors = getattr(module.model, "pre_processors_residual", None)
-        post_processors = getattr(module.model, "post_processors_residual", None)
+        processors = getattr(module.model, "pre_processors_residuals", None)
+        post_processors = getattr(module.model, "post_processors_residuals", None)
         if processors is None or post_processors is None:
             raise ValueError(
                 "Residual prediction requires residual processors backed by statistics_residuals; "
@@ -327,16 +327,24 @@ class ResidualPredictionMode(PredictionMode):
                 f"missing_sources={missing_sources}, missing_targets={missing_targets}."
             )
 
+        # Persist the same-offset alignment (output step -> source input position) into the model so
+        # inference reconstructs against the source step this run trained on. No fallback: the task's
+        # strict helper raises if any output offset lacks a matching input offset.
+        self._reference_positions = list(module.task.output_to_input_positions())
+        module.model.model.set_output_reference_positions(self._reference_positions)
 
     def _reference(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Same-offset references: select the source steps first, then project (cheaper)."""
+        positions = torch.as_tensor(self._reference_positions, dtype=torch.long)
         references: dict[str, torch.Tensor] = {}
         for target_dataset, source_dataset in self._residual_pairs.items():
             if source_dataset not in x:
                 raise KeyError(
                     f"Residual target '{target_dataset}' requires source dataset '{source_dataset}' in task inputs."
                 )
+            source_steps = x[source_dataset].index_select(1, positions.to(x[source_dataset].device))
             reference = self.module.model.model.residual[target_dataset](
-                x[source_dataset][:, -1:, ...],
+                source_steps,
                 self.module.grid_shard_sizes.get(source_dataset) if self.module.grid_shard_sizes else None,
                 self.module.model_comm_group,
                 n_step_output=self.module.n_step_output,
@@ -368,7 +376,7 @@ class ResidualPredictionMode(PredictionMode):
                 y_dataset,
                 x_interp,
                 pre_processors_state=self.module.model.pre_processors,
-                pre_processors_residual=self.module.model.pre_processors_residual,
+                pre_processors_residuals=self.module.model.pre_processors_residuals,
                 target_dataset=target_dataset,
                 source_dataset=source_dataset,
                 input_post_processor=self.module.model.post_processors,
@@ -401,7 +409,7 @@ class ResidualPredictionMode(PredictionMode):
                 references[dataset_name],
                 model_output,
                 post_processors_state=self.module.model.post_processors,
-                post_processors_residual=self.module.model.post_processors_residual,
+                post_processors_residuals=self.module.model.post_processors_residuals,
                 target_dataset=dataset_name,
                 source_dataset=self._residual_pairs[dataset_name],
                 skip_imputation=True,
@@ -431,6 +439,22 @@ class BaseTransportTraining(BaseTrainingModule):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._prediction_mode = self._get_prediction_mode_cls()(self)
+        self._reject_residual_model_in_non_residual_mode()
+
+    def _reject_residual_model_in_non_residual_mode(self) -> None:
+        """A residual model trained under state/tendency mode silently learns the wrong target.
+
+        The model would train on the raw state/tendency while predict-time reconstruction adds the
+        interpolated source back, so the two disagree. Fail loudly instead.
+        """
+        pairs = getattr(getattr(self.model, "model", None), "_residual_pairs", {}) or {}
+        if pairs and not isinstance(self._prediction_mode, ResidualPredictionMode):
+            raise ValueError(
+                "Model is configured with model.model.residual_prediction "
+                f"({dict(pairs)}) but training.transport.prediction_mode is "
+                f"'{self.config.training.transport.prediction_mode}'. A residual-prediction model must "
+                "be trained with prediction_mode='residual'."
+            )
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:
         prediction_mode = self.config.training.transport.prediction_mode

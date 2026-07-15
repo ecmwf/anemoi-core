@@ -214,6 +214,53 @@ def test_interpolation_connection_rejects_time_repetition(interpolation_file_pat
         conn(x, n_step_output=2)
 
 
+@pytest.fixture
+def asymmetric_interpolation_file_path():
+    # A 5x3 (target x source) matrix with distinct entries. Unlike an all-ones matrix, this
+    # detects orientation / permutation errors: every target row mixes the source nodes differently.
+    matrix = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.0, 0.0, 3.0],
+            [0.5, 0.5, 0.0],
+            [0.0, 0.0, 4.0],
+        ],
+        dtype=np.float32,
+    )
+    with tempfile.NamedTemporaryFile(suffix=".npz") as f:
+        scipy.sparse.save_npz(f.name, scipy.sparse.csr_matrix(matrix))
+        yield f.name
+
+
+def test_interpolation_connection_known_asymmetric_values(asymmetric_interpolation_file_path):
+    conn = InterpolationConnection(interpolation_file_path=asymmetric_interpolation_file_path)
+
+    # Two features per node, distinct per node so a mis-oriented matmul would be caught.
+    x = torch.tensor(
+        [[[[[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]]]],  # (batch=1, time=1, ens=1, src_grid=3, feat=2)
+    )
+    out = conn(x)
+
+    assert out.shape == (1, 1, 1, 5, 2)
+    expected = torch.tensor(
+        [
+            [
+                [
+                    [
+                        [1.0, 10.0],  # 1*node0
+                        [4.0, 40.0],  # 2*node1
+                        [9.0, 90.0],  # 3*node2
+                        [1.5, 15.0],  # 0.5*node0 + 0.5*node1
+                        [12.0, 120.0],  # 4*node2
+                    ]
+                ]
+            ]
+        ]
+    )
+    assert torch.allclose(out, expected)
+
+
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────
 
 
