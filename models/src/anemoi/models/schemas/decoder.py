@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2026 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -33,8 +33,6 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Graph Transformer Decoder object from anemoi.models.layers.mapper."
     hidden_dim: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Graph Transformer decoder. Default to 512."
-    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
-    "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
     initialise_data_extractor_zero: bool = Field(example=False)

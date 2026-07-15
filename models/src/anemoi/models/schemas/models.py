@@ -45,6 +45,7 @@ from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
+from .aggregator import AggregatorSchema  # noqa: TC001
 
 LOGGER = logging.getLogger(__name__)
 
@@ -299,6 +300,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    latent_agreggator: AggregatorSchema
+    "Latent agreggator schema."
     processor: Union[
         NoOpProcessorSchema,
         GNNProcessorSchema,
