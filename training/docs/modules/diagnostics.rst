@@ -91,34 +91,57 @@ When a focus area is applied, the plot filenames and experiment log tags will au
       china:
          latlon_bbox: [18.0, 73.0, 54.0, 135.0]
 
-**Rendering Methods**
+**Rendering settings**
 
-There is an additional flag in the plotting callbacks to control the
-rendering method for geospatial plots, offering a trade-off between
-performance and detail.
+Shared rendering options are grouped under ``diagnostics.plot.settings``
+and map 1:1 to :class:`~anemoi.training.diagnostics.callbacks.plot.PlottingSettings`.
+All fields are **optional** — defaults are defined in code so you only need
+to specify values that differ from them.
 
-* When `datashader` is set to True, Datashader is
-   used for rendering, which accelerates plotting through efficient
-   hexbining, particularly useful for large datasets. This approach can
-   produce smoother-looking plots due to the aggregation of data points.
-* If `datashader` is set to False, matplotlib.scatter is used, which provides
-   sharper and more detailed visuals but may be slower for large datasets.
+.. list-table::
+   :header-rows: 1
+   :widths: 25 10 65
 
-**Projection**
+   * - Key
+     - Default
+     - Description
+   * - ``datashader``
+     - ``true``
+     - Use Datashader for rendering (fast hexbinning, recommended for large grids).
+       When ``false``, ``matplotlib.scatter`` is used — slower but sharper.
+   * - ``projection_kind``
+     - ``equirectangular``
+     - Map projection. ``lambert_conformal`` fits the domain automatically
+       (requires Cartopy). Any ``cartopy.crs`` class in snake_case is also accepted.
+       Forced to ``equirectangular`` when ``datashader: true``.
+   * - ``asynchronous``
+     - ``true``
+     - Run plotting in a background thread so it does not block training.
+   * - ``precip_and_related_fields``
+     - ``null``
+     - Variable names that use precipitation-specific colour scaling.
+       Shared across all callbacks so you don't need to repeat the list per callback.
+   * - ``colormaps``
+     - ``null``
+     - Variable-specific colormaps keyed by ``default``, ``error``, or a variable
+       group name. Shared across all callbacks.
 
-Plotting callbacks also support ``config.diagnostics.plot.projection_kind``
-to control the map projection used for geospatial figures.
+Example — override only what differs from the defaults:
 
-- ``equirectangular`` (default): regular axes, no Cartopy dependency.
-- ``lambert_conformal``: regional Lambert Conformal projection fitted to
-  the plotted latitude/longitude domain (requires Cartopy).
+.. code:: yaml
 
-When ``datashader: True`` is enabled, plotting is forced to
-``equirectangular`` because Datashader rendering does not support
-Cartopy transforms.
+   plot:
+     settings:
+       datashader: false               # switch to matplotlib scatter
+       projection_kind: lambert_conformal
+       precip_and_related_fields: [tp, cp]
+       colormaps:
+         precip:
+           _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+           clevels: [0, 0.5, 1, 2, 5, 10, 25, 50, 100]
+           variables: ${diagnostics.plot.settings.precip_and_related_fields}
 
-**Note** - this asynchronous behaviour is only available for the
-plotting callbacks.
+**Note** - asynchronous plotting is only available for the plotting callbacks.
 
 **Progress Bar**
 
@@ -148,51 +171,46 @@ which is recommended for interactive terminals and
 .. code:: yaml
 
    plot:
-      asynchronous: True # Whether to plot asynchronously
-      datashader: True # Whether to use datashader for plotting (faster)
-      projection_kind: equirectangular # or lambert_conformal (requires Cartopy)
-      frequency: # Frequency of the plotting
-      batch: 750
-      epoch: 5
+      # Rendering settings — all optional, code-defined defaults apply.
+      settings:
+         datashader: true
+         projection_kind: equirectangular
+         precip_and_related_fields: [tp, cp]
 
-      # Parameters to plot
+      frequency:
+         batch: 750
+         epoch: 5
+
       parameters:
          - z_500
          - t_850
          - u_850
 
-      # Sample index
       sample_idx: 0
-
-      # Precipitation and related fields
-      precip_and_related_fields: [tp, cp]
-
       datasets_to_plot: ["data"]
 
       focus_areas:
          europe:
             latlon_bbox: [30.0, -20.0, 60.0, 40.0]
-         china:
-            latlon_bbox: [18.0, 73.0, 54.0, 135.0]
 
       callbacks:
          - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
-            dataset_names: ["your_dataset_name"]
-            # group parameters by categories when visualizing contributions to the loss
-            # one-parameter groups are possible to highlight individual parameters
+            dataset_names: ${diagnostics.plot.datasets_to_plot}
             parameter_groups:
                moisture: [tp, cp, tcw]
                sfc_wind: [10u, 10v]
+            every_n_batches: ${diagnostics.plot.frequency.batch}
 
          - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
             tag_infix: sample
-            dataset_names: ["your_dataset_name"]
+            dataset_names: ${diagnostics.plot.datasets_to_plot}
             sample_idx: ${diagnostics.plot.sample_idx}
             parameters: ${diagnostics.plot.parameters}
+            every_n_batches: ${diagnostics.plot.frequency.batch}
             plot_fn:
                _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
                _partial_: true
-               per_sample: 6
+               # per_sample, accumulation_levels_plot etc. are optional — omit to use defaults
 
 Pluggable batch-output plots
 ============================

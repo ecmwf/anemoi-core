@@ -39,8 +39,11 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
       _partial_: true
-      per_sample: 6
-      accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
+      # prediction_label: pred
+      # auxiliary_label: corrupted targets
   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     tag_infix: spec
     dataset_names: ${diagnostics.plot.datasets_to_plot}
@@ -55,6 +58,8 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn
       _partial_: true
+      # Optional overrides (shown with defaults):
+      # min_delta: null
   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     tag_infix: histo
     dataset_names: ${diagnostics.plot.datasets_to_plot}
@@ -69,4 +74,5 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
       _partial_: true
-      log_scale: false
+      # Optional overrides (shown with defaults):
+      # log_scale: false

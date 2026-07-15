@@ -46,8 +46,12 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
       _partial_: true
-      per_sample: 6
-      accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     tag_infix: histo
     dataset_names: ["era5"]
@@ -57,6 +61,8 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
       _partial_: true
+      # Optional overrides (shown with defaults):
+      # log_scale: false
   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     tag_infix: histo
     dataset_names: ["cerra"]
@@ -66,6 +72,8 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
       _partial_: true
+      # Optional overrides (shown with defaults):
+      # log_scale: false
   - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
     tag_infix: sample
     dataset_names: ["cerra"]
@@ -76,5 +84,6 @@ callbacks:
     plot_fn:
       _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
       _partial_: true
-      per_sample: 6
-      accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
