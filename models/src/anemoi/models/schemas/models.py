@@ -300,8 +300,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
-    latent_agreggator: AggregatorSchema
-    "Latent agreggator schema."
+    latent_aggregator: AggregatorSchema
+    "Latent aggregator schema."
     processor: Union[
         NoOpProcessorSchema,
         GNNProcessorSchema,
