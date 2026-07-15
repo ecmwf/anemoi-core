@@ -39,8 +39,6 @@ class GNNProcessorSchema(GNNModelComponent):
 class GraphTransformerProcessorSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.processor.GraphTransformerProcessor"] = Field(..., alias="_target_")
     "Graph transformer processor object from anemoi.models.layers.processor."
-    trainable_size: NonNegativeInt = Field(example=8)
-    "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dir"])
     "Edge attributes to consider in the processor features. Default [edge_length, endge_dirs]."
     num_layers: NonNegativeInt = Field(example=16)

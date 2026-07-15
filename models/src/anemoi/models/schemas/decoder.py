@@ -33,8 +33,6 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Graph Transformer Decoder object from anemoi.models.layers.mapper."
     hidden_dim: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Graph Transformer decoder. Default to 512."
-    trainable_size: NonNegativeInt = Field(example=8)
-    "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
     "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
     qk_norm: bool = Field(example=False)
