@@ -15,9 +15,9 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
+from pathlib import PosixPath
 from typing import TYPE_CHECKING
 from typing import Any
-from pathlib import PosixPath
 
 import pytorch_lightning as pl
 import torch
@@ -180,7 +180,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         super().__init__()
         self.task = task
 
-        assert isinstance(graph_data, HeteroData) or isinstance(graph_data, PosixPath), "graph_data must be a HeteroData object"
+        assert isinstance(graph_data, (HeteroData, PosixPath)), "graph_data must be a HeteroData object or a file path"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
         if isinstance(graph_data, PosixPath):
             self._graph_data_dict = _GraphFileDataset(graph_data)
@@ -190,9 +190,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.dataset_names = list(data_indices.keys())
         self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=self._graph_data_dict[name]) for name in self.dataset_names
-        } #VERY INEFFICIENT, can we get all these attributes once instead of looping every time?
-
+            name: instantiate(config.model.output_mask, nodes=self._graph_data_dict[name])
+            for name in self.dataset_names
+        }  # VERY INEFFICIENT, can we get all these attributes once instead of looping every time?
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()

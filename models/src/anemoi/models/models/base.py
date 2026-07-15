@@ -10,10 +10,10 @@
 
 import logging
 from abc import abstractmethod
+from pathlib import PosixPath
 from typing import Optional
 
 import torch
-from pathlib import PosixPath
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import ListConfig
@@ -67,7 +67,7 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        if isinstance(self._graph_data, PosixPath): 
+        if isinstance(self._graph_data, PosixPath):
             self._graph_data_dict = _GraphFileDataset(self._graph_data)
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
@@ -83,10 +83,10 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        if isinstance(self._graph_data, PosixPath): 
+        if isinstance(self._graph_data, PosixPath):
             self._graph_data_dict = _GraphFileDataset(self._graph_data)
             self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
-        else: 
+        else:
             self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -158,7 +158,7 @@ class BaseGraphModel(nn.Module):
         )
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        pass # reference to the graph should be removed
+        pass  # reference to the graph should be removed
         # for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
         #     assert (
         #         hidden_name in self._graph_data.node_types
@@ -251,7 +251,7 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        if isinstance(self._graph_data, PosixPath): 
+        if isinstance(self._graph_data, PosixPath):
             self._graph_data_dict = _GraphFileDataset(self._graph_data)
         fused = uses_fused_dataset_graph(self._graph_data_dict[self.dataset_names[0]], self.dataset_names)
         for dataset_name in self.dataset_names:
@@ -269,11 +269,15 @@ class BaseGraphModel(nn.Module):
         node_attributes_graph = HeteroData()
         if isinstance(self._graph_data, PosixPath):
             for dataset_name in self.dataset_names:
-                # I think my graphs have an old definition where the dataset name is not the same 
+                # I think my graphs have an old definition where the dataset name is not the same
                 node_attributes_graph[dataset_name].x = self._graph_data_dict[dataset_name]["data"].x
                 node_attributes_graph[dataset_name].num_nodes = len(self._graph_data_dict[dataset_name]["data"].x)
-                node_attributes_graph[self._graph_name_hidden].x = self._graph_data_dict[dataset_name][self._graph_name_hidden].x
-                node_attributes_graph[self._graph_name_hidden].num_nodes = len(self._graph_data_dict[dataset_name][self._graph_name_hidden].x)
+                node_attributes_graph[self._graph_name_hidden].x = self._graph_data_dict[dataset_name][
+                    self._graph_name_hidden
+                ].x
+                node_attributes_graph[self._graph_name_hidden].num_nodes = len(
+                    self._graph_data_dict[dataset_name][self._graph_name_hidden].x
+                )
 
         else:
             for dataset_name in self.dataset_names:
