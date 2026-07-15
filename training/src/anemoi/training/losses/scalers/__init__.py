@@ -21,6 +21,9 @@ from .variable_level import NoVariableLevelScaler
 from .variable_level import PolynomialVariableLevelScaler
 from .variable_level import ReluVariableLevelScaler
 from .variable_masking import VariableMaskingLossScaler
+from .variable_residual import NoResidualScaler
+from .variable_residual import StdevResidualScaler
+from .variable_residual import VarResidualScaler
 from .variable_tendency import NoTendencyScaler
 from .variable_tendency import StdevTendencyScaler
 from .variable_tendency import VarTendencyScaler
@@ -31,15 +34,18 @@ __all__ = [
     "LeadTimeDecayScaler",
     "LinearVariableLevelScaler",
     "NaNMaskScaler",
+    "NoResidualScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
+    "StdevResidualScaler",
     "StdevTendencyScaler",
     "TensorDim",
     "TimeStepScaler",
     "UniformTimeStepScaler",
+    "VarResidualScaler",
     "VarTendencyScaler",
     "VariableMaskingLossScaler",
     "create_scalers",

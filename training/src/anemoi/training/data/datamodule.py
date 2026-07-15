@@ -129,14 +129,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             "or a file containing every target dataset by name."
         )
 
-    @staticmethod
-    def _validate_residual_statistics(statistics: Mapping, dataset_name: str) -> dict:
+    def _validate_residual_statistics(self, statistics: Mapping, dataset_name: str) -> dict:
         required = {"minimum", "maximum", "mean", "stdev"}
         missing = sorted(required - set(statistics))
         if missing:
             raise ValueError(
                 f"Residual statistics for {dataset_name} are missing required fields: {missing}."
             )
+        expected_length = len(np.asarray(self.statistics[dataset_name]["stdev"]))
         validated = dict(statistics)
         for name in required:
             try:
@@ -148,6 +148,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             if values.ndim != 1 or values.size == 0 or not np.isfinite(values).all():
                 raise ValueError(
                     f"Residual statistics field {name} for {dataset_name} must be a non-empty finite 1-D array."
+                )
+            if values.size != expected_length:
+                raise ValueError(
+                    f"Residual statistics field {name} for {dataset_name} has length {values.size}, "
+                    f"expected {expected_length} (matching the dataset's state statistics)."
                 )
             if name == "stdev" and np.any(values <= 0):
                 raise ValueError(

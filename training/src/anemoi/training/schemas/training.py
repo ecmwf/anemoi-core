@@ -161,7 +161,6 @@ class ResidualScalerTargets(StrEnum):
 
 class ResidualScalerSchema(BaseModel):
     target_: ResidualScalerTargets = Field(..., alias="_target_")
-    timestep: str | None = Field(default=None, example="residual")
 
 
 class TendencyScalerSchema(BaseModel):
