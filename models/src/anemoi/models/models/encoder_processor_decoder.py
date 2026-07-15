@@ -107,7 +107,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.decoder = torch.nn.ModuleDict()
         for decoder_name, decoder_config in model_config.model.decoders.items():
-            decoder_in_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
+            decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
             assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
                 f"All datasets for decoder {decoder_name} must have the same target dimension, "
                 f"but got {decoder_in_channels_dst}."
@@ -122,8 +122,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.processor.num_channels,
-                in_channels_dst=decoder_in_channels_dst,
-                out_channels_dst=decoder_output_channels_dst,
+                in_channels_dst=decoder_in_channels_dst[0],
+                out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
