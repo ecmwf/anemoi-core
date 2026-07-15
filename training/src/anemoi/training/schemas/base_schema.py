@@ -235,20 +235,18 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_bounding_not_used_with_data_extractor_zero(self) -> Self:
         """Check that bounding is not used with zero data extractor."""
-        if (
-            isinstance(self.model.decoder, GraphTransformerDecoderSchema)
-            and self.model.decoder.initialise_data_extractor_zero
-            and self.model.bounding
-        ):
-            error = "bounding_conflict_with_data_extractor_zero"
-            msg = (
-                "Boundings cannot be used with zero initialized weights in decoder. "
-                "Set initalise_data_extractor_zero to False."
-            )
-            raise PydanticCustomError(
-                error,
-                msg,
-            )
+        for name, decoder in self.model.decoders.items():
+            mapper = decoder.mapper
+            dataset_names = decoder.datasets
+            if isinstance(mapper, GraphTransformerDecoderSchema) and mapper.initialise_data_extractor_zero:
+                for dataset_name in dataset_names:
+                    if self.model.bounding[dataset_name]:
+                        error = "bounding_conflict_with_data_extractor_zero"
+                        msg = (
+                            f"Boundings for dataset '{dataset_name}' cannot be used with zero initialized weights"
+                            f" in decoder `'{name}`'. Set initalise_data_extractor_zero to False."
+                        )
+                        raise PydanticCustomError(error, msg)
         return self
 
 
