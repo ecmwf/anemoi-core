@@ -1,0 +1,5 @@
+_target_: anemoi.training.tasks.Downscaler
+input_datasets: [input]
+output_datasets: [output]
+input_offset: 0H
+output_offset: 0H

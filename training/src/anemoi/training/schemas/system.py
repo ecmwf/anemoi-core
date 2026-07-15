@@ -46,6 +46,8 @@ class InputSchema(PydanticBaseModel):
     "Path to the truncation matrix file."
     truncation_inv: Path | None = None
     "Path to the inverse truncation matrix file."
+    statistics_residuals: Path | dict[str, Path] | None = None
+    "Explicit name-keyed residual statistics file(s); required for residual prediction mode."
     loss_matrices_path: Path | None = None
     "Path to the directory containing smoothing matrices for the multiscale loss"
     warm_start: Path | None = None

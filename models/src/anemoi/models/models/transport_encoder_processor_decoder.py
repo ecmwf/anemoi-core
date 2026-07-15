@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Mapping
 from typing import Callable
 from typing import Optional
 
@@ -27,6 +28,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.residual import InterpolationConnection
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
@@ -1045,3 +1047,449 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             x_skips[dataset_name] = x_skip[..., self.data_indices[dataset_name].model.input.prognostic]
 
         return x_skips
+
+
+class AnemoiTransportResidualModelEncProcDec(AnemoiTransportModelEncProcDec):
+    """Transport model for spatial residual downscaling.
+
+    Predicts a residual ``target - interp(source)`` on the prognostic channels shared by a
+    target dataset and its grid-interpolated source dataset, and reconstructs the full state
+    via :meth:`add_interp_to_state`. Direct-prediction variables and diagnostics are learned
+    and reconstructed directly in state space (no residual). Mirrors
+    :class:`AnemoiTransportTendModelEncProcDec` (temporal tendency), substituting the
+    interpolated source for the latest input state as the reference.
+
+    Config (``model.model``):
+      - ``residual_prediction``: ``{target_dataset: source_dataset}`` (e.g. ``{out_hres: in_lres}``)
+        or ``False``. The source's residual layer must be an ``InterpolationConnection`` that maps
+        the source grid onto the target grid.
+      - ``direct_prediction`` (optional): ``{target_dataset: [var, ...]}`` — prognostic variables
+        predicted directly in state space, excluded from the residual.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_config: DictConfig,
+        data_indices: dict,
+        statistics: dict,
+        n_step_input: int,
+        n_step_output: int,
+        graph_data: HeteroData,
+    ) -> None:
+        model_config = DotDict(model_config)
+
+        raw = model_config.model.model.get("residual_prediction", False)
+        if isinstance(raw, Mapping):
+            self._residual_pairs = dict(raw)
+        elif raw:
+            raise ValueError(
+                "residual_prediction must be a dict mapping target->source datasets "
+                f"(e.g. {{out_hres: in_lres}}) or False, got: {raw}"
+            )
+        else:
+            self._residual_pairs = {}
+
+        # Optional per-target direct-prediction variable lists (state-space, excluded from residual).
+        self._direct_prediction = dict(model_config.model.model.get("direct_prediction", {}) or {})
+        dataset_names = set(data_indices)
+        unknown_targets = sorted(set(self._residual_pairs) - dataset_names)
+        unknown_sources = sorted(set(self._residual_pairs.values()) - dataset_names)
+        if unknown_targets or unknown_sources:
+            raise ValueError(
+                f"Residual prediction references unknown datasets: "
+                f"targets={unknown_targets}, sources={unknown_sources}."
+            )
+        unknown_direct_targets = sorted(set(self._direct_prediction) - set(self._residual_pairs))
+        if unknown_direct_targets:
+            raise ValueError(
+                f"direct_prediction is configured for datasets without residual_prediction: {unknown_direct_targets}."
+            )
+        for target_dataset, names in self._direct_prediction.items():
+            if len(names) != len(set(names)):
+                raise ValueError(f"direct_prediction for {target_dataset} contains duplicate variables.")
+            target_indices = data_indices[target_dataset]
+            missing = [
+                name
+                for name in names
+                if name not in target_indices.model.output.name_to_index
+                or name not in target_indices.data.output.name_to_position
+            ]
+            if missing:
+                raise ValueError(
+                    f"direct_prediction for {target_dataset} contains unknown output variables: {missing}."
+                )
+            non_prognostic = [
+                name
+                for name in names
+                if int(target_indices.model.output.name_to_index[name])
+                not in {int(index) for index in target_indices.model.output.prognostic.tolist()}
+            ]
+            if non_prognostic:
+                raise ValueError(
+                    f"direct_prediction for {target_dataset} must contain prognostic variables: {non_prognostic}."
+                )
+
+
+        super().__init__(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            n_step_input=n_step_input,
+            n_step_output=n_step_output,
+            graph_data=graph_data,
+        )
+
+        for target_ds in self._residual_pairs:
+            if not isinstance(self.residual[target_ds], InterpolationConnection):
+                raise ValueError(
+                    f"Residual downscaling target {target_ds} requires an InterpolationConnection; "
+                    f"configure model.model.residual with the source-to-target interpolation."
+                )
+
+        for target_ds, source_ds in self._residual_pairs.items():
+            self.register_buffer(
+                f"_matching_channel_indices_{target_ds}",
+                self._build_matching_channel_indices(target_ds, source_ds),
+                persistent=True,
+            )
+            model_idx, data_idx = self._build_direct_prediction_indices(target_ds)
+            self.register_buffer(f"_direct_prediction_indices_{target_ds}", model_idx, persistent=True)
+            self.register_buffer(f"_direct_prediction_data_indices_{target_ds}", data_idx, persistent=True)
+            LOGGER.info("Residual downscaling pair: target=%s source=%s", target_ds, source_ds)
+
+    def _build_matching_channel_indices(self, target_dataset: str, source_dataset: str) -> torch.Tensor:
+        """Source data-space indices matching the target's model-output prognostic order.
+
+        Raw source tensors include forcing channels; the residual is indexed in the target
+        model-output prognostic space, restricted to variables present in both datasets.
+        """
+        source_indices = self.data_indices[source_dataset]
+        target_indices = self.data_indices[target_dataset]
+        direct_names = set(self._direct_prediction.get(target_dataset, []) or [])
+        prognostic_names = [
+            name
+            for name in target_indices.model.output.ordered_names
+            if name in target_indices.model.output.name_to_index
+            and int(target_indices.model.output.name_to_index[name])
+            in {int(index) for index in target_indices.model.output.prognostic.tolist()}
+            and name not in direct_names
+        ]
+        missing = [name for name in prognostic_names if name not in source_indices.data.input.name_to_index]
+        if missing:
+            raise ValueError(
+                f"Residual target '{target_dataset}' requires source '{source_dataset}' variables {missing}; "
+                "all non-direct target prognostic variables must exist in the source input."
+            )
+        return torch.tensor(
+            source_indices.data.input.positions_for_names(prognostic_names),
+            dtype=torch.long,
+        )
+
+    def forward(
+        self,
+        x: dict[str, torch.Tensor],
+        conditioned_target: dict[str, torch.Tensor],
+        condition: dict[str, torch.Tensor],
+        model_comm_group: ProcessGroup | None = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Build target-grid histories from named source-grid inputs before encoding."""
+        target_inputs: dict[str, torch.Tensor] = {}
+        for target_dataset, source_dataset in self._residual_pairs.items():
+            if source_dataset not in x:
+                raise KeyError(
+                    f"Residual target '{target_dataset}' requires source dataset '{source_dataset}' in model inputs."
+                )
+            source_history = x[source_dataset]
+            projected = self.residual[target_dataset](
+                source_history,
+                grid_shard_sizes[source_dataset] if grid_shard_sizes is not None else None,
+                model_comm_group,
+                n_step_output=source_history.shape[1],
+            )
+            source_indices = self.data_indices[source_dataset].data.input
+            target_indices = self.data_indices[target_dataset].data.input
+            missing = [name for name in target_indices.ordered_names if name not in source_indices.name_to_position]
+            if missing:
+                raise ValueError(
+                    f"Cannot condition residual target '{target_dataset}' from source '{source_dataset}': "
+                    f"source is missing input variables {missing}."
+                )
+            source_positions = torch.tensor(
+                source_indices.positions_for_names(target_indices.ordered_names),
+                dtype=torch.long,
+                device=projected.device,
+            )
+            target_inputs[target_dataset] = projected.index_select(-1, source_positions)
+
+        return super().forward(
+            target_inputs,
+            conditioned_target,
+            condition,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+            **kwargs,
+        )
+
+    def get_matching_channel_indices(self, target_dataset: str) -> torch.Tensor:
+        return getattr(self, f"_matching_channel_indices_{target_dataset}")
+
+    def _build_direct_prediction_indices(self, target_dataset: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """(model-output, data-output) index tensors for this target's direct-prediction vars."""
+        varnames = self._direct_prediction.get(target_dataset, []) or []
+        target_indices = self.data_indices[target_dataset]
+        model_nti = target_indices.model.output.name_to_index
+        present = [v for v in varnames if v in model_nti and v in target_indices.data.output.name_to_position]
+        model_idx = torch.tensor([model_nti[v] for v in present], dtype=torch.long)
+        data_idx = torch.tensor(
+            [target_indices.data.output.name_to_position[v] for v in present],
+            dtype=torch.long,
+        )
+        return model_idx, data_idx
+
+    def _get_direct_prediction_indices(self, target_dataset: str) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        model_buf = getattr(self, f"_direct_prediction_indices_{target_dataset}", None)
+        data_buf = getattr(self, f"_direct_prediction_data_indices_{target_dataset}", None)
+        if model_buf is not None and len(model_buf) > 0 and data_buf is not None:
+            return model_buf, data_buf
+        return None, None
+
+    def _residual_prognostic(self, target_dataset: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return model positions, data-output positions, and raw data indices for residual variables."""
+        target_indices = self.data_indices[target_dataset]
+        direct_names = set(self._direct_prediction.get(target_dataset, []) or [])
+        names = [
+            name
+            for name in target_indices.model.output.ordered_names
+            if name not in direct_names
+            and int(target_indices.model.output.name_to_index[name])
+            in {int(index) for index in target_indices.model.output.prognostic.tolist()}
+        ]
+        model_positions = torch.tensor(
+            [target_indices.model.output.name_to_index[name] for name in names],
+            dtype=torch.long,
+        )
+        data_positions = torch.tensor(
+            target_indices.data.output.positions_for_names(names),
+            dtype=torch.long,
+        )
+        raw_data_indices = torch.tensor(
+            [target_indices.data.output.name_to_index[name] for name in names],
+            dtype=torch.long,
+        )
+        return model_positions, data_positions, raw_data_indices
+
+    def compute_residual(
+        self,
+        y: torch.Tensor,
+        x_interp: torch.Tensor,
+        pre_processors_state: dict[str, Callable],
+        pre_processors_residual: dict[str, Callable] | None,
+        target_dataset: str,
+        source_dataset: str | None = None,
+        input_post_processor: dict[str, Callable | None] | None = None,
+        skip_imputation: bool = False,
+    ) -> torch.Tensor:
+        """Normalized residual training target.
+
+        ``residual = normalize(y - interp(source))`` on the shared prognostic channels;
+        direct-prediction and diagnostic channels are state-normalized ``y``. ``x_interp`` is the
+        RAW interpolated source on the target grid, already channel-selected to the
+        residual-prognostic order (see :meth:`get_matching_channel_indices`).
+        """
+        target_indices = self.data_indices[target_dataset]
+        source_dataset = source_dataset or target_dataset
+        diagnostic_out = target_indices.model.output.diagnostic
+        diagnostic_names = target_indices.model.output.ordered_names
+        diagnostic_data = torch.tensor(
+            target_indices.data.output.positions_for_names(
+                [name for name in diagnostic_names if name in target_indices.model.output.diagnostic.name_to_index]
+            ),
+            dtype=torch.long,
+            device=y.device,
+        ) if len(diagnostic_out) > 0 else torch.empty(0, dtype=torch.long, device=y.device)
+        residual_out, residual_data, residual_raw_data = self._residual_prognostic(target_dataset)
+        residual_out = residual_out.to(y.device)
+        residual_data = residual_data.to(y.device)
+        residual_raw_data = residual_raw_data.to(y.device)
+        residual_names = [target_indices.model.output.ordered_names[int(index)] for index in residual_out.tolist()]
+
+        target_state = y
+        if input_post_processor is not None:
+            target_state = input_post_processor[target_dataset](
+                y,
+                in_place=False,
+                data_index=target_indices.data.output.full,
+                skip_imputation=skip_imputation,
+            )
+            x_interp = input_post_processor[source_dataset](
+                x_interp,
+                in_place=False,
+                data_index=torch.tensor(
+                    [self.data_indices[source_dataset].data.input.name_to_index[name] for name in residual_names],
+                    dtype=torch.long,
+                    device=x_interp.device,
+                ),
+                skip_imputation=skip_imputation,
+            )
+        target = y.clone()
+
+        if len(residual_out) > 0:
+            if x_interp.shape[-1] != len(residual_out):
+                raise ValueError(
+                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(residual_out)} "
+                    f"residual-prognostic channels for target '{target_dataset}'."
+                )
+            if pre_processors_residual is None or target_dataset not in pre_processors_residual:
+                raise ValueError(
+                    f"Residual prediction for '{target_dataset}' requires residual processors and residual statistics."
+                )
+            target[..., residual_out] = target_state[..., residual_data] - x_interp
+            proc = pre_processors_residual[target_dataset]
+            target[..., residual_out] = proc(
+                target[..., residual_out],
+                in_place=False,
+                data_index=residual_raw_data,
+                skip_imputation=skip_imputation,
+            )
+
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None:
+            direct_names = [target_indices.model.output.ordered_names[int(index)] for index in dp_model_idx.tolist()]
+            target[..., dp_model_idx] = pre_processors_state[target_dataset](
+                target_state[..., dp_data_idx],
+                in_place=False,
+                data_index=torch.tensor(
+                    [target_indices.data.output.name_to_index[name] for name in direct_names],
+                    dtype=torch.long,
+                    device=y.device,
+                ),
+                skip_imputation=skip_imputation,
+            )
+
+        if len(diagnostic_out) > 0:
+            target[..., diagnostic_out] = pre_processors_state[target_dataset](
+                target_state[..., diagnostic_data],
+                in_place=False,
+                data_index=target_indices.data.output.diagnostic,
+                skip_imputation=skip_imputation,
+            )
+        return target
+
+    def add_interp_to_state(
+        self,
+        state_inp: torch.Tensor,
+        model_output: torch.Tensor,
+        post_processors_state: dict[str, Callable],
+        post_processors_residual: dict[str, Callable] | None,
+        target_dataset: str,
+        source_dataset: str,
+        skip_imputation: bool = False,
+    ) -> torch.Tensor:
+        """Reconstruct the full state from the model output.
+
+        Denormalize the residual and add back denormalized ``interp(source)`` on the
+        residual-prognostic channels; diagnostics and direct-prediction are state-denormalized.
+        ``state_inp`` is the NORMALIZED interpolated source on the target grid (full source channels).
+        """
+        if target_dataset not in self._residual_pairs:
+            return post_processors_state[target_dataset](model_output, in_place=False)
+
+        target_indices = self.data_indices[target_dataset]
+        diagnostic_out = target_indices.model.output.diagnostic
+        residual_out, _, _ = self._residual_prognostic(target_dataset)
+        residual_out = residual_out.to(model_output.device)
+
+        if post_processors_residual is not None and target_dataset in post_processors_residual:
+            state_outp = post_processors_residual[target_dataset](
+                model_output,
+                in_place=False,
+                data_index=target_indices.data.output.full,
+                skip_imputation=skip_imputation,
+            )
+        else:
+            raise ValueError(
+                f"Residual prediction for '{target_dataset}' requires residual post-processors and residual statistics."
+            )
+
+        if len(diagnostic_out) > 0:
+            state_outp[..., diagnostic_out] = post_processors_state[target_dataset](
+                model_output[..., diagnostic_out],
+                in_place=False,
+                data_index=target_indices.data.output.diagnostic,
+                skip_imputation=skip_imputation,
+            )
+
+        if len(residual_out) > 0:
+            x_source_denorm = post_processors_state[source_dataset](
+                state_inp,
+                in_place=False,
+                data_index=self.data_indices[source_dataset].data.input.full,
+                skip_imputation=skip_imputation,
+            )
+            channel_indices = self.get_matching_channel_indices(target_dataset).to(x_source_denorm.device)
+            state_outp[..., residual_out] += x_source_denorm[..., channel_indices]
+
+        dp_model_idx, dp_data_idx = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is not None:
+            state_outp[..., dp_model_idx] = post_processors_state[target_dataset](
+                model_output[..., dp_model_idx],
+                in_place=False,
+                data_index=self.data_indices[target_dataset].data.output.positions_for_names(
+                    [
+                        self.data_indices[target_dataset].model.output.ordered_names[int(i)]
+                        for i in dp_model_idx.tolist()
+                    ]
+                ),
+                skip_imputation=skip_imputation,
+            )
+        return state_outp
+
+    def _after_sampling(
+        self,
+        out: dict[str, torch.Tensor],
+        post_processors: dict[str, nn.Module],
+        before_sampling_data: SamplingData,
+        model_comm_group: ProcessGroup | None = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        gather_out: bool = True,
+        pre_processors_residual: dict[str, nn.Module] | None = None,
+        post_processors_residual: dict[str, nn.Module] | None = None,
+        **kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """Reconstruct residual outputs using the latest loaded source state."""
+        del pre_processors_residual, kwargs
+        x = before_sampling_data[0]
+        for dataset_name, model_output in out.items():
+            if dataset_name not in self._residual_pairs:
+                out[dataset_name] = post_processors[dataset_name](model_output, in_place=False)
+                if gather_out and model_comm_group is not None:
+                    out[dataset_name] = gather_tensor(
+                        out[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                    )
+                continue
+
+            source_dataset = self._residual_pairs[dataset_name]
+            source = x[source_dataset][:, -1:, ...]
+            reference = self.residual[dataset_name](
+                source,
+                grid_shard_sizes[source_dataset] if grid_shard_sizes is not None else None,
+                model_comm_group,
+                n_step_output=self.n_step_output,
+            )
+            out[dataset_name] = self.add_interp_to_state(
+                reference,
+                model_output,
+                post_processors_state=post_processors,
+                post_processors_residual=post_processors_residual,
+                target_dataset=dataset_name,
+                source_dataset=source_dataset,
+                skip_imputation=True,
+            )
+            if gather_out and model_comm_group is not None:
+                out[dataset_name] = gather_tensor(
+                    out[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                )
+        return out

@@ -10,6 +10,7 @@
 import pytest
 from pydantic import ValidationError
 
+from anemoi.models.schemas.residual import InterpolationConnectionSchema
 from anemoi.models.schemas.residual import TruncatedConnectionSchema
 from anemoi.models.schemas.residual import TruncationConfigDiskSchema
 from anemoi.models.schemas.residual import TruncationConfigOnTheFlySchema
@@ -68,3 +69,14 @@ def test_truncated_connection_mixed_mode_rejected() -> None:
                 },
             }
         )
+
+
+def test_interpolation_connection_has_no_trajectory_step_field() -> None:
+    schema = InterpolationConnectionSchema(
+        **{
+            "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+            "interpolation_file_path": "source-to-target.npz",
+        }
+    )
+
+    assert "step" not in schema.model_dump()

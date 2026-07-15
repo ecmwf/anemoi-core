@@ -68,7 +68,32 @@ class TemporalDownscalerSchema(BaseModel):
     "Whether to include the right boundary in the output."
 
 
+class FixedOffsetsTaskSchema(BaseModel):
+    """Configuration for arbitrary physical input/output offsets."""
+
+    target_: Literal["anemoi.training.tasks.FixedOffsetsTask"] = Field(..., alias="_target_")
+    "Task class path for fixed physical offsets."
+    input_offsets: list[str] = Field(..., min_length=1)
+    "Input offsets, for example ['-6h', '0h', '6h']."
+    output_offsets: list[str] = Field(..., min_length=1)
+    "Output offsets in the order presented to the model."
+
+
+class DownscalerSchema(BaseModel):
+    """Configuration for spatial residual downscaling."""
+
+    target_: Literal["anemoi.training.tasks.Downscaler"] = Field(..., alias="_target_")
+    "Task class path for the spatial downscaling task."
+    input_datasets: list[str] = Field(..., min_length=1)
+    "Datasets supplied as spatially coarse/source inputs."
+    output_datasets: list[str] = Field(..., min_length=1)
+    "Datasets predicted as spatially fine/target outputs."
+    input_offset: str = Field(default="0H", example="0H")
+    "Physical offset of the source state."
+    output_offset: str = Field(default="0H", example="0H")
+    "Physical offset of the target state."
+
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema | FixedOffsetsTaskSchema | DownscalerSchema,
     Discriminator("target_"),
 ]

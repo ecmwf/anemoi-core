@@ -1,0 +1,18 @@
+defaults:
+- data: multi
+- dataloader: multi
+- diagnostics: evaluation_multi
+- system: example
+- graph: multi
+- model: graphtransformer_transport_residual_edm
+- task: downscaler
+- training: transport_residual
+- _self_
+
+
+diagnostics:
+  callbacks: []
+  plot:
+    callbacks: []
+
+config_validation: True

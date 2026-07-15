@@ -142,9 +142,26 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
     )
 
 
+class InterpolationConnectionSchema(BaseModel):
+    """Schema for the cross-grid interpolation residual connection.
+
+    Maps a source dataset's grid onto the target grid via a single sparse interpolation
+    matrix (source -> target). Used for residual downscaling: ``target - interp(source)``.
+    """
+
+    target_: Literal["anemoi.models.layers.residual.InterpolationConnection"] = Field(..., alias="_target_")
+    interpolation_file_path: str = Field(
+        ...,
+        description="Path to the .npz interpolation matrix mapping the source grid onto the target grid.",
+    )
+    autocast: bool = Field(False, description="Use automatic mixed precision in the sparse projection.")
+    row_normalize: bool = Field(False, description="Row-normalize the interpolation weights.")
+
+
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
     | TruncatedConnectionSchema
+    | InterpolationConnectionSchema
     | ScalarOrnsteinConnectionSchema
     | SpectralOrnsteinConnectionSchema,
     Field(discriminator="target_"),

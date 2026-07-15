@@ -347,6 +347,7 @@ class AnemoiTrainer(ABC):
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
+            "statistics_residuals": self.datamodule.statistics_residuals,
             "supporting_arrays": self.supporting_arrays,
         }
 

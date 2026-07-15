@@ -7,13 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import tempfile
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+import scipy.sparse
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.residual import InterpolationConnection
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
@@ -183,6 +186,32 @@ def test_skipconnection(flat_data):
     expected_out = flat_data[:, -1, ...]
 
     assert torch.allclose(out, expected_out), "SkipConnection did not return the expected output."
+
+
+@pytest.fixture
+def interpolation_file_path():
+    with tempfile.NamedTemporaryFile(suffix=".npz") as f:
+        scipy.sparse.save_npz(f.name, scipy.sparse.csr_matrix(np.ones((5, 3), dtype=np.float32)))
+        yield f.name
+
+
+def test_interpolation_connection_preserves_loaded_time(interpolation_file_path):
+    conn = InterpolationConnection(interpolation_file_path=interpolation_file_path)
+    x = torch.randn(2, 3, 1, 3, 4)  # batch, time, ensemble, source grid, features
+
+    out = conn(x)
+
+    assert out.shape == (2, 3, 1, 5, 4)
+    expected = torch.cat([conn(x[:, time : time + 1]) for time in range(3)], dim=1)
+    assert torch.allclose(out, expected)
+
+
+def test_interpolation_connection_rejects_time_repetition(interpolation_file_path):
+    conn = InterpolationConnection(interpolation_file_path=interpolation_file_path)
+    x = torch.randn(2, 3, 1, 3, 4)
+
+    with pytest.raises(ValueError, match="preserves the loaded time axis"):
+        conn(x, n_step_output=2)
 
 
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────

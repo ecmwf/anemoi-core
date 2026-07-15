@@ -43,6 +43,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Metadata for the model.
     statistics_tendencies : dict
         Statistics for the tendencies of the data.
+    statistics_residuals : dict
+        First-class statistics for spatial residuals.
     supporting_arrays : dict
         Numpy arraysto store in the checkpoint.
     data_indices : dict
@@ -66,6 +68,7 @@ class AnemoiModelInterface(torch.nn.Module):
         data_indices: dict,
         metadata: dict,
         statistics_tendencies: dict | None = None,
+        statistics_residuals: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
         super().__init__()
@@ -76,6 +79,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
+        self.statistics_residuals = statistics_residuals
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
@@ -123,6 +127,20 @@ class AnemoiModelInterface(torch.nn.Module):
             statistics_tendencies,
         )
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
+
+    def _build_residual_processors(
+        self,
+        processors_configs: dict,
+        data_indices: dict,
+        statistics_residuals: dict | None,
+    ) -> tuple[Processors, Processors] | tuple[None, None]:
+        """Build residual processors from explicit residual statistics.
+
+        Residual normalization must never silently fall back to state statistics.
+        """
+        if statistics_residuals is None:
+            return None, None
+        return self._build_processor_pair(processors_configs, data_indices, statistics_residuals)
 
     @staticmethod
     def _build_processor_pair(
@@ -172,6 +190,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self.post_processors = torch.nn.ModuleDict()
         self.pre_processors_tendencies = torch.nn.ModuleDict()
         self.post_processors_tendencies = torch.nn.ModuleDict()
+        self.pre_processors_residual = torch.nn.ModuleDict()
+        self.post_processors_residual = torch.nn.ModuleDict()
 
         data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.statistics.keys():
@@ -187,6 +207,15 @@ class AnemoiModelInterface(torch.nn.Module):
             if pre_tend is not None:
                 self.pre_processors_tendencies[dataset_name] = pre_tend
                 self.post_processors_tendencies[dataset_name] = post_tend
+            residual_stats = self.statistics_residuals.get(dataset_name) if self.statistics_residuals else None
+            pre_residual, post_residual = self._build_residual_processors(
+                data_config[dataset_name].processors,
+                self.data_indices[dataset_name],
+                residual_stats,
+            )
+            if pre_residual is not None:
+                self.pre_processors_residual[dataset_name] = pre_residual
+                self.post_processors_residual[dataset_name] = post_residual
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
@@ -247,6 +276,10 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+        if hasattr(self, "pre_processors_residual"):
+            predict_kwargs["pre_processors_residual"] = self.pre_processors_residual
+        if hasattr(self, "post_processors_residual"):
+            predict_kwargs["post_processors_residual"] = self.post_processors_residual
 
         # Delegate to the model's predict_step implementation with processors
         return self.model.predict_step(**predict_kwargs, **kwargs)

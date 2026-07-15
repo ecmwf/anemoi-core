@@ -293,6 +293,83 @@ class TruncatedConnection(BaseResidualConnection):
         return self._expand_time(x, n_step_output)
 
 
+class InterpolationConnection(BaseResidualConnection):
+    """Cross-grid interpolation residual connection.
+
+    Applies a single sparse projection to map a *source* dataset's grid onto a *target*
+    grid (e.g. low-resolution input -> high-resolution target). Used for residual
+    downscaling, where the model learns ``target - interp(source)``. Unlike
+    :class:`TruncatedConnection` (a down-then-up projection on the same node set), this is
+    a single cross-grid projection, so the output grid size differs from the input.
+
+    Parameters
+    ----------
+    interpolation_file_path : str
+        Path to the ``.npz`` file containing the source-grid -> target-grid interpolation matrix.
+    autocast : bool, default False
+        Whether to use automatic mixed precision in the sparse projection.
+    row_normalize : bool, default False
+        Whether to row-normalize the interpolation weights.
+    """
+
+    def __init__(
+        self,
+        interpolation_file_path: str,
+        autocast: bool = False,
+        row_normalize: bool = False,
+        **_,
+    ) -> None:
+        super().__init__()
+        self.provider = ProjectionGraphProvider(
+            graph=None,
+            edges_name=None,
+            file_path=interpolation_file_path,
+            row_normalize=row_normalize,
+        )
+        self.projector = SparseProjector(autocast=autocast)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Project every loaded timestep from the source grid onto the target grid.
+
+        Time alignment is a data/task responsibility. This layer deliberately does
+        not select, repeat, or otherwise reinterpret trajectory steps.
+        """
+        batch_size = x.shape[0]
+        time_size = x.shape[1]
+
+        x = einops.rearrange(x, "batch time ensemble grid features -> (batch time ensemble) grid features")
+        channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
+        if grid_shard_sizes is not None:  # grid sharding -> channel sharding
+            x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+
+        x = self.projector(x, self.provider.get_edges(device=x.device))
+
+        # The target grid differs from the source grid, so re-shard on the output grid size.
+        output_grid_shard_sizes = get_shard_sizes(x, -2, model_comm_group)
+        if grid_shard_sizes is not None:  # channel sharding -> grid sharding
+            x = all_to_all_transpose(x, -2, output_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
+        x = einops.rearrange(
+            x,
+            "(batch time ensemble) grid features -> batch time ensemble grid features",
+            batch=batch_size,
+            time=time_size,
+        )
+
+        if n_step_output is not None and n_step_output != time_size:
+            raise ValueError(
+                "InterpolationConnection preserves the loaded time axis; "
+                f"received {time_size} loaded steps but n_step_output={n_step_output}. "
+                "Align source and target tensors before projection."
+            )
+        return x
+
+
 def _ornstein_init_theta(
     theta_init: float,
     theta_buff: float,

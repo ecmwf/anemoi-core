@@ -64,6 +64,10 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
+    ANEMOI_TRANSPORT_RESIDUAL_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportResidualModelEncProcDec"
+    )
+    ANEMOI_TRANSPORT_RESIDUAL_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportResidualModelEncProcDec"
     ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"

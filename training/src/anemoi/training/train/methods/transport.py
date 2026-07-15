@@ -177,6 +177,24 @@ class TendencyPredictionMode(PredictionMode):
             self._tendency_pre_processors[dataset_name] = pre_tend
             self._tendency_post_processors[dataset_name] = post_tend
 
+    def _reference_steps(self, x_ref: dict[str, torch.Tensor], dataset_name: str) -> torch.Tensor:
+        """Align one reference state to every task output using task offsets."""
+        reference = x_ref[dataset_name]
+        reference_indices = self.module.task.get_batch_reference_input_indices()
+        if reference.ndim == 5:
+            if reference.shape[1] == self.module.n_step_input:
+                index = torch.as_tensor(reference_indices, dtype=torch.long, device=reference.device)
+                return reference.index_select(1, index)
+            if reference.shape[1] != self.module.n_step_output:
+                raise ValueError(
+                    f"Reference state for '{dataset_name}' has {reference.shape[1]} time steps; "
+                    f"expected {self.module.n_step_input} input steps or {self.module.n_step_output} output steps."
+                )
+            return reference
+        if reference.ndim == 4:
+            return reference.unsqueeze(1).expand(-1, self.module.n_step_output, -1, -1, -1)
+        raise ValueError(f"Reference state for '{dataset_name}' must have 4 or 5 dimensions.")
+
     def _compute_tendency_target(
         self,
         y: dict[str, torch.Tensor],
@@ -188,7 +206,7 @@ class TendencyPredictionMode(PredictionMode):
             tendency_steps = []
             for step, pre_proc in enumerate(pre_tend):
                 y_step = y_dataset[:, step : step + 1]
-                x_ref_step = x_ref[dataset_name].unsqueeze(1)
+                x_ref_step = self._reference_steps(x_ref, dataset_name)[:, step : step + 1]
                 tendency_step = self.module.model.model.compute_tendency(
                     {dataset_name: y_step},
                     {dataset_name: x_ref_step},
@@ -211,7 +229,7 @@ class TendencyPredictionMode(PredictionMode):
             post_tend = self._tendency_post_processors[dataset_name]
             state_steps = []
             for step, post_proc in enumerate(post_tend):
-                x_ref_step = x_ref[dataset_name].unsqueeze(1)
+                x_ref_step = self._reference_steps(x_ref, dataset_name)[:, step : step + 1]
                 tendency_step = tendency_dataset[:, step : step + 1]
                 state_step = self.module.model.model.add_tendency_to_state(
                     {dataset_name: x_ref_step},
@@ -253,7 +271,7 @@ class TendencyPredictionMode(PredictionMode):
             self.module.grid_shard_sizes,
             self.module.model_comm_group,
         )
-        x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
+        x_ref = {dataset_name: ref for dataset_name, ref in x_ref.items()}
 
         tendency_target_data_output = self._compute_tendency_target(y_data_output, x_ref)
         tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)
@@ -294,9 +312,128 @@ class TendencyPredictionMode(PredictionMode):
         }
 
 
+class ResidualPredictionMode(PredictionMode):
+    """Prediction mode for spatial residual downscaling.
+
+    The task supplies ordinary tensors. Dataset names identify the source and target
+    roles; trajectory coordinates never enter this mode.
+    """
+
+    def __init__(self, module: BaseTransportTraining) -> None:
+        super().__init__(module)
+        pairs = getattr(module.model.model, "_residual_pairs", {})
+        if not pairs:
+            raise ValueError(
+                "training.transport.prediction_mode='residual' requires model.model.residual_prediction "
+                "to map each target dataset to a source dataset."
+            )
+        processors = getattr(module.model, "pre_processors_residual", None)
+        post_processors = getattr(module.model, "post_processors_residual", None)
+        if processors is None or post_processors is None:
+            raise ValueError(
+                "Residual prediction requires residual processors backed by statistics_residuals; "
+                "none were built."
+            )
+        self._residual_pairs = pairs
+        task_inputs = set(getattr(module.task, "input_datasets", ()))
+        task_outputs = set(getattr(module.task, "output_datasets", ()))
+        missing_sources = sorted(set(pairs.values()) - task_inputs)
+        missing_targets = sorted(task_outputs - set(pairs))
+        if missing_sources or missing_targets:
+            raise ValueError(
+                "Residual downscaling requires every configured source/target dataset to be connected: "
+                f"missing_sources={missing_sources}, missing_targets={missing_targets}."
+            )
+
+
+    def _reference(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        references: dict[str, torch.Tensor] = {}
+        for target_dataset, source_dataset in self._residual_pairs.items():
+            if source_dataset not in x:
+                raise KeyError(
+                    f"Residual target '{target_dataset}' requires source dataset '{source_dataset}' in task inputs."
+                )
+            reference = self.module.model.model.residual[target_dataset](
+                x[source_dataset][:, -1:, ...],
+                self.module.grid_shard_sizes.get(source_dataset) if self.module.grid_shard_sizes else None,
+                self.module.model_comm_group,
+                n_step_output=self.module.n_step_output,
+            )
+            references[target_dataset] = reference
+        return references
+
+    def prepare_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
+    ) -> PreparedPredictionTarget:
+        state_target = self.module.task.get_targets(batch)
+        y_data_output = self.module.get_data_output_target(state_target)
+        references = self._reference(x)
+        residual_targets: dict[str, torch.Tensor] = {}
+
+        for target_dataset, y_dataset in y_data_output.items():
+            if target_dataset not in self._residual_pairs:
+                residual_targets[target_dataset] = y_dataset
+                continue
+
+            source_dataset = self._residual_pairs[target_dataset]
+            matching = self.module.model.model.get_matching_channel_indices(target_dataset).to(
+                references[target_dataset].device
+            )
+            x_interp = references[target_dataset].index_select(-1, matching)
+            residual_target = self.module.model.model.compute_residual(
+                y_dataset,
+                x_interp,
+                pre_processors_state=self.module.model.pre_processors,
+                pre_processors_residual=self.module.model.pre_processors_residual,
+                target_dataset=target_dataset,
+                source_dataset=source_dataset,
+                input_post_processor=self.module.model.post_processors,
+                skip_imputation=True,
+            )
+            residual_targets[target_dataset] = residual_target
+
+        return PreparedPredictionTarget(
+            model_target=self.module.reduce_data_output_target_to_model_output(residual_targets),
+            loss_target=residual_targets,
+            loss_target_layout=IndexSpace.DATA_OUTPUT,
+            metric_target=state_target,
+            aux={"residual_reference": references},
+        )
+
+    def reconstruct_prediction(
+        self,
+        prediction: dict[str, torch.Tensor],
+        prepared: PreparedPredictionTarget,
+    ) -> dict[str, torch.Tensor]:
+        output: dict[str, torch.Tensor] = {}
+        references = prepared.aux["residual_reference"]
+        for dataset_name, model_output in prediction.items():
+            if dataset_name not in self._residual_pairs:
+                output[dataset_name] = self.module.model.post_processors[dataset_name](
+                    model_output, in_place=False
+                )
+                continue
+            output[dataset_name] = self.module.model.model.add_interp_to_state(
+                references[dataset_name],
+                model_output,
+                post_processors_state=self.module.model.post_processors,
+                post_processors_residual=self.module.model.post_processors_residual,
+                target_dataset=dataset_name,
+                source_dataset=self._residual_pairs[dataset_name],
+                skip_imputation=True,
+            )
+        return output
+
+    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
+        return prepared.metric_target
+
+
 PREDICTION_MODE_CLASSES = {
     "state": StatePredictionMode,
     "tendency": TendencyPredictionMode,
+    "residual": ResidualPredictionMode,
 }
 
 

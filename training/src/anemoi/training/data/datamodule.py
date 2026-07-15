@@ -8,10 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
+import json
 import logging
+from collections.abc import Mapping
 from functools import cached_property
+from pathlib import Path
 
+import numpy as np
 import pytorch_lightning as pl
+import yaml
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -93,6 +98,89 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not any(stats is not None for stats in stats_by_dataset.values()):
             return None
         return stats_by_dataset
+
+    @cached_property
+    def statistics_residuals(self) -> dict[str, dict] | None:
+        """Load explicit residual statistics, failing hard on a configured bad path."""
+        configured = self.config.system.input.get("statistics_residuals")
+        if configured is None:
+            return None
+
+        if isinstance(configured, Mapping):
+            return {
+                dataset_name: self._validate_residual_statistics(
+                    self._load_residual_statistics(Path(path)),
+                    dataset_name,
+                )
+                for dataset_name, path in configured.items()
+            }
+
+        loaded = self._load_residual_statistics(Path(configured))
+        if all(dataset_name in loaded for dataset_name in self.dataset_names):
+            return {
+                dataset_name: self._validate_residual_statistics(loaded[dataset_name], dataset_name)
+                for dataset_name in self.dataset_names
+            }
+        if len(self.dataset_names) == 1:
+            return {self.dataset_names[0]: self._validate_residual_statistics(loaded, self.dataset_names[0])}
+        raise ValueError(
+            "statistics_residuals must be a mapping of target dataset names to files, "
+            "or a file containing every target dataset by name."
+        )
+
+    @staticmethod
+    def _validate_residual_statistics(statistics: Mapping, dataset_name: str) -> dict:
+        required = {"minimum", "maximum", "mean", "stdev"}
+        missing = sorted(required - set(statistics))
+        if missing:
+            raise ValueError(
+                f"Residual statistics for {dataset_name} are missing required fields: {missing}."
+            )
+        validated = dict(statistics)
+        for name in required:
+            try:
+                values = np.asarray(validated[name], dtype=np.float64)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Residual statistics field {name} for {dataset_name} must be numeric."
+                ) from exc
+            if values.ndim != 1 or values.size == 0 or not np.isfinite(values).all():
+                raise ValueError(
+                    f"Residual statistics field {name} for {dataset_name} must be a non-empty finite 1-D array."
+                )
+            if name == "stdev" and np.any(values <= 0):
+                raise ValueError(
+                    f"Residual statistics stdev for {dataset_name} must be strictly positive."
+                )
+        return validated
+
+    @staticmethod
+    def _load_residual_statistics(path: Path) -> dict:
+        if not path.exists():
+            raise FileNotFoundError(f"Residual statistics file does not exist: {path}")
+        if path.suffix.lower() in {".json", ".yaml", ".yml"}:
+            with path.open() as stream:
+                value = json.load(stream) if path.suffix.lower() == ".json" else yaml.safe_load(stream)
+            if not isinstance(value, dict):
+                raise ValueError(f"Residual statistics file must contain a mapping: {path}")
+            return {name: np.asarray(values) if isinstance(values, list) else values for name, values in value.items()}
+        if path.suffix.lower() in {".nc", ".netcdf"}:
+            import xarray as xr
+
+            with xr.open_dataset(path) as dataset:
+                result = {
+                    name: variable.values
+                    for name, variable in dataset.data_vars.items()
+                    if name in {"mean", "stdev", "minimum", "maximum"}
+                }
+                required = {"minimum", "maximum", "mean", "stdev"}
+                if not required.issubset(result):
+                    raise ValueError(f"Residual statistics NetCDF must contain {sorted(required)}: {path}")
+                for name, values in list(result.items()):
+                    if values.ndim > 1:
+                        result[name] = values[0]
+                return result
+        raise ValueError(f"Unsupported residual statistics format: {path}; use JSON, YAML, or NetCDF.")
 
     @cached_property
     def metadata(self) -> dict:

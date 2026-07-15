@@ -46,6 +46,7 @@ class EnsembleTraining(BaseTrainingModule):
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict,
+        statistics_residuals: dict | None = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -71,6 +72,7 @@ class EnsembleTraining(BaseTrainingModule):
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
+            statistics_residuals=statistics_residuals,
         )
 
         # num_gpus_per_ensemble >= 1 and num_gpus_per_ensemble >= num_gpus_per_model (as per the DDP strategy)

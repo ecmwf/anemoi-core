@@ -1,0 +1,19 @@
+defaults:
+- graphtransformer_transport_edm
+- _self_
+
+model:
+  _target_: anemoi.models.models.AnemoiTransportResidualModelEncProcDec
+  # Map each target dataset to its source dataset.
+  residual_prediction: {}
+  direct_prediction: {}
+
+# Example override:
+# model:
+#   residual_prediction:
+#     output: input
+#   direct_prediction:
+#     output: [tp]
+#   residual:
+#     _target_: anemoi.models.layers.residual.InterpolationConnection
+#     interpolation_file_path: /path/to/source-to-target.npz
