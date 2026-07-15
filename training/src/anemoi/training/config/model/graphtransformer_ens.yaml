@@ -52,6 +52,7 @@ processor:
   qk_norm: True # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
+  shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
   layer_kernels:
