@@ -177,24 +177,6 @@ class TendencyPredictionMode(PredictionMode):
             self._tendency_pre_processors[dataset_name] = pre_tend
             self._tendency_post_processors[dataset_name] = post_tend
 
-    def _reference_steps(self, x_ref: dict[str, torch.Tensor], dataset_name: str) -> torch.Tensor:
-        """Align one reference state to every task output using task offsets."""
-        reference = x_ref[dataset_name]
-        reference_indices = self.module.task.get_batch_reference_input_indices()
-        if reference.ndim == 5:
-            if reference.shape[1] == self.module.n_step_input:
-                index = torch.as_tensor(reference_indices, dtype=torch.long, device=reference.device)
-                return reference.index_select(1, index)
-            if reference.shape[1] != self.module.n_step_output:
-                raise ValueError(
-                    f"Reference state for '{dataset_name}' has {reference.shape[1]} time steps; "
-                    f"expected {self.module.n_step_input} input steps or {self.module.n_step_output} output steps."
-                )
-            return reference
-        if reference.ndim == 4:
-            return reference.unsqueeze(1).expand(-1, self.module.n_step_output, -1, -1, -1)
-        raise ValueError(f"Reference state for '{dataset_name}' must have 4 or 5 dimensions.")
-
     def _compute_tendency_target(
         self,
         y: dict[str, torch.Tensor],
@@ -206,7 +188,7 @@ class TendencyPredictionMode(PredictionMode):
             tendency_steps = []
             for step, pre_proc in enumerate(pre_tend):
                 y_step = y_dataset[:, step : step + 1]
-                x_ref_step = self._reference_steps(x_ref, dataset_name)[:, step : step + 1]
+                x_ref_step = x_ref[dataset_name].unsqueeze(1)
                 tendency_step = self.module.model.model.compute_tendency(
                     {dataset_name: y_step},
                     {dataset_name: x_ref_step},
@@ -229,7 +211,7 @@ class TendencyPredictionMode(PredictionMode):
             post_tend = self._tendency_post_processors[dataset_name]
             state_steps = []
             for step, post_proc in enumerate(post_tend):
-                x_ref_step = self._reference_steps(x_ref, dataset_name)[:, step : step + 1]
+                x_ref_step = x_ref[dataset_name].unsqueeze(1)
                 tendency_step = tendency_dataset[:, step : step + 1]
                 state_step = self.module.model.model.add_tendency_to_state(
                     {dataset_name: x_ref_step},
@@ -271,7 +253,7 @@ class TendencyPredictionMode(PredictionMode):
             self.module.grid_shard_sizes,
             self.module.model_comm_group,
         )
-        x_ref = {dataset_name: ref for dataset_name, ref in x_ref.items()}
+        x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target_data_output = self._compute_tendency_target(y_data_output, x_ref)
         tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)

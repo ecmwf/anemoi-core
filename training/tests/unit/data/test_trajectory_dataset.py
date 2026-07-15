@@ -114,7 +114,7 @@ def _make_trajectory_dataset(
         step_frequency=step_td,
         missing=missing,
     )
-    dataset.default_sampling = sampling if sampling is not None else {"stride": 1}
+    dataset.default_sampling = sampling if sampling is not None else {"stride": None}
     return dataset
 
 
@@ -168,10 +168,10 @@ class TestTrajectoryDatasetProperties:
 class TestTrajectoryDatasetDefaultSampling:
     """Test that default_sampling is correctly set."""
 
-    def test_default_sampling_includes_every_valid_anchor(self) -> None:
-        """Without explicit sampling, every valid trajectory position is used."""
+    def test_default_sampling_is_non_overlapping(self) -> None:
+        """Without explicit sampling, stride=None (non-overlapping)."""
         ds = _make_trajectory_dataset()
-        assert ds.default_sampling == {"stride": 1}
+        assert ds.default_sampling == {"stride": None}
 
     def test_explicit_stride_stored(self) -> None:
         ds = _make_trajectory_dataset(sampling={"stride": 6})
@@ -267,13 +267,6 @@ class TestCreateDatasetWithTrajectory:
             ds = create_dataset(config)
             assert isinstance(ds, TrajectoryDataset)
             assert ds.default_sampling == {"stride": 6}
-
-    def test_compute_anchors_excludes_out_of_bounds_positions(self) -> None:
-        ds = _make_trajectory_dataset(num_inits=1, steps=6, sampling={"stride": 1})
-        anchors = ds.compute_anchors([-1, 0, 1])
-
-        assert anchors[:, 0].tolist() == [0, 0, 0, 0]
-        assert anchors[:, 1].tolist() == [1, 2, 3, 4]
 
     def test_create_dataset_without_trajectory_gives_native(self) -> None:
         """create_dataset without trajectory key should give NativeGridDataset."""

@@ -80,9 +80,8 @@ class BaseTendencyScaler(BaseScaler):
         variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
         for key, idx in self.data_indices.model.output.name_to_index.items():
-            if (
-                idx in self.data_indices.model.output.prognostic
-                and self.data_indices.data.output.name_to_index.get(key) is not None
+            if idx in self.data_indices.model.output.prognostic and self.data_indices.data.output.name_to_index.get(
+                key,
             ):
                 prog_idx = self.data_indices.data.output.name_to_index[key]
                 variable_stdev = self.statistics["stdev"][prog_idx] if self.statistics_tendencies else 1
@@ -115,38 +114,3 @@ class VarTendencyScaler(BaseTendencyScaler):
 
     def get_level_scaling(self, variable_stdev: float, variable_tendency_stdev: float) -> float:
         return variable_stdev**2 / variable_tendency_stdev**2
-
-
-def _residual_statistics_payload(statistics_residuals: Mapping | None) -> Mapping:
-    if statistics_residuals is None:
-        raise ValueError(
-            "Residual loss scalers require explicit statistics_residuals; "
-            "state statistics are not a fallback."
-        )
-    if "lead_times" in statistics_residuals:
-        return statistics_residuals
-    return {"lead_times": ["residual"], "residual": statistics_residuals}
-
-
-class NoResidualScaler(NoTendencyScaler):
-    """Residual analogue of NoTendencyScaler with an explicit stats contract."""
-
-    def __init__(self, *, statistics_residuals: Mapping | None = None, **kwargs) -> None:
-        kwargs.pop("statistics_tendencies", None)
-        super().__init__(statistics_tendencies=_residual_statistics_payload(statistics_residuals), **kwargs)
-
-
-class StdevResidualScaler(StdevTendencyScaler):
-    """Scale residual losses using explicit residual standard deviations."""
-
-    def __init__(self, *, statistics_residuals: Mapping | None = None, **kwargs) -> None:
-        kwargs.pop("statistics_tendencies", None)
-        super().__init__(statistics_tendencies=_residual_statistics_payload(statistics_residuals), **kwargs)
-
-
-class VarResidualScaler(VarTendencyScaler):
-    """Scale residual losses using explicit residual variances."""
-
-    def __init__(self, *, statistics_residuals: Mapping | None = None, **kwargs) -> None:
-        kwargs.pop("statistics_tendencies", None)
-        super().__init__(statistics_tendencies=_residual_statistics_payload(statistics_residuals), **kwargs)

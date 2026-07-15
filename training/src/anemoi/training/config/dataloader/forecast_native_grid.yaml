@@ -12,9 +12,9 @@ defaults:
 # initialisation boundary.
 #
 # - The ``trajectory`` block selects the TrajectoryDataset reader. ``sampling``
-#   controls which valid anchors are included via ``stride``:
-#     * stride: 1     : every valid position (the default)
-#     * stride: N     : fixed stride of N valid anchors
+#   controls how anchor positions are drawn within each forecast via ``stride``:
+#     * stride: null  : stride = window size (samples never share a step)
+#     * stride: 1     : every valid step position
 #     * stride: N     : fixed stride of N steps (overlapping when N < window)
 # - start/end filter base dates on the valid-time envelope (base + step range).
 # - Step subsetting (steps / step_start / step_end / step_frequency) can be
@@ -22,10 +22,11 @@ defaults:
 # ============
 
 # Sampling for trajectory windows within each forecast.
-# stride: 1     → every valid position (default)
+# stride: null  → window size stride (non-overlapping, default)
+# stride: 1     → every valid position
 # stride: N     → fixed stride of N steps
 trajectory_sampling:
-  stride: 1  # every valid trajectory anchor
+  stride: null  # null = window size (non-overlapping)
 
 training:
   datasets:

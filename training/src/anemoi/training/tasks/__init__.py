@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 from .downscaler import Downscaler
-from .fixed_offsets import FixedOffsetsTask
 from .forecaster import Forecaster
 from .temporal_downscaler import TemporalDownscaler
 from .timeless import Autoencoder
@@ -18,5 +17,4 @@ __all__ = [
     "Downscaler",
     "Forecaster",
     "TemporalDownscaler",
-    "FixedOffsetsTask",
 ]

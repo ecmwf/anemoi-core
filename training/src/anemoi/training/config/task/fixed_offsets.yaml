@@ -1,3 +1,0 @@
-_target_: anemoi.training.tasks.FixedOffsetsTask
-input_offsets: ["0h"]
-output_offsets: ["0h"]

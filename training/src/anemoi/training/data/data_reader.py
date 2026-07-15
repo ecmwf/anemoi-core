@@ -385,7 +385,7 @@ class TrajectoryDataset(BaseAnemoiReader):
         if end is not None:
             open_kwargs["base_end"] = end
         self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
-        self.default_sampling = sampling if sampling is not None else {"stride": 1}
+        self.default_sampling = sampling if sampling is not None else {"stride": None}
 
     @property
     def num_sequences(self) -> int:

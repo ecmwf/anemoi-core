@@ -96,7 +96,7 @@ class TrajectorySamplingSchema(PydanticBaseModel):
     """Trajectory anchor sampling configuration."""
 
     stride: int | None = Field(default=None)
-    "Stride between valid anchors. 1 samples every valid anchor; N deliberately subsamples the valid-anchor set."
+    "Stride between anchor positions. None = window size (non-overlapping); 1 = every position."
 
 
 class TrajectorySchema(PydanticBaseModel):
@@ -145,6 +145,6 @@ class DataLoaderSchema(PydanticBaseModel):
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
     trajectory_sampling: TrajectorySamplingSchema | None = Field(default=None)
-    "Default trajectory anchor sampling used across all splits. The default reader policy is stride=1."
+    "Default trajectory anchor sampling used across all splits. stride=None → non-overlapping; stride=N → step N."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used"

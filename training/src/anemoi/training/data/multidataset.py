@@ -290,17 +290,15 @@ class MultiDataset(IterableDataset):
         """Initialize all data readers for this worker."""
         self.worker_id = worker_id
 
-        # Partition the global permutation into balanced rank and worker ranges.
-        # Both stages use the full count, so a remainder is assigned to the
-        # first partitions instead of being silently discarded.
-        group_low, group_high = get_balanced_partition_range(
-            len(self.valid_date_indices),
-            self.sample_comm_num_groups,
-            self.sample_comm_group_id,
-        )
-        group_size = group_high - group_low
-        low, high = get_balanced_partition_range(group_size, n_workers, worker_id, offset=group_low)
-        self.n_samples_per_worker = high - low
+        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+        # note that we need even splits here across DDP ranks, so we might throw away some samples
+        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
+        shard_start = self.sample_comm_group_id * shard_size
+
+        self.n_samples_per_worker = shard_size // n_workers
+
+        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
+        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
 
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 

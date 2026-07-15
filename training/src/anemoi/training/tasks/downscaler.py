@@ -60,3 +60,17 @@ class Downscaler(BaseTask):
 
     def _get_timestep_for_metadata(self) -> str:
         return self._format_physical_offset(self._input_offsets[0])
+
+    @staticmethod
+    def _format_physical_offset(offset: datetime.timedelta) -> str:
+        """Format a timedelta using the public configuration vocabulary."""
+        seconds = int(offset.total_seconds())
+        sign = "-" if seconds < 0 else ""
+        seconds = abs(seconds)
+        if seconds % 86400 == 0:
+            return f"{sign}{seconds // 86400}d"
+        if seconds % 3600 == 0:
+            return f"{sign}{seconds // 3600}h"
+        if seconds % 60 == 0:
+            return f"{sign}{seconds // 60}m"
+        return f"{sign}{seconds}s"

@@ -57,15 +57,9 @@ class BaseTask(ABC):
         self,
         input_offsets: list[datetime.timedelta],
         output_offsets: list[datetime.timedelta],
-        *,
-        preserve_order: bool = False,
     ) -> None:
-        # Existing tasks historically pass offsets in arbitrary construction
-        # order, so retain the established sorted behaviour by default. A
-        # fixed-offset task can opt into preserving the public configuration
-        # order, which is part of its model-input/output contract.
-        self._input_offsets = list(input_offsets) if preserve_order else sorted(input_offsets)
-        self._output_offsets = list(output_offsets) if preserve_order else sorted(output_offsets)
+        self._input_offsets = sorted(input_offsets)
+        self._output_offsets = sorted(output_offsets)
         self._offsets = sorted(set(self._input_offsets + self._output_offsets))
 
     def steps(self, mode: str = "training") -> Iterable[dict]:  # noqa: ARG002
@@ -120,21 +114,6 @@ class BaseTask(ABC):
         """Positions of the input offsets within the full batch ``_offsets``."""
         return self._offsets_to_batch_indices(self.get_input_offsets(**kwargs))
 
-    def get_input_reference_positions(self, strict: bool = False, **kwargs) -> list[int]:
-        """Positions of each output offset in the task-local input tensor."""
-        input_offsets = self.get_input_offsets(**kwargs)
-        output_offsets = self.get_output_offsets(**kwargs)
-        by_offset = dict(zip(input_offsets, range(len(input_offsets)), strict=True))
-        missing = [offset for offset in output_offsets if offset not in by_offset]
-        if missing and strict:
-            raise ValueError(
-                "Every output offset must have a matching input offset for residual alignment; "
-                f"missing {[str(offset) for offset in missing]} from {[str(offset) for offset in input_offsets]}."
-            )
-        fallback = len(input_offsets) - 1
-        return [by_offset.get(offset, fallback) for offset in output_offsets]
-
-
     def get_batch_output_indices(self, **kwargs) -> list[int]:
         """Positions of the output offsets within the full batch ``_offsets``.
 
@@ -144,21 +123,6 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
-
-    def get_batch_reference_input_indices(self, strict: bool = False, **kwargs) -> list[int]:
-        """Return the input position corresponding to each output offset."""
-        input_offsets = self.get_input_offsets(**kwargs)
-        output_offsets = self.get_output_offsets(**kwargs)
-        input_indices = self.get_batch_input_indices(**kwargs)
-        by_offset = dict(zip(input_offsets, input_indices, strict=True))
-        missing = [offset for offset in output_offsets if offset not in by_offset]
-        if missing and strict:
-            raise ValueError(
-                "Every output offset must have a matching input offset for residual alignment; "
-                f"missing {[str(offset) for offset in missing]} from {[str(offset) for offset in input_offsets]}."
-            )
-        fallback = input_indices[-1]
-        return [by_offset.get(offset, fallback) for offset in output_offsets]
     def get_inputs(
         self,
         batch: dict[str, torch.Tensor],
@@ -236,20 +200,6 @@ class BaseTask(ABC):
     def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
 
-    @staticmethod
-    def _format_physical_offset(offset: datetime.timedelta) -> str:
-        """Format a timedelta using the public configuration vocabulary."""
-        seconds = int(offset.total_seconds())
-        sign = "-" if seconds < 0 else ""
-        seconds = abs(seconds)
-        if seconds % 86400 == 0:
-            return f"{sign}{seconds // 86400}d"
-        if seconds % 3600 == 0:
-            return f"{sign}{seconds // 3600}h"
-        if seconds % 60 == 0:
-            return f"{sign}{seconds // 60}m"
-        return f"{sign}{seconds}s"
-
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
         md_dict["task"] = self.name
@@ -263,9 +213,6 @@ class BaseTask(ABC):
             "input_relative_date_indices": input_relative_date_indices,  # backwards compatibility with inference
             "output_relative_date_indices": output_relative_date_indices,  # backwards compatibility with inference
             "timestep": timestep,  # backwards compatibility with inference
-            "input_offsets": [self._format_physical_offset(offset) for offset in self.get_input_offsets()],
-            "output_offsets": [self._format_physical_offset(offset) for offset in self.get_output_offsets()],
-            "offsets": [self._format_physical_offset(offset) for offset in self.get_offsets()],
         }
 
         dataset_names = md_dict["metadata_inference"]["dataset_names"]
