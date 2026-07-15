@@ -63,22 +63,22 @@ for training and supports:
 
 Multi-Domain Dataset
 --------------------
-The ``MultiDomainDataset`` class provides an alternative to ``MultiDataset`` 
-for synchronizing and combining multiple datasets that have different grids 
-and time indices, but share similar data structures. The dataset indices are 
+The ``MultiDomainDataset`` class provides an alternative to ``MultiDataset``
+for synchronizing and combining multiple datasets that have different grids
+and time indices, but share similar data structures. The dataset indices are
 shuffled and a single one is passed forward.
 
 Advantages of this training strategy include:
-* Optimal utilization of dataset similarities, avoiding the need for 
+* Optimal utilization of dataset similarities, avoiding the need for
 unnecessary additional encoders
-* Easier to achieve cross-domain or cross-resolution generalization as the 
+* Easier to achieve cross-domain or cross-resolution generalization as the
 model is able to continuously see different samples
-* Avoiding additional transfer learning steps when fine-tuning to a new 
+* Avoiding additional transfer learning steps when fine-tuning to a new
 domain, which can cause catastrophic forgetting.
 * Easier to get a good prediction on an unseen domain
 
-Similar to ``MultiDataset``, distributed data loading across workers and 
-communication groups is supported, as well as shuffling and batching data 
+Similar to ``MultiDataset``, distributed data loading across workers and
+communication groups is supported, as well as shuffling and batching data
 for training.
 
 API Reference

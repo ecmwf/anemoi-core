@@ -9,11 +9,11 @@
 
 
 import logging
+from pathlib import PosixPath
 from typing import Optional
 
 import einops
 import torch
-from pathlib import PosixPath
 from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -42,10 +42,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.dataset_names:
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)] if not type(self._graph_data) is PosixPath else self._graph_data,
+                graph=(
+                    self._graph_data[(dataset_name, "to", self._graph_name_hidden)]
+                    if type(self._graph_data) is not PosixPath
+                    else self._graph_data
+                ),
                 edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[dataset_name] if not type(self._graph_data) is PosixPath else "data",
-                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden] if not type(self._graph_data) is PosixPath else "hidden",
+                src_size=(
+                    self.node_attributes.num_nodes[dataset_name] if type(self._graph_data) is not PosixPath else "data"
+                ),
+                dst_size=(
+                    self.node_attributes.num_nodes[self._graph_name_hidden]
+                    if type(self._graph_data) is not PosixPath
+                    else "hidden"
+                ),
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
                 dataset_name=dataset_name if type(self._graph_data) is PosixPath else None,
             )
@@ -61,10 +71,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)] if not type(self._graph_data) is PosixPath else self._graph_data,
+            graph=(
+                self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+                if type(self._graph_data) is not PosixPath
+                else self._graph_data
+            ),
             edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden] if not type(self._graph_data) is PosixPath else "hidden",
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden] if not type(self._graph_data) is PosixPath else "hidden",
+            src_size=(
+                self.node_attributes.num_nodes[self._graph_name_hidden]
+                if type(self._graph_data) is not PosixPath
+                else "hidden"
+            ),
+            dst_size=(
+                self.node_attributes.num_nodes[self._graph_name_hidden]
+                if type(self._graph_data) is not PosixPath
+                else "hidden"
+            ),
             trainable_size=model_config.model.processor.get("trainable_size", 0),
             dataset_name=self.dataset_names[0] if type(self._graph_data) is PosixPath else None,
         )
@@ -81,10 +103,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)] if not type(self._graph_data) is PosixPath else self._graph_data,
+                graph=(
+                    self._graph_data[(self._graph_name_hidden, "to", dataset_name)]
+                    if type(self._graph_data) is not PosixPath
+                    else self._graph_data
+                ),
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[self._graph_name_hidden] if not type(self._graph_data) is PosixPath else "hidden",
-                dst_size=self.node_attributes.num_nodes[dataset_name] if not type(self._graph_data) is PosixPath else "data",
+                src_size=(
+                    self.node_attributes.num_nodes[self._graph_name_hidden]
+                    if type(self._graph_data) is not PosixPath
+                    else "hidden"
+                ),
+                dst_size=(
+                    self.node_attributes.num_nodes[dataset_name] if type(self._graph_data) is not PosixPath else "data"
+                ),
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
                 dataset_name=dataset_name if type(self._graph_data) is PosixPath else None,
             )

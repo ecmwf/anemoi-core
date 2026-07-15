@@ -10,10 +10,10 @@
 
 import logging
 from abc import abstractmethod
+from pathlib import PosixPath
 from typing import Optional
 
 import torch
-from pathlib import PosixPath
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import ListConfig
@@ -158,7 +158,7 @@ class BaseGraphModel(nn.Module):
         )
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        pass # reference to the graph should be removed
+        pass  # reference to the graph should be removed
         # for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
         #     assert (
         #         hidden_name in self._graph_data.node_types
@@ -282,8 +282,12 @@ class BaseGraphModel(nn.Module):
                 # I think my graphs have an old definition where the dataset name is not the same
                 node_attributes_graph[dataset_name].x = self._graph_data_dict[dataset_name]["data"].x
                 node_attributes_graph[dataset_name].num_nodes = len(self._graph_data_dict[dataset_name]["data"].x)
-                node_attributes_graph[self._graph_name_hidden].x = self._graph_data_dict[dataset_name][self._graph_name_hidden].x
-                node_attributes_graph[self._graph_name_hidden].num_nodes = len(self._graph_data_dict[dataset_name][self._graph_name_hidden].x)
+                node_attributes_graph[self._graph_name_hidden].x = self._graph_data_dict[dataset_name][
+                    self._graph_name_hidden
+                ].x
+                node_attributes_graph[self._graph_name_hidden].num_nodes = len(
+                    self._graph_data_dict[dataset_name][self._graph_name_hidden].x
+                )
 
         else:
             for dataset_name in self.dataset_names:

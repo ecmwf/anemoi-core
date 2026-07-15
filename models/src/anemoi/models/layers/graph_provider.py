@@ -73,7 +73,14 @@ def create_graph_provider(
     """
     if graph:
         if isinstance(graph, Path) and graph.is_dir():
-            return FileGraphProvider(graph_dir=graph, src_size=src_size, dst_size=dst_size, dataset_name=dataset_name, edge_attributes=edge_attributes, trainable_size=trainable_size)
+            return FileGraphProvider(
+                graph_dir=graph,
+                src_size=src_size,
+                dst_size=dst_size,
+                dataset_name=dataset_name,
+                edge_attributes=edge_attributes,
+                trainable_size=trainable_size,
+            )
         else:
             return StaticGraphProvider(
                 graph=graph,
@@ -796,7 +803,7 @@ class _GraphFileDataset(Dataset):
         self.paths: list[Path] = sorted(self.graph_dir.glob(f"*{extension}"))
         if not self.paths:
             raise RuntimeError(f"No {extension} files found in {self.graph_dir}")
-        
+
         self.paths = {path.parts[-1].split(".")[0]: path for path in self.paths}
         self.names = list(self.paths.keys())
 
@@ -908,8 +915,9 @@ class FileGraphProvider(BaseGraphProvider):
             self.src_size is not None or self.dst_size is not None
         ), "Graph must have at least one of src_size or dst_size attributes"
 
-        edge_attr_tensor = torch.cat([graph[(self.src_name, "to", self.dst_name)][attr] for attr in self.edge_attributes], axis=1)
-
+        edge_attr_tensor = torch.cat(
+            [graph[(self.src_name, "to", self.dst_name)][attr] for attr in self.edge_attributes], axis=1
+        )
 
         self._edge_dim = edge_attr_tensor.shape[1] + self.trainable_size
 
