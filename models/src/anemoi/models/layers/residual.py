@@ -302,27 +302,81 @@ class InterpolationConnection(BaseResidualConnection):
     :class:`TruncatedConnection` (a down-then-up projection on the same node set), this is
     a single cross-grid projection, so the output grid size differs from the input.
 
+    Graph-sourced weights are the primary path: the interpolation geometry is declared as
+    ordinary graph edges (e.g. ``[input, to, output]``), so the graph remains the single
+    source of truth and the projection weights travel with the checkpoint.
+    ``interpolation_file_path`` is the alternative source, for pre-computed projection
+    matrices supplied as an ``.npz`` file.
+
     Parameters
     ----------
-    interpolation_file_path : str
-        Path to the ``.npz`` file containing the source-grid -> target-grid interpolation matrix.
+    graph : HeteroData, optional
+        Graph containing the source -> target interpolation edges.
+    edges_name : tuple[str, str, str], optional
+        Pre-resolved ``(src, relation, dst)`` edge type for the interpolation edges.
+    edge_weight_attribute : str, optional
+        Edge attribute used as projection weights.
+    src_node_weight_attribute : str, optional
+        Source-node attribute used as additional projection weights.
     autocast : bool, default False
         Whether to use automatic mixed precision in the sparse projection.
     row_normalize : bool, default False
         Whether to row-normalize the interpolation weights.
+    interpolation_file_path : str, optional
+        Alternative to ``edges_name``: path to the ``.npz`` file containing the
+        source-grid -> target-grid interpolation matrix.
+
+    Examples
+    --------
+    >>> # Graph-based path (edge name supplied by ProjectionCreator)
+    >>> conn = InterpolationConnection(
+    ...     graph=graph,
+    ...     edges_name=("input", "to", "output"),
+    ...     edge_weight_attribute="gauss_weight",
+    ... )
+    >>> x = torch.randn(2, 3, 1, 3, 4)  # (batch, time, ensemble, source grid, features)
+    >>> out = conn(x)
+    >>> print(out.shape)
+    torch.Size([2, 3, 1, 5, 4])
+
+    >>> # File-based path
+    >>> conn = InterpolationConnection(interpolation_file_path="source_to_target.npz")
+    >>> out = conn(x)
+    >>> print(out.shape)
+    torch.Size([2, 3, 1, 5, 4])
     """
 
     def __init__(
         self,
-        interpolation_file_path: str,
+        graph: Optional[HeteroData] = None,
+        edges_name: Optional[tuple[str, str, str]] = None,
+        edge_weight_attribute: Optional[str] = None,
+        src_node_weight_attribute: Optional[str] = None,
+        interpolation_file_path: Optional[str] = None,
         autocast: bool = False,
         row_normalize: bool = False,
         **_,
     ) -> None:
         super().__init__()
+
+        has_edges = edges_name is not None
+        has_file = interpolation_file_path is not None
+        if has_edges == has_file:
+            msg = (
+                "InterpolationConnection requires exactly one of 'edges_name' (graph-sourced) or "
+                "'interpolation_file_path' (file-sourced) to be provided, got "
+                f"edges_name={edges_name!r} and interpolation_file_path={interpolation_file_path!r}."
+            )
+            raise ValueError(msg)
+        if has_edges and graph is None:
+            msg = "InterpolationConnection requires 'graph' to be provided when 'edges_name' is given."
+            raise ValueError(msg)
+
         self.provider = ProjectionGraphProvider(
-            graph=None,
-            edges_name=None,
+            graph=graph,
+            edges_name=edges_name,
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=src_node_weight_attribute,
             file_path=interpolation_file_path,
             row_normalize=row_normalize,
         )

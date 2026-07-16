@@ -261,6 +261,71 @@ def test_interpolation_connection_known_asymmetric_values(asymmetric_interpolati
     assert torch.allclose(out, expected)
 
 
+@pytest.fixture
+def asymmetric_interpolation_graph():
+    # Encodes the same 5x3 (target x source) matrix as `asymmetric_interpolation_file_path`,
+    # as graph edges instead of an .npz file:
+    #   target0 = 1*source0
+    #   target1 = 2*source1
+    #   target2 = 3*source2
+    #   target3 = 0.5*source0 + 0.5*source1
+    #   target4 = 4*source2
+    graph = HeteroData()
+    graph["source"].num_nodes = 3
+    graph["target"].num_nodes = 5
+    # PyG convention: edge_index[0] = source node idx, edge_index[1] = target node idx.
+    graph["source", "to", "target"].edge_index = torch.tensor(
+        [
+            [0, 1, 2, 0, 1, 2],
+            [0, 1, 2, 3, 3, 4],
+        ]
+    )
+    graph["source", "to", "target"].weight = torch.tensor([1.0, 2.0, 3.0, 0.5, 0.5, 4.0])
+    return graph
+
+
+def test_interpolation_connection_graph_matches_file(
+    asymmetric_interpolation_file_path, asymmetric_interpolation_graph
+):
+    """Graph-sourced and file-sourced constructions must produce identical projections."""
+    conn_file = InterpolationConnection(interpolation_file_path=asymmetric_interpolation_file_path)
+    conn_graph = InterpolationConnection(
+        graph=asymmetric_interpolation_graph,
+        edges_name=("source", "to", "target"),
+        edge_weight_attribute="weight",
+    )
+
+    x = torch.tensor(
+        [[[[[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]]]],  # (batch=1, time=1, ens=1, src_grid=3, feat=2)
+    )
+    out_file = conn_file(x)
+    out_graph = conn_graph(x)
+
+    assert out_file.shape == out_graph.shape == (1, 1, 1, 5, 2)
+    assert torch.allclose(out_file, out_graph)
+
+
+def test_interpolation_connection_requires_a_source():
+    with pytest.raises(ValueError, match="exactly one"):
+        InterpolationConnection()
+
+
+def test_interpolation_connection_rejects_both_sources(
+    asymmetric_interpolation_file_path, asymmetric_interpolation_graph
+):
+    with pytest.raises(ValueError, match="exactly one"):
+        InterpolationConnection(
+            graph=asymmetric_interpolation_graph,
+            edges_name=("source", "to", "target"),
+            interpolation_file_path=asymmetric_interpolation_file_path,
+        )
+
+
+def test_interpolation_connection_edges_name_requires_graph():
+    with pytest.raises(ValueError, match="graph"):
+        InterpolationConnection(edges_name=("source", "to", "target"))
+
+
 # ── ScalarOrnsteinConnection tests ───────────────────────────────────────
 
 

@@ -80,3 +80,36 @@ def test_interpolation_connection_has_no_trajectory_step_field() -> None:
     )
 
     assert "step" not in schema.model_dump()
+
+
+def test_interpolation_connection_graph_sourced_valid() -> None:
+    schema = InterpolationConnectionSchema(
+        **{
+            "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+            "edges_name": ("source", "to", "target"),
+            "edge_weight_attribute": "gauss_weight",
+        }
+    )
+
+    assert schema.interpolation_file_path is None
+    assert schema.edges_name == ("source", "to", "target")
+
+
+def test_interpolation_connection_rejects_both_sources() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        InterpolationConnectionSchema(
+            **{
+                "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+                "interpolation_file_path": "source-to-target.npz",
+                "edges_name": ("source", "to", "target"),
+            }
+        )
+
+
+def test_interpolation_connection_rejects_neither_source() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        InterpolationConnectionSchema(
+            **{
+                "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+            }
+        )
