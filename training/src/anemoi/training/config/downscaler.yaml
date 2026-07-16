@@ -10,9 +10,64 @@ defaults:
 - _self_
 
 
+data:
+  resolution: o96
+
+# The composed data/dataloader/graph configs (data: multi) reference these keys.
+system:
+  input:
+    graph: graph_anemoi_new_${data.resolution}.pt
+
+    # Source (coarse) dataset
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8
+
+    # Target (fine) dataset (using same file as a placeholder)
+    dataset_b: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8
+
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
+
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+
+# Dataset roles must match the dataset names of the composed data/dataloader/graph
+# configs (data: multi uses "era5" and "cerra"). The source dataset (era5) conditions
+# the target dataset (cerra), which is the only predicted output.
+task:
+  input_datasets: [era5, cerra]
+  output_datasets: [cerra]
+
 diagnostics:
   callbacks: []
   plot:
     callbacks: []
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
 
 config_validation: True
+
+# Required overrides for an actual run (no usable defaults exist):
+# model:
+#   model:
+#     residual_prediction:
+#       cerra: era5
+#   residual:
+#     _target_: anemoi.models.layers.residual.InterpolationConnection
+#     interpolation_file_path: /path/to/era5-to-cerra.npz
+# system:
+#   input:
+#     statistics_residuals:
+#       cerra: /path/to/residual_statistics.json
+#
+# Only predicted (output) datasets may carry a training_loss entry; restrict the
+# inherited multi-dataset loss config to the residual target, e.g. in code or via
+# an override file:
+# training:
+#   training_loss:
+#     datasets:
+#       cerra: {...}   # keep cerra only; era5 is input-only and produces no prediction

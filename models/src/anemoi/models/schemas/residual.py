@@ -150,6 +150,8 @@ class InterpolationConnectionSchema(BaseModel):
     """
 
     target_: Literal["anemoi.models.layers.residual.InterpolationConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
     interpolation_file_path: str = Field(
         ...,
         description="Path to the .npz interpolation matrix mapping the source grid onto the target grid.",

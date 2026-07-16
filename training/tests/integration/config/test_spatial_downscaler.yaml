@@ -1,0 +1,88 @@
+# Modifications for the spatial residual downscaler template "downscaler.yaml".
+#
+# era5 (o96, global) is the source dataset; cerra (5.5 km) is the residual target.
+# The cerra grid is cropped to a small area (N/W/S/E) so the smoke test stays cheap;
+# the graph and the interpolation matrix built by the test fixture use the same crop.
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset_b: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+
+dataloader:
+  num_workers:
+    training: 1
+    validation: 1
+  batch_size:
+    training: 1
+    validation: 1
+  limit_batches:
+    training: 1
+    validation: 1
+  training:
+    datasets:
+      era5:
+        end: 2017-01-08 12:00:00
+      cerra:
+        dataset_config:
+          area: [55.0, 0.0, 50.0, 8.0]
+        end: 2017-01-08 12:00:00
+  validation:
+    datasets:
+      era5:
+        start: 2017-01-08 18:00:00
+      cerra:
+        dataset_config:
+          area: [55.0, 0.0, 50.0, 8.0]
+        start: 2017-01-08 18:00:00
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 1
+
+data:
+  datasets:
+    cerra:
+      forcing:
+      - "cos_latitude"
+      - "cos_longitude"
+      - "sin_latitude"
+      - "sin_longitude"
+      - "cos_julian_day"
+      - "cos_local_time"
+      - "sin_julian_day"
+      - "sin_local_time"
+      - "cos_solar_zenith_angle"
+      diagnostic:
+      - "tp"
+
+      processors:
+        normalizer:
+          config:
+            default: "mean-std"
+            std:
+            - "tp"
+            min-max:
+            max:
+            none:
+            - "cos_latitude"
+            - "cos_longitude"
+            - "sin_latitude"
+            - "sin_longitude"
+            - "cos_julian_day"
+            - "cos_local_time"
+            - "sin_julian_day"
+            - "sin_local_time"
+
+model:
+  model:
+    residual_prediction:
+      cerra: era5
+    # cerra prognostic variables with no counterpart in the era5 source input
+    # are predicted directly in state space instead of as residuals.
+    direct_prediction:
+      cerra: [r_100, r_50, sf]
+
+diagnostics:
+  callbacks: []
+  plot:
+    callbacks: []

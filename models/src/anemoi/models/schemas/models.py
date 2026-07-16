@@ -382,6 +382,18 @@ class TransportTendModelSchema(TransportModelSchema):
     "Whether to condition the noise injection on the residual connection."
 
 
+class TransportResidualModel(TransportModel):
+    residual_prediction: dict[str, str] = Field(default_factory=dict)
+    "Residual spatial downscaling pairs: target dataset -> source dataset."
+    direct_prediction: dict[str, list[str]] = Field(default_factory=dict)
+    "Per-target prognostic variables predicted directly in state space (excluded from the residual)."
+
+
+class TransportResidualModelSchema(TransportModelSchema):
+    model: TransportResidualModel = Field(default_factory=TransportResidualModel)
+    "Transport residual (spatial downscaling) model schema."
+
+
 class HierarchicalModelSchema(BaseModelSchema):
     enable_hierarchical_level_processing: bool = Field(default=False)
     "Toggle to do message passing at every downscaling and upscaling step"
@@ -395,4 +407,5 @@ ModelSchema = Union[
     HierarchicalModelSchema,
     TransportModelSchema,
     TransportTendModelSchema,
+    TransportResidualModelSchema,
 ]
