@@ -22,8 +22,7 @@ def _task(input_offsets: list[int], output_offsets: list[int], **kwargs) -> Spat
 
 def _index_collection_for(names: tuple[str, ...]) -> dict[str, SimpleNamespace]:
     return {
-        name: SimpleNamespace(data=SimpleNamespace(input=SimpleNamespace(full=torch.tensor([0]))))
-        for name in names
+        name: SimpleNamespace(data=SimpleNamespace(input=SimpleNamespace(full=torch.tensor([0])))) for name in names
     }
 
 

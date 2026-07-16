@@ -47,7 +47,7 @@ class SpatialDownscaler(BaseTask):
         if missing:
             raise ValueError(
                 f"SpatialDownscaler output_offsets {missing} have no matching input_offsets; "
-                f"output_offsets must be a subset of input_offsets ({sorted(set(input_offsets))})."
+                f"output_offsets must be a subset of input_offsets ({sorted(set(input_offsets))}).",
             )
 
         self._integer_input_offsets: list[int] = sorted(input_offsets)
