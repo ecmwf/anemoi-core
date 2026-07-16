@@ -8,10 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+
 from omegaconf import DictConfig
 
 LOGGER = logging.getLogger(__name__)
-
 
 
 def _as_dict(value: str | dict | DictConfig) -> str | dict:

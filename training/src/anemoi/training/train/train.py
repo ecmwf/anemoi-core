@@ -40,20 +40,18 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
-from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.configs import get_missing_graph_config
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
-from anemoi.training.utils.configs import get_missing_graph_config
 
 LOGGER = logging.getLogger(__name__)
 
 PL_VERSION = version.parse(pl.__version__)
-
 
 
 class AnemoiTrainer(ABC):
@@ -186,21 +184,20 @@ class AnemoiTrainer(ABC):
             raise FileNotFoundError(msg)
 
         graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
-        if overwrite: 
+        if overwrite:
             # Don't load anything. Create the full graph from scratch.
             return GraphCreator(graph_config).create(save_path=save_path, overwrite=True)
 
-        else: 
-            # not overwrite. Load the graph and create any missing nodes/edges from the config
-            graph = load_graph_from_file(save_path)
+        # not overwrite. Load the graph and create any missing nodes/edges from the config
+        graph = load_graph_from_file(save_path)
 
-            missing_graph_config = get_missing_graph_config(graph_config, graph.node_types, graph.edge_types)
+        missing_graph_config = get_missing_graph_config(graph_config, graph.node_types, graph.edge_types)
 
-            graph_creator = GraphCreator(missing_graph_config)
-            graph = graph_creator.update_graph(graph)
-            graph = graph_creator.clean(graph)
-            graph = graph_creator.post_process(graph)
-            return graph
+        graph_creator = GraphCreator(missing_graph_config)
+        graph = graph_creator.update_graph(graph)
+        graph = graph_creator.clean(graph)
+        graph = graph_creator.post_process(graph)
+        return graph
 
     def _validate_transfer_learning_datasets(
         self,

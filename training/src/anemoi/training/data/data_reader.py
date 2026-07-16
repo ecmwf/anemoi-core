@@ -19,10 +19,10 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
-from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.configs import _as_dict
 from anemoi.training.utils.configs import _normalize_dataset_config
 from anemoi.training.utils.configs import _normalize_reader_config
+from anemoi.training.utils.time_indices import TimeIndices
 
 LOGGER = logging.getLogger(__name__)
 
