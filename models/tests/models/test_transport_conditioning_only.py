@@ -30,14 +30,16 @@ real graph and real graph-transformer encoders/decoders/processor, with two data
 Design note verified here: an input-only dataset still carries a non-empty ``model.output``
 (``aux``'s prognostic ``u, v``), so conditioning-only cannot be inferred from ``data_indices`` — it
 must be declared explicitly. That is exactly why the config list is the source of truth.
+
+Construction boilerplate (graph, layer kernels, model_config skeleton, index collections,
+statistics) is shared with ``test_transport_residual_forward.py`` via the factory fixtures in
+``conftest.py``; only the ``build_model`` fixture below is specific to this module's two-dataset
+(``aux``, ``output``) shape.
 """
 
 import pytest
 import torch
-from omegaconf import DictConfig
-from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 
 # ── grid sizes ────────────────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ NOISE_COND_DIM = 4
 N_STEP_INPUT = 2
 N_STEP_OUTPUT = 1
 
-# ── index collections ─────────────────────────────────────────────────────────
+# ── variable roles ─────────────────────────────────────────────────────────────
 # aux "conditioning-only": u(0) v(1) sforce(2), forcing=[sforce] -> prognostic=[u, v]
 #   model.input = [u, v, sforce] (3), model.output = [u, v] (2) -> NON-EMPTY output even though
 #   this dataset is only ever an input. This is what makes explicit config necessary.
@@ -61,166 +63,51 @@ _AUX_NAME_TO_INDEX = {"u": 0, "v": 1, "sforce": 2}
 _OUTPUT_NAME_TO_INDEX = {"u": 0, "v": 1, "force": 2}
 
 
-def _aux_indices() -> IndexCollection:
-    cfg = DictConfig({"forcing": ["sforce"], "diagnostic": [], "target": []})
-    return IndexCollection(cfg, dict(_AUX_NAME_TO_INDEX))
+@pytest.fixture
+def build_model(index_collection_factory, statistics_factory, tiny_graph_factory, transport_model_config_factory):
+    """Build a real two-dataset (``aux``, ``output``) :class:`AnemoiTransportModelEncProcDec`."""
 
-
-def _output_indices() -> IndexCollection:
-    cfg = DictConfig({"forcing": ["force"], "diagnostic": [], "target": []})
-    return IndexCollection(cfg, dict(_OUTPUT_NAME_TO_INDEX))
-
-
-def _stats(n: int) -> dict:
-    import numpy as np
-
-    return {
-        "mean": np.zeros(n, dtype=np.float32),
-        "stdev": np.ones(n, dtype=np.float32),
-        "minimum": np.zeros(n, dtype=np.float32),
-        "maximum": np.ones(n, dtype=np.float32),
-    }
-
-
-def _coords(n: int, offset: float) -> torch.Tensor:
-    lats = torch.linspace(-1.0, 1.0, n) + offset
-    lons = torch.linspace(0.0, 2.0, n) - offset
-    return torch.stack((lats, lons), dim=-1).float()
-
-
-def _dense_bipartite_edges(n_src: int, n_dst: int) -> torch.Tensor:
-    src = torch.arange(n_src).repeat_interleave(n_dst)
-    dst = torch.arange(n_dst).repeat(n_src)
-    return torch.stack((src, dst), dim=0)
-
-
-def _graph() -> HeteroData:
-    graph = HeteroData()
-    for name, n, offset in (("aux", N_AUX, 0.0), ("output", N_OUTPUT, 0.1), ("hidden", N_HIDDEN, 0.2)):
-        graph[name].x = _coords(n, offset)
-        graph[name].num_nodes = n
-
-    sizes = {"aux": N_AUX, "output": N_OUTPUT, "hidden": N_HIDDEN}
-    # aux has NO hidden->aux decoder edges on purpose: conditioning-only datasets are never decoded.
-    pairs = [
-        ("aux", "hidden"),
-        ("output", "hidden"),
-        ("hidden", "output"),
-        ("hidden", "hidden"),
-    ]
-    generator = torch.Generator().manual_seed(7)
-    for src, dst in pairs:
-        edge_index = _dense_bipartite_edges(sizes[src], sizes[dst])
-        store = graph[(src, "to", dst)]
-        store.edge_index = edge_index
-        store.edge_length = torch.rand((edge_index.shape[1], 1), generator=generator)
-    return graph
-
-
-def _layer_kernels() -> dict:
-    return {
-        "LayerNorm": {
-            "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
-            "normalized_shape": NUM_CHANNELS,
-            "condition_shape": NOISE_COND_DIM,
-            "zero_init": True,
-            "autocast": False,
-        },
-        "Linear": {"_target_": "torch.nn.Linear"},
-        "Activation": {"_target_": "torch.nn.GELU"},
-        "QueryNorm": {"_target_": "anemoi.models.layers.normalization.AutocastLayerNorm", "bias": False},
-        "KeyNorm": {"_target_": "anemoi.models.layers.normalization.AutocastLayerNorm", "bias": False},
-    }
-
-
-def _model_config(conditioning_only_datasets: list[str], history_less_datasets: list[str] | None = None) -> DictConfig:
-    layer_kernels = _layer_kernels()
-    mapper_common = {
-        "trainable_size": 0,
-        "sub_graph_edge_attributes": ["edge_length"],
-        "num_chunks": 1,
-        "mlp_hidden_ratio": 2,
-        "mlp_implementation": "mlp",
-        "num_heads": 4,
-        "qk_norm": True,
-        "cpu_offload": False,
-        "gradient_checkpointing": False,
-        "layer_kernels": layer_kernels,
-        "shard_strategy": "edges",
-        "graph_attention_backend": "pyg",
-    }
-    return DictConfig(
-        {
-            "model": {
-                "num_channels": NUM_CHANNELS,
-                "cpu_offload": False,
-                "keep_batch_sharded": False,
-                "model": {
-                    "hidden_nodes_name": "hidden",
-                    "latent_skip": True,
-                    "conditioning_only_datasets": list(conditioning_only_datasets),
-                    "history_less_datasets": list(history_less_datasets or []),
-                    "transport": {
-                        "objective": "edm_diffusion",
-                        "sigma_data": 1.0,
-                        "noise_channels": NOISE_CHANNELS,
-                        "noise_cond_dim": NOISE_COND_DIM,
-                        "noise_embedder": {
-                            "_target_": "anemoi.models.layers.diffusion.SinusoidalEmbeddings",
-                            "num_channels": NOISE_CHANNELS,
-                            "max_period": 1000,
-                        },
-                    },
-                },
-                "layer_kernels": layer_kernels,
-                "encoder": {
-                    "_target_": "anemoi.models.layers.mapper.GraphTransformerForwardMapper",
-                    **mapper_common,
-                },
-                "decoder": {
-                    "_target_": "anemoi.models.layers.mapper.GraphTransformerBackwardMapper",
-                    "initialise_data_extractor_zero": False,
-                    **mapper_common,
-                },
-                "processor": {
-                    "_target_": "anemoi.models.layers.processor.GraphTransformerProcessor",
-                    "num_layers": 1,
-                    **mapper_common,
-                },
-                "residual": {"_target_": "anemoi.models.layers.residual.SkipConnection"},
-                "trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                    "data2hidden": 0,
-                    "hidden2data": 0,
-                    "hidden2hidden": 0,
-                },
-                "attributes": {"edges": ["edge_length"], "nodes": []},
-                "bounding": [],
+    def _build(
+        conditioning_only_datasets: list[str],
+        history_less_datasets: list[str] | None = None,
+    ) -> AnemoiTransportModelEncProcDec:
+        data_indices = {
+            "aux": index_collection_factory(_AUX_NAME_TO_INDEX, forcing=["sforce"]),
+            "output": index_collection_factory(_OUTPUT_NAME_TO_INDEX, forcing=["force"]),
+        }
+        statistics = {
+            "aux": statistics_factory(len(_AUX_NAME_TO_INDEX)),
+            "output": statistics_factory(len(_OUTPUT_NAME_TO_INDEX)),
+        }
+        # aux has NO hidden->aux decoder edges on purpose: conditioning-only datasets are never decoded.
+        graph = tiny_graph_factory(
+            {"aux": N_AUX, "output": N_OUTPUT, "hidden": N_HIDDEN},
+            [("aux", "hidden"), ("output", "hidden"), ("hidden", "output"), ("hidden", "hidden")],
+        )
+        model_config = transport_model_config_factory(
+            num_channels=NUM_CHANNELS,
+            noise_channels=NOISE_CHANNELS,
+            noise_cond_dim=NOISE_COND_DIM,
+            model_extra={
+                "conditioning_only_datasets": list(conditioning_only_datasets),
+                "history_less_datasets": list(history_less_datasets or []),
             },
-        },
-    )
+        )
+        return AnemoiTransportModelEncProcDec(
+            model_config=model_config,
+            data_indices=data_indices,
+            statistics=statistics,
+            n_step_input=N_STEP_INPUT,
+            n_step_output=N_STEP_OUTPUT,
+            graph_data=graph,
+        )
 
-
-def _build_model(
-    conditioning_only_datasets: list[str],
-    history_less_datasets: list[str] | None = None,
-) -> AnemoiTransportModelEncProcDec:
-    data_indices = {"aux": _aux_indices(), "output": _output_indices()}
-    statistics = {"aux": _stats(len(_AUX_NAME_TO_INDEX)), "output": _stats(len(_OUTPUT_NAME_TO_INDEX))}
-    return AnemoiTransportModelEncProcDec(
-        model_config=_model_config(conditioning_only_datasets, history_less_datasets),
-        data_indices=data_indices,
-        statistics=statistics,
-        n_step_input=N_STEP_INPUT,
-        n_step_output=N_STEP_OUTPUT,
-        graph_data=_graph(),
-    )
+    return _build
 
 
 @pytest.fixture
-def model() -> AnemoiTransportModelEncProcDec:
-    return _build_model(["aux"])
+def model(build_model) -> AnemoiTransportModelEncProcDec:
+    return build_model(["aux"])
 
 
 def _expected_input_dim(model: AnemoiTransportModelEncProcDec, dataset: str, conditioning_only: bool) -> int:
@@ -269,11 +156,11 @@ def test_construction_decoder_membership_and_input_dims(model: AnemoiTransportMo
     assert model.encoder["output"].in_channels_src == expected_output
 
 
-def _forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
+def _forward_inputs(model: AnemoiTransportModelEncProcDec, batch_size: int = 2) -> tuple[dict, dict, dict]:
     generator = torch.Generator().manual_seed(11)
-    n_in_aux = len(_aux_indices().model.input)  # 3
-    n_in_output = len(_output_indices().model.input)  # 3
-    n_out_output = len(_output_indices().model.output)  # 2
+    n_in_aux = len(model.data_indices["aux"].model.input)  # 3
+    n_in_output = len(model.data_indices["output"].model.input)  # 3
+    n_out_output = len(model.data_indices["output"].model.output)  # 2
     x = {
         "aux": torch.randn(batch_size, N_STEP_INPUT, 1, N_AUX, n_in_aux, generator=generator),
         "output": torch.randn(batch_size, N_STEP_INPUT, 1, N_OUTPUT, n_in_output, generator=generator),
@@ -288,7 +175,7 @@ def _forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
 
 # ── test 2: full forward returns only the decoded dataset ──────────────────────
 def test_forward_returns_only_predicted_dataset(model: AnemoiTransportModelEncProcDec) -> None:
-    x, conditioned_target, condition = _forward_inputs()
+    x, conditioned_target, condition = _forward_inputs(model)
     n_out_output = len(model.data_indices["output"].model.output)
 
     out = model.forward(x, conditioned_target, condition)
@@ -300,7 +187,7 @@ def test_forward_returns_only_predicted_dataset(model: AnemoiTransportModelEncPr
 
 # ── test 3: a predicted dataset missing its conditioned target still raises loudly ──
 def test_missing_conditioned_target_for_predicted_dataset_raises(model: AnemoiTransportModelEncProcDec) -> None:
-    x, _, condition = _forward_inputs()
+    x, _, condition = _forward_inputs(model)
 
     # "output" is NOT conditioning-only, so a missing corrupted target must raise (loud contract).
     with pytest.raises(AssertionError, match="not conditioning-only"):
@@ -308,9 +195,9 @@ def test_missing_conditioned_target_for_predicted_dataset_raises(model: AnemoiTr
 
 
 # ── test 4: an unknown conditioning-only name raises at construction ───────────
-def test_unknown_conditioning_only_dataset_raises_at_construction() -> None:
+def test_unknown_conditioning_only_dataset_raises_at_construction(build_model) -> None:
     with pytest.raises(ValueError, match="conditioning_only_datasets references unknown datasets"):
-        _build_model(["ghost"])
+        build_model(["ghost"])
 
 
 # ── asymmetric roles: history-less predicted datasets (the dual of conditioning-only) ──
@@ -320,14 +207,14 @@ def test_unknown_conditioning_only_dataset_raises_at_construction() -> None:
 
 
 @pytest.fixture
-def asymmetric_model() -> AnemoiTransportModelEncProcDec:
-    return _build_model(["aux"], ["output"])
+def asymmetric_model(build_model) -> AnemoiTransportModelEncProcDec:
+    return build_model(["aux"], ["output"])
 
 
-def _asymmetric_forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
+def _asymmetric_forward_inputs(model: AnemoiTransportModelEncProcDec, batch_size: int = 2) -> tuple[dict, dict, dict]:
     generator = torch.Generator().manual_seed(11)
-    n_in_aux = len(_aux_indices().model.input)  # 3
-    n_out_output = len(_output_indices().model.output)  # 2
+    n_in_aux = len(model.data_indices["aux"].model.input)  # 3
+    n_out_output = len(model.data_indices["output"].model.output)  # 2
     # Honest shape: x carries ONLY the conditioning-only source; the history-less target is absent.
     x = {"aux": torch.randn(batch_size, N_STEP_INPUT, 1, N_AUX, n_in_aux, generator=generator)}
     conditioned_target = {
@@ -367,7 +254,7 @@ def test_history_less_construction_membership_and_input_dims(asymmetric_model) -
 
 def test_history_less_forward_returns_only_predicted_dataset(asymmetric_model) -> None:
     model = asymmetric_model
-    x, conditioned_target, condition = _asymmetric_forward_inputs()
+    x, conditioned_target, condition = _asymmetric_forward_inputs(model)
     n_out_output = len(model.data_indices["output"].model.output)
 
     out = model.forward(x, conditioned_target, condition)
@@ -380,7 +267,7 @@ def test_history_less_forward_returns_only_predicted_dataset(asymmetric_model) -
 
 def test_history_less_declared_but_present_in_x_raises(asymmetric_model) -> None:
     model = asymmetric_model
-    x, conditioned_target, condition = _asymmetric_forward_inputs()
+    x, conditioned_target, condition = _asymmetric_forward_inputs(model)
     # Put the declared-history-less target back into x: a config contract violation.
     n_in_output = len(model.data_indices["output"].model.input)
     x = {**x, "output": torch.randn(2, N_STEP_INPUT, 1, N_OUTPUT, n_in_output)}
@@ -388,20 +275,20 @@ def test_history_less_declared_but_present_in_x_raises(asymmetric_model) -> None
         model._forward_transport_network(x, conditioned_target, condition)
 
 
-def test_history_less_present_but_undeclared_raises() -> None:
+def test_history_less_present_but_undeclared_raises(build_model) -> None:
     # Build with output NOT declared history-less (so it is sized as an ordinary predicted dataset),
     # then run the honest x = {aux}-only forward: the derived history-less role has no declaration.
-    model = _build_model(["aux"], history_less_datasets=[])
-    x, conditioned_target, condition = _asymmetric_forward_inputs()
+    model = build_model(["aux"], history_less_datasets=[])
+    x, conditioned_target, condition = _asymmetric_forward_inputs(model)
     with pytest.raises(ValueError, match="history_less_datasets"):
         model._forward_transport_network(x, conditioned_target, condition)
 
 
-def test_unknown_history_less_dataset_raises_at_construction() -> None:
+def test_unknown_history_less_dataset_raises_at_construction(build_model) -> None:
     with pytest.raises(ValueError, match="history_less_datasets references unknown datasets"):
-        _build_model(["aux"], ["ghost"])
+        build_model(["aux"], ["ghost"])
 
 
-def test_dataset_cannot_be_both_conditioning_only_and_history_less() -> None:
+def test_dataset_cannot_be_both_conditioning_only_and_history_less(build_model) -> None:
     with pytest.raises(ValueError, match="cannot be both conditioning-only and history-less"):
-        _build_model(["aux"], ["aux"])
+        build_model(["aux"], ["aux"])

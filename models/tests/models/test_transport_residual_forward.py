@@ -26,16 +26,18 @@ real ``InterpolationConnection`` loaded from an ``.npz`` file. This validates th
 
 The residual subclass no longer builds any conditioning itself; the ``InterpolationConnection`` is
 consumed only in ``_after_sampling`` for the residual reconstruction.
+
+Construction boilerplate (graph, layer kernels, model_config skeleton, index collections,
+statistics) is shared with ``test_transport_conditioning_only.py`` via the factory fixtures in
+``conftest.py``; only the ``real_model`` fixture below is specific to this module's source/target
+residual shape.
 """
 
 import numpy as np
 import pytest
-import scipy.sparse
 import torch
 from omegaconf import DictConfig
-from torch_geometric.data import HeteroData
 
-from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.residual import InterpolationConnection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportResidualModelEncProcDec
 from anemoi.models.preprocessing import Processors
@@ -52,7 +54,7 @@ NOISE_COND_DIM = 4
 N_STEP_INPUT = 2
 N_STEP_OUTPUT = 1
 
-# ── index collections (mirrors test_transport_residual_model.py) ─────────────
+# ── variable roles (mirrors test_transport_residual_model.py) ────────────────
 # target "output": global order u(0) tgt(1) v(2) dp(3) diag(4) force(5)
 #   forcing=[force], diagnostic=[diag], target=[tgt] -> prognostic=[u, v, dp]
 #   residual channels = prognostic minus direct(dp) = [u, v]; model.output=[u, v, dp, diag]
@@ -66,27 +68,15 @@ _TARGET_RESIDUAL_STDEV = [10.0, 1.0, 20.0, 1.0, 1.0, 1.0]  # only u, v matter
 _SOURCE_STATE_STDEV = [3.0, 6.0, 1.5]  # u v sforce
 
 
-def _target_indices() -> IndexCollection:
-    cfg = DictConfig({"forcing": ["force"], "diagnostic": ["diag"], "target": ["tgt"]})
-    return IndexCollection(cfg, dict(_TARGET_NAME_TO_INDEX))
+def _target_indices(index_collection_factory):
+    return index_collection_factory(_TARGET_NAME_TO_INDEX, forcing=["force"], diagnostic=["diag"], target=["tgt"])
 
 
-def _source_indices() -> IndexCollection:
-    cfg = DictConfig({"forcing": ["sforce"], "diagnostic": [], "target": []})
-    return IndexCollection(cfg, dict(_SOURCE_NAME_TO_INDEX))
+def _source_indices(index_collection_factory):
+    return index_collection_factory(_SOURCE_NAME_TO_INDEX, forcing=["sforce"])
 
 
-def _norm_stats(stdev: list[float]) -> dict:
-    n = len(stdev)
-    return {
-        "mean": np.zeros(n, dtype=np.float32),
-        "stdev": np.asarray(stdev, dtype=np.float32),
-        "minimum": np.zeros(n, dtype=np.float32),
-        "maximum": np.ones(n, dtype=np.float32),
-    }
-
-
-def _processor_pair(indices: IndexCollection, stats: dict) -> tuple[Processors, Processors]:
+def _processor_pair(indices, stats: dict) -> tuple[Processors, Processors]:
     cfg = DictConfig({"default": "mean-std"})
     pre = Processors([["normalizer", InputNormalizer(cfg, indices, {k: v.copy() for k, v in stats.items()})]])
     post = Processors(
@@ -111,163 +101,54 @@ def _interpolation_matrix() -> np.ndarray:
 
 
 @pytest.fixture
-def interpolation_npz(tmp_path) -> tuple[str, np.ndarray]:
+def real_model(
+    index_collection_factory,
+    statistics_factory,
+    tiny_graph_factory,
+    transport_model_config_factory,
+    interpolation_npz_factory,
+) -> tuple[AnemoiTransportResidualModelEncProcDec, np.ndarray]:
     matrix = _interpolation_matrix()
-    path = tmp_path / "source_to_target.npz"
-    scipy.sparse.save_npz(path, scipy.sparse.csr_matrix(matrix))
-    return str(path), matrix
+    interpolation_file_path = interpolation_npz_factory(matrix)
 
-
-def _coords(n: int, offset: float) -> torch.Tensor:
-    lats = torch.linspace(-1.0, 1.0, n) + offset
-    lons = torch.linspace(0.0, 2.0, n) - offset
-    return torch.stack((lats, lons), dim=-1).float()
-
-
-def _dense_bipartite_edges(n_src: int, n_dst: int) -> torch.Tensor:
-    src = torch.arange(n_src).repeat_interleave(n_dst)
-    dst = torch.arange(n_dst).repeat(n_src)
-    return torch.stack((src, dst), dim=0)
-
-
-def _graph() -> HeteroData:
-    graph = HeteroData()
-    for name, n, offset in (("input", N_SOURCE, 0.0), ("output", N_TARGET, 0.1), ("hidden", N_HIDDEN, 0.2)):
-        graph[name].x = _coords(n, offset)
-        graph[name].num_nodes = n
-
-    sizes = {"input": N_SOURCE, "output": N_TARGET, "hidden": N_HIDDEN}
-    pairs = [
-        ("input", "hidden"),
-        ("output", "hidden"),
-        ("hidden", "input"),
-        ("hidden", "output"),
-        ("hidden", "hidden"),
-    ]
-    generator = torch.Generator().manual_seed(7)
-    for src, dst in pairs:
-        edge_index = _dense_bipartite_edges(sizes[src], sizes[dst])
-        store = graph[(src, "to", dst)]
-        store.edge_index = edge_index
-        store.edge_length = torch.rand((edge_index.shape[1], 1), generator=generator)
-    return graph
-
-
-def _layer_kernels() -> dict:
-    return {
-        "LayerNorm": {
-            "_target_": "anemoi.models.layers.normalization.ConditionalLayerNorm",
-            "normalized_shape": NUM_CHANNELS,
-            "condition_shape": NOISE_COND_DIM,
-            "zero_init": True,
-            "autocast": False,
-        },
-        "Linear": {"_target_": "torch.nn.Linear"},
-        "Activation": {"_target_": "torch.nn.GELU"},
-        "QueryNorm": {
-            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
-            "bias": False,
-        },
-        "KeyNorm": {
-            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
-            "bias": False,
-        },
+    data_indices = {
+        "input": _source_indices(index_collection_factory),
+        "output": _target_indices(index_collection_factory),
     }
-
-
-def _model_config(interpolation_file_path: str) -> DictConfig:
-    layer_kernels = _layer_kernels()
-    mapper_common = {
-        "trainable_size": 0,
-        "sub_graph_edge_attributes": ["edge_length"],
-        "num_chunks": 1,
-        "mlp_hidden_ratio": 2,
-        "mlp_implementation": "mlp",
-        "num_heads": 4,
-        "qk_norm": True,
-        "cpu_offload": False,
-        "gradient_checkpointing": False,
-        "layer_kernels": layer_kernels,
-        "shard_strategy": "edges",
-        "graph_attention_backend": "pyg",
+    statistics = {
+        "input": statistics_factory(_SOURCE_STATE_STDEV),
+        "output": statistics_factory(_TARGET_STATE_STDEV),
     }
-    return DictConfig(
-        {
-            "model": {
-                "num_channels": NUM_CHANNELS,
-                "cpu_offload": False,
-                "keep_batch_sharded": False,
-                "model": {
-                    "hidden_nodes_name": "hidden",
-                    "latent_skip": True,
-                    "residual_prediction": {"output": "input"},
-                    "direct_prediction": {"output": ["dp"]},
-                    # The source is encoded on its native grid by the base transport forward and
-                    # never decoded (multi-encoder conditioning).
-                    "conditioning_only_datasets": ["input"],
-                    # The target is predicted but never a model input: it supplies no input history,
-                    # so its encoder input is the noised target plus node attributes only.
-                    "history_less_datasets": ["output"],
-                    "transport": {
-                        "objective": "edm_diffusion",
-                        "sigma_data": 1.0,
-                        "noise_channels": NOISE_CHANNELS,
-                        "noise_cond_dim": NOISE_COND_DIM,
-                        "noise_embedder": {
-                            "_target_": "anemoi.models.layers.diffusion.SinusoidalEmbeddings",
-                            "num_channels": NOISE_CHANNELS,
-                            "max_period": 1000,
-                        },
-                    },
-                },
-                "layer_kernels": layer_kernels,
-                "encoder": {
-                    "_target_": "anemoi.models.layers.mapper.GraphTransformerForwardMapper",
-                    **mapper_common,
-                },
-                "decoder": {
-                    "_target_": "anemoi.models.layers.mapper.GraphTransformerBackwardMapper",
-                    "initialise_data_extractor_zero": False,
-                    **mapper_common,
-                },
-                "processor": {
-                    "_target_": "anemoi.models.layers.processor.GraphTransformerProcessor",
-                    "num_layers": 1,
-                    **mapper_common,
-                },
-                "residual": {
-                    "_target_": "anemoi.models.layers.residual.InterpolationConnection",
-                    "interpolation_file_path": interpolation_file_path,
-                },
-                "trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                    "data2hidden": 0,
-                    "hidden2data": 0,
-                    "hidden2hidden": 0,
-                },
-                "attributes": {"edges": ["edge_length"], "nodes": []},
-                "bounding": [],
-            },
+    graph = tiny_graph_factory(
+        {"input": N_SOURCE, "output": N_TARGET, "hidden": N_HIDDEN},
+        [("input", "hidden"), ("output", "hidden"), ("hidden", "input"), ("hidden", "output"), ("hidden", "hidden")],
+    )
+    model_config = transport_model_config_factory(
+        num_channels=NUM_CHANNELS,
+        noise_channels=NOISE_CHANNELS,
+        noise_cond_dim=NOISE_COND_DIM,
+        model_extra={
+            "residual_prediction": {"output": "input"},
+            "direct_prediction": {"output": ["dp"]},
+            # The source is encoded on its native grid by the base transport forward and never
+            # decoded (multi-encoder conditioning).
+            "conditioning_only_datasets": ["input"],
+            # The target is predicted but never a model input: it supplies no input history, so its
+            # encoder input is the noised target plus node attributes only.
+            "history_less_datasets": ["output"],
+        },
+        residual={
+            "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+            "interpolation_file_path": interpolation_file_path,
         },
     )
-
-
-@pytest.fixture
-def real_model(interpolation_npz) -> tuple[AnemoiTransportResidualModelEncProcDec, np.ndarray]:
-    interpolation_file_path, matrix = interpolation_npz
-    data_indices = {"input": _source_indices(), "output": _target_indices()}
-    statistics = {
-        "input": _norm_stats(_SOURCE_STATE_STDEV),
-        "output": _norm_stats(_TARGET_STATE_STDEV),
-    }
     model = AnemoiTransportResidualModelEncProcDec(
-        model_config=_model_config(interpolation_file_path),
+        model_config=model_config,
         data_indices=data_indices,
         statistics=statistics,
         n_step_input=N_STEP_INPUT,
         n_step_output=N_STEP_OUTPUT,
-        graph_data=_graph(),
+        graph_data=graph,
     )
     return model, matrix
 
@@ -303,10 +184,10 @@ def test_real_instantiation_encoder_input_dims_follow_base_rules(real_model) -> 
     assert model.encoder["output"].in_channels_src == expected_target
 
 
-def _forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
+def _forward_inputs(model: AnemoiTransportResidualModelEncProcDec, batch_size: int = 2) -> tuple[dict, dict, dict]:
     generator = torch.Generator().manual_seed(11)
-    n_in_source = len(_source_indices().model.input)  # u, v, sforce -> 3
-    n_out_target = len(_target_indices().model.output)  # u, v, dp, diag -> 4
+    n_in_source = len(model.data_indices["input"].model.input)  # u, v, sforce -> 3
+    n_out_target = len(model.data_indices["output"].model.output)  # u, v, dp, diag -> 4
     # The honest training shape: ``x`` carries ONLY the conditioning-only source (its native small
     # grid). The predicted target is history-less — it is absent from ``x`` and enters the network
     # solely through its noised (corrupted) target in ``conditioned_target``.
@@ -323,7 +204,7 @@ def _forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
 
 def test_real_forward_pass_shape_and_finiteness(real_model) -> None:
     model, _ = real_model
-    x, conditioned_target, condition = _forward_inputs()
+    x, conditioned_target, condition = _forward_inputs(model)
 
     # The base transport forward encodes the source as conditioning-only, encodes the history-less
     # target from its noised target, and decodes only the target.
@@ -335,13 +216,19 @@ def test_real_forward_pass_shape_and_finiteness(real_model) -> None:
     assert torch.isfinite(out["output"]).all()
 
 
-def test_real_after_sampling_reconstructs_residual_channels_by_hand(real_model) -> None:
+def test_real_after_sampling_reconstructs_residual_channels_by_hand(
+    real_model, index_collection_factory, statistics_factory
+) -> None:
     model, matrix = real_model
     target_indices = model.data_indices["output"]
 
-    pre_src, post_src = _processor_pair(_source_indices(), _norm_stats(_SOURCE_STATE_STDEV))
-    _, post_tgt = _processor_pair(_target_indices(), _norm_stats(_TARGET_STATE_STDEV))
-    _, post_res = _processor_pair(_target_indices(), _norm_stats(_TARGET_RESIDUAL_STDEV))
+    pre_src, post_src = _processor_pair(
+        _source_indices(index_collection_factory), statistics_factory(_SOURCE_STATE_STDEV)
+    )
+    _, post_tgt = _processor_pair(_target_indices(index_collection_factory), statistics_factory(_TARGET_STATE_STDEV))
+    _, post_res = _processor_pair(
+        _target_indices(index_collection_factory), statistics_factory(_TARGET_RESIDUAL_STDEV)
+    )
     del pre_src
 
     post_processors = torch.nn.ModuleDict({"input": post_src, "output": post_tgt})
@@ -402,11 +289,15 @@ def test_real_after_sampling_reconstructs_residual_channels_by_hand(real_model) 
     torch.testing.assert_close(out[0, 0, 0, :, model_pos["diag"]], expected_diag, atol=1e-5, rtol=1e-5)
 
 
-def test_real_after_sampling_refuses_unset_reference_positions(real_model) -> None:
+def test_real_after_sampling_refuses_unset_reference_positions(
+    real_model, index_collection_factory, statistics_factory
+) -> None:
     model, _ = real_model
-    _, post_src = _processor_pair(_source_indices(), _norm_stats(_SOURCE_STATE_STDEV))
-    _, post_tgt = _processor_pair(_target_indices(), _norm_stats(_TARGET_STATE_STDEV))
-    _, post_res = _processor_pair(_target_indices(), _norm_stats(_TARGET_RESIDUAL_STDEV))
+    _, post_src = _processor_pair(_source_indices(index_collection_factory), statistics_factory(_SOURCE_STATE_STDEV))
+    _, post_tgt = _processor_pair(_target_indices(index_collection_factory), statistics_factory(_TARGET_STATE_STDEV))
+    _, post_res = _processor_pair(
+        _target_indices(index_collection_factory), statistics_factory(_TARGET_RESIDUAL_STDEV)
+    )
 
     x_source_raw = torch.randn(1, N_STEP_INPUT, 1, N_SOURCE, 3)
     model_output = torch.randn(1, N_STEP_OUTPUT, 1, N_TARGET, 4)
