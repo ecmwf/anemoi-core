@@ -73,6 +73,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.inference_defaults = transport_params.get("inference_defaults", {})
         self.transport_model_objective = get_transport_model_objective(transport_params.objective)
 
+        # Conditioning-only datasets are encoded and their latents join the additive merge, but they
+        # are never predicted: they get no decoder, no noised (corrupted) target, and never appear in
+        # the output dict. Set before super().__init__() so _build_networks (decoder skip) and
+        # _calculate_input_dim (no corrupted-target term) can consult it during construction.
+        # The config list is the source of truth; validate the names against data_indices here
+        # (the docstring contract asks that a conditioning-only dataset not appear on any target/loss
+        # path — that is enforced by the caller building data_indices/targets, not re-derived here).
+        self.conditioning_only_datasets = set(model_config.model.model.get("conditioning_only_datasets", []) or [])
+        unknown_conditioning_only = sorted(self.conditioning_only_datasets - set(data_indices))
+        if unknown_conditioning_only:
+            raise ValueError(
+                f"conditioning_only_datasets references unknown datasets: {unknown_conditioning_only}. "
+                f"Known datasets: {sorted(data_indices)}."
+            )
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -87,6 +102,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)
+        if dataset_name in self.conditioning_only_datasets:
+            # Conditioning-only datasets have no noised target concatenated to the encoder input.
+            return base_input_dim
         output_dim = super()._calculate_output_dim(dataset_name)
         input_dim = base_input_dim + output_dim  # input history plus corrupted target
         return input_dim
@@ -114,10 +132,23 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
+        x_history = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+
+        if dataset_name in self.conditioning_only_datasets:
+            # Conditioning-only datasets have no noised target: concatenate only history and positions.
+            x_data_latent = torch.cat((x_history, node_attributes_data), dim=-1)
+            return x_data_latent, None, grid_shard_sizes
+
+        # The config list is the source of truth; a missing corrupted target for a dataset that is
+        # NOT conditioning-only is a loud contract violation, exactly as before.
+        assert y_noised is not None, (
+            f"Dataset '{dataset_name}' is not conditioning-only but has no corrupted target to assemble."
+        )
+
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                x_history,
                 einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
@@ -213,9 +244,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
-        # the condition that way, so we can read it from the first dataset,
-        # embed it once, and repeat it over each dataset's graph nodes below.
-        condition_base = condition[dataset_names[0]][:, 0, :, 0]
+        # the condition that way, so we can read it from the first *predicted*
+        # dataset (conditioning-only datasets carry no target and so are absent
+        # from ``condition``), embed it once, and repeat it over each dataset's
+        # graph nodes below — conditioning-only encoders included.
+        noise_source = next(name for name in dataset_names if name in condition)
+        condition_base = condition[noise_source][:, 0, :, 0]
         noise_cond_base = self._embed_noise_conditioning(condition_base)
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
@@ -296,7 +330,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
-                conditioned_target[dataset_name],
+                conditioned_target.get(dataset_name),  # None for conditioning-only datasets
                 bse,
                 grid_shard_sizes,
                 model_comm_group,
@@ -358,9 +392,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             # Processor skip connection
             x_latent_proc = x_latent_proc + x_latent
 
-        # Decoder
+        # Decoder — decode only datasets that are predicted. Conditioning-only datasets were
+        # encoded (their latents joined the additive merge above) but have no decoder, so they
+        # never appear in x_out_dict.
         x_out_dict = {}
         for dataset_name in dataset_names:
+            if dataset_name in self.conditioning_only_datasets:
+                continue
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -500,9 +538,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         default_kind: str = "gaussian",
     ) -> dict[str, torch.Tensor]:
         """Build the starting/source field used by transport sampling."""
+        # Only predicted datasets are sampled; conditioning-only datasets stay pure conditioning.
+        sampled = self._sampled_inputs(x)
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                x,
+                sampled,
                 n_step_output=self.n_step_output,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
@@ -510,7 +550,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x,
+                    sampled,
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),
@@ -519,6 +559,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             error_context="state prediction",
         )
         return self.transport_source.build(request)
+
+    def _sampled_inputs(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Subset of ``x`` that is actually predicted (drops conditioning-only datasets).
+
+        Conditioning-only datasets are encoded and merged into the latent, but never sampled or
+        decoded, so they must not seed a transport source. Uses ``getattr`` so bare ``__new__``
+        test stubs (which never run ``__init__``) still work.
+        """
+        conditioning_only = getattr(self, "conditioning_only_datasets", ())
+        return {name: tensor for name, tensor in x.items() if name not in conditioning_only}
 
     def predict_step(
         self,
@@ -673,7 +723,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
-        if self.condition_on_residual:
+        if self.condition_on_residual and dataset_name not in self.conditioning_only_datasets:
             input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
         return input_dim
 
@@ -714,10 +764,23 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
+        x_history = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+
+        if dataset_name in self.conditioning_only_datasets:
+            # Conditioning-only datasets have no noised target (and no residual conditioning term).
+            x_data_latent = torch.cat((x_history, node_attributes_data), dim=-1)
+            return x_data_latent, x_skip, grid_shard_sizes
+
+        # The config list is the source of truth; a missing corrupted target for a dataset that is
+        # NOT conditioning-only is a loud contract violation, exactly as before.
+        assert y_noised is not None, (
+            f"Dataset '{dataset_name}' is not conditioning-only but has no corrupted target to assemble."
+        )
+
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                x_history,
                 einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
@@ -926,9 +989,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         """Build the starting/source field for tendency-space transport sampling."""
         # Tendency prediction can use Gaussian noise, zeros, or the latest
         # input state projected to the variables the model predicts.
+        # Only predicted datasets are sampled; conditioning-only datasets stay pure conditioning.
+        sampled = self._sampled_inputs(x)
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                x,
+                sampled,
                 n_step_output=self.n_step_output,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
@@ -936,7 +1001,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x,
+                    sampled,
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),

@@ -139,6 +139,8 @@ class TransportConfig(BaseModel):
 class TransportModel(Model):
     transport: TransportConfig = Field(default_factory=TransportConfig)
     "Transport model objective, path, conditioning, and inference configuration."
+    conditioning_only_datasets: list[str] = Field(default_factory=list)
+    "Datasets that condition the model (encoded, latents merged) but are never predicted (no decoder, no noised target)."
 
 
 class TrainableParameters(PydanticBaseModel):

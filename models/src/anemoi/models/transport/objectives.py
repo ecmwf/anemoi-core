@@ -148,8 +148,11 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             schedule_params,
             x_device,
         )
+        # Sample only the datasets that seeded a source; conditioning-only datasets are absent from
+        # ``source`` (build_sampling_source drops them) and must never enter the denoising loop.
         y_init = {
-            dataset_name: source[dataset_name].to(dtype=sigma_schedule.dtype) * sigma_schedule[0] for dataset_name in x
+            dataset_name: source_data.to(dtype=sigma_schedule.dtype) * sigma_schedule[0]
+            for dataset_name, source_data in source.items()
         }
 
         sampler_instance = _build_inference_sampler(
