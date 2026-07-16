@@ -31,11 +31,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.create import load_graph_from_file
-from anemoi.graphs.create import validate_loaded_graph
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.compile import mark_for_compilation
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -51,10 +47,12 @@ from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
+from anemoi.training.utils.configs import get_missing_graph_config
 
 LOGGER = logging.getLogger(__name__)
 
 PL_VERSION = version.parse(pl.__version__)
+
 
 
 class AnemoiTrainer(ABC):
@@ -175,72 +173,33 @@ class AnemoiTrainer(ABC):
         return None
 
     @cached_property
-    def _dataset_names(self) -> list[str]:
-        """Dataset names derived from the dataloader training config."""
-        return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
-
-    @cached_property
     def graph_data(self) -> HeteroData:
         """Graph data built or loaded for the current trainer config."""
-        dataset_names = self._dataset_names
         graph_cfg = self.config.graph
         graph_path = self.config.system.input.graph
         save_path = Path(graph_path) if graph_path else None
-
-        # Existing-graph mode: path given but no nodes/edges defined — load as-is.
-        is_existing = (
-            graph_path is not None
-            and not graph_cfg.overwrite
-            and not getattr(graph_cfg, "nodes", None)
-            and not getattr(graph_cfg, "edges", None)
-        )
-        if is_existing:
-            if not save_path.exists():
-                msg = f"Existing graph file not found: {save_path}"
-                raise FileNotFoundError(msg)
-            graph = load_graph_from_file(save_path)
-            fused = uses_fused_dataset_graph(graph, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
-            validate_loaded_graph(graph, required)
-            return graph
-
-        # Build mode: expand config and create graph via GraphCreator.
-        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
-
-        if not uses_fused_dataset_graph(graph_cfg, dataset_names):
-            if len(dataset_names) == 1:
-                dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
-                dataset_name = dataset_names[0]
-                reader_cfg = dataset_configs[dataset_name].dataset_config
-                dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
-                if dataset_path is None:
-                    msg = f"Dataset source is None for dataset '{dataset_name}'."
-                    raise ValueError(msg)
-                data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
-                if (
-                    data_node_cfg is not None
-                    and hasattr(data_node_cfg, "node_builder")
-                    and hasattr(data_node_cfg.node_builder, "dataset")
-                ):
-                    data_node_cfg.node_builder.dataset = dataset_path
-            else:
-                msg = (
-                    "Multiple datasets require a fused graph config with one node group per dataset. "
-                    f"Received datasets {dataset_names} but graph nodes "
-                    f"{list(graph_cfg.nodes.keys())}."
-                )
-                raise ValueError(msg)
-
-        # Try loading existing saved graph before rebuilding.
         overwrite = graph_cfg.get("overwrite", False)
-        if save_path and save_path.exists() and not overwrite:
-            fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
-            required = dataset_names if fused else [DEFAULT_DATASET_NAME]
-            graph = load_graph_from_file(save_path)
-            validate_loaded_graph(graph, required)
-            return graph
 
-        return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
+        if overwrite and (graph_path is None or not save_path.exists()):
+            msg = "Graph overwrite requested but no graph file exists to overwrite."
+            raise FileNotFoundError(msg)
+
+        graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
+        if overwrite: 
+            # Don't load anything. Create the full graph from scratch.
+            return GraphCreator(graph_config).create(save_path=save_path, overwrite=True)
+
+        else: 
+            # not overwrite. Load the graph and create any missing nodes/edges from the config
+            graph = load_graph_from_file(save_path)
+
+            missing_graph_config = get_missing_graph_config(graph_config, graph.node_types, graph.edge_types)
+
+            graph_creator = GraphCreator(missing_graph_config)
+            graph = graph_creator.update_graph(graph)
+            graph = graph_creator.clean(graph)
+            graph = graph_creator.post_process(graph)
+            return graph
 
     def _validate_transfer_learning_datasets(
         self,

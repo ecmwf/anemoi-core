@@ -21,8 +21,6 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
@@ -243,13 +241,11 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
-                data_node_name=data_node_name,
+                data_node_name=dataset_name,
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
