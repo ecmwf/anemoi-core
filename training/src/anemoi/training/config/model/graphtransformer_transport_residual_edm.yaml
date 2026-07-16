@@ -1,0 +1,29 @@
+defaults:
+- graphtransformer_transport_edm
+- _self_
+
+model:
+  _target_: anemoi.models.models.AnemoiTransportResidualModelEncProcDec
+  # Map each target dataset to its source dataset.
+  residual_prediction: {}
+  direct_prediction: {}
+  # Datasets encoded by the base transport forward on their native grids but never decoded
+  # (no noised target, no output). The residual source (and any same-grid forcings dataset)
+  # must be listed here so the multi-encoder conditioning works.
+  conditioning_only_datasets: []
+  # Datasets that are predicted but supply NO input history (their own values at the input offsets
+  # ARE the answer, so they must never be fed as input). Their encoder input is the noised target
+  # plus node attributes only. The residual/downscaling target must be listed here.
+  history_less_datasets: []
+
+# Example override:
+# model:
+#   residual_prediction:
+#     output: input
+#   direct_prediction:
+#     output: [tp]
+#   conditioning_only_datasets: [input]
+#   history_less_datasets: [output]
+#   residual:
+#     _target_: anemoi.models.layers.residual.InterpolationConnection
+#     interpolation_file_path: /path/to/source-to-target.npz

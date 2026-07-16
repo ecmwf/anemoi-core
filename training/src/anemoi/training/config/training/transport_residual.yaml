@@ -1,0 +1,6 @@
+defaults:
+- multi_transport
+- _self_
+
+transport:
+  prediction_mode: residual

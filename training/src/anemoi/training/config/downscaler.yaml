@@ -1,0 +1,87 @@
+defaults:
+- data: multi
+- dataloader: multi
+- diagnostics: evaluation_multi
+- system: example
+- graph: multi
+- model: graphtransformer_transport_residual_edm
+- task: spatial_downscaler
+- training: transport_residual
+- _self_
+
+
+data:
+  resolution: o96
+
+# The composed data/dataloader/graph configs (data: multi) reference these keys.
+system:
+  input:
+    graph: graph_anemoi_new_${data.resolution}.pt
+
+    # Source (coarse) dataset
+    dataset: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8
+
+    # Target (fine) dataset (using same file as a placeholder)
+    dataset_b: aifs-ea-an-oper-0001-mars-${data.resolution}-1979-2023-6h-v8
+
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/${data.resolution}/
+
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: 1
+    num_nodes: 1
+    num_gpus_per_model: 1
+
+# Dataset roles must match the dataset names of the composed data/dataloader/graph
+# configs (data: multi uses "era5" and "cerra"). Three-role contract: the source dataset (era5)
+# conditions the target dataset (cerra), and the target is NEVER a model input. The composed
+# data: multi config only defines era5/cerra, so there is no pass-through dataset here
+# (conditioning = interp(era5) alone); add a same-grid forcing dataset to input_datasets to
+# condition on additional pass-through forcings.
+task:
+  input_datasets: [era5]
+  output_datasets: [cerra]
+
+# Multi-encoder conditioning: the source (era5) is encoded by the base transport forward on its
+# native grid and never decoded. It must be listed as a conditioning-only dataset. Add any
+# same-grid forcing dataset here too (and to task.input_datasets) to condition on extra forcings.
+model:
+  model:
+    conditioning_only_datasets: [era5]
+    # The target (cerra) is predicted but is NEVER a model input — its values at the input offsets
+    # are the answer. It supplies no input history: encoder input is the noised target only.
+    history_less_datasets: [cerra]
+
+diagnostics:
+  callbacks: []
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      enabled: False
+      tracking_uri: None
+
+config_validation: True
+
+# Required overrides for an actual run (no usable defaults exist):
+# model:
+#   model:
+#     residual_prediction:
+#       cerra: era5
+#     conditioning_only_datasets: [era5]   # already set above; keep the source listed here
+#   residual:
+#     _target_: anemoi.models.layers.residual.InterpolationConnection
+#     interpolation_file_path: /path/to/era5-to-cerra.npz
+# system:
+#   input:
+#     statistics_residuals:
+#       cerra: /path/to/residual_statistics.json
+#
+# Only predicted (output) datasets may carry a training_loss entry; restrict the
+# inherited multi-dataset loss config to the residual target, e.g. in code or via
+# an override file:
+# training:
+#   training_loss:
+#     datasets:
+#       cerra: {...}   # keep cerra only; era5 is input-only and produces no prediction
