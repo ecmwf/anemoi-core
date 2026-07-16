@@ -121,7 +121,14 @@ class BasePreprocessor(nn.Module, ABC):
         """Inverse transform the input tensor."""
         raise NotImplementedError
 
-    def forward(self, x: SourceView, in_place: bool = True, inverse: bool = False, **kwargs) -> SourceView:
+    def forward(
+        self,
+        x: SourceView,
+        in_place: bool = True,
+        inverse: bool = False,
+        impute_mask: list[torch.Tensor] | None = None,
+        **kwargs,
+    ) -> SourceView:
         """Process the input tensor.
 
         Parameters
@@ -132,6 +139,10 @@ class BasePreprocessor(nn.Module, ABC):
             Whether to process the tensor in place
         inverse : bool
             Whether to inverse transform the input
+        impute_mask : list[torch.Tensor] | None
+            Optional per-sample boolean mask over the grid/points dimension, forwarded to
+            the applied transform. Imputers use it to restrict imputation to the inputs only.
+            Not used for gridded fields.
         **kwargs
             Additional keyword arguments to pass to transform/inverse_transform
 
@@ -144,9 +155,9 @@ class BasePreprocessor(nn.Module, ABC):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
 
         if inverse:
-            return x.apply_func(self.inverse_transform, in_place=in_place, **kwargs)
+            return x.apply_func(self.inverse_transform, in_place=in_place, impute_mask=impute_mask, **kwargs)
 
-        return x.apply_func(self.transform, in_place=in_place, **kwargs)
+        return x.apply_func(self.transform, in_place=in_place, impute_mask=impute_mask, **kwargs)
 
 
 class Processors(nn.Module):

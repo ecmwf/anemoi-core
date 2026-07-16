@@ -825,13 +825,44 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return total_loss, metrics_next, y_preds
 
     def preprocess_batch(self, batch: Batch) -> Batch:
-        """Preprocess the batch using the model's pre-processors."""
+        """
+        Preprocess the batch using the model's pre-processors.
+        This includes the imputers, where we have to separate between inputs and outputs.
+        Only the former get imputed with default values; the outputs are left untouched.
+        """
         new_batch = batch
+        input_indices = self.task.get_batch_input_indices()
         for dataset_name, pre_processors in self.model.pre_processors.items():
-            updated_view = pre_processors(batch[dataset_name])
-            # TODO: remove _update_source, maybe batch.clone()??
-            new_batch = new_batch._update_source(dataset_name, updated_view)
+            view = batch[dataset_name]
+            impute_mask = self._build_input_impute_mask(view, input_indices)
+            updated_view = pre_processors(view, impute_mask=impute_mask)
+            # TODO: remove update_source, maybe batch.clone()??
+            new_batch = new_batch.update_source(dataset_name, updated_view)
         return new_batch
+
+    @staticmethod
+    def _build_input_impute_mask(view: SourceView, input_indices: list[int]) -> list[torch.Tensor] | None:
+        """Build a per-sample boolean grid mask that identifies model-input observations.
+
+        Only sparse datasets are masked: for each sample, points that
+        belong to an input time-window have mask==True (imputed), all
+        other points (target windows) have mask==False (NaNs preserved for loss masking).
+
+        For gridded datasets (or sparse views without boundaries), we return None.
+        """
+        if not view.layout.time_in_grid or view.boundaries is None:
+            return None
+
+        grid_dim = view.layout.grid
+        masks: list[torch.Tensor] = []
+        for sample_tensor, sample_bounds in zip(view.data, view.boundaries):
+            n_points = sample_tensor.shape[grid_dim]
+            mask = torch.zeros(n_points, dtype=torch.bool, device=sample_tensor.device)
+            for t in input_indices:
+                s = sample_bounds[t]
+                mask[s.start : s.stop] = True
+            masks.append(mask)
+        return masks
 
     def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.

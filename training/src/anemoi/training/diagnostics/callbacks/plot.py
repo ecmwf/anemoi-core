@@ -1001,7 +1001,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         def _post_process(prediction: SourceView) -> torch.Tensor:
             assert isinstance(
-                prediction, SourceView,
+                prediction,
+                SourceView,
             ), f"Expected a prediction of type SourceView, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
             processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data

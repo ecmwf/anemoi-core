@@ -157,7 +157,9 @@ class BaseTask(ABC):
             )
         return new_batch
 
-    def get_targets(self, batch: "Batch", data_indices: dict[str, IndexCollection], **kwargs) -> tuple["Batch", "Batch"]:
+    def get_targets(
+        self, batch: "Batch", data_indices: dict[str, IndexCollection], **kwargs
+    ) -> tuple["Batch", "Batch"]:
         """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
@@ -189,7 +191,9 @@ class BaseTask(ABC):
                 payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
             )
 
-        var_indices = {dataset_name: data_indices[dataset_name].data.output.full for dataset_name in batch.dataset_names}
+        var_indices = {
+            dataset_name: data_indices[dataset_name].data.output.full for dataset_name in batch.dataset_names
+        }
         target = y.select(variables=var_indices)
 
         empty_data = {}

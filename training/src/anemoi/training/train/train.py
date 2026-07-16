@@ -658,12 +658,12 @@ class AnemoiTrainer(ABC):
     @cached_property
     def strategy(self) -> Any:
         """
-            Returns the distributed training strategy.
+        Returns the distributed training strategy.
 
-            Runs with at least one tabular observation dataset build a dynamic graph per batch
-            and route each sample through per-dataset encoders/decoders that may be unused when a
-            dataset has no observations in a batch. In this case, we set
-            find_unused_parameters=True and static_graph=False.
+        Runs with at least one tabular observation dataset build a dynamic graph per batch
+        and route each sample through per-dataset encoders/decoders that may be unused when a
+        dataset has no observations in a batch. In this case, we set
+        find_unused_parameters=True and static_graph=False.
         """
         if self.has_tabular_datasets:
             return instantiate(
@@ -671,7 +671,7 @@ class AnemoiTrainer(ABC):
                 find_unused_parameters=True,
                 static_graph=False,
             )
-        
+
         return instantiate(
             self.config.training.strategy,
             find_unused_parameters=False,

@@ -45,13 +45,16 @@ class BaseImputer(BasePreprocessor, ABC):
     ) -> dict[int, float]: ...
 
     @abstractmethod
-    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor: ...
+    def impute(
+        self, data: torch.Tensor, replacements: dict[int, float], impute_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor: ...
 
     def transform(
         self,
         x: torch.Tensor,
         statistics: Optional[dict[str, np.ndarray]] = None,
         name_to_index: Optional[dict[str, int]] = None,
+        impute_mask: Optional[torch.Tensor] = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Impute missing values in the input tensor.
@@ -64,6 +67,9 @@ class BaseImputer(BasePreprocessor, ABC):
             Statistics dictionary required for normalization.
         name_to_index : dict[str, int]
             Dictionary mapping variable names to their indices, required for normalization.
+        impute_mask : torch.Tensor, optional (default = None)
+            Optional boolean mask over the latlon dimension. When provided, NaNs are
+            only filled where the mask is True. Passing in None imputes everywhere.
 
         Returns
         -------
@@ -72,7 +78,7 @@ class BaseImputer(BasePreprocessor, ABC):
         """
         replacements = self.get_imputing_replacements(name_to_index, statistics)
 
-        x = self.impute(x, replacements=replacements)
+        x = self.impute(x, replacements=replacements, impute_mask=impute_mask)
 
         return x
 
@@ -111,10 +117,15 @@ class InputImputer(BaseImputer):
             replacements[idx] = float(statistics[method][idx])
         return replacements
 
-    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
+    def impute(
+        self, data: torch.Tensor, replacements: dict[int, float], impute_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         for idx, value in replacements.items():
             col = data[..., idx]
-            data[..., idx] = torch.where(torch.isnan(col), value, col)
+            fill_here = torch.isnan(col)
+            if impute_mask is not None:
+                fill_here = fill_here & impute_mask
+            data[..., idx] = torch.where(fill_here, value, col)
         return data
 
 
@@ -143,10 +154,15 @@ class ConstantImputer(BaseImputer):
             replacements[idx] = float(method)
         return replacements
 
-    def impute(self, data: torch.Tensor, replacements: dict[int, float]) -> torch.Tensor:
+    def impute(
+        self, data: torch.Tensor, replacements: dict[int, float], impute_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         for idx, value in replacements.items():
             col = data[..., idx]
-            data[..., idx] = torch.where(torch.isnan(col), value, col)
+            fill_here = torch.isnan(col)
+            if impute_mask is not None:
+                fill_here = fill_here & impute_mask
+            data[..., idx] = torch.where(fill_here, value, col)
         return data
 
 
@@ -174,10 +190,14 @@ class CopyImputer(BaseImputer):
                 copy_sources[idx] = source_idx
         return copy_sources
 
-    def impute(self, data: torch.Tensor, replacements: dict[int, int]) -> torch.Tensor:
+    def impute(
+        self, data: torch.Tensor, replacements: dict[int, int], impute_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         for idx_dst, idx_src in replacements.items():
             if idx_dst is not None and idx_src is not None:
                 nan_mask = torch.isnan(data[..., idx_dst])
+                if impute_mask is not None:
+                    nan_mask = nan_mask & impute_mask
                 source_vals = data[..., idx_src]
                 assert not torch.isnan(
                     source_vals[nan_mask]
