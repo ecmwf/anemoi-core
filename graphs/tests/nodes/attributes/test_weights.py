@@ -103,3 +103,88 @@ def test_masked_planar_area_weights_fail(graph_with_nodes: HeteroData):
     with pytest.raises(AssertionError):
         node_attr_builder = MaskedPlanarAreaWeights(mask_node_attr_name="nonexisting")
         node_attr_builder.compute(graph_with_nodes, "test_nodes")
+
+
+def test_planar_area_weights_shoelace_matches_convexhull():
+    """`_voronoi_region_areas` reproduces the original per-node ConvexHull volumes.
+
+    Locks the vectorized shoelace area to the behaviour it replaces, on a clustered
+    rectangular patch resembling a regional cutout (the production stress case).
+    """
+    import numpy as np
+    from scipy.spatial import ConvexHull
+    from scipy.spatial import Voronoi
+
+    rng = np.random.default_rng(0)
+    latlons = np.column_stack([rng.uniform(0.6, 0.9, 5000), rng.uniform(0.0, 0.4, 5000)])
+
+    attr = PlanarAreaWeights()
+    resolution = attr._compute_mean_nearest_distance(latlons)
+    boundary_points = attr._get_boundary_ring(latlons, resolution)
+    extended_points = np.vstack([latlons, boundary_points])
+    v = Voronoi(extended_points, qhull_options="QJ Pp")
+
+    # Reference: the original per-node implementation.
+    reference = np.array([ConvexHull(v.vertices[v.regions[v.point_region[idx]]]).volume for idx in range(len(latlons))])
+
+    areas = attr._voronoi_region_areas(v, len(latlons))
+
+    assert areas.shape == reference.shape
+    np.testing.assert_allclose(areas, reference, rtol=1e-9, atol=0.0)
+
+
+def test_planar_area_weights_degenerate_fallback():
+    """A region with an interior vertex falls back to the exact ConvexHull area.
+
+    Heavy qhull joggling can emit interior Voronoi vertices, making a stored region
+    polygon non-convex so plain shoelace under-counts its area (observed on real
+    stretched-grid data: up to ~21% on a few cells). The detector must flag such a
+    region and the ConvexHull fallback must recover the exact hull area. Small random
+    fixtures rarely emit a genuine (non-collinear) interior vertex, so we inject one
+    into a real Voronoi region to exercise that path deterministically.
+    """
+    import numpy as np
+    from scipy.spatial import ConvexHull
+    from scipy.spatial import Voronoi
+
+    rng = np.random.default_rng(0)
+    points = rng.uniform(0.0, 1.0, (200, 2))
+
+    # Boundary ring so the first len(points) regions are all bounded (>= 3 vertices),
+    # matching how compute_area_weights calls the method.
+    resolution = PlanarAreaWeights()._compute_mean_nearest_distance(points)
+    boundary_points = PlanarAreaWeights()._get_boundary_ring(points, resolution)
+    extended_points = np.vstack([points, boundary_points])
+    v = Voronoi(extended_points, qhull_options="QJ Pp")
+    n = len(points)
+
+    # Pick a bounded region (no -1) with >= 4 vertices to deform.
+    target = next(
+        i
+        for i in range(n)
+        if v.regions[v.point_region[i]]
+        and -1 not in v.regions[v.point_region[i]]
+        and len(v.regions[v.point_region[i]]) >= 4
+    )
+    region = list(v.regions[v.point_region[target]])
+    hull_area = ConvexHull(v.vertices[region]).volume  # correct (convex) cell area
+
+    # Inject the region centroid (always interior to the convex hull) into the stored
+    # vertex order, creating a re-entrant polygon that shoelace under-counts but whose
+    # convex hull is unchanged.
+    centroid = v.vertices[region].mean(axis=0)
+    interior_idx = len(v.vertices)
+    v.vertices = np.vstack([v.vertices, centroid])
+    region.insert(1, interior_idx)
+    v.regions[v.point_region[target]] = region
+
+    # Plain shoelace on the deformed polygon must be materially wrong, so a correct
+    # result can only come from the ConvexHull fallback (proves the fallback is load-bearing).
+    poly = v.vertices[region]
+    x, y = poly[:, 0], poly[:, 1]
+    shoelace = 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+    assert abs(shoelace - hull_area) / hull_area > 1e-3, "injected vertex did not create a re-entrant polygon"
+
+    # The production method must detect the non-convex region and fall back to ConvexHull.
+    areas = PlanarAreaWeights._voronoi_region_areas(v, n)
+    np.testing.assert_allclose(areas[target], hull_area, rtol=1e-9, atol=0.0)
