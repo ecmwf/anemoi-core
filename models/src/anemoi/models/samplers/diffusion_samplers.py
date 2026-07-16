@@ -250,6 +250,27 @@ class ExponentialScheduler(NoiseScheduler):
         return _append_terminal_zero(sigmas, device, dtype_compute)
 
 
+class ManualScheduler(NoiseScheduler):
+    """User-supplied sigma schedule.
+
+    ``sigmas`` is the list of (descending) noise levels to visit; the
+    terminal ``sigma=0`` is appended automatically, so do not include it.
+    """
+
+    def __init__(self, sigma_max: float, sigma_min: float, num_steps: int, sigmas: list[float], **kwargs):
+        super().__init__(sigma_max, sigma_min, num_steps)
+        self.sigmas = sigmas
+        self.num_steps = len(sigmas)
+        
+        
+    def get_schedule(
+        self,
+        device: torch.device = None,
+        dtype_compute: torch.dtype = torch.float64,
+        **kwargs,
+    ) -> torch.Tensor:
+        sigmas = torch.tensor(self.sigmas, device=device, dtype=dtype_compute)
+        return _append_terminal_zero(sigmas, device, dtype_compute)
 
 class ExperimentalSamplerScheduler(NoiseScheduler):
     """Piecewise scheduler for aggressive high-sigma collapse and denser low-sigma refinement.
@@ -455,7 +476,7 @@ class EDMHeunSampler(DiffusionSampler):
             y_next = y + (sigma_next - sigma_effective) * d
             # movement in direction of d, amount of movement is equal to the change in noise level
 
-            if sigma_next > eps_prec:
+            if sigma_next > eps_prec: #if sigma next is not zero
                 D2 = denoising_fn(
                     x_in_interp,
                     x_in_hres,
@@ -544,6 +565,7 @@ NOISE_SCHEDULERS = {
     "exponential": ExponentialScheduler,
     "experimental_sampler": ExperimentalSamplerScheduler,
     "experimental_piecewise": ExperimentalSamplerScheduler,
+    "manual": ManualScheduler,
 }
 
 DIFFUSION_SAMPLERS = {

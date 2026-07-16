@@ -29,6 +29,7 @@ from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.distributed.shapes import get_shard_shapes
 from anemoi.models.models.diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from anemoi.models.samplers import diffusion_samplers
+from anemoi.models.samplers.guidance import GuidedDenoiser
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -548,6 +549,82 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
 
         return D_x
 
+    def set_guidance(
+        self,
+        guide_model: "AnemoiDownscalingModelEncProcDec",
+        weight: float,
+        sigma_min: float = 0.0,
+        sigma_max: float = float("inf"),
+    ) -> None:
+        """Attach a guide model so that :meth:`sample` applies diffusion guidance.
+
+        Enables linear guidance in denoised space during sampling::
+
+            D_w = D1 + (w - 1) * (D1 - D0)
+
+        where ``D1`` is this (main) model and ``D0`` is ``guide_model``. The guide
+        is consulted only through its ``fwd_with_preconditioning``; its sampler,
+        scheduler and pre/post-processors are never used (sampling is driven
+        entirely by this model). ``weight == 1.0`` makes guidance a no-op.
+
+        For **autoguidance**, ``guide_model`` should be a *degraded copy of this
+        model* (an earlier checkpoint and/or smaller capacity) trained on the
+        *same data pipeline*: it must consume the same normalised conditioning
+        inputs and produce outputs in the same normalised space as this model,
+        otherwise the difference ``D1 - D0`` is meaningless. Each model applies
+        its own EDM preconditioning (its own ``sigma_data``) automatically, so a
+        guide trained with a different ``sigma_data`` is fine.
+
+        ``sigma_min`` / ``sigma_max`` restrict guidance to a sigma interval (the
+        "guidance interval", typically used for classifier-free-style guidance).
+        They default to the full range ``(0, inf)``, i.e. guidance is applied at
+        every noise level -- the recommended setting for autoguidance.
+
+        Parameters
+        ----------
+        guide_model : AnemoiDownscalingModelEncProcDec
+            The guide model ``D0``, already loaded, on the correct device and in
+            eval mode.
+        weight : float
+            Guidance weight ``w``.
+        sigma_min : float, optional
+            Lower bound of the guidance interval (default ``0.0``: inactive).
+        sigma_max : float, optional
+            Upper bound of the guidance interval (default ``inf``: inactive).
+        """
+        self._guidance_model = guide_model
+        self._guidance_weight = float(weight)
+        self._guidance_sigma_min = float(sigma_min)
+        self._guidance_sigma_max = float(sigma_max)
+        LOGGER.info(
+            "Diffusion guidance enabled: weight=%s, sigma interval=[%s, %s]",
+            self._guidance_weight,
+            self._guidance_sigma_min,
+            self._guidance_sigma_max,
+        )
+
+    def _build_denoiser(self) -> Callable:
+        """Return the denoising callable passed to the sampler.
+
+        When a guide model has been attached via :meth:`set_guidance`, this wraps
+        the main and guide ``fwd_with_preconditioning`` into a
+        :class:`~anemoi.models.samplers.guidance.GuidedDenoiser`; otherwise it
+        returns this model's plain ``fwd_with_preconditioning`` unchanged. Read
+        defensively with ``getattr`` so checkpoints pickled before guidance
+        existed (which never ran ``__init__`` on load) keep working.
+        """
+        guide_model = getattr(self, "_guidance_model", None)
+        if guide_model is None:
+            return self.fwd_with_preconditioning
+
+        return GuidedDenoiser(
+            self.fwd_with_preconditioning,
+            guide_model.fwd_with_preconditioning,
+            weight=self._guidance_weight,
+            sigma_min=self._guidance_sigma_min,
+            sigma_max=self._guidance_sigma_max,
+        )
+
     def _before_sampling(
         self,
         x_in: torch.Tensor,
@@ -829,12 +906,16 @@ class AnemoiDownscalingModelEncProcDec(AnemoiDiffusionTendModelEncProcDec):
         sampler_cls = diffusion_samplers.DIFFUSION_SAMPLERS[actual_sampler]
         sampler_instance = sampler_cls(dtype=sigmas.dtype, **diffusion_sampler_config)
 
+        # Plain denoiser, or an autoguidance/CFG wrapper if a guide model was
+        # attached via set_guidance(). The sampler is agnostic to which it gets.
+        denoiser = self._build_denoiser()
+
         return sampler_instance.sample(
             x_in_interp_to_hres,
             x_in_hres,
             y_init,
             sigmas,
-            self.fwd_with_preconditioning,
+            denoiser,
             grid_shard_shapes=grid_shard_shapes,
             model_comm_group=model_comm_group,
         )
