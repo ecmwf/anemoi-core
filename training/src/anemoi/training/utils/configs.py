@@ -8,8 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from typing import Any
 
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +74,11 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
     return normalized
 
 
-def get_missing_graph_config(graph_config, current_nodes: list[str], current_edges: list[tuple[str, str, str]]) -> dict:
+def get_missing_graph_config(
+    graph_config: DictConfig,
+    current_nodes: list[str],
+    current_edges: list[tuple[str, str, str]],
+) -> dict:
     missing_graph_config = {"nodes": {}, "edges": []}
     for node in graph_config.nodes:
         if node not in current_nodes:

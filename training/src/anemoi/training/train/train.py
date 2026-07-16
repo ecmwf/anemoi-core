@@ -196,8 +196,7 @@ class AnemoiTrainer(ABC):
         graph_creator = GraphCreator(missing_graph_config)
         graph = graph_creator.update_graph(graph)
         graph = graph_creator.clean(graph)
-        graph = graph_creator.post_process(graph)
-        return graph
+        return graph_creator.post_process(graph)
 
     def _validate_transfer_learning_datasets(
         self,
