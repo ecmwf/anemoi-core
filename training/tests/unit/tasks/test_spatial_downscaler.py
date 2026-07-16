@@ -67,34 +67,13 @@ def test_output_offset_not_in_inputs_raises() -> None:
         )
 
 
-def test_empty_input_offsets_raise() -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        SpatialDownscaler(
-            input_datasets=["input"],
-            output_datasets=["output"],
-            input_offsets=[],
-            output_offsets=[0],
-        )
 
 
-def test_empty_output_offsets_raise() -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        SpatialDownscaler(
-            input_datasets=["input"],
-            output_datasets=["output"],
-            input_offsets=[0],
-            output_offsets=[],
-        )
 
 
-def test_empty_datasets_raise() -> None:
-    with pytest.raises(ValueError, match="non-empty"):
-        SpatialDownscaler(input_datasets=[], output_datasets=["output"], input_offsets=[0], output_offsets=[0])
 
-
-# Uniqueness of datasets/offsets and the integer-vs-bool distinction are enforced by the pydantic
-# task schema, not re-checked in __init__ (that redundancy was removed). The subset invariant is
-# kept because tasks are constructed programmatically in tests — see
+# Types, non-emptiness and uniqueness are enforced by the pydantic task schema (SpatialDownscalerSchema),
+# not re-checked in __init__. The subset invariant is the one check kept in the task itself — see
 # ``test_output_offset_not_in_inputs_raises``.
 
 
@@ -316,3 +295,21 @@ def test_fill_metadata_records_integer_offsets_and_roles() -> None:
         assert timesteps["input_offsets"] == [-1, 0, 1, 2]
         assert timesteps["output_offsets"] == [0, 1]
         assert timesteps["timestep"] == "6h"
+
+def test_schema_rejects_empty_lists() -> None:
+    """Non-emptiness is owned by the config-time schema, not the task."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from anemoi.training.schemas.tasks import SpatialDownscalerSchema
+
+    base = {
+        "_target_": "anemoi.training.tasks.SpatialDownscaler",
+        "input_datasets": ["input"],
+        "output_datasets": ["output"],
+        "input_offsets": [0],
+        "output_offsets": [0],
+    }
+    for field in ("input_datasets", "output_datasets", "input_offsets", "output_offsets"):
+        with _pytest.raises(ValidationError):
+            SpatialDownscalerSchema(**{**base, field: []})

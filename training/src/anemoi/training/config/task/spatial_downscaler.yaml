@@ -1,6 +1,8 @@
+# Spatial downscaling: predict ``output_datasets`` from ``input_datasets`` at the
+# same valid time(s). Offsets are integers in units of the dataset frequency
+# (0 = the sample's base time); several offsets make the task multi-input /
+# multi-output, and every output offset must also be an input offset.
 _target_: anemoi.training.tasks.SpatialDownscaler
-# Three-role contract: the target dataset is never a model input. ``input_datasets`` carries the
-# source (and any pass-through forcing datasets); ``output_datasets`` carries only the target.
 input_datasets: [input]
 output_datasets: [output]
 input_offsets: [0]

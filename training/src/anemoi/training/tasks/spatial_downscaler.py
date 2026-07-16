@@ -14,17 +14,17 @@ from anemoi.utils.dates import frequency_to_string
 
 
 class SpatialDownscaler(BaseTask):
-    """Single-valid-time task with explicit named source and target datasets.
+    """Spatial-downscaling task: predict high-resolution target datasets from
+    lower-resolution (and same-grid conditioning) input datasets at matched valid times.
 
-    The public contract uses integer dataset-relative offsets (i.e. positions
-    in the dataset's own time axis, not physical durations). The dataset
-    frequency is not known at construction time -- it is only known once the
-    datamodule has opened the data readers -- so this task starts out
-    operating purely on integers and only converts to ``timedelta`` offsets
-    once :meth:`bind_data_frequency` has been called (see
-    :func:`bind_task_frequency`). Everything positional (batch indices,
-    ordering, etc.) is identical before and after binding, since multiplying
-    a sorted list of integers by a single positive frequency preserves order.
+    There is no rollout and no input advancement. A sample is the set of
+    ``input_datasets`` and ``output_datasets`` read at the configured integer
+    offsets -- multi-input / multi-output when several offsets are given -- and
+    every output offset must also be an input offset, so each predicted state
+    has a source state at the same valid time.
+
+    Offsets are integers in units of the dataset frequency; the frequency itself
+    is attached once at data setup (see :func:`bind_task_frequency`).
     """
 
     name: str = "spatial-downscaler"
@@ -39,15 +39,9 @@ class SpatialDownscaler(BaseTask):
     ) -> None:
         self.input_datasets = tuple(input_datasets)
         self.output_datasets = tuple(output_datasets)
-        if not self.input_datasets or not self.output_datasets:
-            raise ValueError("SpatialDownscaler requires non-empty input_datasets and output_datasets.")
-
-        # Uniqueness of datasets/offsets is enforced by the pydantic task schema; not re-checked here.
-        self._validate_offsets(input_offsets, "input_offsets")
-        self._validate_offsets(output_offsets, "output_offsets")
-
-        # THE invariant: outputs must be a subset of inputs. Kept because tasks are also constructed
-        # programmatically in tests, where the pydantic schema does not run. No fallback of any kind.
+        # Types, non-emptiness and uniqueness are enforced by the pydantic task schema at config
+        # time. The one invariant with physics content is re-checked here because tasks are also
+        # constructed programmatically: outputs must be a subset of inputs, no fallback of any kind.
         missing = sorted(set(output_offsets) - set(input_offsets))
         if missing:
             raise ValueError(
@@ -63,14 +57,6 @@ class SpatialDownscaler(BaseTask):
             input_offsets=list(self._integer_input_offsets),
             output_offsets=list(self._integer_output_offsets),
         )
-
-    @staticmethod
-    def _validate_offsets(offsets: list[int], label: str) -> None:
-        if not offsets:
-            raise ValueError(f"SpatialDownscaler {label} must be a non-empty list of integers.")
-        for offset in offsets:
-            if not isinstance(offset, int):
-                raise ValueError(f"SpatialDownscaler {label} must contain only integers, got {offset!r} in {offsets}.")
 
     def bind_data_frequency(self, frequency: datetime.timedelta) -> None:
         """Late-bind the dataset frequency, converting integer offsets to timedeltas.
@@ -112,19 +98,12 @@ class SpatialDownscaler(BaseTask):
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         inputs = super().get_inputs(batch, data_indices, **kwargs)
-        self._validate_roles(inputs, self.input_datasets, "input")
+        # A dataset missing from the batch raises KeyError(name) here -- loud enough.
         return {name: inputs[name] for name in self.input_datasets}
 
     def get_targets(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         targets = super().get_targets(batch, **kwargs)
-        self._validate_roles(targets, self.output_datasets, "output")
         return {name: targets[name] for name in self.output_datasets}
-
-    @staticmethod
-    def _validate_roles(batch: dict[str, torch.Tensor], names: tuple[str, ...], role: str) -> None:
-        missing = [name for name in names if name not in batch]
-        if missing:
-            raise KeyError(f"SpatialDownscaler {role}_datasets are missing from the loaded batch: {missing}")
 
     def _get_timestep_for_metadata(self) -> str:
         if self._frequency is None:

@@ -214,6 +214,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        # SpatialDownscaler declares integer offsets; hand it the dataset frequency so it can
+        # expose the timedelta offsets the machinery below expects. No-op for every other task.
         bind_task_frequency(self.task, data_readers)
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
