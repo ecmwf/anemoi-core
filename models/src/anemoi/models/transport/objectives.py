@@ -170,9 +170,12 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             comm_arg: Optional[ProcessGroup] = None,
             shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
+            # Drop history-less datasets before the network forward: at sampling time ``x`` may carry
+            # a template tensor for a history-less predicted dataset (used above to size its source),
+            # but the encoder path must match training, where history-less datasets have no input.
             return self.forward(
                 model,
-                x_arg,
+                model._encoder_inputs(x_arg),
                 y_arg,
                 sigma_arg,
                 model_comm_group=comm_arg,
@@ -278,9 +281,10 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             comm_arg: Optional[ProcessGroup] = None,
             shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
+            # Drop history-less datasets before the network forward (see EDM objective for rationale).
             return self.forward(
                 model,
-                x_arg,
+                model._encoder_inputs(x_arg),
                 y_arg,
                 time_arg,
                 model_comm_group=comm_arg,

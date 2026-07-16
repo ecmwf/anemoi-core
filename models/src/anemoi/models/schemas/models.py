@@ -141,6 +141,8 @@ class TransportModel(Model):
     "Transport model objective, path, conditioning, and inference configuration."
     conditioning_only_datasets: list[str] = Field(default_factory=list)
     "Datasets that condition the model (encoded, latents merged) but are never predicted (no decoder, no noised target)."
+    history_less_datasets: list[str] = Field(default_factory=list)
+    "Datasets that are predicted but supply no input history (encoder input is the noised target plus node attributes only)."
 
 
 class TrainableParameters(PydanticBaseModel):

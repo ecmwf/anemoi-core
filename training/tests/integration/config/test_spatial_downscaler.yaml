@@ -80,6 +80,9 @@ model:
     # The era5 source is encoded on its native grid by the base transport forward and never
     # decoded (multi-encoder conditioning); it must be a conditioning-only dataset.
     conditioning_only_datasets: [era5]
+    # The cerra target is predicted but never a model input (its input-offset values are the answer);
+    # it supplies no input history, so it is history-less.
+    history_less_datasets: [cerra]
     # cerra prognostic variables with no counterpart in the era5 source input
     # are predicted directly in state space instead of as residuals.
     direct_prediction:

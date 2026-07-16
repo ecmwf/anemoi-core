@@ -49,6 +49,9 @@ task:
 model:
   model:
     conditioning_only_datasets: [era5]
+    # The target (cerra) is predicted but is NEVER a model input — its values at the input offsets
+    # are the answer. It supplies no input history: encoder input is the noised target only.
+    history_less_datasets: [cerra]
 
 diagnostics:
   callbacks: []

@@ -14,11 +14,13 @@ unit-test index arithmetic), these tests construct the model through its actual
 ``__init__`` with a real graph, real graph-transformer encoders/decoders/processor and a
 real ``InterpolationConnection`` loaded from an ``.npz`` file. This validates that
 
-- with ``conditioning_only_datasets: [input]`` the encoders are built with the BASE input dims
-  (the source gets no corrupted-target term; the target gets the standard one),
+- with ``conditioning_only_datasets: [input]`` and ``history_less_datasets: [output]`` the encoders
+  are built with the asymmetric-role dims (the source gets no corrupted-target term; the target gets
+  the corrupted-target term but NO input-history term),
 - a full ``forward()`` pass runs through the BASE transport path (the multi-encoder architecture:
-  ``x = {source (native small grid), output}``), encoding the source as conditioning-only, and
-  produces the right output shape,
+  ``x = {source (native small grid)}`` ONLY — the history-less target is absent from ``x`` and is
+  encoded from its noised target), encoding the source as conditioning-only, and produces the right
+  output shape,
 - ``_after_sampling`` reconstructs physical states from the RAW source reference through real
   affine processors, matching a hand-computed reference (raw-batch contract).
 
@@ -203,6 +205,9 @@ def _model_config(interpolation_file_path: str) -> DictConfig:
                     # The source is encoded on its native grid by the base transport forward and
                     # never decoded (multi-encoder conditioning).
                     "conditioning_only_datasets": ["input"],
+                    # The target is predicted but never a model input: it supplies no input history,
+                    # so its encoder input is the noised target plus node attributes only.
+                    "history_less_datasets": ["output"],
                     "transport": {
                         "objective": "edm_diffusion",
                         "sigma_data": 1.0,
@@ -278,11 +283,12 @@ def test_real_instantiation_builds_residual_interpolation(real_model) -> None:
 def test_real_instantiation_encoder_input_dims_follow_base_rules(real_model) -> None:
     model, _ = real_model
 
-    # BASE transport input-dim rules now apply (no residual concat override):
-    #   history = n_step_input * len(model.input) + node-attribute dims
-    #   predicted datasets add a corrupted-target term n_step_output * len(model.output);
-    #   conditioning-only datasets (the source) do NOT.
+    # Asymmetric-role input-dim rules apply (no residual concat override):
+    #   conditioning-only (source): history only  = n_step_input * len(model.input) + node-attr dims
+    #   history-less (target):      target only    = node-attr dims + n_step_output * len(model.output)
+    #                               (NO input-history term — the target is never a model input)
     assert model.conditioning_only_datasets == {"input"}
+    assert model.history_less_datasets == {"output"}
 
     source_in = len(model.data_indices["input"].model.input)  # u, v, sforce -> 3
     source_node_attr = model.node_attributes.attr_ndims["input"]
@@ -290,10 +296,9 @@ def test_real_instantiation_encoder_input_dims_follow_base_rules(real_model) -> 
     assert model.input_dim["input"] == expected_source
     assert model.encoder["input"].in_channels_src == expected_source
 
-    target_in = len(model.data_indices["output"].model.input)
     target_node_attr = model.node_attributes.attr_ndims["output"]
     target_out = len(model.data_indices["output"].model.output)  # u, v, dp, diag -> 4
-    expected_target = N_STEP_INPUT * target_in + target_node_attr + N_STEP_OUTPUT * target_out
+    expected_target = target_node_attr + N_STEP_OUTPUT * target_out  # no input-history term
     assert model.input_dim["output"] == expected_target
     assert model.encoder["output"].in_channels_src == expected_target
 
@@ -301,13 +306,12 @@ def test_real_instantiation_encoder_input_dims_follow_base_rules(real_model) -> 
 def _forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
     generator = torch.Generator().manual_seed(11)
     n_in_source = len(_source_indices().model.input)  # u, v, sforce -> 3
-    n_in_target = len(_target_indices().model.input)
     n_out_target = len(_target_indices().model.output)  # u, v, dp, diag -> 4
+    # The honest training shape: ``x`` carries ONLY the conditioning-only source (its native small
+    # grid). The predicted target is history-less — it is absent from ``x`` and enters the network
+    # solely through its noised (corrupted) target in ``conditioned_target``.
     x = {
-        # Multi-encoder path: both the conditioning-only source (native small grid) and the
-        # predicted target carry their own encoder input history.
         "input": torch.randn(batch_size, N_STEP_INPUT, 1, N_SOURCE, n_in_source, generator=generator),
-        "output": torch.randn(batch_size, N_STEP_INPUT, 1, N_TARGET, n_in_target, generator=generator),
     }
     # conditioned_target and condition contain ONLY the predicted dataset (mirrors the objective).
     conditioned_target = {
@@ -321,9 +325,11 @@ def test_real_forward_pass_shape_and_finiteness(real_model) -> None:
     model, _ = real_model
     x, conditioned_target, condition = _forward_inputs()
 
-    # The base transport forward encodes the source as conditioning-only and decodes only the target.
+    # The base transport forward encodes the source as conditioning-only, encodes the history-less
+    # target from its noised target, and decodes only the target.
     out = model.forward(x, conditioned_target, condition)
 
+    assert set(x.keys()) == {"input"}  # the honest shape: no target in the input dict
     assert set(out.keys()) == {"output"}  # the conditioning-only source is absent from the result
     assert out["output"].shape == (2, N_STEP_OUTPUT, 1, N_TARGET, 4)
     assert torch.isfinite(out["output"]).all()
