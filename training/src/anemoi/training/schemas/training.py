@@ -153,6 +153,16 @@ class TendencyScalerTargets(StrEnum):
     var = "anemoi.training.losses.scalers.VarTendencyScaler"
 
 
+class ResidualScalerTargets(StrEnum):
+    no = "anemoi.training.losses.scalers.NoResidualScaler"
+    stdev = "anemoi.training.losses.scalers.StdevResidualScaler"
+    var = "anemoi.training.losses.scalers.VarResidualScaler"
+
+
+class ResidualScalerSchema(BaseModel):
+    target_: ResidualScalerTargets = Field(..., alias="_target_")
+
+
 class TendencyScalerSchema(BaseModel):
     target_: TendencyScalerTargets = Field(
         example="anemoi.training.losses.scalers.StdevTendencyScaler",
@@ -239,6 +249,7 @@ ScalerSchema = (
     | VariableLevelScalerSchema
     | VariableMaskingScalerSchema
     | TendencyScalerSchema
+    | ResidualScalerSchema
     | NaNMaskScalerSchema
     | GraphNodeAttributeScalerSchema
     | TimeStepScalerSchema
@@ -680,7 +691,7 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
 
 
 class TransportTrainingConfigSchema(BaseModel):
-    prediction_mode: Literal["state", "tendency"] = "state"
+    prediction_mode: Literal["state", "tendency", "residual"] = "state"
     "Endpoint semantics for the transport objective."
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Transport objective used to perturb targets and train the model."
