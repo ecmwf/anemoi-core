@@ -477,7 +477,7 @@ class EDMHeunSampler(DiffusionSampler):
             y_next = y + (sigma_next - sigma_effective) * d
             # movement in direction of d, amount of movement is equal to the change in noise level
 
-            if sigma_next > eps_prec:
+            if sigma_next > eps_prec: #if sigma next is not zero
                 D2 = denoising_fn(
                     x_in_interp,
                     x_in_hres,
