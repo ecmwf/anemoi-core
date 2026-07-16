@@ -263,12 +263,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 variable_groups=dataset_variable_groups[dataset_name],
                 metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
             )
-
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
                 task=self.task,
-                graph_data=self._graph_data_dict[dataset_name],
+                graph_data=(
+                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, PosixPath) else self.graph_data
+                ),
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -290,7 +291,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                graph_data=self._graph_data_dict[dataset_name],
+                graph_data=(
+                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, PosixPath) else self.graph_data
+                ),
                 data_node_name=data_node_name,
             )
 
@@ -302,7 +305,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                graph_data=self._graph_data_dict[dataset_name],
+                graph_data=(
+                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, PosixPath) else self.graph_data
+                ),
                 data_node_name=data_node_name,
             )
             self._initialise_updating_scalers(
