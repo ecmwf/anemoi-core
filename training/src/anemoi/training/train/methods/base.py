@@ -156,6 +156,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
+        statistics_residuals: dict | None = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -200,6 +201,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
+            statistics_residuals=statistics_residuals,
             data_indices=data_indices,
             metadata=metadata,
             n_step_input=self.n_step_input,
@@ -215,6 +217,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.save_hyperparameters()
 
         self.statistics_tendencies = statistics_tendencies
+        self.statistics_residuals = statistics_residuals
 
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
@@ -254,6 +257,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
+                ),
+                statistics_residuals=(
+                    statistics_residuals.get(dataset_name) if statistics_residuals is not None else None
                 ),
                 metadata_extractor=metadata_extractor,
                 nodes_name=dataset_name,

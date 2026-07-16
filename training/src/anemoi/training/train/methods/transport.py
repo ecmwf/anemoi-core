@@ -51,6 +51,14 @@ class PredictionMode:
     def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
         return prepared.metric_target
 
+    def model_input(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Return the model inputs fed to the network forward.
+
+        For state/tendency modes the batch is already normalized, so ``x`` is returned unchanged.
+        The residual mode overrides this to normalize the raw conditioning inputs exactly once.
+        """
+        return x
+
 
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
@@ -294,9 +302,239 @@ class TendencyPredictionMode(PredictionMode):
         }
 
 
+class ResidualPredictionMode(PredictionMode):
+    """Prediction mode for spatial residual downscaling.
+
+    The task supplies ordinary tensors. Dataset names identify the source and target
+    roles; trajectory coordinates never enter this mode.
+    """
+
+    def __init__(self, module: BaseTransportTraining) -> None:
+        super().__init__(module)
+        pairs = getattr(module.model.model, "_residual_pairs", {})
+        if not pairs:
+            raise ValueError(
+                "training.transport.prediction_mode='residual' requires model.model.residual_prediction "
+                "to map each target dataset to a source dataset."
+            )
+        processors = getattr(module.model, "pre_processors_residuals", None)
+        post_processors = getattr(module.model, "post_processors_residuals", None)
+        if processors is None or post_processors is None:
+            raise ValueError(
+                "Residual prediction requires residual processors backed by statistics_residuals; "
+                "none were built."
+            )
+        self._residual_pairs = pairs
+        task_inputs = set(getattr(module.task, "input_datasets", ()))
+        task_outputs = set(getattr(module.task, "output_datasets", ()))
+        missing_sources = sorted(set(pairs.values()) - task_inputs)
+        missing_targets = sorted(task_outputs - set(pairs))
+        if missing_sources or missing_targets:
+            raise ValueError(
+                "Residual downscaling requires every configured source/target dataset to be connected: "
+                f"missing_sources={missing_sources}, missing_targets={missing_targets}."
+            )
+
+        # Persist the same-offset alignment (output step -> source input position) into the model so
+        # inference reconstructs against the source step this run trained on. No fallback: the task's
+        # strict helper raises if any output offset lacks a matching input offset.
+        self._reference_positions = list(module.task.output_to_input_positions())
+        module.model.model.set_output_reference_positions(self._reference_positions)
+
+    def model_input(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Normalize the raw conditioning inputs once before the forward chain.
+
+        In residual mode the batch is kept raw, so ``x`` (source + pass-through datasets) is raw
+        here. The encoder needs normalized features, so normalize each dataset with its own state
+        pre-processor. The residual reference is computed separately from the raw ``x`` and never
+        from these normalized tensors, so commutation is irrelevant for the conditioning.
+        """
+        return {
+            dataset_name: self.module.model.pre_processors[dataset_name](tensor, in_place=False)
+            for dataset_name, tensor in x.items()
+        }
+
+    def _reference(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Same-offset RAW references: select the source steps first, then project (cheaper).
+
+        ``x`` is raw (residual mode keeps the batch raw), so the projected reference is the raw
+        physical ``interp(source)`` used both to build the residual target and to reconstruct the
+        physical state.
+        """
+        positions = torch.as_tensor(self._reference_positions, dtype=torch.long)
+        references: dict[str, torch.Tensor] = {}
+        for target_dataset, source_dataset in self._residual_pairs.items():
+            if source_dataset not in x:
+                raise KeyError(
+                    f"Residual target '{target_dataset}' requires source dataset '{source_dataset}' in task inputs."
+                )
+            source_steps = x[source_dataset].index_select(1, positions.to(x[source_dataset].device))
+            reference = self.module.model.model.residual[target_dataset](
+                source_steps,
+                self.module.grid_shard_sizes.get(source_dataset) if self.module.grid_shard_sizes else None,
+                self.module.model_comm_group,
+                n_step_output=self.module.n_step_output,
+            )
+            references[target_dataset] = reference
+        return references
+
+    def _build_residual_target(
+        self,
+        y: torch.Tensor,
+        x_interp: torch.Tensor,
+        target_dataset: str,
+        skip_imputation: bool = False,
+    ) -> torch.Tensor:
+        """Normalized residual training target, entirely in ``DATA_OUTPUT`` space.
+
+        Absorbed from the model's former ``compute_residual`` (the model is now the inference
+        remnant only). Raw-batch contract:
+          - ``y``: ``DATA_OUTPUT`` layout (``data.output.full`` order), RAW physical values.
+          - ``x_interp``: RAW interpolated source on the target grid, already channel-selected to the
+            residual-prognostic order (``model.get_matching_channel_indices``), RAW physical values.
+          - return: ``DATA_OUTPUT`` layout; residual channels residual-normalized, direct-prediction
+            and diagnostic channels state-normalized.
+
+        The residual reference is raw, so ``residual = y - interp(source)`` is an exact physical
+        difference — no denorm-then-renorm and no reliance on interpolation/normalization commuting.
+        Every processor ``data_index`` is a raw data index, so this is correct even when
+        model-output and data-output orderings differ.
+        """
+        model = self.module.model.model
+        pre_processors_state = self.module.model.pre_processors
+        pre_processors_residuals = self.module.model.pre_processors_residuals
+        target_indices = model.data_indices[target_dataset]
+        device = y.device
+
+        residual_names = model._residual_names(target_dataset)
+        residual_data_pos = torch.tensor(
+            target_indices.data.output.positions_for_names(residual_names), dtype=torch.long, device=device
+        )
+        residual_raw_data = torch.tensor(
+            [target_indices.data.output.name_to_index[name] for name in residual_names], dtype=torch.long, device=device
+        )
+
+        target = y.clone()  # DATA_OUTPUT layout
+
+        if residual_names:
+            if x_interp.shape[-1] != len(residual_names):
+                raise ValueError(
+                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(residual_names)} "
+                    f"residual-prognostic channels for target '{target_dataset}'."
+                )
+            if pre_processors_residuals is None or target_dataset not in pre_processors_residuals:
+                raise ValueError(
+                    f"Residual prediction for '{target_dataset}' requires residual processors and residual statistics."
+                )
+            residual_physical = y.index_select(-1, residual_data_pos) - x_interp
+            target[..., residual_data_pos] = pre_processors_residuals[target_dataset](
+                residual_physical,
+                in_place=False,
+                data_index=residual_raw_data,
+                skip_imputation=skip_imputation,
+            )
+
+        direct_names = model._direct_names(target_dataset)
+        if direct_names:
+            direct_data_pos = torch.tensor(
+                target_indices.data.output.positions_for_names(direct_names), dtype=torch.long, device=device
+            )
+            direct_raw_data = torch.tensor(
+                [target_indices.data.output.name_to_index[name] for name in direct_names],
+                dtype=torch.long,
+                device=device,
+            )
+            target[..., direct_data_pos] = pre_processors_state[target_dataset](
+                y.index_select(-1, direct_data_pos),
+                in_place=False,
+                data_index=direct_raw_data,
+                skip_imputation=skip_imputation,
+            )
+
+        diagnostic_names = model._diagnostic_names(target_dataset)
+        if diagnostic_names:
+            diagnostic_data_pos = torch.tensor(
+                target_indices.data.output.positions_for_names(diagnostic_names), dtype=torch.long, device=device
+            )
+            diagnostic_raw_data = torch.tensor(
+                [target_indices.data.output.name_to_index[name] for name in diagnostic_names],
+                dtype=torch.long,
+                device=device,
+            )
+            target[..., diagnostic_data_pos] = pre_processors_state[target_dataset](
+                y.index_select(-1, diagnostic_data_pos),
+                in_place=False,
+                data_index=diagnostic_raw_data,
+                skip_imputation=skip_imputation,
+            )
+        return target
+
+    def prepare_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
+    ) -> PreparedPredictionTarget:
+        state_target = self.module.task.get_targets(batch)
+        y_data_output = self.module.get_data_output_target(state_target)
+        references = self._reference(x)
+        residual_targets: dict[str, torch.Tensor] = {}
+
+        for target_dataset, y_dataset in y_data_output.items():
+            if target_dataset not in self._residual_pairs:
+                residual_targets[target_dataset] = y_dataset
+                continue
+
+            matching = self.module.model.model.get_matching_channel_indices(target_dataset).to(
+                references[target_dataset].device
+            )
+            x_interp = references[target_dataset].index_select(-1, matching)
+            residual_targets[target_dataset] = self._build_residual_target(
+                y_dataset,
+                x_interp,
+                target_dataset=target_dataset,
+                skip_imputation=True,
+            )
+
+        return PreparedPredictionTarget(
+            model_target=self.module.reduce_data_output_target_to_model_output(residual_targets),
+            loss_target=residual_targets,
+            loss_target_layout=IndexSpace.DATA_OUTPUT,
+            metric_target=state_target,
+            aux={"residual_reference": references},
+        )
+
+    def reconstruct_prediction(
+        self,
+        prediction: dict[str, torch.Tensor],
+        prepared: PreparedPredictionTarget,
+    ) -> dict[str, torch.Tensor]:
+        output: dict[str, torch.Tensor] = {}
+        references = prepared.aux["residual_reference"]
+        for dataset_name, model_output in prediction.items():
+            if dataset_name not in self._residual_pairs:
+                output[dataset_name] = self.module.model.post_processors[dataset_name](
+                    model_output, in_place=False
+                )
+                continue
+            output[dataset_name] = self.module.model.model.add_interp_to_state(
+                references[dataset_name],
+                model_output,
+                post_processors_state=self.module.model.post_processors,
+                post_processors_residuals=self.module.model.post_processors_residuals,
+                target_dataset=dataset_name,
+                source_dataset=self._residual_pairs[dataset_name],
+                skip_imputation=True,
+            )
+        return output
+
+    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
+        return prepared.metric_target
+
+
 PREDICTION_MODE_CLASSES = {
     "state": StatePredictionMode,
     "tendency": TendencyPredictionMode,
+    "residual": ResidualPredictionMode,
 }
 
 
@@ -312,6 +550,22 @@ class BaseTransportTraining(BaseTrainingModule):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._prediction_mode = self._get_prediction_mode_cls()(self)
+        self._reject_residual_model_in_non_residual_mode()
+
+    def _reject_residual_model_in_non_residual_mode(self) -> None:
+        """A residual model trained under state/tendency mode silently learns the wrong target.
+
+        The model would train on the raw state/tendency while predict-time reconstruction adds the
+        interpolated source back, so the two disagree. Fail loudly instead.
+        """
+        pairs = getattr(getattr(self.model, "model", None), "_residual_pairs", {}) or {}
+        if pairs and not isinstance(self._prediction_mode, ResidualPredictionMode):
+            raise ValueError(
+                "Model is configured with model.model.residual_prediction "
+                f"({dict(pairs)}) but training.transport.prediction_mode is "
+                f"'{self.config.training.transport.prediction_mode}'. A residual-prediction model must "
+                "be trained with prediction_mode='residual'."
+            )
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:
         prediction_mode = self.config.training.transport.prediction_mode
@@ -325,6 +579,20 @@ class BaseTransportTraining(BaseTrainingModule):
     def prediction_mode(self) -> PredictionMode:
         """Return the state/tendency target handler for this module."""
         return self._prediction_mode
+
+    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Keep the batch RAW in residual mode; normalize it as usual otherwise.
+
+        Residual downscaling normalizes each piece exactly once where it is used (the reference is
+        raw physical ``interp(source)``, conditioning is normalized in ``ResidualPredictionMode.
+        model_input``, targets are normalized inside ``ResidualPredictionMode._build_residual_target``).
+        Normalizing the whole
+        batch up front would force a denorm-then-renorm round trip and reintroduce the
+        interpolation/normalization commutation problem, so we skip it here.
+        """
+        if isinstance(self._prediction_mode, ResidualPredictionMode):
+            return batch
+        return super()._normalize_batch(batch)
 
     @property
     def plot_adapter(self) -> EnsemblePlotAdapterWrapper:
@@ -505,7 +773,10 @@ class TransportTraining(BaseTransportTraining):
         prepared_target = self.prediction_mode.prepare_target(batch, x)
         prepared_objective = self.transport_objective.prepare(prepared_target)
 
-        prediction = self(x, prepared_objective.conditioned_target, prepared_objective.condition)
+        # In residual mode ``x`` is raw; the mode normalizes the conditioning inputs here (the raw
+        # ``x`` was already consumed by ``prepare_target`` for the physical residual reference).
+        model_input = self.prediction_mode.model_input(x)
+        prediction = self(model_input, prepared_objective.conditioned_target, prepared_objective.condition)
         loss_prediction = self.transport_objective.prepare_loss_prediction(prediction, prepared_objective)
 
         metric_prediction = None

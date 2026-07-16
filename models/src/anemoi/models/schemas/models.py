@@ -64,6 +64,10 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
+    ANEMOI_TRANSPORT_RESIDUAL_MODEL_ENC_PROC_DEC = (
+        "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportResidualModelEncProcDec"
+    )
+    ANEMOI_TRANSPORT_RESIDUAL_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportResidualModelEncProcDec"
     ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
     ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
@@ -382,6 +386,17 @@ class TransportTendModelSchema(TransportModelSchema):
     "Whether to condition the noise injection on the residual connection."
 
 
+class TransportResidualModel(TransportModel):
+    residual_prediction: dict[str, str] = Field(default_factory=dict)
+    "Residual spatial downscaling pairs: target dataset -> source dataset."
+    direct_prediction: dict[str, list[str]] = Field(default_factory=dict)
+    "Per-target prognostic variables predicted directly in state space (excluded from the residual)."
+
+
+class TransportResidualModelSchema(TransportModelSchema):
+    model: TransportResidualModel = Field(default_factory=TransportResidualModel)
+    "Transport residual (spatial downscaling) model schema."
+
 
 class HierarchicalModelSchema(BaseModelSchema):
     enable_hierarchical_level_processing: bool = Field(default=False)
@@ -396,4 +411,5 @@ ModelSchema = Union[
     HierarchicalModelSchema,
     TransportModelSchema,
     TransportTendModelSchema,
+    TransportResidualModelSchema,
 ]
