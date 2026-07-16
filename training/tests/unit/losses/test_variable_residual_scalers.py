@@ -162,6 +162,43 @@ def test_no_residual_scaler_accepts_missing_statistics(graph_with_nodes: HeteroD
     assert torch.allclose(scaling, torch.ones_like(scaling))
 
 
+# A prognostic variable sitting at data-output index 0. Under the old truthiness check
+# (``name_to_index.get(key)`` returning a falsy 0) this variable was silently skipped and left at
+# unit scaling; the ``is not None`` fix scales it correctly.
+INDEX0_NAME_TO_INDEX = {"d": 0, "x": 1}
+INDEX0_STATISTICS = {"stdev": [10.0, 1.0]}
+INDEX0_STATISTICS_RESIDUALS = {"stdev": [2.0, 1.0]}
+
+
+def _index0_config() -> DictConfig:
+    return DictConfig(
+        {
+            "data": {"forcing": ["x"], "diagnostic": []},
+            "training": {
+                "variable_groups": {"default": "sfc"},
+            },
+        },
+    )
+
+
+def test_stdev_residual_scaler_scales_prognostic_at_data_output_index_0() -> None:
+    """A prognostic variable at data-output index 0 must be scaled, not skipped (index-0 bug)."""
+    config = _index0_config()
+    data_indices = IndexCollection(data_config=config.data, name_to_index=INDEX0_NAME_TO_INDEX)
+
+    scaler = StdevResidualScaler(
+        data_indices=data_indices,
+        statistics=INDEX0_STATISTICS,
+        statistics_residuals=INDEX0_STATISTICS_RESIDUALS,
+    )
+    scaling = scaler.get_scaling_values()
+
+    # "d" is prognostic at global/data-output index 0 -> stdev/residual_stdev = 10/2 = 5.0.
+    # Under the old ``.get(key,)`` truthiness bug this stayed 1.0.
+    d_output_pos = data_indices.data.output.positions_for_names(["d"])[0]
+    assert scaling[d_output_pos].item() == pytest.approx(5.0)
+
+
 @pytest.mark.parametrize("scaler_cls", [StdevResidualScaler, VarResidualScaler])
 def test_residual_scalers_require_explicit_statistics(scaler_cls: type) -> None:
     """Stdev/Var residual scalers must fail hard rather than silently fall back to state stats."""

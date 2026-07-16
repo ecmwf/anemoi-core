@@ -1632,6 +1632,10 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
         def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
             return prepared.metric_target
 
+        def model_input(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+            # Non-residual mode: the batch is already normalized, so x is fed to the model as-is.
+            return x
+
     forecaster._prediction_mode = _DummyPredictionMode()
 
     captured: dict[str, Any] = {}

@@ -51,6 +51,14 @@ class PredictionMode:
     def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
         return prepared.metric_target
 
+    def model_input(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Return the model inputs fed to the network forward.
+
+        For state/tendency modes the batch is already normalized, so ``x`` is returned unchanged.
+        The residual mode overrides this to normalize the raw conditioning inputs exactly once.
+        """
+        return x
+
 
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
@@ -333,8 +341,26 @@ class ResidualPredictionMode(PredictionMode):
         self._reference_positions = list(module.task.output_to_input_positions())
         module.model.model.set_output_reference_positions(self._reference_positions)
 
+    def model_input(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Normalize the raw conditioning inputs once before the forward chain.
+
+        In residual mode the batch is kept raw, so ``x`` (source + pass-through datasets) is raw
+        here. The encoder needs normalized features, so normalize each dataset with its own state
+        pre-processor. The residual reference is computed separately from the raw ``x`` and never
+        from these normalized tensors, so commutation is irrelevant for the conditioning.
+        """
+        return {
+            dataset_name: self.module.model.pre_processors[dataset_name](tensor, in_place=False)
+            for dataset_name, tensor in x.items()
+        }
+
     def _reference(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Same-offset references: select the source steps first, then project (cheaper)."""
+        """Same-offset RAW references: select the source steps first, then project (cheaper).
+
+        ``x`` is raw (residual mode keeps the batch raw), so the projected reference is the raw
+        physical ``interp(source)`` used both to build the residual target and to reconstruct the
+        physical state.
+        """
         positions = torch.as_tensor(self._reference_positions, dtype=torch.long)
         references: dict[str, torch.Tensor] = {}
         for target_dataset, source_dataset in self._residual_pairs.items():
@@ -379,7 +405,6 @@ class ResidualPredictionMode(PredictionMode):
                 pre_processors_residuals=self.module.model.pre_processors_residuals,
                 target_dataset=target_dataset,
                 source_dataset=source_dataset,
-                input_post_processor=self.module.model.post_processors,
                 skip_imputation=True,
             )
             residual_targets[target_dataset] = residual_target
@@ -468,6 +493,19 @@ class BaseTransportTraining(BaseTrainingModule):
     def prediction_mode(self) -> PredictionMode:
         """Return the state/tendency target handler for this module."""
         return self._prediction_mode
+
+    def _normalize_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Keep the batch RAW in residual mode; normalize it as usual otherwise.
+
+        Residual downscaling normalizes each piece exactly once where it is used (the reference is
+        raw physical ``interp(source)``, conditioning is normalized in ``ResidualPredictionMode.
+        model_input``, targets are normalized inside ``compute_residual``). Normalizing the whole
+        batch up front would force a denorm-then-renorm round trip and reintroduce the
+        interpolation/normalization commutation problem, so we skip it here.
+        """
+        if isinstance(self._prediction_mode, ResidualPredictionMode):
+            return batch
+        return super()._normalize_batch(batch)
 
     @property
     def plot_adapter(self) -> EnsemblePlotAdapterWrapper:
@@ -648,7 +686,10 @@ class TransportTraining(BaseTransportTraining):
         prepared_target = self.prediction_mode.prepare_target(batch, x)
         prepared_objective = self.transport_objective.prepare(prepared_target)
 
-        prediction = self(x, prepared_objective.conditioned_target, prepared_objective.condition)
+        # In residual mode ``x`` is raw; the mode normalizes the conditioning inputs here (the raw
+        # ``x`` was already consumed by ``prepare_target`` for the physical residual reference).
+        model_input = self.prediction_mode.model_input(x)
+        prediction = self(model_input, prepared_objective.conditioned_target, prepared_objective.condition)
         loss_prediction = self.transport_objective.prepare_loss_prediction(prediction, prepared_objective)
 
         metric_prediction = None

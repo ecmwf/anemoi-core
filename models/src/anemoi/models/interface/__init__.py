@@ -18,14 +18,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.utils.config import get_multiple_datasets_config
-
-# Denormalizing an interpolated normalized source is exact only for affine pre-processors.
-# Residual downscaling requires interpolation and normalization to commute, so only affine
-# normalizers are permitted on any source/target dataset feeding a residual pair. Extend this
-# allowlist deliberately (only with processors whose transform is affine per channel).
-AFFINE_PRE_PROCESSORS: tuple[type, ...] = (InputNormalizer,)
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -241,37 +234,8 @@ class AnemoiModelInterface(torch.nn.Module):
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
-        self._validate_residual_linearity()
-
         # Use the forward method of the model directly
         self.forward = self.model.forward
-
-    def _validate_residual_linearity(self) -> None:
-        """Reject non-affine pre-processors on datasets feeding a residual pair.
-
-        Residual reconstruction denormalizes an interpolated *normalized* source; this equals the
-        interpolation of the physical source only when normalization is affine (interpolation and
-        normalization commute). A non-affine processor (imputer, remapper, non-linear transform)
-        would silently break that identity, so we fail loudly at setup.
-        """
-        pairs = getattr(self.model, "_residual_pairs", {}) or {}
-        if not pairs:
-            return
-        involved = set(pairs) | set(pairs.values())
-        for dataset_name in sorted(involved):
-            if dataset_name not in self.pre_processors:
-                continue
-            processors = self.pre_processors[dataset_name]
-            for name, processor in processors.processors.items():
-                if not isinstance(processor, AFFINE_PRE_PROCESSORS):
-                    raise ValueError(
-                        f"Residual downscaling requires affine pre-processors so interpolation and "
-                        f"normalization commute, but dataset '{dataset_name}' uses non-affine processor "
-                        f"'{name}' ({type(processor).__name__}). Allowed: "
-                        f"{[cls.__name__ for cls in AFFINE_PRE_PROCESSORS]}. "
-                        "Remove it from the source/target datasets feeding the residual pair, or extend "
-                        "AFFINE_PRE_PROCESSORS deliberately if it is provably affine."
-                    )
 
     def predict_step(
         self,

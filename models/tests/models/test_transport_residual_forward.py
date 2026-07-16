@@ -16,10 +16,13 @@ real ``InterpolationConnection`` loaded from an ``.npz`` file. This validates th
 
 - ``_calculate_input_dim`` has every attribute it needs at the point the parent
   ``__init__`` builds the encoders (construction-order contract),
-- a full ``forward()`` pass runs through the concat conditioning
-  (interp(source) ++ target forcings) and produces the right output shape,
-- ``_after_sampling`` reconstructs physical states through real affine processors,
-  matching a hand-computed reference.
+- a full ``forward()`` pass runs through the concat conditioning (interp(source), with zero
+  pass-through datasets here) and produces the right output shape,
+- ``_after_sampling`` reconstructs physical states from the RAW source reference through real
+  affine processors, matching a hand-computed reference (raw-batch contract).
+
+Three-role note: the target ("output") is output-only and is never a model input; ``x`` carries the
+source only. Pass-through composition is unit-tested in ``test_transport_residual_model.py``.
 """
 
 import numpy as np
@@ -271,16 +274,17 @@ def test_real_instantiation_builds_residual_interpolation(real_model) -> None:
 def test_real_instantiation_encoder_input_dim_matches_hand_formula(real_model) -> None:
     model, _ = real_model
     source_input_full = len(model.data_indices["input"].data.input.full)  # u, v, sforce -> 3
-    target_forcing = len(model.data_indices["output"].data.input.forcing)  # force -> 1
     node_attr_dims = model.node_attributes.attr_ndims["output"]  # 2 * coord dims, no trainables -> 4
     output_channels = len(model.data_indices["output"].model.output.full)  # u, v, dp, diag -> 4
 
     assert source_input_full == 3
-    assert target_forcing == 1
     assert node_attr_dims == 4
     assert output_channels == 4
+    assert model._passthrough_datasets == []  # zero pass-through in this fixture
 
-    expected = N_STEP_INPUT * (source_input_full + target_forcing) + node_attr_dims + N_STEP_OUTPUT * output_channels
+    # New formula: source input full per step (+ pass-through fulls, none here), plus node
+    # attributes, plus the corrupted target. No target-forcing term any more.
+    expected = N_STEP_INPUT * source_input_full + node_attr_dims + N_STEP_OUTPUT * output_channels
     assert model.input_dim["output"] == expected
     # The real encoder was constructed with that dim (this is what a stub test cannot check).
     assert model.encoder["output"].in_channels_src == expected
@@ -289,10 +293,9 @@ def test_real_instantiation_encoder_input_dim_matches_hand_formula(real_model) -
 def _forward_inputs(batch_size: int = 2) -> tuple[dict, dict, dict]:
     generator = torch.Generator().manual_seed(11)
     x = {
-        # source history: (batch, time, ensemble, source grid, source data.input.full)
+        # source history only: (batch, time, ensemble, source grid, source data.input.full).
+        # The target is output-only and is never a model input.
         "input": torch.randn(batch_size, N_STEP_INPUT, 1, N_SOURCE, 3, generator=generator),
-        # target history: (batch, time, ensemble, target grid, target data.input.full = [u, v, dp, force])
-        "output": torch.randn(batch_size, N_STEP_INPUT, 1, N_TARGET, 4, generator=generator),
     }
     conditioned_target = {
         "output": torch.randn(batch_size, N_STEP_OUTPUT, 1, N_TARGET, 4, generator=generator),
@@ -312,14 +315,13 @@ def test_real_forward_pass_shape_and_finiteness(real_model) -> None:
     assert torch.isfinite(out["output"]).all()
 
 
-def test_real_forward_requires_source_and_target_inputs(real_model) -> None:
+def test_real_forward_requires_source_input(real_model) -> None:
     model, _ = real_model
-    x, conditioned_target, condition = _forward_inputs()
+    _, conditioned_target, condition = _forward_inputs()
 
+    # The source dataset is required; the target is never a model input.
     with pytest.raises(KeyError, match="requires source dataset"):
-        model.forward({"output": x["output"]}, conditioned_target, condition)
-    with pytest.raises(KeyError, match="requires its own dataset"):
-        model.forward({"input": x["input"]}, conditioned_target, condition)
+        model.forward({}, conditioned_target, condition)
 
 
 def test_real_after_sampling_reconstructs_residual_channels_by_hand(real_model) -> None:
@@ -338,9 +340,10 @@ def test_real_after_sampling_reconstructs_residual_channels_by_hand(real_model) 
     model.set_output_reference_positions([1])
 
     generator = torch.Generator().manual_seed(23)
-    # NORMALIZED source history (as produced by _before_sampling): (1, 2, 1, N_SOURCE, 3)
-    x_source_norm = torch.randn(1, N_STEP_INPUT, 1, N_SOURCE, 3, generator=generator)
-    before_sampling_data = ({"input": x_source_norm, "output": None},)
+    # RAW physical source history (kept by the raw-batch _before_sampling): (1, 2, 1, N_SOURCE, 3).
+    # before_sampling_data = (normalized conditioning inputs [unused here], RAW inputs).
+    x_source_raw = torch.randn(1, N_STEP_INPUT, 1, N_SOURCE, 3, generator=generator)
+    before_sampling_data = ({"input": None}, {"input": x_source_raw})
 
     # Network output in MODEL_OUTPUT layout [u, v, dp, diag]
     model_output = torch.randn(1, N_STEP_OUTPUT, 1, N_TARGET, 4, generator=generator)
@@ -357,15 +360,15 @@ def test_real_after_sampling_reconstructs_residual_channels_by_hand(real_model) 
 
     assert out.shape == (1, N_STEP_OUTPUT, 1, N_TARGET, 4)
 
-    # Hand-computed reference, independent of the model code path:
-    #   interp_phys[c] = matrix @ (x_source_norm[:, 1, ..., c] * source_stdev[c]) for c in [u, v]
+    # Hand-computed reference, independent of the model code path (raw reference, no source_stdev):
+    #   interp_phys[c] = matrix @ x_source_raw[:, 1, ..., c] for c in [u, v]
     #   out[u] = model_output[u] * residual_stdev[u] + interp_phys[u]   (residual channels)
     #   out[dp] = model_output[dp] * state_stdev[dp]                    (direct prediction)
     #   out[diag] = model_output[diag] * state_stdev[diag]              (diagnostic)
     projection = torch.from_numpy(matrix)
-    source_step = x_source_norm[0, 1, 0]  # (N_SOURCE, 3), the step selected by positions=[1]
-    interp_u_phys = projection @ (source_step[:, 0] * _SOURCE_STATE_STDEV[0])
-    interp_v_phys = projection @ (source_step[:, 1] * _SOURCE_STATE_STDEV[1])
+    source_step = x_source_raw[0, 1, 0]  # (N_SOURCE, 3), the step selected by positions=[1]
+    interp_u_phys = projection @ source_step[:, 0]
+    interp_v_phys = projection @ source_step[:, 1]
 
     model_pos = {
         name: int(target_indices.model.output.name_to_index[name]) for name in ("u", "v", "dp", "diag")
@@ -394,14 +397,14 @@ def test_real_after_sampling_refuses_unset_reference_positions(real_model) -> No
     _, post_tgt = _processor_pair(_target_indices(), _norm_stats(_TARGET_STATE_STDEV))
     _, post_res = _processor_pair(_target_indices(), _norm_stats(_TARGET_RESIDUAL_STDEV))
 
-    x_source_norm = torch.randn(1, N_STEP_INPUT, 1, N_SOURCE, 3)
+    x_source_raw = torch.randn(1, N_STEP_INPUT, 1, N_SOURCE, 3)
     model_output = torch.randn(1, N_STEP_OUTPUT, 1, N_TARGET, 4)
 
     with pytest.raises(RuntimeError, match="unset"):
         model._after_sampling(
             {"output": model_output},
             torch.nn.ModuleDict({"input": post_src, "output": post_tgt}),
-            ({"input": x_source_norm, "output": None},),
+            ({"input": None}, {"input": x_source_raw}),
             model_comm_group=None,
             grid_shard_sizes=None,
             gather_out=False,

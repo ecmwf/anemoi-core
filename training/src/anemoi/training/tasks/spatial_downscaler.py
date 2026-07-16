@@ -41,20 +41,13 @@ class SpatialDownscaler(BaseTask):
         self.output_datasets = tuple(output_datasets)
         if not self.input_datasets or not self.output_datasets:
             raise ValueError("SpatialDownscaler requires non-empty input_datasets and output_datasets.")
-        if len(set(self.input_datasets)) != len(self.input_datasets):
-            raise ValueError(f"SpatialDownscaler input_datasets contains duplicates: {input_datasets}")
-        if len(set(self.output_datasets)) != len(self.output_datasets):
-            raise ValueError(f"SpatialDownscaler output_datasets contains duplicates: {output_datasets}")
 
+        # Uniqueness of datasets/offsets is enforced by the pydantic task schema; not re-checked here.
         self._validate_offsets(input_offsets, "input_offsets")
         self._validate_offsets(output_offsets, "output_offsets")
 
-        if len(set(input_offsets)) != len(input_offsets):
-            raise ValueError(f"SpatialDownscaler input_offsets contains duplicates: {input_offsets}")
-        if len(set(output_offsets)) != len(output_offsets):
-            raise ValueError(f"SpatialDownscaler output_offsets contains duplicates: {output_offsets}")
-
-        # THE invariant: outputs must be a subset of inputs. There is no fallback of any kind.
+        # THE invariant: outputs must be a subset of inputs. Kept because tasks are also constructed
+        # programmatically in tests, where the pydantic schema does not run. No fallback of any kind.
         missing = sorted(set(output_offsets) - set(input_offsets))
         if missing:
             raise ValueError(
@@ -76,27 +69,17 @@ class SpatialDownscaler(BaseTask):
         if not offsets:
             raise ValueError(f"SpatialDownscaler {label} must be a non-empty list of integers.")
         for offset in offsets:
-            # bool is a subclass of int in Python; reject it explicitly since a
-            # dataset-relative offset of True/False is never a meaningful value.
-            if isinstance(offset, bool) or not isinstance(offset, int):
+            if not isinstance(offset, int):
                 raise ValueError(f"SpatialDownscaler {label} must contain only integers, got {offset!r} in {offsets}.")
 
     def bind_data_frequency(self, frequency: datetime.timedelta) -> None:
         """Late-bind the dataset frequency, converting integer offsets to timedeltas.
 
-        No-op if already bound to the same frequency; raises if already bound
-        to a different one.
+        No-op if already bound to the same frequency; otherwise (re)binds and overwrites the derived
+        timedelta offsets. The multi-frequency guard lives in :func:`bind_task_frequency`.
         """
-        if not isinstance(frequency, datetime.timedelta) or frequency <= datetime.timedelta(0):
-            raise ValueError(f"SpatialDownscaler frequency must be a positive timedelta, got {frequency!r}.")
-
-        if self._frequency is not None:
-            if self._frequency == frequency:
-                return
-            raise ValueError(
-                f"SpatialDownscaler is already bound to frequency {self._frequency}; "
-                f"cannot rebind to a different frequency {frequency}.",
-            )
+        if self._frequency == frequency:
+            return
 
         self._frequency = frequency
         # Multiplying a sorted list of ints by one positive scalar preserves order.

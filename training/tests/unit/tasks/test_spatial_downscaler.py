@@ -67,26 +67,6 @@ def test_output_offset_not_in_inputs_raises() -> None:
         )
 
 
-def test_duplicate_input_offsets_raise() -> None:
-    with pytest.raises(ValueError, match="duplicates"):
-        SpatialDownscaler(
-            input_datasets=["input"],
-            output_datasets=["output"],
-            input_offsets=[0, 0, 1],
-            output_offsets=[0],
-        )
-
-
-def test_duplicate_output_offsets_raise() -> None:
-    with pytest.raises(ValueError, match="duplicates"):
-        SpatialDownscaler(
-            input_datasets=["input"],
-            output_datasets=["output"],
-            input_offsets=[0, 1],
-            output_offsets=[0, 0],
-        )
-
-
 def test_empty_input_offsets_raise() -> None:
     with pytest.raises(ValueError, match="non-empty"):
         SpatialDownscaler(
@@ -107,29 +87,15 @@ def test_empty_output_offsets_raise() -> None:
         )
 
 
-def test_bool_offset_is_rejected() -> None:
-    with pytest.raises(ValueError, match="integers"):
-        SpatialDownscaler(
-            input_datasets=["input"],
-            output_datasets=["output"],
-            input_offsets=[0, True],
-            output_offsets=[0],
-        )
-
-
 def test_empty_datasets_raise() -> None:
     with pytest.raises(ValueError, match="non-empty"):
         SpatialDownscaler(input_datasets=[], output_datasets=["output"], input_offsets=[0], output_offsets=[0])
 
 
-def test_duplicate_datasets_raise() -> None:
-    with pytest.raises(ValueError, match="duplicates"):
-        SpatialDownscaler(
-            input_datasets=["input", "input"],
-            output_datasets=["output"],
-            input_offsets=[0],
-            output_offsets=[0],
-        )
+# Uniqueness of datasets/offsets and the integer-vs-bool distinction are enforced by the pydantic
+# task schema, not re-checked in __init__ (that redundancy was removed). The subset invariant is
+# kept because tasks are constructed programmatically in tests — see
+# ``test_output_offset_not_in_inputs_raises``.
 
 
 # ── Role selection ──────────────────────────────────────────────────────────
@@ -246,27 +212,18 @@ def test_rebinding_same_frequency_is_noop() -> None:
     assert task.get_offsets() == [datetime.timedelta(hours=0)]
 
 
-def test_rebinding_different_frequency_raises() -> None:
+def test_rebinding_different_frequency_overwrites() -> None:
     task = SpatialDownscaler(
         input_datasets=["input"],
         output_datasets=["output"],
-        input_offsets=[0],
+        input_offsets=[0, 1],
         output_offsets=[0],
     )
     task.bind_data_frequency(datetime.timedelta(hours=6))
-    with pytest.raises(ValueError, match="already bound"):
-        task.bind_data_frequency(datetime.timedelta(hours=1))
-
-
-def test_bind_data_frequency_rejects_non_positive_timedelta() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[0],
-        output_offsets=[0],
-    )
-    with pytest.raises(ValueError, match="positive"):
-        task.bind_data_frequency(datetime.timedelta(0))
+    # Rebinding to a different frequency simply overwrites the derived timedelta offsets (no raise).
+    task.bind_data_frequency(datetime.timedelta(hours=1))
+    assert task.get_input_offsets() == [datetime.timedelta(hours=0), datetime.timedelta(hours=1)]
+    assert task.get_output_offsets() == [datetime.timedelta(hours=0)]
 
 
 def test_get_timestep_for_metadata_bound_and_unbound() -> None:

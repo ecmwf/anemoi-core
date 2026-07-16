@@ -1,5 +1,7 @@
 _target_: anemoi.training.tasks.SpatialDownscaler
-input_datasets: [input, output]
+# Three-role contract: the target dataset is never a model input. ``input_datasets`` carries the
+# source (and any pass-through forcing datasets); ``output_datasets`` carries only the target.
+input_datasets: [input]
 output_datasets: [output]
 input_offsets: [0]
 output_offsets: [0]

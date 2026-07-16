@@ -83,14 +83,17 @@ class BaseResidualScaler(BaseScaler):
         variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
         for key, idx in self.data_indices.model.output.name_to_index.items():
-            if idx in self.data_indices.model.output.prognostic and self.data_indices.data.output.name_to_index.get(
-                key,
+            # ``name_to_index.get(key)`` returns a data-output index that can legitimately be 0, so
+            # test membership explicitly — a truthiness check silently skips the index-0 variable.
+            if (
+                idx in self.data_indices.model.output.prognostic
+                and self.data_indices.data.output.name_to_index.get(key) is not None
             ):
                 prog_idx = self.data_indices.data.output.name_to_index[key]
-                variable_stdev = self.statistics["stdev"][prog_idx] if self.statistics_residuals else 1
-                variable_residual_stdev = (
-                    self.statistics_residuals["stdev"][prog_idx] if self.statistics_residuals else 1
-                )
+                # Stdev/Var residual scalers always have residual statistics (validated in __init__);
+                # NoResidualScaler overrides get_level_scaling to ignore both stdevs.
+                variable_stdev = self.statistics["stdev"][prog_idx]
+                variable_residual_stdev = self.statistics_residuals["stdev"][prog_idx]
                 scaling = self.get_level_scaling(variable_stdev, variable_residual_stdev)
                 variable_level_scaling[idx] *= scaling
 
@@ -101,6 +104,10 @@ class NoResidualScaler(BaseResidualScaler):
     """No scaling by residual statistics."""
 
     requires_statistics_residuals = False
+
+    def get_scaling_values(self, **_kwargs) -> torch.Tensor:
+        # No residual statistics are consumed, so return unit scaling without touching any stdev.
+        return torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
     def get_level_scaling(self, variable_stdev: float, variable_residual_stdev: float) -> float:
         del variable_stdev, variable_residual_stdev

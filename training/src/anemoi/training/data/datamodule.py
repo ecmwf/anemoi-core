@@ -16,7 +16,6 @@ from pathlib import Path
 
 import numpy as np
 import pytorch_lightning as pl
-import yaml
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -164,29 +163,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     def _load_residual_statistics(path: Path) -> dict:
         if not path.exists():
             raise FileNotFoundError(f"Residual statistics file does not exist: {path}")
-        if path.suffix.lower() in {".json", ".yaml", ".yml"}:
-            with path.open() as stream:
-                value = json.load(stream) if path.suffix.lower() == ".json" else yaml.safe_load(stream)
-            if not isinstance(value, dict):
-                raise ValueError(f"Residual statistics file must contain a mapping: {path}")
-            return {name: np.asarray(values) if isinstance(values, list) else values for name, values in value.items()}
-        if path.suffix.lower() in {".nc", ".netcdf"}:
-            import xarray as xr
-
-            with xr.open_dataset(path) as dataset:
-                result = {
-                    name: variable.values
-                    for name, variable in dataset.data_vars.items()
-                    if name in {"mean", "stdev", "minimum", "maximum"}
-                }
-                required = {"minimum", "maximum", "mean", "stdev"}
-                if not required.issubset(result):
-                    raise ValueError(f"Residual statistics NetCDF must contain {sorted(required)}: {path}")
-                for name, values in list(result.items()):
-                    if values.ndim > 1:
-                        result[name] = values[0]
-                return result
-        raise ValueError(f"Unsupported residual statistics format: {path}; use JSON, YAML, or NetCDF.")
+        if path.suffix.lower() != ".json":
+            raise ValueError(f"Unsupported residual statistics format: {path}; use JSON.")
+        with path.open() as stream:
+            value = json.load(stream)
+        if not isinstance(value, dict):
+            raise ValueError(f"Residual statistics file must contain a mapping: {path}")
+        return {name: np.asarray(values) if isinstance(values, list) else values for name, values in value.items()}
 
     @cached_property
     def metadata(self) -> dict:

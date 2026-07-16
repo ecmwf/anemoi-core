@@ -79,9 +79,8 @@ def spatial_downscaler_config(
 
     OmegaConf.set_struct(cfg, False)
 
-    # The residual linearity guard only allows affine pre-processors on datasets feeding a
-    # residual pair; drop the (non-affine) constant imputer that data:multi puts on cerra.
-    cfg.data.datasets.cerra.processors.pop("const_imputer", None)
+    # The raw-batch residual design removed the affine pre-processor gate, so the (non-affine)
+    # constant imputer that data:multi puts on cerra no longer needs to be stripped.
 
     # Only the residual target is predicted, so only it can contribute to the loss.
     cfg.training.training_loss.datasets = OmegaConf.create(
@@ -177,9 +176,10 @@ def _assert_downscaler_training_outcome(trainer: AnemoiTrainer, compute_residual
     assert -1 not in reference_positions, f"reference positions never set: {reference_positions}"
     assert reference_positions == [0]  # input_offsets [0] / output_offsets [0]
 
-    # (b) The task recorded its integer dataset-relative offsets in the metadata.
+    # (b) The task recorded its integer dataset-relative offsets in the metadata. Three-role
+    # contract: the target (cerra) is never a model input, so only era5 is an input dataset.
     metadata = trainer.metadata
-    assert metadata["input_datasets"] == ["era5", "cerra"]
+    assert metadata["input_datasets"] == ["era5"]
     assert metadata["output_datasets"] == ["cerra"]
     for dataset_name in ("era5", "cerra"):
         timesteps = metadata["metadata_inference"][dataset_name]["timesteps"]
