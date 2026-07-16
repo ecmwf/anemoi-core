@@ -82,6 +82,8 @@ class SpatialDownscalerSchema(BaseModel):
     "Dataset-relative integer offsets of the source state(s)."
     output_offsets: list[int] = Field(..., min_length=1)
     "Dataset-relative integer offsets of the target state(s). Must be a subset of `input_offsets`."
+    frequency: str = Field(example="${data.frequency}")
+    "Sampling frequency the datasets are opened with; one offset = one step of this. Use ${data.frequency}."
 
     @model_validator(mode="after")
     def _validate_offsets(self) -> "SpatialDownscalerSchema":

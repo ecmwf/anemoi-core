@@ -2,14 +2,22 @@
 
 import datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 import torch
 
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.tasks import SpatialDownscaler
-from anemoi.training.tasks.spatial_downscaler import bind_task_frequency
+
+
+def _task(input_offsets: list[int], output_offsets: list[int], **kwargs) -> SpatialDownscaler:
+    defaults = {
+        "input_datasets": ["input"],
+        "output_datasets": ["output"],
+        "frequency": "6h",
+    }
+    defaults.update(kwargs)
+    return SpatialDownscaler(input_offsets=input_offsets, output_offsets=output_offsets, **defaults)
 
 
 def _index_collection_for(names: tuple[str, ...]) -> dict[str, SimpleNamespace]:
@@ -42,16 +50,51 @@ def test_construction_and_batch_positions(
     expected_output_positions: list[int],
     expected_o2i: list[int],
 ) -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=input_offsets,
-        output_offsets=output_offsets,
-    )
+    task = _task(input_offsets, output_offsets)
 
     assert task.get_batch_input_indices() == expected_input_positions
     assert task.get_batch_output_indices() == expected_output_positions
     assert task.output_to_input_positions() == expected_o2i
+
+
+def test_offsets_are_frequency_multiples() -> None:
+    """Integer offsets become physical offsets at construction: offset x frequency."""
+    task = _task([-1, 0, 1], [0], frequency="6h")
+
+    assert task.get_input_offsets() == [
+        datetime.timedelta(hours=-6),
+        datetime.timedelta(hours=0),
+        datetime.timedelta(hours=6),
+    ]
+    assert task.get_output_offsets() == [datetime.timedelta(hours=0)]
+    assert task._get_timestep_for_metadata() == "6h"
+
+
+def test_relative_date_indices_equal_the_configured_integers() -> None:
+    """The round trip: integers x frequency // frequency == the same integers.
+
+    ``compute_relative_date_indices`` is the existing helper that turns task offsets into
+    dataset row positions; with this task the positions ARE the configured integers.
+    """
+    task = _task([-1, 0, 1, 2], [0, 1])
+    readers = {
+        "input": SimpleNamespace(frequency=datetime.timedelta(hours=6)),
+        "output": SimpleNamespace(frequency=datetime.timedelta(hours=6)),
+    }
+
+    relative_date_indices = compute_relative_date_indices(task, readers)
+
+    expected = [-1, 0, 1, 2]
+    assert relative_date_indices == {"input": expected, "output": expected}
+
+
+def test_incompatible_frequency_fails_in_existing_helper() -> None:
+    """A task frequency the data cannot represent fails loudly in the existing helper."""
+    task = _task([-1, 0, 1], [0], frequency="6h")
+    readers = {"input": SimpleNamespace(frequency=datetime.timedelta(hours=4))}
+
+    with pytest.raises(ValueError, match="not compatible"):
+        compute_relative_date_indices(task, readers)
 
 
 # ── Invariant violations ───────────────────────────────────────────────────────
@@ -59,17 +102,7 @@ def test_construction_and_batch_positions(
 
 def test_output_offset_not_in_inputs_raises() -> None:
     with pytest.raises(ValueError, match="output_offsets"):
-        SpatialDownscaler(
-            input_datasets=["input"],
-            output_datasets=["output"],
-            input_offsets=[0, 1],
-            output_offsets=[2],
-        )
-
-
-
-
-
+        _task([0, 1], [2])
 
 
 # Types, non-emptiness and uniqueness are enforced by the pydantic task schema (SpatialDownscalerSchema),
@@ -81,12 +114,7 @@ def test_output_offset_not_in_inputs_raises() -> None:
 
 
 def test_get_inputs_and_get_targets_select_named_roles_in_order() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input", "output"],
-        output_datasets=["output"],
-        input_offsets=[-1, 0, 1, 2],
-        output_offsets=[0, 1],
-    )
+    task = _task([-1, 0, 1, 2], [0, 1], input_datasets=["input", "output"])
     n_time = 4  # len of the offset union [-1, 0, 1, 2]
     batch = {
         "input": torch.arange(n_time).reshape(1, n_time, 1, 1).float(),
@@ -105,12 +133,7 @@ def test_get_inputs_and_get_targets_select_named_roles_in_order() -> None:
 
 
 def test_get_inputs_missing_dataset_raises_key_error() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input", "missing"],
-        output_datasets=["output"],
-        input_offsets=[0],
-        output_offsets=[0],
-    )
+    task = _task([0], [0], input_datasets=["input", "missing"])
     batch = {
         "input": torch.zeros(1, 1, 1, 1),
         "output": torch.zeros(1, 1, 1, 1),
@@ -122,160 +145,18 @@ def test_get_inputs_missing_dataset_raises_key_error() -> None:
 
 
 def test_get_targets_missing_dataset_raises_key_error() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["missing"],
-        input_offsets=[0],
-        output_offsets=[0],
-    )
+    task = _task([0], [0], output_datasets=["missing"])
     batch = {"input": torch.zeros(1, 1, 1, 1)}
 
     with pytest.raises(KeyError, match="missing"):
         task.get_targets(batch)
 
 
-# ── Frequency binding ──────────────────────────────────────────────────────
-
-
-def test_bind_data_frequency_converts_offsets_to_timedeltas() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[-1, 0, 1, 2],
-        output_offsets=[0, 1],
-    )
-    task.bind_data_frequency(datetime.timedelta(hours=6))
-
-    assert task.get_offsets() == [
-        datetime.timedelta(hours=-6),
-        datetime.timedelta(hours=0),
-        datetime.timedelta(hours=6),
-        datetime.timedelta(hours=12),
-    ]
-    assert task.get_input_offsets() == [
-        datetime.timedelta(hours=-6),
-        datetime.timedelta(hours=0),
-        datetime.timedelta(hours=6),
-        datetime.timedelta(hours=12),
-    ]
-    assert task.get_output_offsets() == [datetime.timedelta(hours=0), datetime.timedelta(hours=6)]
-
-
-def test_positional_indices_identical_before_and_after_binding() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[-1, 0, 1, 2],
-        output_offsets=[0, 1],
-    )
-    before_input = task.get_batch_input_indices()
-    before_output = task.get_batch_output_indices()
-    before_o2i = task.output_to_input_positions()
-
-    task.bind_data_frequency(datetime.timedelta(hours=6))
-
-    assert task.get_batch_input_indices() == before_input
-    assert task.get_batch_output_indices() == before_output
-    assert task.output_to_input_positions() == before_o2i
-
-
-def test_rebinding_same_frequency_is_noop() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[0],
-        output_offsets=[0],
-    )
-    task.bind_data_frequency(datetime.timedelta(hours=6))
-    task.bind_data_frequency(datetime.timedelta(hours=6))  # no-op, must not raise
-    assert task.get_offsets() == [datetime.timedelta(hours=0)]
-
-
-def test_rebinding_different_frequency_overwrites() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[0, 1],
-        output_offsets=[0],
-    )
-    task.bind_data_frequency(datetime.timedelta(hours=6))
-    # Rebinding to a different frequency simply overwrites the derived timedelta offsets (no raise).
-    task.bind_data_frequency(datetime.timedelta(hours=1))
-    assert task.get_input_offsets() == [datetime.timedelta(hours=0), datetime.timedelta(hours=1)]
-    assert task.get_output_offsets() == [datetime.timedelta(hours=0)]
-
-
-def test_get_timestep_for_metadata_bound_and_unbound() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[0],
-        output_offsets=[0],
-    )
-    with pytest.raises(RuntimeError, match="bind_data_frequency"):
-        task._get_timestep_for_metadata()
-
-    task.bind_data_frequency(datetime.timedelta(hours=6))
-    assert task._get_timestep_for_metadata() == "6h"
-
-
-# ── Seam integration: bind_task_frequency + compute_relative_date_indices ────
-
-
-def test_bind_task_frequency_binds_and_relative_indices_equal_integer_offsets() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[-1, 0, 1, 2],
-        output_offsets=[0, 1],
-    )
-    readers = {
-        "input": SimpleNamespace(frequency=datetime.timedelta(hours=6)),
-        "output": SimpleNamespace(frequency=datetime.timedelta(hours=6)),
-    }
-
-    bind_task_frequency(task, readers)
-    relative_date_indices = compute_relative_date_indices(task, readers)
-
-    expected = sorted(set(task._integer_input_offsets) | set(task._integer_output_offsets))
-    assert relative_date_indices == {"input": expected, "output": expected}
-
-
-def test_bind_task_frequency_differing_frequencies_raises() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input"],
-        output_datasets=["output"],
-        input_offsets=[0],
-        output_offsets=[0],
-    )
-    readers = {
-        "input": SimpleNamespace(frequency=datetime.timedelta(hours=6)),
-        "output": SimpleNamespace(frequency=datetime.timedelta(hours=1)),
-    }
-    with pytest.raises(ValueError, match="one frequency"):
-        bind_task_frequency(task, readers)
-
-
-def test_bind_task_frequency_noop_for_task_without_bind_data_frequency() -> None:
-    task = MagicMock(spec=[])  # no bind_data_frequency attribute
-    readers = {
-        "input": SimpleNamespace(frequency=datetime.timedelta(hours=6)),
-        "output": SimpleNamespace(frequency=datetime.timedelta(hours=1)),
-    }
-    bind_task_frequency(task, readers)  # must not raise
-
-
 # ── fill_metadata ────────────────────────────────────────────────────────────
 
 
 def test_fill_metadata_records_integer_offsets_and_roles() -> None:
-    task = SpatialDownscaler(
-        input_datasets=["input", "output"],
-        output_datasets=["output"],
-        input_offsets=[-1, 0, 1, 2],
-        output_offsets=[0, 1],
-    )
-    task.bind_data_frequency(datetime.timedelta(hours=6))
+    task = _task([-1, 0, 1, 2], [0, 1], input_datasets=["input", "output"])
 
     md_dict = {
         "metadata_inference": {
@@ -296,9 +177,9 @@ def test_fill_metadata_records_integer_offsets_and_roles() -> None:
         assert timesteps["output_offsets"] == [0, 1]
         assert timesteps["timestep"] == "6h"
 
+
 def test_schema_rejects_empty_lists() -> None:
     """Non-emptiness is owned by the config-time schema, not the task."""
-    import pytest as _pytest
     from pydantic import ValidationError
 
     from anemoi.training.schemas.tasks import SpatialDownscalerSchema
@@ -309,7 +190,8 @@ def test_schema_rejects_empty_lists() -> None:
         "output_datasets": ["output"],
         "input_offsets": [0],
         "output_offsets": [0],
+        "frequency": "6h",
     }
     for field in ("input_datasets", "output_datasets", "input_offsets", "output_offsets"):
-        with _pytest.raises(ValidationError):
+        with pytest.raises(ValidationError):
             SpatialDownscalerSchema(**{**base, field: []})

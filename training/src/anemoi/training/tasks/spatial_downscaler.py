@@ -4,13 +4,12 @@
 
 from __future__ import annotations
 
-import datetime
-
 import torch
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks.base import BaseTask
 from anemoi.utils.dates import frequency_to_string
+from anemoi.utils.dates import frequency_to_timedelta
 
 
 class SpatialDownscaler(BaseTask):
@@ -23,8 +22,9 @@ class SpatialDownscaler(BaseTask):
     every output offset must also be an input offset, so each predicted state
     has a source state at the same valid time.
 
-    Offsets are integers in units of the dataset frequency; the frequency itself
-    is attached once at data setup (see :func:`bind_task_frequency`).
+    Offsets are integers in units of ``frequency``, the sampling frequency the
+    datasets are opened with. Configure it as ``frequency: ${data.frequency}``
+    so it always matches the data (the same pattern as ``Forecaster.timestep``).
     """
 
     name: str = "spatial-downscaler"
@@ -35,6 +35,7 @@ class SpatialDownscaler(BaseTask):
         output_datasets: list[str],
         input_offsets: list[int],
         output_offsets: list[int],
+        frequency: str,
         **_kwargs,
     ) -> None:
         self.input_datasets = tuple(input_datasets)
@@ -51,27 +52,12 @@ class SpatialDownscaler(BaseTask):
 
         self._integer_input_offsets: list[int] = sorted(input_offsets)
         self._integer_output_offsets: list[int] = sorted(output_offsets)
-        self._frequency: datetime.timedelta | None = None
+        self._frequency = frequency_to_timedelta(frequency)
 
         super().__init__(
-            input_offsets=list(self._integer_input_offsets),
-            output_offsets=list(self._integer_output_offsets),
+            input_offsets=[offset * self._frequency for offset in self._integer_input_offsets],
+            output_offsets=[offset * self._frequency for offset in self._integer_output_offsets],
         )
-
-    def bind_data_frequency(self, frequency: datetime.timedelta) -> None:
-        """Late-bind the dataset frequency, converting integer offsets to timedeltas.
-
-        No-op if already bound to the same frequency; otherwise (re)binds and overwrites the derived
-        timedelta offsets. The multi-frequency guard lives in :func:`bind_task_frequency`.
-        """
-        if self._frequency == frequency:
-            return
-
-        self._frequency = frequency
-        # Multiplying a sorted list of ints by one positive scalar preserves order.
-        self._input_offsets = [offset * frequency for offset in self._integer_input_offsets]
-        self._output_offsets = [offset * frequency for offset in self._integer_output_offsets]
-        self._offsets = sorted(set(self._input_offsets + self._output_offsets))
 
     def output_to_input_positions(self) -> list[int]:
         """For each output offset (in output order), return its position among the input offsets.
@@ -106,11 +92,6 @@ class SpatialDownscaler(BaseTask):
         return {name: targets[name] for name in self.output_datasets}
 
     def _get_timestep_for_metadata(self) -> str:
-        if self._frequency is None:
-            raise RuntimeError(
-                f"{self.__class__.__name__} has no bound data frequency; call bind_data_frequency() first "
-                "(this normally happens in the datamodule via bind_task_frequency()).",
-            )
         return frequency_to_string(self._frequency)
 
     def fill_metadata(self, md_dict: dict) -> None:
@@ -131,26 +112,3 @@ class SpatialDownscaler(BaseTask):
 
         md_dict["input_datasets"] = list(self.input_datasets)
         md_dict["output_datasets"] = list(self.output_datasets)
-
-
-def bind_task_frequency(task, data_readers: dict) -> None:
-    """Late-bind ``task`` to the (single) frequency of ``data_readers``, if supported.
-
-    No-op unless ``task`` implements ``bind_data_frequency`` (e.g. tasks whose
-    offsets are physical timedeltas from construction, such as ``Forecaster``,
-    do not need this seam). Spatial downscaling requires every dataset to
-    share one frequency; if the readers disagree, raise naming each dataset's
-    frequency.
-    """
-    if not hasattr(task, "bind_data_frequency"):
-        return
-
-    frequencies = {name: dr.frequency for name, dr in data_readers.items()}
-    distinct = {frequency_to_string(freq) for freq in frequencies.values()}
-    if len(distinct) > 1:
-        listing = ", ".join(f"{name}={frequency_to_string(freq)}" for name, freq in frequencies.items())
-        raise ValueError(
-            f"Spatial downscaling requires all datasets to share one frequency, but got: {listing}.",
-        )
-
-    task.bind_data_frequency(next(iter(frequencies.values())))

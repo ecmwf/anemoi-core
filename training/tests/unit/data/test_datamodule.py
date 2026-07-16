@@ -66,10 +66,7 @@ def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None
     """set_epoch updates every already-cached dataset and leaves lazy datasets untouched."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.epoch = 0
-    # spec=Forecaster: a real task without bind_data_frequency, so bind_task_frequency()
-    # (called by set_epoch) correctly no-ops instead of trying to read
-    # `.frequency` off the plain-object data readers used below.
-    datamodule.task = mocker.Mock(spec=Forecaster)
+    datamodule.task = mocker.Mock()
     datamodule.task.steps.side_effect = lambda label: tuple(
         {} for _ in range({"training": 1, "validation": 2, "test": 3}[label])
     )
@@ -111,8 +108,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     """Datasets constructed after set_epoch receive the datamodule's current epoch."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.epoch = 7
-    # spec=Forecaster: see comment in test_set_epoch_updates_all_constructed_datasets above.
-    datamodule.task = mocker.Mock(spec=Forecaster)
+    datamodule.task = mocker.Mock()
     datamodule.task.steps.return_value = ({}, {})
 
     data_reader = object()

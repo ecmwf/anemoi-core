@@ -7,3 +7,4 @@ input_datasets: [input]
 output_datasets: [output]
 input_offsets: [0]
 output_offsets: [0]
+frequency: ${data.frequency}
