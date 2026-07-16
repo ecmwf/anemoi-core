@@ -8,9 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 
+import json
 import logging
+from collections.abc import Mapping
 from functools import cached_property
+from pathlib import Path
 
+import numpy as np
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
@@ -93,6 +97,78 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not any(stats is not None for stats in stats_by_dataset.values()):
             return None
         return stats_by_dataset
+
+    @cached_property
+    def statistics_residuals(self) -> dict[str, dict] | None:
+        """Load explicit residual statistics, failing hard on a configured bad path."""
+        configured = self.config.system.input.get("statistics_residuals")
+        if configured is None:
+            return None
+
+        if isinstance(configured, Mapping):
+            return {
+                dataset_name: self._validate_residual_statistics(
+                    self._load_residual_statistics(Path(path)),
+                    dataset_name,
+                )
+                for dataset_name, path in configured.items()
+            }
+
+        loaded = self._load_residual_statistics(Path(configured))
+        if all(dataset_name in loaded for dataset_name in self.dataset_names):
+            return {
+                dataset_name: self._validate_residual_statistics(loaded[dataset_name], dataset_name)
+                for dataset_name in self.dataset_names
+            }
+        if len(self.dataset_names) == 1:
+            return {self.dataset_names[0]: self._validate_residual_statistics(loaded, self.dataset_names[0])}
+        raise ValueError(
+            "statistics_residuals must be a mapping of target dataset names to files, "
+            "or a file containing every target dataset by name."
+        )
+
+    def _validate_residual_statistics(self, statistics: Mapping, dataset_name: str) -> dict:
+        required = {"minimum", "maximum", "mean", "stdev"}
+        missing = sorted(required - set(statistics))
+        if missing:
+            raise ValueError(
+                f"Residual statistics for {dataset_name} are missing required fields: {missing}."
+            )
+        expected_length = len(np.asarray(self.statistics[dataset_name]["stdev"]))
+        validated = dict(statistics)
+        for name in required:
+            try:
+                values = np.asarray(validated[name], dtype=np.float64)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Residual statistics field {name} for {dataset_name} must be numeric."
+                ) from exc
+            if values.ndim != 1 or values.size == 0 or not np.isfinite(values).all():
+                raise ValueError(
+                    f"Residual statistics field {name} for {dataset_name} must be a non-empty finite 1-D array."
+                )
+            if values.size != expected_length:
+                raise ValueError(
+                    f"Residual statistics field {name} for {dataset_name} has length {values.size}, "
+                    f"expected {expected_length} (matching the dataset's state statistics)."
+                )
+            if name == "stdev" and np.any(values <= 0):
+                raise ValueError(
+                    f"Residual statistics stdev for {dataset_name} must be strictly positive."
+                )
+        return validated
+
+    @staticmethod
+    def _load_residual_statistics(path: Path) -> dict:
+        if not path.exists():
+            raise FileNotFoundError(f"Residual statistics file does not exist: {path}")
+        if path.suffix.lower() != ".json":
+            raise ValueError(f"Unsupported residual statistics format: {path}; use JSON.")
+        with path.open() as stream:
+            value = json.load(stream)
+        if not isinstance(value, dict):
+            raise ValueError(f"Residual statistics file must contain a mapping: {path}")
+        return {name: np.asarray(values) if isinstance(values, list) else values for name, values in value.items()}
 
     @cached_property
     def metadata(self) -> dict:
