@@ -43,6 +43,13 @@ task:
   input_datasets: [era5]
   output_datasets: [cerra]
 
+# Multi-encoder conditioning: the source (era5) is encoded by the base transport forward on its
+# native grid and never decoded. It must be listed as a conditioning-only dataset. Add any
+# same-grid forcing dataset here too (and to task.input_datasets) to condition on extra forcings.
+model:
+  model:
+    conditioning_only_datasets: [era5]
+
 diagnostics:
   callbacks: []
   plot:
@@ -59,6 +66,7 @@ config_validation: True
 #   model:
 #     residual_prediction:
 #       cerra: era5
+#     conditioning_only_datasets: [era5]   # already set above; keep the source listed here
 #   residual:
 #     _target_: anemoi.models.layers.residual.InterpolationConnection
 #     interpolation_file_path: /path/to/era5-to-cerra.npz

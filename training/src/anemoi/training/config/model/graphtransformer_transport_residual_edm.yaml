@@ -7,6 +7,10 @@ model:
   # Map each target dataset to its source dataset.
   residual_prediction: {}
   direct_prediction: {}
+  # Datasets encoded by the base transport forward on their native grids but never decoded
+  # (no noised target, no output). The residual source (and any same-grid forcings dataset)
+  # must be listed here so the multi-encoder conditioning works.
+  conditioning_only_datasets: []
 
 # Example override:
 # model:
@@ -14,6 +18,7 @@ model:
 #     output: input
 #   direct_prediction:
 #     output: [tp]
+#   conditioning_only_datasets: [input]
 #   residual:
 #     _target_: anemoi.models.layers.residual.InterpolationConnection
 #     interpolation_file_path: /path/to/source-to-target.npz

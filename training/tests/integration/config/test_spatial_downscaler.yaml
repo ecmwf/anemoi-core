@@ -77,6 +77,9 @@ model:
   model:
     residual_prediction:
       cerra: era5
+    # The era5 source is encoded on its native grid by the base transport forward and never
+    # decoded (multi-encoder conditioning); it must be a conditioning-only dataset.
+    conditioning_only_datasets: [era5]
     # cerra prognostic variables with no counterpart in the era5 source input
     # are predicted directly in state space instead of as residuals.
     direct_prediction:

@@ -13,8 +13,8 @@ Composes the ``downscaler.yaml`` template (era5 -> cerra residual downscaling), 
 real nearest-neighbour interpolation matrix from the two dataset grids at fixture time,
 supplies explicit residual statistics, and runs ``AnemoiTrainer(cfg).train()`` for one
 optimizer step under both transport objectives (EDM diffusion and stochastic
-interpolant). ``compute_residual`` is wrapped with a call counter to prove the residual
-transformation is reached from the production path, not assumed.
+interpolant). ``ResidualPredictionMode._build_residual_target`` is wrapped with a call counter
+to prove the residual transformation is reached from the production path, not assumed.
 """
 
 import json
@@ -34,6 +34,7 @@ from omegaconf import OmegaConf
 from anemoi.models.layers.residual import InterpolationConnection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportResidualModelEncProcDec
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.train.methods.transport import ResidualPredictionMode
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -155,13 +156,14 @@ def _switch_to_stochastic_interpolant(cfg: DictConfig) -> None:
 
 def _install_compute_residual_counter(monkeypatch: pytest.MonkeyPatch) -> dict:
     calls = {"count": 0}
-    original = AnemoiTransportResidualModelEncProcDec.compute_residual
+    # The residual-target math moved from the model into the prediction mode.
+    original = ResidualPredictionMode._build_residual_target
 
-    def counting_compute_residual(self, *args, **kwargs):
+    def counting_build_residual_target(self, *args, **kwargs):
         calls["count"] += 1
         return original(self, *args, **kwargs)
 
-    monkeypatch.setattr(AnemoiTransportResidualModelEncProcDec, "compute_residual", counting_compute_residual)
+    monkeypatch.setattr(ResidualPredictionMode, "_build_residual_target", counting_build_residual_target)
     return calls
 
 
@@ -195,7 +197,7 @@ def _assert_downscaler_training_outcome(trainer: AnemoiTrainer, compute_residual
         assert math.isfinite(value), f"{key} is not finite: {value}"
 
     # The residual transformation was actually reached from the production training path.
-    assert compute_residual_calls["count"] >= 1, "compute_residual was never called during training"
+    assert compute_residual_calls["count"] >= 1, "_build_residual_target was never called during training"
 
 
 @skip_if_offline

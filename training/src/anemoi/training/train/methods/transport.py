@@ -378,6 +378,97 @@ class ResidualPredictionMode(PredictionMode):
             references[target_dataset] = reference
         return references
 
+    def _build_residual_target(
+        self,
+        y: torch.Tensor,
+        x_interp: torch.Tensor,
+        target_dataset: str,
+        skip_imputation: bool = False,
+    ) -> torch.Tensor:
+        """Normalized residual training target, entirely in ``DATA_OUTPUT`` space.
+
+        Absorbed from the model's former ``compute_residual`` (the model is now the inference
+        remnant only). Raw-batch contract:
+          - ``y``: ``DATA_OUTPUT`` layout (``data.output.full`` order), RAW physical values.
+          - ``x_interp``: RAW interpolated source on the target grid, already channel-selected to the
+            residual-prognostic order (``model.get_matching_channel_indices``), RAW physical values.
+          - return: ``DATA_OUTPUT`` layout; residual channels residual-normalized, direct-prediction
+            and diagnostic channels state-normalized.
+
+        The residual reference is raw, so ``residual = y - interp(source)`` is an exact physical
+        difference — no denorm-then-renorm and no reliance on interpolation/normalization commuting.
+        Every processor ``data_index`` is a raw data index, so this is correct even when
+        model-output and data-output orderings differ.
+        """
+        model = self.module.model.model
+        pre_processors_state = self.module.model.pre_processors
+        pre_processors_residuals = self.module.model.pre_processors_residuals
+        target_indices = model.data_indices[target_dataset]
+        device = y.device
+
+        residual_names = model._residual_names(target_dataset)
+        residual_data_pos = torch.tensor(
+            target_indices.data.output.positions_for_names(residual_names), dtype=torch.long, device=device
+        )
+        residual_raw_data = torch.tensor(
+            [target_indices.data.output.name_to_index[name] for name in residual_names], dtype=torch.long, device=device
+        )
+
+        target = y.clone()  # DATA_OUTPUT layout
+
+        if residual_names:
+            if x_interp.shape[-1] != len(residual_names):
+                raise ValueError(
+                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(residual_names)} "
+                    f"residual-prognostic channels for target '{target_dataset}'."
+                )
+            if pre_processors_residuals is None or target_dataset not in pre_processors_residuals:
+                raise ValueError(
+                    f"Residual prediction for '{target_dataset}' requires residual processors and residual statistics."
+                )
+            residual_physical = y.index_select(-1, residual_data_pos) - x_interp
+            target[..., residual_data_pos] = pre_processors_residuals[target_dataset](
+                residual_physical,
+                in_place=False,
+                data_index=residual_raw_data,
+                skip_imputation=skip_imputation,
+            )
+
+        direct_names = model._direct_names(target_dataset)
+        if direct_names:
+            direct_data_pos = torch.tensor(
+                target_indices.data.output.positions_for_names(direct_names), dtype=torch.long, device=device
+            )
+            direct_raw_data = torch.tensor(
+                [target_indices.data.output.name_to_index[name] for name in direct_names],
+                dtype=torch.long,
+                device=device,
+            )
+            target[..., direct_data_pos] = pre_processors_state[target_dataset](
+                y.index_select(-1, direct_data_pos),
+                in_place=False,
+                data_index=direct_raw_data,
+                skip_imputation=skip_imputation,
+            )
+
+        diagnostic_names = model._diagnostic_names(target_dataset)
+        if diagnostic_names:
+            diagnostic_data_pos = torch.tensor(
+                target_indices.data.output.positions_for_names(diagnostic_names), dtype=torch.long, device=device
+            )
+            diagnostic_raw_data = torch.tensor(
+                [target_indices.data.output.name_to_index[name] for name in diagnostic_names],
+                dtype=torch.long,
+                device=device,
+            )
+            target[..., diagnostic_data_pos] = pre_processors_state[target_dataset](
+                y.index_select(-1, diagnostic_data_pos),
+                in_place=False,
+                data_index=diagnostic_raw_data,
+                skip_imputation=skip_imputation,
+            )
+        return target
+
     def prepare_target(
         self,
         batch: dict[str, torch.Tensor],
@@ -393,21 +484,16 @@ class ResidualPredictionMode(PredictionMode):
                 residual_targets[target_dataset] = y_dataset
                 continue
 
-            source_dataset = self._residual_pairs[target_dataset]
             matching = self.module.model.model.get_matching_channel_indices(target_dataset).to(
                 references[target_dataset].device
             )
             x_interp = references[target_dataset].index_select(-1, matching)
-            residual_target = self.module.model.model.compute_residual(
+            residual_targets[target_dataset] = self._build_residual_target(
                 y_dataset,
                 x_interp,
-                pre_processors_state=self.module.model.pre_processors,
-                pre_processors_residuals=self.module.model.pre_processors_residuals,
                 target_dataset=target_dataset,
-                source_dataset=source_dataset,
                 skip_imputation=True,
             )
-            residual_targets[target_dataset] = residual_target
 
         return PreparedPredictionTarget(
             model_target=self.module.reduce_data_output_target_to_model_output(residual_targets),
@@ -499,7 +585,8 @@ class BaseTransportTraining(BaseTrainingModule):
 
         Residual downscaling normalizes each piece exactly once where it is used (the reference is
         raw physical ``interp(source)``, conditioning is normalized in ``ResidualPredictionMode.
-        model_input``, targets are normalized inside ``compute_residual``). Normalizing the whole
+        model_input``, targets are normalized inside ``ResidualPredictionMode._build_residual_target``).
+        Normalizing the whole
         batch up front would force a denorm-then-renorm round trip and reintroduce the
         interpolation/normalization commutation problem, so we skip it here.
         """

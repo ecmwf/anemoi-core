@@ -1115,31 +1115,41 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
 
 class AnemoiTransportResidualModelEncProcDec(AnemoiTransportModelEncProcDec):
-    """Transport model for spatial residual downscaling.
+    """Inference remnant of the transport spatial residual downscaler.
+
+    This subclass exists ONLY to make a residual-downscaling checkpoint inference-complete: it
+    carries the residual/direct pairs and their validation, the source-step reference alignment,
+    the channel-matching helpers, and the physical reconstruction (:meth:`add_interp_to_state`) and
+    the sampling hooks (:meth:`_before_sampling` / :meth:`_after_sampling`) that use them. It no
+    longer builds any conditioning itself.
+
+    Conditioning is base-model functionality now (the "multi-encoder" architecture): the source and
+    any forcings dataset are ordinary ``model.model.conditioning_only_datasets``, encoded by the
+    BASE transport forward on their native grids, their latents joining the additive merge. The
+    ``InterpolationConnection`` is consumed in exactly ONE place — computing the residual reference
+    ``interp(raw source)`` — which happens in ``ResidualPredictionMode`` at training time and in
+    :meth:`_after_sampling` at inference time. The training-target math (``target - interp(source)``)
+    lives in the prediction mode; this class only reconstructs.
 
     Predicts a residual ``target - interp(source)`` on the prognostic channels shared by a
     target dataset and its grid-interpolated source dataset, and reconstructs the full state
     via :meth:`add_interp_to_state`. Direct-prediction variables and diagnostics are learned
-    and reconstructed directly in state space (no residual). Mirrors
-    :class:`AnemoiTransportTendModelEncProcDec` (temporal tendency), substituting the
-    interpolated source for the latest input state as the reference.
+    and reconstructed directly in state space (no residual).
 
     Raw-batch design (see ``ResidualPredictionMode``): in residual mode the batch is kept RAW
     (never normalized in-place) and each piece is normalized exactly once where it is used. The
     residual reference is therefore ``interp(raw source)`` (physical), so the reconstruction
-    identity ``add_interp_to_state(compute_residual(y)) == y`` holds exactly without ever relying
-    on interpolation and normalization commuting. Encoder conditioning is normalized separately
-    (it is features only, not part of that identity).
+    identity holds exactly without ever relying on interpolation and normalization commuting.
+    Encoder conditioning is normalized separately (it is features only, not part of that identity).
 
-    Conditioning contract: for each residual target the encoder input is ``interp(x[source])``
-    channel-concatenated with ``x[d]`` for every pass-through dataset ``d`` (any dataset that is
-    neither a residual source nor a residual target). The target is never a model input, so
-    leakage of the target into its own conditioning is impossible by construction.
+    Note: ``self.residual`` is built per dataset from one config (see ``base._build_residual``), so
+    non-target datasets carry unused ``InterpolationConnection`` layers loading the same matrix.
+    This is harmless — only the target datasets' entries are ever consulted — and is intentionally
+    not restructured in this PR.
 
-    Index-space conventions (mirrors the tendency class, fixed for permuted orderings):
-      - Training targets (:meth:`compute_residual`) are produced and consumed in
-        ``DATA_OUTPUT`` layout (``data.output.full`` order); the mode reduces them to
-        ``MODEL_OUTPUT`` for the network.
+    Index-space conventions (fixed for permuted orderings):
+      - The residual training target (built in the mode) is produced and consumed in ``DATA_OUTPUT``
+        layout (``data.output.full`` order); the mode reduces it to ``MODEL_OUTPUT`` for the network.
       - The network emits ``MODEL_OUTPUT`` layout; :meth:`add_interp_to_state` consumes and
         returns ``MODEL_OUTPUT`` layout (physical state).
       - Processor ``data_index`` arguments are always *raw* data indices (values from
@@ -1151,6 +1161,8 @@ class AnemoiTransportResidualModelEncProcDec(AnemoiTransportModelEncProcDec):
         the source grid onto the target grid.
       - ``direct_prediction`` (optional): ``{target_dataset: [var, ...]}`` — prognostic variables
         predicted directly in state space, excluded from the residual.
+      - ``conditioning_only_datasets``: must list the source (and any forcings) dataset so the base
+        forward encodes them without a decoder or a noised target.
     """
 
     def __init__(
@@ -1215,24 +1227,6 @@ class AnemoiTransportResidualModelEncProcDec(AnemoiTransportModelEncProcDec):
                 raise ValueError(
                     f"direct_prediction for {target_dataset} must contain prognostic variables: {non_prognostic}."
                 )
-
-        # Three-role contract: conditioning is always interp(source) plus every pass-through dataset
-        # (a dataset in the model inputs that is neither a residual source nor a residual target).
-        # The pass-through set is derivable at construction from the data_indices keys, which is
-        # exactly what the task will pass in x (the target is never a model input).
-        self._residual_sources = set(self._residual_pairs.values())
-        self._residual_targets = set(self._residual_pairs)
-        self._passthrough_datasets = [
-            name
-            for name in data_indices
-            if name not in self._residual_sources and name not in self._residual_targets
-        ]
-        if len(self._residual_pairs) > 1 and self._passthrough_datasets:
-            raise ValueError(
-                "ambiguous — which pass-through conditions which target: multiple residual targets "
-                f"({sorted(self._residual_targets)}) with pass-through datasets "
-                f"({self._passthrough_datasets}) cannot be disambiguated."
-            )
 
         super().__init__(
             model_config=model_config,
@@ -1348,179 +1342,6 @@ class AnemoiTransportResidualModelEncProcDec(AnemoiTransportModelEncProcDec):
             target_indices.data.output.full_index_to_name[int(index)]
             for index in target_indices.data.output.diagnostic.tolist()
         ]
-
-    # ── input dim override ────────────────────────────────────────────────────────
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        """Encoder input dim for a residual target.
-
-        The per-time-step conditioning history is the interpolated source's *full* input channels
-        plus, for every pass-through dataset, that dataset's *full* input channels. Node-attribute
-        and corrupted-target contributions are unchanged from the parent transport model.
-        """
-        if dataset_name not in self._residual_pairs:
-            return super()._calculate_input_dim(dataset_name)
-
-        source_dataset = self._residual_pairs[dataset_name]
-        per_step = len(self.data_indices[source_dataset].data.input.full)
-        for passthrough in self._passthrough_datasets:
-            per_step += len(self.data_indices[passthrough].data.input.full)
-
-        input_history = self.n_step_input * per_step + self.node_attributes.attr_ndims[dataset_name]
-        corrupted_target = super()._calculate_output_dim(dataset_name)  # n_step_output * num_output_channels
-        return input_history + corrupted_target
-
-    # ── forward: build the target-grid conditioning history ───────────────────────
-    def _build_residual_conditioning(
-        self,
-        x: dict[str, torch.Tensor],
-        model_comm_group: ProcessGroup | None = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Channel-concatenate ``interp(x[source])`` with every pass-through dataset, per target.
-
-        ``x`` arrives already normalized (the residual training mode normalizes it before the
-        forward chain; the inference path normalizes it in ``_before_sampling``). Pass-through
-        datasets are every dataset in ``x`` that is neither a residual source nor a residual
-        target, taken in ``x``'s iteration order.
-        """
-        passthrough = [
-            name for name in x if name not in self._residual_sources and name not in self._residual_targets
-        ]
-        target_inputs: dict[str, torch.Tensor] = {}
-        for target_dataset, source_dataset in self._residual_pairs.items():
-            if source_dataset not in x:
-                raise KeyError(
-                    f"Residual target '{target_dataset}' requires source dataset '{source_dataset}' in model inputs."
-                )
-            source_history = x[source_dataset]
-            # Project every loaded source step onto the target grid; the time axis is preserved.
-            projected = self.residual[target_dataset](
-                source_history,
-                grid_shard_sizes[source_dataset] if grid_shard_sizes is not None else None,
-                model_comm_group,
-                n_step_output=source_history.shape[1],
-            )
-            parts = [projected] + [x[name] for name in passthrough]
-            target_inputs[target_dataset] = torch.cat(parts, dim=-1)
-        return target_inputs
-
-    def forward(
-        self,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
-        condition: dict[str, torch.Tensor],
-        model_comm_group: ProcessGroup | None = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Assemble each residual target's encoder input, then encode only the target datasets.
-
-        Per time step the target's conditioning is ``interp(x[source])`` channel-concatenated with
-        every pass-through dataset (see :meth:`_build_residual_conditioning`). The target is never a
-        model input, so it never conditions itself. ``x`` passed to the parent contains only the
-        target keys; the source and pass-through datasets are never encoded.
-        """
-        target_inputs = self._build_residual_conditioning(x, model_comm_group, grid_shard_sizes)
-        return super().forward(
-            target_inputs,
-            conditioned_target,
-            condition,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-            **kwargs,
-        )
-
-    # ── residual target / reconstruction (all raw-index / data-output correct) ─────
-    def compute_residual(
-        self,
-        y: torch.Tensor,
-        x_interp: torch.Tensor,
-        pre_processors_state: dict[str, Callable],
-        pre_processors_residuals: dict[str, Callable] | None,
-        target_dataset: str,
-        source_dataset: str | None = None,
-        skip_imputation: bool = False,
-    ) -> torch.Tensor:
-        """Normalized residual training target, entirely in ``DATA_OUTPUT`` space.
-
-        Raw-batch contract:
-          - ``y``: ``DATA_OUTPUT`` layout (``data.output.full`` order), RAW physical values.
-          - ``x_interp``: RAW interpolated source on the target grid, already channel-selected to the
-            residual-prognostic order (:meth:`get_matching_channel_indices`), RAW physical values.
-          - return: ``DATA_OUTPUT`` layout; residual channels residual-normalized, direct-prediction
-            and diagnostic channels state-normalized.
-
-        The residual reference is raw, so ``residual = y - interp(source)`` is an exact physical
-        difference — no denorm-then-renorm and no reliance on interpolation/normalization commuting.
-        The return is written at DATA-OUTPUT positions and uses raw data indices for every processor
-        ``data_index`` argument, so it is correct even when model-output and data-output orderings differ.
-        """
-        del source_dataset  # kept for signature symmetry; raw reference needs no source processor.
-        target_indices = self.data_indices[target_dataset]
-        device = y.device
-
-        residual_names = self._residual_names(target_dataset)
-        residual_data_pos = torch.tensor(
-            target_indices.data.output.positions_for_names(residual_names), dtype=torch.long, device=device
-        )
-        residual_raw_data = torch.tensor(
-            [target_indices.data.output.name_to_index[name] for name in residual_names], dtype=torch.long, device=device
-        )
-
-        target = y.clone()  # DATA_OUTPUT layout
-
-        if residual_names:
-            if x_interp.shape[-1] != len(residual_names):
-                raise ValueError(
-                    f"x_interp has {x_interp.shape[-1]} channels, expected {len(residual_names)} "
-                    f"residual-prognostic channels for target '{target_dataset}'."
-                )
-            if pre_processors_residuals is None or target_dataset not in pre_processors_residuals:
-                raise ValueError(
-                    f"Residual prediction for '{target_dataset}' requires residual processors and residual statistics."
-                )
-            residual_physical = y.index_select(-1, residual_data_pos) - x_interp
-            target[..., residual_data_pos] = pre_processors_residuals[target_dataset](
-                residual_physical,
-                in_place=False,
-                data_index=residual_raw_data,
-                skip_imputation=skip_imputation,
-            )
-
-        direct_names = self._direct_names(target_dataset)
-        if direct_names:
-            direct_data_pos = torch.tensor(
-                target_indices.data.output.positions_for_names(direct_names), dtype=torch.long, device=device
-            )
-            direct_raw_data = torch.tensor(
-                [target_indices.data.output.name_to_index[name] for name in direct_names],
-                dtype=torch.long,
-                device=device,
-            )
-            target[..., direct_data_pos] = pre_processors_state[target_dataset](
-                y.index_select(-1, direct_data_pos),
-                in_place=False,
-                data_index=direct_raw_data,
-                skip_imputation=skip_imputation,
-            )
-
-        diagnostic_names = self._diagnostic_names(target_dataset)
-        if diagnostic_names:
-            diagnostic_data_pos = torch.tensor(
-                target_indices.data.output.positions_for_names(diagnostic_names), dtype=torch.long, device=device
-            )
-            diagnostic_raw_data = torch.tensor(
-                [target_indices.data.output.name_to_index[name] for name in diagnostic_names],
-                dtype=torch.long,
-                device=device,
-            )
-            target[..., diagnostic_data_pos] = pre_processors_state[target_dataset](
-                y.index_select(-1, diagnostic_data_pos),
-                in_place=False,
-                data_index=diagnostic_raw_data,
-                skip_imputation=skip_imputation,
-            )
-        return target
 
     def add_interp_to_state(
         self,
