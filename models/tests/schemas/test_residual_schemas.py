@@ -10,6 +10,7 @@
 import pytest
 from pydantic import ValidationError
 
+from anemoi.models.schemas.residual import InterpolationConnectionSchema
 from anemoi.models.schemas.residual import TruncatedConnectionSchema
 from anemoi.models.schemas.residual import TruncationConfigDiskSchema
 from anemoi.models.schemas.residual import TruncationConfigOnTheFlySchema
@@ -66,5 +67,49 @@ def test_truncated_connection_mixed_mode_rejected() -> None:
                     "truncation_up_file_path": "up.npz",
                     "truncation_down_file_path": "down.npz",
                 },
+            }
+        )
+
+
+def test_interpolation_connection_has_no_trajectory_step_field() -> None:
+    schema = InterpolationConnectionSchema(
+        **{
+            "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+            "interpolation_file_path": "source-to-target.npz",
+        }
+    )
+
+    assert "step" not in schema.model_dump()
+
+
+def test_interpolation_connection_graph_sourced_valid() -> None:
+    schema = InterpolationConnectionSchema(
+        **{
+            "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+            "edges_name": ("source", "to", "target"),
+            "edge_weight_attribute": "gauss_weight",
+        }
+    )
+
+    assert schema.interpolation_file_path is None
+    assert schema.edges_name == ("source", "to", "target")
+
+
+def test_interpolation_connection_rejects_both_sources() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        InterpolationConnectionSchema(
+            **{
+                "_target_": "anemoi.models.layers.residual.InterpolationConnection",
+                "interpolation_file_path": "source-to-target.npz",
+                "edges_name": ("source", "to", "target"),
+            }
+        )
+
+
+def test_interpolation_connection_rejects_neither_source() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        InterpolationConnectionSchema(
+            **{
+                "_target_": "anemoi.models.layers.residual.InterpolationConnection",
             }
         )
