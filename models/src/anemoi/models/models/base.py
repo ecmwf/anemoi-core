@@ -69,6 +69,8 @@ class BaseGraphModel(nn.Module):
         self.statistics = statistics
         if isinstance(self._graph_data, PosixPath):
             self._graph_data_dict = _GraphFileDataset(self._graph_data)
+        else:
+            self._graph_data_dict = self._graph_data
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
 
@@ -84,7 +86,6 @@ class BaseGraphModel(nn.Module):
             hidden=self._graph_name_hidden,
         )
         if isinstance(self._graph_data, PosixPath):
-            self._graph_data_dict = _GraphFileDataset(self._graph_data)
             self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
         else:
             self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
@@ -251,8 +252,6 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        if isinstance(self._graph_data, PosixPath):
-            self._graph_data_dict = _GraphFileDataset(self._graph_data)
         fused = uses_fused_dataset_graph(self._graph_data_dict[self.dataset_names[0]], self.dataset_names)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME

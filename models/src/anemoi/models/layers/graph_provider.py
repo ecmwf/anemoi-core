@@ -115,6 +115,7 @@ class BaseGraphProvider(nn.Module, ABC):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
+        device: Optional[torch.device] = None,
     ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
         """Get edge information.
 
@@ -270,6 +271,7 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
+        device: Optional[torch.device] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edge attributes and expanded edge index for static graph.
 
@@ -323,6 +325,7 @@ class NoOpGraphProvider(BaseGraphProvider):
         dst_coords: Optional[Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
+        device: Optional[torch.device] = None,
     ) -> tuple[None, None, None]:
         """Return None for edge attributes, edge index, and edge_shard_sizes.
 
@@ -428,6 +431,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
+        device: Optional[torch.device] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get dynamic edges constructed from node coordinates.
 
@@ -771,7 +775,6 @@ class _GraphFileDataset(Dataset):
 
         self.paths = {path.parts[-1].split(".")[0]: path for path in self.paths}
         self.names = list(self.paths.keys())
-        print("Graph files found:", self.names)
 
         LOGGER.info("Found %d graph file(s) in %s", len(self.paths), self.graph_dir)
 
