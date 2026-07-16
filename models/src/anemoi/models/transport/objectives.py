@@ -148,8 +148,11 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             schedule_params,
             x_device,
         )
+        # Sample only the datasets that seeded a source; conditioning-only datasets are absent from
+        # ``source`` (build_sampling_source drops them) and must never enter the denoising loop.
         y_init = {
-            dataset_name: source[dataset_name].to(dtype=sigma_schedule.dtype) * sigma_schedule[0] for dataset_name in x
+            dataset_name: source_data.to(dtype=sigma_schedule.dtype) * sigma_schedule[0]
+            for dataset_name, source_data in source.items()
         }
 
         sampler_instance = _build_inference_sampler(
@@ -167,9 +170,12 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             comm_arg: Optional[ProcessGroup] = None,
             shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
+            # Drop history-less datasets before the network forward: at sampling time ``x`` may carry
+            # a template tensor for a history-less predicted dataset (used above to size its source),
+            # but the encoder path must match training, where history-less datasets have no input.
             return self.forward(
                 model,
-                x_arg,
+                model._encoder_inputs(x_arg),
                 y_arg,
                 sigma_arg,
                 model_comm_group=comm_arg,
@@ -275,9 +281,10 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             comm_arg: Optional[ProcessGroup] = None,
             shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
+            # Drop history-less datasets before the network forward (see EDM objective for rationale).
             return self.forward(
                 model,
-                x_arg,
+                model._encoder_inputs(x_arg),
                 y_arg,
                 time_arg,
                 model_comm_group=comm_arg,

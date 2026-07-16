@@ -135,6 +135,10 @@ class TransportConfig(BaseModel):
 class TransportModel(Model):
     transport: TransportConfig = Field(default_factory=TransportConfig)
     "Transport model objective, path, conditioning, and inference configuration."
+    conditioning_only_datasets: list[str] = Field(default_factory=list)
+    "Datasets that condition the model (encoded, latents merged) but are never predicted (no decoder, no noised target)."
+    history_less_datasets: list[str] = Field(default_factory=list)
+    "Datasets that are predicted but supply no input history (encoder input is the noised target plus node attributes only)."
 
 
 class TrainableParameters(PydanticBaseModel):
@@ -376,6 +380,7 @@ class TransportModelSchema(BaseModelSchema):
 class TransportTendModelSchema(TransportModelSchema):
     condition_on_residual: bool = Field(default=False)
     "Whether to condition the noise injection on the residual connection."
+
 
 
 class HierarchicalModelSchema(BaseModelSchema):

@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Mapping
 from typing import Callable
 from typing import Optional
 
@@ -71,6 +72,43 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.inference_defaults = transport_params.get("inference_defaults", {})
         self.transport_model_objective = get_transport_model_objective(transport_params.objective)
 
+        # Conditioning-only datasets are encoded and their latents join the additive merge, but they
+        # are never predicted: they get no decoder, no noised (corrupted) target, and never appear in
+        # the output dict. Set before super().__init__() so _build_networks (decoder skip) and
+        # _calculate_input_dim (no corrupted-target term) can consult it during construction.
+        # The config list is the source of truth; validate the names against data_indices here
+        # (the docstring contract asks that a conditioning-only dataset not appear on any target/loss
+        # path — that is enforced by the caller building data_indices/targets, not re-derived here).
+        self.conditioning_only_datasets = set(model_config.model.model.get("conditioning_only_datasets", []) or [])
+        unknown_conditioning_only = sorted(self.conditioning_only_datasets - set(data_indices))
+        if unknown_conditioning_only:
+            raise ValueError(
+                f"conditioning_only_datasets references unknown datasets: {unknown_conditioning_only}. "
+                f"Known datasets: {sorted(data_indices)}."
+            )
+
+        # History-less datasets are the dual of conditioning-only: they ARE predicted (decoder, noised
+        # target, present in the output dict) but supply NO input history — their encoder input is the
+        # noised target concatenated with node attributes only. Derivation is a runtime property (a
+        # dataset in ``conditioned_target`` but absent from ``x``), but the encoders must be SIZED at
+        # construction, so which datasets are history-less has to be known at build time: the config
+        # list is that build-time truth, and the forward cross-checks it against the runtime derivation.
+        # Set before super().__init__() so ``_calculate_input_dim`` can consult it during construction.
+        self.history_less_datasets = set(model_config.model.model.get("history_less_datasets", []) or [])
+        unknown_history_less = sorted(self.history_less_datasets - set(data_indices))
+        if unknown_history_less:
+            raise ValueError(
+                f"history_less_datasets references unknown datasets: {unknown_history_less}. "
+                f"Known datasets: {sorted(data_indices)}."
+            )
+        overlap = sorted(self.conditioning_only_datasets & self.history_less_datasets)
+        if overlap:
+            raise ValueError(
+                f"Datasets cannot be both conditioning-only and history-less: {overlap}. "
+                "Conditioning-only datasets are never predicted; history-less datasets are predicted "
+                "without input history."
+            )
+
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -84,8 +122,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        base_input_dim = super()._calculate_input_dim(dataset_name)
-        output_dim = super()._calculate_output_dim(dataset_name)
+        base_input_dim = super()._calculate_input_dim(dataset_name)  # input history + node attributes
+        if dataset_name in self.conditioning_only_datasets:
+            # Conditioning-only datasets have no noised target concatenated to the encoder input.
+            return base_input_dim
+        output_dim = super()._calculate_output_dim(dataset_name)  # corrupted (noised) target term
+        if dataset_name in self.history_less_datasets:
+            # History-less datasets carry the corrupted target and node attributes but NO input
+            # history term (base_input_dim above includes it, so drop the history part).
+            node_attr_dim = self.node_attributes.attr_ndims[dataset_name]
+            return node_attr_dim + output_dim
         input_dim = base_input_dim + output_dim  # input history plus corrupted target
         return input_dim
 
@@ -98,7 +144,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
+        x: torch.Tensor | None,
         y_noised: torch.Tensor,
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
@@ -112,10 +158,36 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
+        if dataset_name in self.history_less_datasets:
+            # History-less datasets supply NO input history: concatenate only the noised target and
+            # node positions. ``x`` is None here (the dataset is absent from the input dict).
+            assert y_noised is not None, (
+                f"Dataset '{dataset_name}' is history-less but has no corrupted target to assemble."
+            )
+            y_history = einops.rearrange(
+                y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+            )
+            x_data_latent = torch.cat((y_history, node_attributes_data), dim=-1)
+            return x_data_latent, None, grid_shard_sizes
+
+        assert x is not None, f"Dataset '{dataset_name}' is not history-less but has no input history to assemble."
+        x_history = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+
+        if dataset_name in self.conditioning_only_datasets:
+            # Conditioning-only datasets have no noised target: concatenate only history and positions.
+            x_data_latent = torch.cat((x_history, node_attributes_data), dim=-1)
+            return x_data_latent, None, grid_shard_sizes
+
+        # The config list is the source of truth; a missing corrupted target for a dataset that is
+        # NOT conditioning-only is a loud contract violation, exactly as before.
+        assert y_noised is not None, (
+            f"Dataset '{dataset_name}' is not conditioning-only but has no corrupted target to assemble."
+        )
+
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                x_history,
                 einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
@@ -202,22 +274,25 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_conditioning_kwargs(
         self,
-        x: dict[str, torch.Tensor],
+        dataset_names: list[str],
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
         self._assert_condition_shapes(condition)
-        dataset_names = list(x.keys())
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
-        # the condition that way, so we can read it from the first dataset,
-        # embed it once, and repeat it over each dataset's graph nodes below.
-        condition_base = condition[dataset_names[0]][:, 0, :, 0]
+        # the condition that way, so we can read it from the first *predicted*
+        # dataset (conditioning-only datasets carry no target and so are absent
+        # from ``condition``), embed it once, and repeat it over each dataset's
+        # graph nodes below. Every encoded dataset gets conditioning kwargs —
+        # conditioning-only and history-less encoders included.
+        noise_source = next(name for name in dataset_names if name in condition)
+        condition_base = condition[noise_source][:, 0, :, 0]
         noise_cond_base = self._embed_noise_conditioning(condition_base)
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name in x:
+        for dataset_name in dataset_names:
             # The same transport noise/time embedding is shared across all output steps.
             noise_cond = noise_cond_base[:, None, :, None, :]
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
@@ -262,10 +337,54 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        # Multi-dataset case
-        dataset_names = list(x.keys())
+        """Run the shared encoder-processor-decoder forward for the transport family.
 
-        # Extract and validate batch & ensemble sizes across datasets
+        Each dataset's role is derived from its membership in ``x`` (supplies input history) and
+        ``conditioned_target`` (is predicted, so carries a noised/corrupted target). This is the
+        2x2 role matrix, with the two off-diagonal roles configured explicitly so the encoders can
+        be sized at build time:
+
+            in x?   in conditioned_target?   role
+            ------  ----------------------   ----------------------------------------------------
+            yes     yes                      ordinary: encoded (history + noised target), decoded.
+            yes     no                       conditioning-only: encoded (history only), NOT decoded.
+                                             Declared in ``conditioning_only_datasets``.
+            no      yes                      history-less: encoded (noised target only), decoded.
+                                             Declared in ``history_less_datasets``.
+            no      no                       unreachable: the dataset is never referenced.
+
+        The declared config lists are the build-time truth (they size the encoders); the membership
+        derivation is the runtime cross-check. A declared history-less dataset appearing in ``x``,
+        or a predicted dataset with no history that is NOT declared history-less, is a loud config
+        contract violation and raises here.
+        """
+        assert x, (
+            "The transport forward requires a non-empty input dict ``x`` (at least one conditioning "
+            "or ordinary dataset supplies the batch/ensemble sizes)."
+        )
+
+        # History-less datasets are predicted (in ``conditioned_target``) but absent from ``x``. They
+        # follow the datasets that DO supply history, giving a stable, deterministic order.
+        derived_history_less = [name for name in conditioned_target if name not in x]
+        dataset_names = list(x.keys()) + derived_history_less
+
+        # Cross-check the runtime derivation against the declared build-time truth (both directions).
+        for name in self.history_less_datasets:
+            if name in x:
+                raise ValueError(
+                    f"Dataset '{name}' is declared in model.model.history_less_datasets but was passed "
+                    "in the input dict ``x``: history-less datasets must supply no input history."
+                )
+        for name in derived_history_less:
+            if name not in self.history_less_datasets:
+                raise ValueError(
+                    f"Dataset '{name}' is predicted (present in conditioned_target) but supplies no "
+                    "input history, yet is not declared in model.model.history_less_datasets. Declare "
+                    "it there, or provide its input history in ``x``."
+                )
+
+        # Extract and validate batch & ensemble sizes across datasets (``x`` is non-empty; history-less
+        # datasets carry the same batch/ensemble sizes via their conditioned target).
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
@@ -279,7 +398,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         # Embed the current noise level or bridge time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            x, condition, model_comm_group=model_comm_group
+            dataset_names, condition, model_comm_group=model_comm_group
         )
 
         # Process each dataset through its corresponding encoder
@@ -293,8 +412,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                conditioned_target[dataset_name],
+                x.get(dataset_name),  # None for history-less datasets
+                conditioned_target.get(dataset_name),  # None for conditioning-only datasets
                 bse,
                 grid_shard_sizes,
                 model_comm_group,
@@ -356,9 +475,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             # Processor skip connection
             x_latent_proc = x_latent_proc + x_latent
 
-        # Decoder
+        # Decoder — decode only datasets that are predicted. Conditioning-only datasets were
+        # encoded (their latents joined the additive merge above) but have no decoder, so they
+        # never appear in x_out_dict.
         x_out_dict = {}
         for dataset_name in dataset_names:
+            if dataset_name in self.conditioning_only_datasets:
+                continue
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -386,8 +509,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 **bwd_mapper_kwargs[dataset_name],
             )
 
+            # History-less datasets are absent from ``x``; take the output dtype from their target.
+            out_dtype = (x[dataset_name] if dataset_name in x else conditioned_target[dataset_name]).dtype
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype
+                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, out_dtype
             )
 
         return x_out_dict
@@ -498,9 +623,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         default_kind: str = "gaussian",
     ) -> dict[str, torch.Tensor]:
         """Build the starting/source field used by transport sampling."""
+        # Only predicted datasets are sampled; conditioning-only datasets stay pure conditioning.
+        sampled = self._sampled_inputs(x)
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                x,
+                sampled,
                 n_step_output=self.n_step_output,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
@@ -508,7 +635,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x,
+                    sampled,
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),
@@ -517,6 +644,29 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             error_context="state prediction",
         )
         return self.transport_source.build(request)
+
+    def _sampled_inputs(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Subset of ``x`` that is actually predicted (drops conditioning-only datasets).
+
+        Conditioning-only datasets are encoded and merged into the latent, but never sampled or
+        decoded, so they must not seed a transport source. Uses ``getattr`` so bare ``__new__``
+        test stubs (which never run ``__init__``) still work.
+        """
+        conditioning_only = getattr(self, "conditioning_only_datasets", ())
+        return {name: tensor for name, tensor in x.items() if name not in conditioning_only}
+
+    def _encoder_inputs(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Subset of ``x`` that supplies encoder input history (drops history-less datasets).
+
+        Dual of :meth:`_sampled_inputs`. At sampling time the batch may carry a template tensor for a
+        history-less predicted dataset (to size its noise source), but that dataset must NOT be fed to
+        the network as input history — the forward requires history-less datasets to be absent from
+        ``x``. The sampler seeds the source from the full ``x`` and denoises through this filtered
+        ``x`` so the encoder path matches training exactly. Uses ``getattr`` so bare ``__new__`` test
+        stubs still work.
+        """
+        history_less = getattr(self, "history_less_datasets", ())
+        return {name: tensor for name, tensor in x.items() if name not in history_less}
 
     def predict_step(
         self,
@@ -671,7 +821,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
-        if self.condition_on_residual:
+        # The residual-conditioning term is derived from input history, so it applies neither to
+        # conditioning-only datasets (no target) nor to history-less datasets (no input history).
+        if (
+            self.condition_on_residual
+            and dataset_name not in self.conditioning_only_datasets
+            and dataset_name not in self.history_less_datasets
+        ):
             input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
         return input_dim
 
@@ -702,6 +858,20 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
+        if dataset_name in self.history_less_datasets:
+            # History-less datasets supply no input history, so there is no residual/skip reference and
+            # no residual-conditioning term: encoder input is the noised target and node positions only.
+            assert y_noised is not None, (
+                f"Dataset '{dataset_name}' is history-less but has no corrupted target to assemble."
+            )
+            if grid_shard_sizes is not None:
+                node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+            y_history = einops.rearrange(
+                y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+            )
+            x_data_latent = torch.cat((y_history, node_attributes_data), dim=-1)
+            return x_data_latent, None, grid_shard_sizes
+
         x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
             ..., self._internal_input_idx[dataset_name]
         ]
@@ -712,10 +882,23 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
+        x_history = einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+
+        if dataset_name in self.conditioning_only_datasets:
+            # Conditioning-only datasets have no noised target (and no residual conditioning term).
+            x_data_latent = torch.cat((x_history, node_attributes_data), dim=-1)
+            return x_data_latent, x_skip, grid_shard_sizes
+
+        # The config list is the source of truth; a missing corrupted target for a dataset that is
+        # NOT conditioning-only is a loud contract violation, exactly as before.
+        assert y_noised is not None, (
+            f"Dataset '{dataset_name}' is not conditioning-only but has no corrupted target to assemble."
+        )
+
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                x_history,
                 einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
                 node_attributes_data,
             ),
@@ -924,9 +1107,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         """Build the starting/source field for tendency-space transport sampling."""
         # Tendency prediction can use Gaussian noise, zeros, or the latest
         # input state projected to the variables the model predicts.
+        # Only predicted datasets are sampled; conditioning-only datasets stay pure conditioning.
+        sampled = self._sampled_inputs(x)
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                x,
+                sampled,
                 n_step_output=self.n_step_output,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
@@ -934,7 +1119,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x,
+                    sampled,
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),

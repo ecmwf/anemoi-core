@@ -74,9 +74,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         # Decoder hidden -> data
+        # Conditioning-only datasets are encoded (above) but never predicted, so they get no
+        # decoder or decoder graph provider. The set defaults to empty for models that do not
+        # declare it (e.g. non-transport encoder-processor-decoder models).
+        conditioning_only = getattr(self, "conditioning_only_datasets", ())
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name in conditioning_only:
+                continue
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
