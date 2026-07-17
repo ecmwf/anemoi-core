@@ -122,9 +122,7 @@ def test_file_graph_provider_get_edges_no_shard(graph_dir: Path) -> None:
     )
 
     # Load a graph and pass it to get_edges
-    edge_attr, edge_index, shard_sizes = provider.get_edges(
-        batch_size=1, shard_edges=False, device=torch.device("cuda:0")
-    )
+    edge_attr, edge_index, shard_sizes = provider.get_edges(batch_size=1, shard_edges=False, device=torch.device("cpu"))
 
     assert edge_attr.shape == (NUM_EDGES, EDGE_ATTR_DIM)
     assert edge_index.shape == (2, NUM_EDGES)
@@ -144,9 +142,7 @@ def test_file_graph_provider_get_edges_batch_expansion(graph_dir: Path) -> None:
     )
 
     batch_size = 3
-    edge_attr, edge_index, _ = provider.get_edges(
-        batch_size=batch_size, shard_edges=False, device=torch.device("cuda:0")
-    )
+    edge_attr, edge_index, _ = provider.get_edges(batch_size=batch_size, shard_edges=False, device=torch.device("cpu"))
 
     assert edge_attr.shape == (NUM_EDGES * batch_size, EDGE_ATTR_DIM)
     assert edge_index.shape == (2, NUM_EDGES * batch_size)

@@ -862,7 +862,7 @@ class FileGraphProvider(BaseGraphProvider):
         self._dataset = _GraphFileDataset(self.graph_dir, extension=extension)
         self.names = self._dataset.names
         # Peek at the first graph to derive metadata
-        first_graph = self._dataset[self.names[0]].cuda(non_blocking=True)
+        first_graph = self._dataset[self.names[0]]
         self._init_from_graph(first_graph)
 
     def _init_from_graph(self, graph: HeteroData) -> None:
