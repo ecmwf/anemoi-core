@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Optional
 
 import einops
-import torch
 from torch import Tensor
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -79,7 +80,7 @@ class CrossGridProjector(SpatialPreprocessor):
         )
         self.projector = SparseProjector(autocast=autocast)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, model_comm_group=None, grid_shard_sizes=None) -> Tensor:
         """Project all time and ensemble slices from source grid to target grid.
 
         Parameters
@@ -97,8 +98,17 @@ class CrossGridProjector(SpatialPreprocessor):
         # Flatten batch/time/ensemble into a single leading dim for the projector.
         x_flat = einops.rearrange(x, "b t e g v -> (b t e) g v")
 
+        channel_shard_sizes = get_shard_sizes(x_flat, -1, model_comm_group)
+        if grid_shard_sizes is not None:
+            x_flat = all_to_all_transpose(x_flat, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+
         x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device))
 
+        output_grid_shard_sizes = get_shard_sizes(x_proj, -2, model_comm_group)
+        if grid_shard_sizes is not None:
+            x_proj = all_to_all_transpose(
+                x_proj, -2, output_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
+            )
         return einops.rearrange(x_proj, "(b t e) g v -> b t e g v", b=batch, t=time, e=ensemble)
 
     def inverse(self, x: Tensor) -> Tensor:

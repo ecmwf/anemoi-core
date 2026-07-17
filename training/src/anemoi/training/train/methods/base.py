@@ -834,7 +834,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Owned by the model; applied before normalization so projectors see raw values.
         for ds_name, projector in self.model.spatial_pre_processors.items():
             if ds_name in batch:
-                batch[ds_name] = projector(batch[ds_name])
+                batch[ds_name] = projector(
+                    batch[ds_name],
+                    model_comm_group=self.model_comm_group,
+                    grid_shard_sizes=self.grid_shard_sizes[ds_name],
+                )
 
         # Batch normalization — skipped when the task defers it (e.g. SpatialDownscaler,
         # where ResidualPredictionMode needs raw tensors to compute y - interp(x_lres)).
