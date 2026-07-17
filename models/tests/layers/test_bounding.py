@@ -276,3 +276,48 @@ def test_normalized_leaky_relu_bounding(config, name_to_index, name_to_index_sta
         ]
     )
     assert torch.allclose(output, expected_output, atol=1e-4)
+
+
+def test_normalized_relu_bounding_skips_missing_variables(
+    name_to_index, name_to_index_stats, input_tensor, statistics
+):
+    # Same bounding config applied to a dataset that only contains 'var1'.
+    # 'missing_var' must be silently skipped (consistent with BaseBounding),
+    # otherwise the same config can't be shared across multi-dataset setups.
+    partial_name_to_index = {"var1": 0}
+    bounding = NormalizedReluBounding(
+        variables=["var1", "missing_var"],
+        name_to_index=partial_name_to_index,
+        min_val=[2.0, 99.0],
+        normalizer=["mean-std", "mean-std"],
+        statistics=statistics,
+        name_to_index_stats=name_to_index_stats,
+    )
+    # Only var1 should be in data_index after filtering.
+    assert bounding.data_index.tolist() == [0]
+    assert bounding.min_val == [2.0]
+    assert bounding.normalizer == ["mean-std"]
+
+    # Bounding still applies to var1 (mean=1.0, stdev=0.5, min_val=2.0 → norm_min=2.0).
+    partial_input = input_tensor[:, :1].clone()
+    output = bounding(partial_input.clone())
+    expected = torch.tensor([[2.0], [4.0], [2.0]])
+    assert torch.allclose(output, expected, atol=1e-4)
+
+
+def test_normalized_relu_bounding_all_missing_is_noop(
+    name_to_index_stats, input_tensor, statistics
+):
+    # If none of the configured variables are present, the bounding must
+    # construct without error and act as a no-op.
+    bounding = NormalizedReluBounding(
+        variables=["missing_a", "missing_b"],
+        name_to_index={"other": 0},
+        min_val=[1.0, 2.0],
+        normalizer=["mean-std", "min-max"],
+        statistics=statistics,
+        name_to_index_stats=name_to_index_stats,
+    )
+    assert bounding.data_index.numel() == 0
+    output = bounding(input_tensor.clone())
+    assert torch.equal(output, input_tensor)
