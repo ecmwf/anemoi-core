@@ -19,11 +19,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
@@ -466,6 +464,7 @@ class GraphTransformerProcessor(BaseProcessor):
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
         **kwargs,
@@ -500,6 +499,8 @@ class GraphTransformerProcessor(BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy: str, by default "edges"
+            Strategy to shard tensors, options are "edges" and "heads"
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         edge_pre_mlp: bool, by default False
@@ -516,6 +517,12 @@ class GraphTransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
+        assert shard_strategy in ["edges", "heads"], (
+            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
+            f"Supported strategies are 'edges' and 'heads'."
+        )
+        self.shard_strategy = shard_strategy
+
         self.build_layers(
             GraphTransformerProcessorBlock,
             in_channels=num_channels,
@@ -526,6 +533,7 @@ class GraphTransformerProcessor(BaseProcessor):
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
             mlp_implementation=mlp_implementation,
+            shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
             edge_pre_mlp=edge_pre_mlp,
@@ -576,26 +584,25 @@ class GraphTransformerProcessor(BaseProcessor):
         Tensor
             Processed node features.
         """
-        size = sum(shard_info.nodes)
-        num_nodes = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
+        size = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
         edge_attr, edge_index = ensure_edges_are_dst_sorted(
             edge_attr,
             edge_index,
-            num_dst=num_nodes,
+            num_dst=size,
             edges_are_sharded=shard_info.edges_are_sharded(),
             model_comm_group=model_comm_group,
             edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
-        if shard_info.edges_are_sharded():
-            # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
-            # but edge_attr can stay sharded
-            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
-        else:
-            # Edges not pre-sharded, shard edge_attr here (edge_index stays full)
-            edge_shard_sizes = get_shard_sizes(edge_attr, 0, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
+        if not shard_info.edges_are_sharded():  # ensure edges are sharded
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
+                edge_attr, edge_index, size, size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
+            )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
+
+        # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
+        if self.shard_strategy == "heads":
+            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
 
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
