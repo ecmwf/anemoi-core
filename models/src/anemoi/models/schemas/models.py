@@ -39,6 +39,8 @@ from .encoder import GNNEncoderSchema  # noqa: TC001
 from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
+from .fusion import LatentFusionSchema  # noqa: TC001
+from .fusion import SumLatentFusionSchema
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import NoOpProcessorSchema  # noqa: TC001
@@ -278,6 +280,12 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN encoder schema."
+    latent_fusion: LatentFusionSchema = Field(
+        default_factory=lambda: SumLatentFusionSchema.model_validate(
+            {"_target_": "anemoi.models.layers.fusion.SumLatentFusion"}
+        )
+    )
+    "Fusion of encoder outputs."
     decoder: Union[
         GNNDecoderSchema,
         GraphTransformerDecoderSchema,

@@ -267,8 +267,8 @@ class AnemoiTrainer(ABC):
           All weights are loaded normally.
 
         - **Scenario 2**: Adding datasets (config has datasets not in checkpoint)
-          Missing datasets will have their encoder & decoder weights randomly initialized.
-          The shared processor weights are still transferred.
+          Parameters associated with missing datasets will remain randomly initialized.
+          Shared model parameters will still be transferred.
 
         - **Scenario 3**: Removing datasets (checkpoint has datasets not in config)
           Extra datasets in checkpoint are ignored (their weights are not loaded).
@@ -279,7 +279,7 @@ class AnemoiTrainer(ABC):
         -----
         - Logs warnings for datasets that are missing or ignored
         - Logs info summary of loaded and initialized datasets
-        - The shared processor weights are always transferred
+        - Shared model weights are always transferred
         """
         loaded_datasets = []
         initialized_datasets = []
@@ -298,7 +298,7 @@ class AnemoiTrainer(ABC):
             else:
                 # Dataset not found in checkpoint - will be randomly initialized
                 LOGGER.warning(
-                    "Dataset '%s' NOT found in checkpoint. Encoder & decoder weights will be randomly initialized!",
+                    "Parameters associated with dataset '%s' will remain randomly initialized.",
                     dataset_name,
                 )
                 initialized_datasets.append(dataset_name)
@@ -308,9 +308,7 @@ class AnemoiTrainer(ABC):
         if ignored_datasets:
             for ignored_dataset in ignored_datasets:
                 LOGGER.warning(
-                    "Dataset '%s' found in checkpoint but NOT in config. "
-                    "Encoder & decoder weights for '%s' will be ignored.",
-                    ignored_dataset,
+                    "Parameters associated with dataset '%s' will be ignored.",
                     ignored_dataset,
                 )
 

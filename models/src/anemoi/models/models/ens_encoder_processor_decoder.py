@@ -246,7 +246,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
-        x_latent = sum(dataset_latents.values())
+        x_latent = self._fuse_encoder_latents(x_hidden_latent, dataset_latents)
 
         x_latent_proc, latent_noise = self.noise_injector(
             x=x_latent,
