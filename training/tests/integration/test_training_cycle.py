@@ -37,7 +37,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
     for key, subschema in schema.items():
-
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:

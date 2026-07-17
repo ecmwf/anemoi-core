@@ -14,7 +14,7 @@ These can either be used individually or both at the same time.
  Data-Distributed
 ******************
 
-This is used automatially if the ``number of parallel data GPUs = number
+This is used automatically if the ``number of parallel data GPUs = number
 of GPUs available/number of GPUs per model`` is an integer greater than
 1. In this case the batches will be split across the number of parallel
 data GPUs meaning that the effective batch size of each training step
@@ -25,28 +25,73 @@ multiplied by the number of parallel data GPUs.
  Model Sharding
 ****************
 
-It is also possible to shard the model across multiple GPUs as defined
-by the `Distributed Data Parallel (DDP)
-<https://pytorch.org/tutorials/intermediate/ddp_tutorial.html>`__
-Strategy.
+It is also possible to shard a single model across multiple GPUs.
+To use model sharding, set ``config.system.hardware.num_gpus_per_model``
+to the number of GPUs you wish to shard the model across. Set
+``config.model.keep_batch_sharded=True`` to also keep batches fully
+sharded throughout training and dataloading, reducing memory usage for
+large inputs or long rollouts.
 
-In essence the model is sharded with each GPU receiving a different part
-of the graph, before being re-integrated when the loss is calculated, as
-shown in the figure below
+Note that model sharding comes with communication overhead, so it is
+recommended to first maximise data parallelism before sharding the
+model.
 
-.. figure:: ../images/model_sharding.png
+When using model sharding, the global grid is partitioned across GPUs:
+each GPU owns a contiguous sub-region of the globe. For GNN-based layers
+(including the GraphTransformer), the edges are split accordingly: each
+GPU only stores and computes edges whose destination node belongs to its
+partition. To allow information to flow across partition boundaries,
+nodes from neighbouring partitions that are sources of cross-partition
+edges are exchanged as *halo* nodes before each layer's message passing,
+and discarded afterwards. This is illustrated below.
+
+.. figure:: ../images/graph-partitioning.png
    :width: 500
    :align: center
 
-   Model Sharding (source: `Jacobs et al. (2023) <https://arxiv.org/pdf/2309.14509>`_)
+   Graph partitioning across two GPUs. Each colour represents one
+   partition (inner nodes). Halo nodes received from the neighbouring
+   partition are shown in red/green along the partition boundary.
 
-To use model sharding, set ``config.system.hardware.num_gpus_per_model``
-to the number of GPUs you wish to shard the model across. Set
-``config.model. keep_batch_sharded=True`` to also keep batches fully
-sharded throughout training, reducing memory usage for large inputs or
-long rollouts. It is recommended to only shard if the model does not fit
-in GPU memory, as data distribution is a much more efficient way to
-parallelise the training.
+This *edge sharding* strategy is enabled by default for the GraphTransformer:
+
+.. code:: yaml
+
+   model:
+     encoder:
+       shard_strategy: edges
+     processor:
+       shard_strategy: edges
+     decoder:
+       shard_strategy: edges
+
+Dense attention layers without a sparse graph (e.g. the sliding-window
+processor) instead shard the attention heads across GPUs, as shown in
+the figure below. This requires expensive all-to-all communication
+as opposed to the more local point-to-point communication used in edge sharding.
+Head sharding can also be selected for the GraphTransformer:
+
+.. code:: yaml
+
+   model:
+     encoder:
+       shard_strategy: heads
+     processor:
+       shard_strategy: heads
+     decoder:
+       shard_strategy: heads
+
+This may be beneficial when the graph is very densely connected, but
+note that head sharding requires an all-to-all communication at every
+layer and quickly becomes the communication bottleneck. It is therefore
+most suitable for layers where attention is already close to dense (e.g.
+sliding-window attention) rather than sparse GNN message passing.
+
+.. figure:: ../images/transformer-head-sharding.png
+   :width: 500
+   :align: center
+
+   Head sharding (source: `Jacobs et al. (2023) <https://arxiv.org/pdf/2309.14509>`_)
 
 Anemoi Training provides different sharding strategies depending if the
 model task is deterministic or ensemble based.
@@ -80,12 +125,18 @@ to the number of GPUs you wish to parallelise the ensemble members
 across and ``config.training.ensemble_size_per_device`` to the number of
 ensemble members per GPU.
 
-*********
- Example
-*********
+**********
+ Examples
+**********
 
-Suppose the job is running on 2 nodes each with 4 GPUs and that
+Suppose the job is running on 8 nodes each with 4 GPUs and that
 ``config.system.hardware.num_gpus_per_model=2`` and
-``config.dataloader.batch_size.training=4``. Then each model will be
+``config.dataloader.batch_size.training=1``. Then each model will be
 sharded across 2 GPUs and the data sharded across ``total number of
-GPUs/num_gpus_per_model=4``. This means the effective batch size is 16.
+GPUs/num_gpus_per_model=32/2=16``. This means the effective batch size
+is 16.
+
+Alternatively, with no model sharding on a single node with 4 GPUs, setting
+``config.system.hardware.num_gpus_per_model=1`` and
+``config.dataloader.batch_size.training=4`` gives 4-way data
+parallelism on 4 GPUs, again yielding an effective batch size of 16.
