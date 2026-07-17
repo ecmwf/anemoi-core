@@ -160,10 +160,6 @@ class BaseGraphModel(nn.Module):
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
         pass  # reference to the graph should be removed
-        # for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
-        #     assert (
-        #         hidden_name in self._graph_data.node_types
-        #     ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.

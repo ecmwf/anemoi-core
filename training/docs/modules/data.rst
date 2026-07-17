@@ -61,26 +61,6 @@ for training and supports:
    should sub-class ``MultiDataset`` and override the ``__iter__``
    method or the ``get_sample`` method.
 
-Multi-Domain Dataset
---------------------
-The ``MultiDomainDataset`` class provides an alternative to ``MultiDataset``
-for synchronizing and combining multiple datasets that have different grids
-and time indices, but share similar data structures. The dataset indices are
-shuffled and a single one is passed forward.
-
-Advantages of this training strategy include:
-* Optimal utilization of dataset similarities, avoiding the need for
-unnecessary additional encoders
-* Easier to achieve cross-domain or cross-resolution generalization as the
-model is able to continuously see different samples
-* Avoiding additional transfer learning steps when fine-tuning to a new
-domain, which can cause catastrophic forgetting.
-* Easier to get a good prediction on an unseen domain
-
-Similar to ``MultiDataset``, distributed data loading across workers and
-communication groups is supported, as well as shuffling and batching data
-for training.
-
 API Reference
 =============
 
@@ -96,14 +76,6 @@ Multi-Dataset
 -------------
 
 .. automodule:: anemoi.training.data.multidataset
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-Multi-Domain Dataset
---------------------
-
-.. automodule:: anemoi.training.data.multidomain
    :members:
    :no-undoc-members:
    :show-inheritance:

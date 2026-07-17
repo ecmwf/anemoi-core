@@ -245,7 +245,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             self.target_dataset_names.append(dataset_name)
             if isinstance(graph_data, PosixPath):
                 fused = uses_fused_dataset_graph(self._graph_data_dict[self.dataset_names[0]], self.dataset_names)
-                # fused = FALSE (reading from paths, cannot have subgraphs for each dataset)
             else:
                 fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
