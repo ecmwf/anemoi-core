@@ -85,13 +85,26 @@ class BaseAnemoiReader:
         dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
+        optional: bool = False,
     ):
-        """Initialize Anemoi data reader."""
+        """Initialize Anemoi data reader.
+
+        Parameters
+        ----------
+        optional : bool, optional
+            Marks the reader as optional. Optional readers are excluded from the
+            required-dates intersection performed in
+            :func:`anemoi.training.data.usable_indices.compute_valid_data_indices`
+            and their samples may be auto-dropped in the training step when they
+            fall on a missing date (i.e. anemoi-datasets returns NaN slots for
+            dates listed under ``dates.missing:`` in the recipe).
+        """
         source = dataset_config if dataset_config is not None else dataset
         if source is None:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
         self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+        self.optional = bool(optional)
 
     @property
     def dates(self) -> np.ndarray:
@@ -233,8 +246,15 @@ class TrajectoryDataset(BaseAnemoiReader):
         dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
+        optional: bool = False,
     ):
-        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
+        super().__init__(
+            dataset=dataset,
+            dataset_config=dataset_config,
+            start=start,
+            end=end,
+            optional=optional,
+        )
         self.trajectory_start = trajectory_start
         self.trajectory_length = trajectory_length
 

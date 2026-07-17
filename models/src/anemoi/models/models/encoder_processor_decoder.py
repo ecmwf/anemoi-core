@@ -66,7 +66,7 @@ class GatedLatentFusion(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-    def forward(self, latent: Tensor, encoder_output: Tensor) -> Tensor:
+    def forward(self, latent: Tensor, encoder_output: Tensor, drop: bool = False) -> Tensor:
         """Fold encoder_output into the running latent.
 
         Parameters
@@ -75,6 +75,9 @@ class GatedLatentFusion(nn.Module):
             Running latent of shape [N, D].
         encoder_output : Tensor
             Encoder output to incorporate, shape [N, D].
+        drop : bool, optional
+            If True, force the gate to 0 so this block becomes a no-op while still
+            running the full computation (needed to keep the DDP graph static).
 
         Returns
         -------
@@ -85,6 +88,8 @@ class GatedLatentFusion(nn.Module):
         en = self.norm_input(encoder_output)
         combined = torch.cat([ln, en], dim=-1)  # [N, 2D]
         gate = self.to_gate(combined)  # [N, D] in (0, 1)
+        if drop:
+            gate = gate * 0.0
         value = self.to_value(combined)  # [N, D]
         # Gated residual: if gate → 0, block is a no-op (safe for missing encoders)
         return latent + gate * value
@@ -96,20 +101,25 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
+        # Per-dataset encoder overrides may be supplied via `model.encoders.<dataset_name>`;
+        # otherwise the shared `model.encoder` block is used for every dataset.
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
+        encoder_overrides = model_config.model.get("encoders", {}) or {}
         for dataset_name in self.dataset_names:
+            encoder_cfg = encoder_overrides.get(dataset_name, model_config.model.encoder)
+
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=encoder_cfg.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=encoder_cfg.get("trainable_size", 0),
             )
 
             self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
+                encoder_cfg,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
@@ -163,19 +173,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
 
         # Decoder hidden -> data
+        # Per-dataset decoder overrides may be supplied via `model.decoders.<dataset_name>`;
+        # otherwise the shared `model.decoder` block is used for every dataset.
         self.decoder_graph_provider = torch.nn.ModuleDict()
         self.decoder = torch.nn.ModuleDict()
+        decoder_overrides = model_config.model.get("decoders", {}) or {}
         for dataset_name in self.dataset_names:
+            decoder_cfg = decoder_overrides.get(dataset_name, model_config.model.decoder)
+
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=decoder_cfg.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=decoder_cfg.get("trainable_size", 0),
             )
 
             self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
+                decoder_cfg,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
@@ -183,6 +198,32 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
+
+        self._log_encoder_decoder_param_counts()
+
+    def _log_encoder_decoder_param_counts(self) -> None:
+        """Log trainable parameter counts for each per-dataset encoder and decoder."""
+
+        def _count(mod: nn.Module) -> int:
+            return sum(p.numel() for p in mod.parameters() if p.requires_grad)
+
+        def _fmt(n: int) -> str:
+            return f"{n:,} ({n / 1e6:.2f}M)"
+
+        LOGGER.info("Trainable parameters per encoder/decoder:")
+        enc_total = 0
+        for name, mod in self.encoder.items():
+            n = _count(mod)
+            enc_total += n
+            LOGGER.info(f"  encoder[{name}]: {_fmt(n)}")
+        LOGGER.info(f"  encoder total : {_fmt(enc_total)}")
+
+        dec_total = 0
+        for name, mod in self.decoder.items():
+            n = _count(mod)
+            dec_total += n
+            LOGGER.info(f"  decoder[{name}]: {_fmt(n)}")
+        LOGGER.info(f"  decoder total : {_fmt(dec_total)}")
 
     def _assemble_input(
         self,
@@ -278,6 +319,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         dropped_dataset_names: list[str] | set[str] | None = None,
+        decoder_dropped_dataset_names: list[str] | set[str] | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass of the model.
@@ -306,7 +348,30 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dropped_dataset_names = dropped_dataset_names
         dropped_dataset_names = set() if dropped_dataset_names is None else set(dropped_dataset_names)
         dropped_dataset_names.discard(primary_dataset)
-        LOGGER.info(f"predict_step dropped_dataset_names: {dropped_dataset_names}")
+        decoder_dropped_dataset_names = (
+            set() if decoder_dropped_dataset_names is None else set(decoder_dropped_dataset_names)
+        )
+        decoder_dropped_dataset_names.discard(primary_dataset)
+        # A fully-dropped dataset is already dropped at the decoder, no need to list it twice.
+        decoder_dropped_dataset_names -= dropped_dataset_names
+        # LOGGER.info(f"predict_step dropped_dataset_names: {dropped_dataset_names}")
+
+        # Debug: show which datasets the model is dropping this forward pass.
+        # Uses torch.distributed rank if available so we can see per-rank
+        # behavior in multi-GPU runs.
+        try:
+            import torch.distributed as _dist
+
+            _rank = _dist.get_rank() if _dist.is_available() and _dist.is_initialized() else 0
+        except Exception:  # noqa: BLE001
+            _rank = 0
+        # print(
+        #     f"[model-forward] rank={_rank} datasets={dataset_names} "
+        #     f"principal={primary_dataset} "
+        #     f"fully_dropped={sorted(dropped_dataset_names) if dropped_dataset_names else '[]'} "
+        #     f"decoder_only_dropped={sorted(decoder_dropped_dataset_names) if decoder_dropped_dataset_names else '[]'}",
+        #     flush=True,
+        # )
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
@@ -354,7 +419,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             # Encoder for this dataset — always run to keep graph static for DDP.
-            # If dropped, multiply latent by 0 so it contributes nothing.
             x_data_latent, x_latent = self.encoder[dataset_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_size,
@@ -364,15 +428,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
-            keep_scale = 0.0 if dataset_name in dropped_dataset_names else 1.0
-            x_latent = x_latent * keep_scale
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
         # Fuse encoder latents sequentially: first encoder is the base latent,
         # subsequent encoders are folded in via gated fusion blocks (no attention).
-        # Dropped datasets contribute zero latent — fusion block still runs (static graph)
-        # but learns no-op. Order randomized during training to prevent order dependence.
+        # Dropped datasets: for 'gated', the fusion block forces its gate to 0
+        # (no-op while keeping the static graph). For 'sum', the dropped encoder
+        # output is zeroed before summing.
+        # Order randomized during training to prevent order dependence.
         x_latent = dataset_latents[primary_dataset]
         remaining = [name for name in self.dataset_names if name != primary_dataset and name in dataset_latents]
         if self.training:
@@ -381,11 +445,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if dropped_dataset_names:
                 LOGGER.info(f"Evaluation with dropped datasets: {dropped_dataset_names}")
         if self.latent_fusion_method == "sum":
-            # x_latent = sum(dataset_latents[name] for name in remaining)
-            x_latent = sum(dataset_latents.values())
+            x_latent = sum(
+                (dataset_latents[name] * (0.0 if name in dropped_dataset_names else 1.0))
+                for name in dataset_latents
+            )
         else:
             for dataset_name in remaining:
-                x_latent = self.latent_fusion[dataset_name](x_latent, dataset_latents[dataset_name])
+                x_latent = self.latent_fusion[dataset_name](
+                    x_latent,
+                    dataset_latents[dataset_name],
+                    drop=dataset_name in dropped_dataset_names,
+                )
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
@@ -436,9 +506,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
             )
 
-            if dataset_name in dropped_dataset_names:
+            if dataset_name in dropped_dataset_names or dataset_name in decoder_dropped_dataset_names:
                 # Replace output with NaN — NaN-aware loss will ignore this dataset.
                 # Multiply by 0 and add NaN to keep decoder params in the graph.
+                # print(f"[decoder-dropout] masking {dataset_name} "
+                #     f"(fully_dropped={dataset_name in dropped_dataset_names}, "
+                #     f"decoder_only={dataset_name in decoder_dropped_dataset_names})", flush=True)
                 x_out = x_out * 0 + float("nan")
 
             x_out_dict[dataset_name] = x_out

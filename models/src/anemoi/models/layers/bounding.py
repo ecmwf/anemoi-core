@@ -147,26 +147,39 @@ class NormalizedReluBounding(BaseBounding):
                 "The length of the min_val list must match the number of variables in NormalizedReluBounding."
             )
 
+        # Filter to variables present in this dataset's name_to_index. The same
+        # config-level bounding list is applied to every dataset, so variables
+        # not in the current dataset must be silently skipped (consistent with
+        # BaseBounding._create_index).
+        kept = [(ii, var) for ii, var in enumerate(variables) if var in name_to_index]
+        kept_variables = [var for _, var in kept]
+        kept_min_val = [min_val[ii] for ii, _ in kept]
+        kept_normalizer = [self.normalizer[ii] for ii, _ in kept]
+        self.min_val = kept_min_val
+        self.normalizer = kept_normalizer
+
         # Create data index for the variables to be bounded in order from configuration
-        self.data_index = torch.tensor([name_to_index[var] for var in variables], dtype=self.data_index.dtype)
+        self.data_index = torch.tensor(
+            [name_to_index[var] for var in kept_variables], dtype=self.data_index.dtype
+        )
         # Compute normalized min values
-        norm_min_val = torch.zeros(len(variables))
-        for ii, variable in enumerate(variables):
+        norm_min_val = torch.zeros(len(kept_variables))
+        for ii, variable in enumerate(kept_variables):
             stat_index = self.name_to_index_stats[variable]
             if self.normalizer[ii] == "mean-std":
                 mean = self.statistics["mean"][stat_index]
                 std = self.statistics["stdev"][stat_index]
-                norm_min_val[ii] = (min_val[ii] - mean) / std
+                norm_min_val[ii] = (kept_min_val[ii] - mean) / std
             elif self.normalizer[ii] == "min-max":
                 min_stat = self.statistics["min"][stat_index]
                 max_stat = self.statistics["max"][stat_index]
-                norm_min_val[ii] = (min_val[ii] - min_stat) / (max_stat - min_stat)
+                norm_min_val[ii] = (kept_min_val[ii] - min_stat) / (max_stat - min_stat)
             elif self.normalizer[ii] == "max":
                 max_stat = self.statistics["max"][stat_index]
-                norm_min_val[ii] = min_val[ii] / max_stat
+                norm_min_val[ii] = kept_min_val[ii] / max_stat
             elif self.normalizer[ii] == "std":
                 std = self.statistics["stdev"][stat_index]
-                norm_min_val[ii] = min_val[ii] / std
+                norm_min_val[ii] = kept_min_val[ii] / std
         # register the normalized min values as a buffer to ensure they are moved to the correct device
         self.register_buffer("norm_min_val", norm_min_val)
 

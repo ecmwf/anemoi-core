@@ -129,11 +129,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
+        # Principal dataset drives the training date pool. Every other dataset
+        # is treated as optional by default; an explicit
+        # `dataloader.optional_datasets` list overrides that default.
+        principal_dataset = self.config.model.get("principal_dataset", None)
+        optional_datasets_cfg = self.config.dataloader.get("optional_datasets", None)
+        optional_datasets = None if optional_datasets_cfg is None else list(optional_datasets_cfg)
+
         return MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
             label=label,
+            principal_dataset=principal_dataset,
+            optional_datasets=optional_datasets,
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:

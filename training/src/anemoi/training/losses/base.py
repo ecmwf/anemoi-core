@@ -51,6 +51,7 @@ class BaseLoss(nn.Module, ABC):
     def __init__(
         self,
         ignore_nans: bool = False,
+        squash_mode: Squash_mode = "avg",
     ) -> None:
         """Node- and feature_weighted Loss.
 
@@ -67,6 +68,9 @@ class BaseLoss(nn.Module, ABC):
         ----------
         ignore_nans : bool, optional
             Allow nans in the loss and apply methods ignoring nans for measuring the loss, by default False
+        squash_mode : {"avg", "sum"}, optional
+            Default reduction mode for the variable dimension when ``forward`` is called
+            without an explicit ``squash_mode``. By default ``"avg"``.
 
         """
         super().__init__()
@@ -74,6 +78,11 @@ class BaseLoss(nn.Module, ABC):
         self.add_module("scaler", ScaleTensor())
 
         self.ignore_nans = ignore_nans
+
+        if squash_mode not in ("avg", "sum"):
+            msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
+            raise ValueError(msg)
+        self._squash_mode: Squash_mode = squash_mode
 
         self.supports_sharding = True
         self.num_scales = 1
@@ -391,7 +400,7 @@ class FunctionalLoss(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "avg",
+        squash_mode: Squash_mode | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
@@ -413,8 +422,9 @@ class FunctionalLoss(BaseLoss):
             Slice of the grid if x comes sharded, by default None
         group: ProcessGroup, optional
             Distributed group, by default None
-        squash_mode : {"avg", "sum"}, optional
-            Reduction mode for the variable dimension, by default ``"avg"``
+        squash_mode : {"avg", "sum"} or None, optional
+            Reduction mode for the variable dimension. If ``None``, falls back to the
+            value provided at construction (see ``BaseLoss.__init__``).
         **kwargs
             Additional keyword arguments
 
@@ -428,4 +438,5 @@ class FunctionalLoss(BaseLoss):
 
         out = self.calculate_difference(pred, target)
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        squash_mode = squash_mode if squash_mode is not None else self._squash_mode
         return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)

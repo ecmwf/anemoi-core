@@ -42,6 +42,8 @@ class MultiDataset(IterableDataset):
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
+        principal_dataset: str | None = None,
+        optional_datasets: list[str] | set[str] | None = None,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -56,13 +58,77 @@ class MultiDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "multi"
+        principal_dataset : str, optional
+            Name of the principal (required) dataset — matches
+            ``config.model.principal_dataset``. Only used as a safety guard:
+            it is silently removed from ``optional_datasets`` if present, so
+            the principal dataset is never treated as optional.
+        optional_datasets : list[str] | set[str], optional
+            Explicit list of dataset names to treat as optional. Optional
+            datasets:
+
+            - are excluded from the required-dates intersection in
+              :func:`anemoi.training.data.usable_indices.compute_valid_data_indices`;
+            - carry an ``optional=True`` flag on their reader so
+              :meth:`BaseAnemoiReader.get_sample` short-circuits reads on
+              missing slots to NaN tensors;
+            - are auto-dropped in the training step (encoder gated off,
+              decoder emits NaN) for any batch whose input for that dataset
+              is entirely NaN.
+
+            When ``None`` (default), **no dataset is treated as optional** —
+            every reader's missing set participates in the date intersection
+            as usual.
         """
         self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
 
-        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
+        # principal_dataset is only used as a safety guard so we never mark it
+        # optional even if someone lists it in optional_datasets.
+        if principal_dataset is not None and principal_dataset not in self.dataset_names:
+            msg = (
+                f"principal_dataset={principal_dataset!r} not found in data readers "
+                f"({self.dataset_names}). Check config.model.principal_dataset."
+            )
+            raise ValueError(msg)
+        self.principal_dataset = principal_dataset
+
+        if optional_datasets is None:
+            # Default: nothing is optional. Every dataset is required and its
+            # missing set participates in the date intersection.
+            self.optional_datasets: set[str] = set()
+        else:
+            requested = set(optional_datasets)
+            unknown = requested - set(self.dataset_names)
+            if unknown:
+                msg = (
+                    f"optional_datasets references unknown datasets: {sorted(unknown)} "
+                    f"(available: {self.dataset_names})"
+                )
+                raise ValueError(msg)
+            # Never mark the principal dataset optional, if one is known.
+            self.optional_datasets = requested - ({principal_dataset} if principal_dataset else set())
+
+        # Propagate the optional flag onto each reader so the reader-side
+        # NaN short-circuit in get_sample() activates.
+        for name, reader in data_readers.items():
+            reader.optional = name in self.optional_datasets
+
+        if self.optional_datasets:
+            LOGGER.info(
+                "MultiDataset '%s': principal=%r, optional=%s.",
+                label,
+                principal_dataset,
+                sorted(self.optional_datasets),
+            )
+
+        self.valid_date_indices = compute_valid_data_indices(
+            self.data_readers,
+            relative_date_indices,
+            optional_datasets=self.optional_datasets,
+        )
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {

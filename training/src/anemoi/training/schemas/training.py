@@ -266,6 +266,8 @@ class BaseLossSchema(BaseModel):
     "Scalers to include in loss calculation"
     ignore_nans: bool = False
     "Allow nans in the loss and apply methods ignoring nans for measuring the loss."
+    squash_mode: Literal["avg", "sum"] = "avg"
+    "Reduction over the variable dimension: 'avg' (default) or 'sum'."
     predicted_variables: list[str] | None = None
     target_variables: list[str] | None = None
 

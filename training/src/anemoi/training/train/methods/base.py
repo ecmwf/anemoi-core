@@ -872,6 +872,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Normalized batch
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
+
+        # Snapshot which datasets carry all-NaN inputs BEFORE the pre-processors
+        # run (imputers replace NaNs with numeric values, so a post-imputation
+        # NaN check would always be False). Subclasses (e.g. SingleTraining)
+        # use this to auto-drop optional datasets whose input for this batch
+        # fell entirely on virtual missing dates.
+        #
+        # `.all()` (not `.any()`): ocean-style fields legitimately carry NaN on
+        # land cells at every date, so `.any()` would fire every batch. A
+        # padded (missing-date) slot is guaranteed to be entirely NaN.
+        self._batch_nan_datasets: set[str] = {
+            name for name, tensor in batch.items() if torch.isnan(tensor).all()
+        }
+
         for dataset_name in batch:
             batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
         return batch

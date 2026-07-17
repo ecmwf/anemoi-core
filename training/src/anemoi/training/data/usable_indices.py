@@ -21,14 +21,26 @@ LOGGER = logging.getLogger(__name__)
 def compute_valid_data_indices(
     data_readers: dict[str, "BaseAnemoiReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],
+    optional_datasets: list[str] | set[str] | None = None,
 ) -> np.ndarray:
     """Return valid date indices.
 
-    A date t is valid if we can sample the elements t + i
-    for every relative_date_index i across all data readers.
+    A date t is valid if we can sample the elements t + i for every
+    ``relative_date_index`` i across all *required* data readers.
 
-    Returns the intersection of valid indices from all data readers.
+    Optional readers (listed in ``optional_datasets`` and/or marked with
+    ``reader.optional=True``) are excluded from the intersection: their missing
+    slots do not remove dates from the training pool. Instead, samples that
+    fall on their missing slots come back as NaN tensors and the training step
+    is expected to auto-drop those datasets for that batch.
+
+    Returns the intersection of valid indices from all required data readers.
     """
+    optional_set = set(optional_datasets or [])
+    for name, reader in data_readers.items():
+        if getattr(reader, "optional", False):
+            optional_set.add(name)
+
     valid_date_indices_intersection = None
     for dataset_name, ds in data_readers.items():
         valid_date_indices = get_usable_indices(
@@ -37,6 +49,19 @@ def compute_valid_data_indices(
             relative_date_indices[dataset_name],
             ds.trajectory_ids if ds.has_trajectories else None,
         )
+
+        if dataset_name in optional_set:
+            # Compute for logging, but do NOT intersect with the required pool.
+            n_missing = len(ds.missing)
+            n_valid = len(valid_date_indices)
+            LOGGER.info(
+                "Optional data reader '%s' has %d valid indices (%d missing slots) — excluded from date intersection.",
+                dataset_name,
+                n_valid,
+                n_missing,
+            )
+            continue
+
         if valid_date_indices_intersection is None:
             valid_date_indices_intersection = valid_date_indices
         else:
@@ -47,6 +72,13 @@ def compute_valid_data_indices(
             raise ValueError(msg)
 
         LOGGER.info("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
+
+    if valid_date_indices_intersection is None:
+        msg = (
+            "compute_valid_data_indices: no required datasets found — every reader is optional. "
+            "At least one dataset must be non-optional to anchor the training date pool."
+        )
+        raise ValueError(msg)
 
     if len(valid_date_indices_intersection) == 0:
         msg = "No valid date indices found after intersection across all datasets."
