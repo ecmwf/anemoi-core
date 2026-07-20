@@ -510,7 +510,9 @@ class TrajectoryDataset(BaseAnemoiReader):
             y = y[..., grid_shard_indices]
         y = rearrange(y, "steps variables ensemble gridpoints -> steps ensemble gridpoints variables")
 
-        return torch.cat([torch.from_numpy(x), torch.from_numpy(y)], dim=-1)
+        x_t = torch.from_numpy(x)
+        y_t = torch.from_numpy(y).expand(x_t.shape[0], x_t.shape[1], x_t.shape[2], -1)
+        return torch.cat([x_t, y_t], dim=-1)
 
     def tree(self, prefix: str = "") -> Tree:
         tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")

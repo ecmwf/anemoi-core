@@ -506,8 +506,10 @@ class TestTrajectoryDatasetWithAuxiliaryGetSample:
         aux_part = sample[..., 3:]  # (3 steps, ens=2, grid=10, aux_vars=2)
 
         raw_aux = ds._auxiliary_reader.data[expected_aux_indices.tolist(), :, :, :]
-        # raw_aux shape: (steps, aux_vars, ens=1, grid) → transpose → (steps, ens, grid, aux_vars)
+        # raw_aux shape: (steps, aux_vars, ens=1, grid) → transpose → (steps, ens=1, grid, aux_vars)
+        # The aux ensemble dim is broadcast to match the trajectory ensemble size.
         expected_aux = np.transpose(raw_aux, (0, 2, 3, 1))
+        expected_aux = np.broadcast_to(expected_aux, aux_part.shape)
         np.testing.assert_allclose(aux_part.numpy(), expected_aux, rtol=1e-6)
 
     def test_forward_fill_clips_before_first_aux_date(self) -> None:
