@@ -276,3 +276,44 @@ def test_normalized_leaky_relu_bounding(config, name_to_index, name_to_index_sta
         ]
     )
     assert torch.allclose(output, expected_output, atol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "cls, extra_kwargs",
+    [
+        (ReluBounding, {}),
+        (LeakyReluBounding, {}),
+        (HardtanhBounding, {"min_val": -1.0, "max_val": 1.0}),
+        (LeakyHardtanhBounding, {"min_val": -1.0, "max_val": 1.0}),
+        (FractionBounding, {"min_val": 0.0, "max_val": 1.0, "total_var": "var1"}),
+        (LeakyFractionBounding, {"min_val": 0.0, "max_val": 1.0, "total_var": "var1"}),
+        (
+            NormalizedReluBounding,
+            {"min_val": [2.0, 99.0], "normalizer": ["mean-std", "mean-std"]},
+        ),
+        (
+            NormalizedLeakyReluBounding,
+            {"min_val": [2.0, 99.0], "normalizer": ["mean-std", "mean-std"]},
+        ),
+    ],
+)
+def test_bounding_skips_missing_variables(cls, extra_kwargs, name_to_index_stats, statistics):
+    # Same bounding config applied to a dataset that only contains 'var1'.
+    # 'missing_var' must be silently skipped so the same config can be shared
+    # across multi-dataset setups.
+    partial_name_to_index = {"var1": 0}
+    kwargs = dict(
+        variables=["var1", "missing_var"],
+        name_to_index=partial_name_to_index,
+        **extra_kwargs,
+    )
+    if "min_val" in extra_kwargs and isinstance(extra_kwargs["min_val"], list):
+        kwargs["statistics"] = statistics
+        kwargs["name_to_index_stats"] = name_to_index_stats
+
+    bounding = cls(**kwargs)
+    assert bounding.data_index.tolist() == [0]
+
+    # forward must run without error and preserve shape on a tensor sized to the partial dataset.
+    partial_input = torch.tensor([[-1.0], [4.0], [0.5]])
+    bounding(partial_input.clone())

@@ -205,11 +205,22 @@ class PlotSchema(PydanticBaseModel):
     "Handle plotting tasks without blocking the model training."
     datashader: bool
     "Use Datashader to plot."
-    projection_kind: Literal["equirectangular", "lambert_conformal"] = Field(
+    projection_kind: str = Field(
         default="equirectangular",
-        examples=["equirectangular", "lambert_conformal"],
+        examples=["equirectangular", "lambert_conformal", "robinson", "mollweide"],
     )
-    "Map projection for diagnostics plots: 'equirectangular' or 'lambert_conformal'."
+    """Map projection for diagnostics plots.
+
+    Built-in options: ``'equirectangular'`` (no cartopy required) and
+    ``'lambert_conformal'`` (auto-fitted to the data domain; requires cartopy).
+    Any ``cartopy.crs`` class name in snake_case is also accepted
+    (e.g. ``'robinson'``, ``'mollweide'``, ``'orthographic'``); these require
+    cartopy and are instantiated with **default constructor arguments** (e.g.
+    ``'orthographic'`` centres on longitude/latitude 0). If you need non-default
+    parameters, use ``'lambert_conformal'`` (auto-fitted to the data domain) or
+    subclass ``MapProjection``.
+    Must be ``'equirectangular'`` when ``datashader`` is ``True``.
+    """
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
     colormaps: dict | None = None
