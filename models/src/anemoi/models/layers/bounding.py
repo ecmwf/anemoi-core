@@ -124,7 +124,6 @@ class NormalizedReluBounding(BaseBounding):
         name_to_index_stats : dict
             A dictionary mapping the variable names to their corresponding indices in the statistics dictionary.
         """
-        # Validate raw config before filtering so errors are dataset-independent.
         if len(normalizer) != len(variables):
             raise ValueError(
                 "The length of the normalizer list must match the number of variables in NormalizedReluBounding."
@@ -147,17 +146,17 @@ class NormalizedReluBounding(BaseBounding):
 
         # Silently skip variables absent from this dataset (matches BaseBounding._create_index).
         kept = [(ii, var) for ii, var in enumerate(variables) if var in name_to_index]
-        kept_variables = [var for _, var in kept]
+        self.variables = [var for _, var in kept]
         self.min_val = [min_val[ii] for ii, _ in kept]
         self.normalizer = [normalizer[ii] for ii, _ in kept]
 
         # Create data index for the variables to be bounded in order from configuration
         self.data_index = torch.tensor(
-            [name_to_index[var] for var in kept_variables], dtype=self.data_index.dtype
+            [name_to_index[var] for var in self.variables], dtype=self.data_index.dtype
         )
         # Compute normalized min values
-        norm_min_val = torch.zeros(len(kept_variables))
-        for ii, variable in enumerate(kept_variables):
+        norm_min_val = torch.zeros(len(self.variables), dtype=torch.float32)
+        for ii, variable in enumerate(self.variables):
             stat_index = self.name_to_index_stats[variable]
             if self.normalizer[ii] == "mean-std":
                 mean = self.statistics["mean"][stat_index]
