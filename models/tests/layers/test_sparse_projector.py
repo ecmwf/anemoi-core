@@ -53,3 +53,10 @@ def test_forward_handles_arbitrary_leading_dims(projector: SparseProjector, csr_
         for t in range(3):
             expected = projector(x[b, t : t + 1], csr_matrix)
             assert torch.allclose(out[b, t], expected[0], atol=1e-6)
+
+
+def test_forward_uses_configured_num_chunks(csr_matrix: torch.Tensor) -> None:
+    x = torch.rand(5, csr_matrix.shape[1], 4)
+    chunked = SparseProjector(autocast=False, num_chunks=3)(x, csr_matrix)
+    unchunked = SparseProjector(autocast=False, num_chunks=1)(x, csr_matrix)
+    assert torch.allclose(chunked, unchunked, atol=1e-6)
