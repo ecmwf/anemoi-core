@@ -18,25 +18,22 @@ class SparseProjector(torch.nn.Module):
     Stateless: the matrix is passed to :meth:`forward`, not stored.
     """
 
-    def __init__(self, autocast: bool = False, num_chunks: int = 1) -> None:
+    def __init__(self, autocast: bool = False) -> None:
         """Initialize SparseProjector.
 
         Parameters
         ----------
         autocast : bool
             Use automatic mixed precision
-        num_chunks : int
-            Default number of chunks to project with sparse matmul.
         """
         super().__init__()
         self.autocast = autocast
-        self.num_chunks = num_chunks
 
     def forward(
         self,
         x: torch.Tensor,
         projection_matrix: torch.Tensor,
-        num_chunks: int | None = None,
+        num_chunks: int = 1,
     ) -> torch.Tensor:
         """Apply sparse projection.
 
@@ -46,17 +43,15 @@ class SparseProjector(torch.nn.Module):
             Input tensor with shape ``[..., input_nodes, channels]``.
         projection_matrix : torch.Tensor
             Sparse projection matrix (assumed to be on the correct device)
-        num_chunks : int, optional
+        num_chunks : int
             Number of chunks to project with sparse matmul. ``1``
-            projects all in one matmul. Defaults to the value configured
-            when constructing the projector.
+            projects all in one matmul.
 
         Returns
         -------
         torch.Tensor
             Projected tensor
         """
-        num_chunks = self.num_chunks if num_chunks is None else num_chunks
         input_shape = x.shape
         x = x.reshape(-1, *input_shape[-2:])
 

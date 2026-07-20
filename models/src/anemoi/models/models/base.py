@@ -89,7 +89,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
+        self._build_residual(model_config.model.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -241,10 +241,9 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
+    def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
-        sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
@@ -254,7 +253,6 @@ class BaseGraphModel(nn.Module):
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
-                sparse_projector_num_chunks=sparse_projector_num_chunks,
             )
 
     def _build_named_node_attributes_graph(self) -> HeteroData:

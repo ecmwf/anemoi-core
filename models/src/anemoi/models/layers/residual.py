@@ -109,8 +109,6 @@ class TruncatedConnection(BaseResidualConnection):
         Name of the data nodes in ``graph``.
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
-    sparse_projector_num_chunks : int, default 1
-        Number of chunks to use for sparse projection matmuls.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
     truncation_up_file_path : str, optional
@@ -154,7 +152,6 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
         data_node_name: str = "data",
         autocast: bool = False,
-        sparse_projector_num_chunks: int = 1,
         row_normalize: bool = False,
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
@@ -220,7 +217,7 @@ class TruncatedConnection(BaseResidualConnection):
             row_normalize=row_normalize,
         )
 
-        self.projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
+        self.projector = SparseProjector(autocast=autocast)
 
     @staticmethod
     def _normalise_truncation_config(

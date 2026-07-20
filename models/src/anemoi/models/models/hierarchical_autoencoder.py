@@ -80,7 +80,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         self._build_networks(model_config)
 
         # build residual connection
-        self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
+        self._build_residual(model_config.model.residual)
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
