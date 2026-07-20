@@ -111,6 +111,9 @@ class TrajectoryDatasetSchema(NativeDatasetSchema):
 
     trajectory: TrajectorySchema | None = Field(default=None)
     "Trajectory configuration."
+    auxiliary: NativeDatasetSchema | None = Field(default=None)
+    "Optional auxiliary gridded dataset providing extra forcing variables at a coarser frequency. \
+Values are forward-filled to match each trajectory step's valid time."
 
 
 class LoaderSet(BaseModel):

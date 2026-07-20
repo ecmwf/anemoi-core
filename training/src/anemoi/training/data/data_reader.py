@@ -71,7 +71,7 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
         msg = "Missing required 'dataset_config' in dataset reader configuration."
         raise ValueError(msg)
 
-    allowed_keys = {"start", "end", "trajectory"}
+    allowed_keys = {"start", "end", "trajectory", "auxiliary"}
     unknown_keys = set(normalized) - allowed_keys
     if unknown_keys:
         unknown = ", ".join(sorted(unknown_keys))
@@ -360,6 +360,7 @@ class TrajectoryDataset(BaseAnemoiReader):
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
         sampling: dict | None = None,
+        auxiliary: dict | DictConfig | None = None,
     ) -> None:
         source = dataset_config if dataset_config is not None else dataset
         if source is None:
@@ -387,6 +388,27 @@ class TrajectoryDataset(BaseAnemoiReader):
         self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
         self.default_sampling = sampling if sampling is not None else {"stride": None}
 
+        # Optional auxiliary gridded dataset providing extra forcing variables at
+        # a different (e.g. coarser) frequency.  At sample time its values are
+        # forward-filled to the trajectory step timestamps.
+        self._auxiliary_reader: NativeGridDataset | None = None
+        if auxiliary is not None:
+            aux = _as_dict(auxiliary)
+            aux_dataset_config = aux.get("dataset_config")
+            if aux_dataset_config is None:
+                msg = "auxiliary must contain 'dataset_config'."
+                raise ValueError(msg)
+            LOGGER.info("Opening auxiliary dataset for TrajectoryDataset...")
+            self._auxiliary_reader = NativeGridDataset(
+                dataset_config=aux_dataset_config,
+                start=aux.get("start"),
+                end=aux.get("end"),
+            )
+            # Cache dates as int64 nanoseconds for fast binary search in get_sample.
+            self._aux_dates_ns: np.ndarray = (
+                self._auxiliary_reader.data.dates.astype("datetime64[ns]").astype(np.int64)
+            )
+
     @property
     def num_sequences(self) -> int:
         """Number of forecast initialisations (base dates)."""
@@ -404,6 +426,33 @@ class TrajectoryDataset(BaseAnemoiReader):
     def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
         """Forecast datasets do not track per-step missing values."""
         return set()
+
+    @property
+    def variables(self) -> list[str]:
+        """Return combined variable list from trajectory and auxiliary datasets."""
+        if self._auxiliary_reader is None:
+            return self.data.variables
+        return self.data.variables + self._auxiliary_reader.variables
+
+    @cached_property
+    def name_to_index(self) -> dict[str, int]:
+        """Return merged name-to-index mapping, with auxiliary indices offset past trajectory variables."""
+        if self._auxiliary_reader is None:
+            return self.data.name_to_index
+        n_traj = len(self.data.variables)
+        merged = dict(self.data.name_to_index)
+        for var, idx in self._auxiliary_reader.name_to_index.items():
+            merged[var] = idx + n_traj
+        return merged
+
+    @cached_property
+    def statistics(self) -> dict:
+        """Return statistics concatenated from trajectory and auxiliary datasets."""
+        if self._auxiliary_reader is None:
+            return self.data.statistics
+        traj_stats = self.data.statistics
+        aux_stats = self._auxiliary_reader.statistics
+        return {key: np.concatenate([traj_stats[key], aux_stats[key]]) for key in traj_stats}
 
     @property
     def frequency(self) -> datetime.timedelta:
@@ -441,9 +490,27 @@ class TrajectoryDataset(BaseAnemoiReader):
         x = x[:, :, positions, :]
         if grid_shard_indices is not None:
             x = x[..., grid_shard_indices]
-
         x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
-        return torch.from_numpy(x)
+
+        if self._auxiliary_reader is None:
+            return torch.from_numpy(x)
+
+        # Compute the absolute valid-time timestamp for each requested step and
+        # forward-fill into the auxiliary dataset (last aux date <= timestamp).
+        base_date_ns = self.data.base_dates[sequence].astype("datetime64[ns]").astype(np.int64)
+        steps_ns = np.asarray(self.data.steps)[positions].astype("timedelta64[ns]").astype(np.int64)
+        abs_ts_ns = base_date_ns + steps_ns
+
+        aux_indices = np.searchsorted(self._aux_dates_ns, abs_ts_ns, side="right") - 1
+        aux_indices = np.clip(aux_indices, 0, len(self._aux_dates_ns) - 1)
+
+        # Load auxiliary data: raw shape (n_steps, n_aux_vars, n_ensemble, n_gridpoints)
+        y = self._auxiliary_reader.data[aux_indices.tolist(), :, :, :]
+        if grid_shard_indices is not None:
+            y = y[..., grid_shard_indices]
+        y = rearrange(y, "steps variables ensemble gridpoints -> steps ensemble gridpoints variables")
+
+        return torch.cat([torch.from_numpy(x), torch.from_numpy(y)], dim=-1)
 
     def tree(self, prefix: str = "") -> Tree:
         tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
@@ -454,6 +521,8 @@ class TrajectoryDataset(BaseAnemoiReader):
         tree.add(f"Num initialisations: {self.num_sequences}")
         tree.add(f"Steps per initialisation: {self.sequence_length()}")
         tree.add(f"Sampling: {self.default_sampling}")
+        if self._auxiliary_reader is not None:
+            tree.add(f"Auxiliary vars: {self._auxiliary_reader.variables}")
         return tree
 
 
@@ -461,11 +530,12 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create a data reader based on the dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
+    auxiliary_config = _as_dict(dataset_config.pop("auxiliary", None))
 
     if trajectory_config is not None:
         sampling = trajectory_config.get("sampling") if isinstance(trajectory_config, dict) else None
         LOGGER.info("Creating TrajectoryDataset...")
-        return TrajectoryDataset(**dataset_config, sampling=_as_dict(sampling))
+        return TrajectoryDataset(**dataset_config, sampling=_as_dict(sampling), auxiliary=auxiliary_config)
 
     LOGGER.info("Creating NativeGridDataset...")
     return NativeGridDataset(**dataset_config)
