@@ -13,11 +13,16 @@ import pytest
 from omegaconf import OmegaConf
 from pydantic import ValidationError
 
+from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 from anemoi.training.schemas.diagnostics import BatchOutputPlotFnSchema
 from anemoi.training.schemas.diagnostics import GraphPlotFnSchema
 from anemoi.training.schemas.diagnostics import LossPlotFnSchema
 from anemoi.training.schemas.diagnostics import PlotSchema
 from anemoi.training.schemas.diagnostics import PlotSettingsSchema
+
+# Fields that exist in PlottingSettings but are runtime-only (not config-facing)
+# and intentionally absent from PlotSettingsSchema.
+_RUNTIME_ONLY_FIELDS = {"save_basedir", "focus_areas", "dataset_names"}
 
 # ---------------------------------------------------------------------------
 # PlotSettingsSchema
@@ -42,6 +47,40 @@ def test_plot_settings_schema_override() -> None:
 def test_plot_settings_schema_precip_fields() -> None:
     s = PlotSettingsSchema(precip_and_related_fields=["tp", "cp"])
     assert s.precip_and_related_fields == ["tp", "cp"]
+
+
+def test_plot_settings_schema_in_sync_with_plotting_settings() -> None:
+    """Fail if PlottingSettings and PlotSettingsSchema drift out of sync.
+
+    PlotSettingsSchema is the config-facing validator; PlottingSettings is the
+    runtime object passed to plot_fn. They must agree on shared field names and
+    defaults. Add new fields to _RUNTIME_ONLY_FIELDS above if they are
+    intentionally absent from the schema.
+    """
+    runtime_fields = {
+        name: field for name, field in PlottingSettings.model_fields.items() if name not in _RUNTIME_ONLY_FIELDS
+    }
+    schema_fields = PlotSettingsSchema.model_fields
+
+    missing_from_schema = set(runtime_fields) - set(schema_fields)
+    assert not missing_from_schema, (
+        f"Fields present in PlottingSettings but missing from PlotSettingsSchema: "
+        f"{missing_from_schema}. Add them to PlotSettingsSchema or to _RUNTIME_ONLY_FIELDS."
+    )
+
+    missing_from_runtime = set(schema_fields) - set(runtime_fields) - _RUNTIME_ONLY_FIELDS
+    assert not missing_from_runtime, (
+        f"Fields present in PlotSettingsSchema but missing from PlottingSettings: "
+        f"{missing_from_runtime}. Add them to PlottingSettings."
+    )
+
+    for name in runtime_fields:
+        runtime_default = PlottingSettings.model_fields[name].default
+        schema_default = PlotSettingsSchema.model_fields[name].default
+        assert runtime_default == schema_default, (
+            f"Default for '{name}' differs: PlottingSettings={runtime_default!r}, "
+            f"PlotSettingsSchema={schema_default!r}. Keep them in sync."
+        )
 
 
 # ---------------------------------------------------------------------------
