@@ -151,7 +151,7 @@ class NormalizedReluBounding(BaseBounding):
         self.normalizer = [normalizer[ii] for ii, _ in kept]
 
         # Create data index for the variables to be bounded in order from configuration
-        self.data_index = torch.tensor([name_to_index[var] for var in kept_variables], dtype=self.data_index.dtype)
+        self.data_index = torch.tensor([name_to_index[var] for var in self.variables], dtype=self.data_index.dtype)
         # Compute normalized min values
         norm_min_val = torch.zeros(len(self.variables), dtype=torch.float32)
         for ii, variable in enumerate(self.variables):
