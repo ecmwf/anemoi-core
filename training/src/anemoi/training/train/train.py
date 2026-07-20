@@ -665,9 +665,16 @@ class AnemoiTrainer(ABC):
 
         if hasattr(self.config.model, "compile"):
             self.model = mark_for_compilation(self.model, self.config.model.compile)
-        if hasattr(self.config.model, "recompile_limit"):
-            torch._dynamo.config.cache_size_limit = int(self.config.model.recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.model.recompile_limit), 256)
+        recompile_limit = getattr(self.config.model, "recompile_limit", None)
+        if hasattr(self.config.training, "recompile_limit"):
+            LOGGER.warning(
+                "The recompile_limit in config.training is deprecated. "
+                "Please use config.model.recompile_limit instead.",
+            )
+            recompile_limit = getattr(self.config.training, "recompile_limit", None)
+        if recompile_limit is not None:
+            torch._dynamo.config.cache_size_limit = int(recompile_limit)
+            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(recompile_limit), 256)
             LOGGER.info(
                 "Recompile limit set to %d per kernel, %d accumulated",
                 torch._dynamo.config.cache_size_limit,
