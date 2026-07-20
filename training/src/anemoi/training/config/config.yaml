@@ -1,13 +1,635 @@
-defaults:
-- data: zarr
-- dataloader: native_grid
-- diagnostics: evaluation
-- system: example
-- graph: multi_scale
-- model: gnn
-- training: default
-- _self_
-
-
-# set to true to switch on config validation
-config_validation: True
+data:
+  format: zarr
+  resolution: n320
+  frequency: 6h
+  timestep: 6h
+  forcing:
+  - cos_latitude
+  - cos_longitude
+  - sin_latitude
+  - sin_longitude
+  - cos_julian_day
+  - cos_local_time
+  - sin_julian_day
+  - sin_local_time
+  - insolation
+  - lsm
+  - sdor
+  - slor
+  - z
+  diagnostic:
+  - tp
+  - cp
+  - sf
+  - tcc
+  - hcc
+  - lcc
+  - mcc
+  - ro
+  - ssrd
+  - strd
+  - 100u
+  - 100v
+  remapped: null
+  normalizer:
+    default: mean-std
+    remap:
+      cp: tp
+      sf: tp
+    std:
+    - tp
+    - cp
+    - sf
+    - ro
+    - tcw
+    - ssrd
+    - q_50
+    - q_100
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - q_1000
+    min-max: null
+    max:
+    - sdor
+    - slor
+    - z
+    none:
+    - cos_latitude
+    - cos_longitude
+    - sin_latitude
+    - sin_longitude
+    - cos_julian_day
+    - cos_local_time
+    - sin_julian_day
+    - sin_local_time
+    - insolation
+    - lsm
+    - tcc
+    - mcc
+    - hcc
+    - lcc
+    - swvl1
+    - swvl2
+  imputer:
+    default: none
+  remapper:
+    default: none
+  processors:
+    normalizer:
+      _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+      config: ${data.normalizer}
+  num_features: null
+dataloader:
+  prefetch_factor: 1
+  pin_memory: true
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  num_workers:
+    training: 8
+    validation: 8
+    test: 8
+    predict: 8
+  batch_size:
+    training: 1
+    validation: 1
+    test: 4
+    predict: 4
+  limit_batches:
+    training: null
+    validation: null
+    test: 20
+    predict: 20
+  grid_indices:
+    _target_: anemoi.training.data.grid_indices.FullGrid
+    nodes_name: ${graph.data}
+  dataset: ${system.input.dataset}
+  training:
+    dataset:
+    - dataset: ${dataloader.dataset}
+      start: null
+      end: 2022
+      frequency: ${data.frequency}
+      drop: []
+    - dataset: ${system.input.dataset_land}
+      start: null
+      end: 2022
+      frequency: ${data.frequency}
+      select:
+      - swvl1
+      - swvl2
+      - stl1
+      - stl2
+      - ssrd
+      - strd
+      - sf
+      - tcc
+      - mcc
+      - hcc
+      - lcc
+      - 100u
+      - 100v
+      - ro
+    start: null
+    end: 2022
+    drop: []
+  validation:
+    dataset:
+    - dataset: ${dataloader.dataset}
+      start: 2023
+      end: 2023
+      frequency: ${data.frequency}
+      drop: []
+    - dataset: ${system.input.dataset_land}
+      start: 2023
+      end: 2023
+      frequency: ${data.frequency}
+      select:
+      - swvl1
+      - swvl2
+      - stl1
+      - stl2
+      - ssrd
+      - strd
+      - sf
+      - tcc
+      - mcc
+      - hcc
+      - lcc
+      - 100u
+      - 100v
+      - ro
+    start: 2023
+    end: 2023
+    drop: []
+  validation_rollout: 1
+  test:
+    dataset:
+    - dataset: ${dataloader.dataset}
+      start: 2022
+      end: null
+      frequency: ${data.frequency}
+      drop: []
+    - dataset: ${system.input.dataset_land}
+      start: 2022
+      end: null
+      frequency: ${data.frequency}
+      select:
+      - swvl1
+      - swvl2
+      - stl1
+      - stl2
+      - ssrd
+      - strd
+      - sf
+      - tcc
+      - mcc
+      - hcc
+      - lcc
+      - 100u
+      - 100v
+      - ro
+    start: 2022
+    end: null
+    drop: []
+diagnostics:
+  plot:
+    asynchronous: true
+    datashader: true
+    frequency:
+      batch: 750
+      epoch: 5
+    parameters:
+    - z_500
+    - t_850
+    - u_850
+    - v_850
+    - 2t
+    - 10u
+    - 10v
+    - sp
+    - tp
+    - cp
+    sample_idx: 0
+    precip_and_related_fields:
+    - tp
+    - cp
+    colormaps:
+      default:
+        _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+        name: viridis
+      error:
+        _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+        name: bwr
+      precip:
+        _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+        clevels:
+        - '#ffffff'
+        - '#04e9e7'
+        - '#019ff4'
+        - '#0300f4'
+        - '#02fd02'
+        - '#01c501'
+        - '#008e00'
+        - '#fdf802'
+        - '#e5bc00'
+        - '#fd9500'
+        - '#fd0000'
+        - '#d40000'
+        - '#bc0000'
+        - '#f800fd'
+        variables: ${diagnostics.plot.precip_and_related_fields}
+    callbacks: []
+  callbacks: []
+  benchmark_profiler:
+    memory:
+      enabled: true
+      steps: 5
+      warmup: 2
+      extra_plots: false
+      trace_rank0_only: false
+    time:
+      enabled: true
+      verbose: false
+    speed:
+      enabled: true
+    system:
+      enabled: true
+    model_summary:
+      enabled: true
+    snapshot:
+      enabled: true
+      steps: 4
+      warmup: 0
+  debug:
+    anomaly_detection: false
+  enable_checkpointing: true
+  checkpoint:
+    every_n_minutes:
+      save_frequency: 30
+      num_models_saved: 3
+    every_n_epochs:
+      save_frequency: 1
+      num_models_saved: -1
+    every_n_train_steps:
+      save_frequency: null
+      num_models_saved: 0
+  log:
+    wandb:
+      enabled: false
+      offline: false
+      log_model: false
+      project: Anemoi
+      entity: whatever
+      gradients: false
+      parameters: false
+    tensorboard:
+      enabled: false
+    mlflow:
+      enabled: true
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+      offline: true
+      authentication: true
+      tracking_uri: https://mlflow.ecmwf.int/
+      experiment_name: 9km-interp-new
+      project_name: Anemoi
+      system: false
+      terminal: true
+      run_name: null
+      on_resume_create_child: true
+      expand_hyperparams:
+      - config
+      http_max_retries: 35
+      max_params_length: 2000
+      save_dir: ${system.output.logs.mlflow}
+    interval: 100
+  enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
+  check_val_every_n_epoch: 1
+  print_memory_summary: false
+system:
+  output:
+    root: ${oc.env:SCRATCH}/aifs/prietonemesio1/${data.resolution}/
+    logs:
+      root: logs
+      wandb: wandb
+      mlflow: mlflow
+      tensorboard: tensorboard
+    checkpoints:
+      root: checkpoint
+      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
+    profiler: profiler
+  input:
+    dataset: /e/data1/jureap-data/ecmwf/gkpdm/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    graph: graph_enc_proc_dec_${data.resolution}_multiscale_7.pt
+    truncation: null
+    truncation_inv: null
+    loss_matrices_path: null
+    warm_start: null
+    dataset_land: /e/data1/jureap-data/ecmwf/gkpdm/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v1-land.zarr
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+    num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
+    num_gpus_per_model: 2
+graph:
+  overwrite: true
+  data: data
+  hidden: hidden
+  nodes:
+    data:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.dataset}
+      attributes: ${graph.attributes.nodes}
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.TriNodes
+        resolution: 7
+      attributes: ${graph.attributes.nodes}
+  edges:
+  - source_name: ${graph.data}
+    target_name: ${graph.hidden}
+    edge_builders:
+    - _target_: anemoi.graphs.edges.CutOffEdges
+      cutoff_factor: 0.6
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: ${graph.hidden}
+    target_name: ${graph.hidden}
+    edge_builders:
+    - _target_: anemoi.graphs.edges.MultiScaleEdges
+      x_hops: 1
+      scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: ${graph.hidden}
+    target_name: ${graph.data}
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  attributes:
+    nodes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        norm: unit-max
+        fill_value: 0
+    edges:
+      edge_length:
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-std
+      edge_dirs:
+        _target_: anemoi.graphs.edges.attributes.EdgeDirection
+        norm: unit-std
+  post_processors: []
+model:
+  num_channels: 1024
+  cpu_offload: false
+  keep_batch_sharded: true
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
+  layer_kernels:
+    LayerNorm:
+      _target_: torch.nn.LayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
+    QueryNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+    KeyNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+      bias: false
+  processor:
+    _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+    trainable_size: ${model.trainable_parameters.hidden2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    num_layers: 16
+    num_chunks: 2
+    mlp_hidden_ratio: 4
+    num_heads: 16
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    layer_kernels: ${model.layer_kernels}
+  encoder:
+    _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    trainable_size: ${model.trainable_parameters.data2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    num_chunks: 8
+    mlp_hidden_ratio: 4
+    num_heads: 16
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    layer_kernels: ${model.layer_kernels}
+    shard_strategy: edges
+  decoder:
+    _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+    trainable_size: ${model.trainable_parameters.hidden2data}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    num_chunks: 8
+    mlp_hidden_ratio: 4
+    num_heads: 16
+    initialise_data_extractor_zero: false
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    layer_kernels: ${model.layer_kernels}
+    shard_strategy: edges
+  output_mask:
+    _target_: anemoi.training.utils.masks.NoOutputMask
+  residual:
+    _target_: anemoi.models.layers.residual.SkipConnection
+    step: -1
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  attributes:
+    edges:
+    - edge_length
+    - edge_dirs
+    nodes: []
+  bounding:
+  - _target_: anemoi.models.layers.bounding.ReluBounding
+    variables:
+    - tp
+    - ro
+    - tcw
+    - ssrd
+    - ro
+    - q_50
+    - q_100
+    - q_150
+    - q_200
+    - q_250
+    - q_300
+    - q_400
+    - q_500
+    - q_600
+    - q_700
+    - q_850
+    - q_925
+    - q_1000
+  - _target_: anemoi.models.layers.bounding.HardtanhBounding
+    variables:
+    - tcc
+    - swvl1
+    - swvl2
+    min_val: 0
+    max_val: 1
+  - _target_: anemoi.models.layers.bounding.FractionBounding
+    variables:
+    - cp
+    - sf
+    min_val: 0
+    max_val: 1
+    total_var: tp
+  - _target_: anemoi.models.layers.bounding.FractionBounding
+    variables:
+    - lcc
+    - mcc
+    - hcc
+    min_val: 0
+    max_val: 1
+    total_var: tcc
+  interpolate_batch: false
+  interp_batch_file_path: null
+training:
+  scalers:
+    general_variable:
+      _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+      weights:
+        default: 1
+        q: 0.6
+        t: 6
+        u: 0.8
+        v: 0.5
+        w: 0.001
+        z: 12
+        sp: 10
+        10u: 0.5
+        10v: 0.5
+        2d: 0.5
+        tp: 0.025
+        cp: 0.0025
+        ro: 0.005
+        sf: 0.025
+        tcc: 0.1
+        mcc: 0.1
+        lcc: 0.1
+        hcc: 0.1
+        swvl2: 2
+        swvl1: 1
+        stl2: 10
+        stl1: 1
+        ssrd: 0.05
+        strd: 0.1
+    pressure_level:
+      _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+      group: pl
+      y_intercept: 0.2
+      slope: 0.001
+    nan_mask_weights:
+      _target_: anemoi.training.losses.scalers.NaNMaskScaler
+    tp_mask:
+      _target_: anemoi.training.losses.scalers.VariableMaskingLossScaler
+      variables:
+      - tp
+    not_tp_mask:
+      _target_: anemoi.training.losses.scalers.VariableMaskingLossScaler
+      variables:
+      - tp
+      invert: true
+    stdev_tendency:
+      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+    var_tendency:
+      _target_: anemoi.training.losses.scalers.VarTendencyScaler
+    node_weights:
+      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+      nodes_name: ${graph.data}
+      nodes_attribute_name: area_weight
+      norm: unit-sum
+  run_id: null
+  fork_run_id: null
+  transfer_learning: false
+  load_weights_only: false
+  deterministic: false
+  precision: 16-mixed
+  multistep_input: 2
+  accum_grad_batches: 1
+  num_sanity_val_steps: 6
+  gradient_clip:
+    val: 32.0
+    algorithm: value
+  swa:
+    enabled: false
+    lr: 0.0001
+  model_task: anemoi.training.train.tasks.GraphForecaster
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+    read_group_size: ${dataloader.read_group_size}
+  loss_gradient_scaling: false
+  training_loss:
+    _target_: anemoi.training.losses.MSELoss
+    scalers:
+    - pressure_level
+    - general_variable
+    - nan_mask_weights
+    - node_weights
+    ignore_nans: false
+  validation_metrics:
+    mse:
+      _target_: anemoi.training.losses.MSELoss
+      scalers: []
+      ignore_nans: true
+  variable_groups:
+    default: sfc
+    pl:
+    - q
+    - t
+    - u
+    - v
+    - w
+    - z
+  metrics:
+  - z_500
+  - t_850
+  - u_850
+  - v_850
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+  max_epochs: null
+  max_steps: 262500
+  lr:
+    warmup: 1000
+    rate: 3.125e-05
+    iterations: 260000
+    min: 3.0e-07
+  submodules_to_freeze: []
+  optimizer:
+    _target_: torch.optim.AdamW
+    betas:
+    - 0.9
+    - 0.95
+config_validation: false

@@ -39,6 +39,7 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     temp = tempfile.NamedTemporaryFile(dir=tmpdir, prefix=f"{user}_")  # noqa: SIM115
     os.environ["MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE"] = temp.name
     os.environ["MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY"] = tmpdir
+    print(tmpdir,temp.name)
     return temp
 
 

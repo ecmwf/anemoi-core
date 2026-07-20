@@ -40,4 +40,9 @@ class ParentUUIDCallback(Callback):
         checkpoint: torch.nn.Module,
     ) -> None:
         del trainer  # unused
-        pl_module.hparams["metadata"]["parent_uuid"] = checkpoint["hyper_parameters"]["metadata"]["uuid"]
+        #print("Loading checkpoint with hyper parameters: ", checkpoint["hyper_parameters"]['metadata'])
+        #print("Loading checkpoint with parent UUID: ", checkpoint["hyper_parameters"]["metadata"]["uuid"])
+        try:
+            pl_module.hparams["metadata"]["parent_uuid"] = checkpoint["hyper_parameters"]["metadata"]["uuid"]
+        except KeyError:
+            LOGGER.warning("Parent UUID not found in checkpoint metadata.")

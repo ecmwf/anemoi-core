@@ -84,6 +84,10 @@ class AnemoiTrainer(ABC):
         LOGGER.info("Starting from checkpoint: %s", self.start_from_checkpoint)
 
         self.load_weights_only = self.config.training.load_weights_only
+
+        # print(self.load_weights_only)
+        # print(self.config.training.transfer_learning)
+    
         self.parent_uuid = None
 
         self.config.training.run_id = self.run_id
@@ -199,6 +203,9 @@ class AnemoiTrainer(ABC):
 
         model_task = get_class(self.config.training.model_task)
         model = model_task(**kwargs)  # GraphForecaster -> pl.LightningModule
+
+        print(self.load_weights_only, self.last_checkpoint)
+        print(self.config.training.transfer_learning)
 
         # Load the model weights
         if self.load_weights_only:
