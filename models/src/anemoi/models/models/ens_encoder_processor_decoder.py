@@ -33,7 +33,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
     def __init__(self, params: Parametrisation, *, noise_injector=None, **kwargs) -> None:
         self.condition_on_residual = params.get("model.condition_on_residual")
-        self._noise_injector = noise_injector
+        # See AnemoiModelEncProcDec.__init__: stash before nn.Module.__init__ runs.
+        object.__setattr__(self, "_noise_injector", noise_injector)
         super().__init__(params, **kwargs)
 
     def _build_networks(self) -> None:

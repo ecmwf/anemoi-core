@@ -16,10 +16,13 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
 from anemoi.utils.parametrisation import ParametrisationError
-from anemoi.utils.parametrisation import build
 
 LOGGER = logging.getLogger(__name__)
+
+# Layer kernels are leaf factories; build them through a stateless parametrisation.
+_PARAMETRISATION = DictParametrisation()
 
 
 def compute_mlp_hidden_dim(num_channels: int, mlp_hidden_ratio: float) -> int:
@@ -129,7 +132,7 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
     for name, kernel_entry in {**default_kernels, **kernel_config}.items():
         if instance:
             try:
-                layer_kernels[name] = build(kernel_entry, _partial_=True)
+                layer_kernels[name] = _PARAMETRISATION.create_module(kernel_entry, _partial_=True)
             except ParametrisationError:
                 LOGGER.info(
                     f"{kernel_entry['_target_']} not found! Check your params.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"

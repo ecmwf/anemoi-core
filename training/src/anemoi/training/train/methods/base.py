@@ -41,10 +41,10 @@ from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.parametrisation import TrainingParametrisation
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
-from anemoi.utils.parametrisation import DictParametrisation
 
 _chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 _trainable_edge_perm_fix_migration = importlib.import_module(
@@ -199,7 +199,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # The model is built from a Parametrisation (Hydra-free). Training still owns the
         # OmegaConf config; we hand the model a resolved, JSON-serialisable view of it.
-        params = DictParametrisation(OmegaConf.to_container(config, resolve=True))
+        params = TrainingParametrisation.from_config(config)
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -209,7 +209,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             n_step_output=self.n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
-            config=params,
+            params=params,
         )
         self.config = config
 

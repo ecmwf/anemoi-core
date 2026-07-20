@@ -53,9 +53,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             instance is used as-is. The model always injects the runtime-computed
             channel/edge dimensions.
         """
-        self._encoder = encoder
-        self._processor = processor
-        self._decoder = decoder
+        # Stash injected sub-module specs before nn.Module.__init__ runs (inside
+        # super().__init__). object.__setattr__ avoids premature nn.Module registration when
+        # an already-built module instance is passed; the real registration happens when the
+        # sub-modules are placed into the ModuleDicts in _build_networks.
+        object.__setattr__(self, "_encoder", encoder)
+        object.__setattr__(self, "_processor", processor)
+        object.__setattr__(self, "_decoder", decoder)
         super().__init__(params, **kwargs)
 
     def _build_networks(self) -> None:

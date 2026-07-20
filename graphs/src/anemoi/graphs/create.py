@@ -17,7 +17,7 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.utils.config import DotDict
-from anemoi.utils.parametrisation import build
+from anemoi.utils.parametrisation import DictParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +37,8 @@ class GraphCreator:
             self.config = DotDict(config)
         else:
             self.config = config
+        # Builders and attribute objects are constructed through this parametrisation.
+        self.parametrisation = DictParametrisation(self.config)
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
         """Update the graph.
@@ -55,20 +57,22 @@ class GraphCreator:
             The updated graph with new nodes and edges added based on the configuration.
         """
         for nodes_name, nodes_cfg in self.config.get("nodes", {}).items():
-            graph = build(nodes_cfg.node_builder, name=nodes_name).update_graph(
-                graph, attrs_config=nodes_cfg.get("attributes", {})
+            graph = self.parametrisation.create_module(nodes_cfg.node_builder, name=nodes_name).update_graph(
+                graph, attrs_config=nodes_cfg.get("attributes", {}), parametrisation=self.parametrisation
             )
 
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
-                edge_builder = build(
+                edge_builder = self.parametrisation.create_module(
                     edge_builder_cfg,
                     source_name=edges_cfg.source_name,
                     target_name=edges_cfg.target_name,
                 )
                 graph = edge_builder.update_graph(graph, attrs_config=None)
 
-            graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
+            graph = edge_builder.register_attributes(
+                graph, edges_cfg.get("attributes", {}), parametrisation=self.parametrisation
+            )
 
         if graph.num_nodes == 0:
             LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
@@ -119,7 +123,9 @@ class GraphCreator:
         Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
         """
         for processor in self.config.get("post_processors", []):
-            graph = build(processor).update_graph(graph, graph_config=self.config)
+            graph = self.parametrisation.create_module(processor).update_graph(
+                graph, graph_config=self.config, parametrisation=self.parametrisation
+            )
 
         return graph
 

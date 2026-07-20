@@ -5,6 +5,14 @@ This records the design conversation behind replacing Hydra `instantiate` with a
 `agent/no-pickle-plan.md` (which introduced a backend-switchable `instantiate` shim); that
 shim is now **removed**.
 
+> **Update (round 2).** Following further direction in `refactor.md`, the ABC and its
+> concrete impl moved to **`anemoi.utils.parametrisation`** (from `anemoi.graphs`); the
+> concrete impl is renamed `DictParametrisation` (was `JSONParametrisation`); the free
+> `build()` function is **gone** — all construction is `params.create_module(...)`, including
+> in graphs; the interface constructor keyword is `params=` (was `config=`); and training
+> gets a `TrainingParametrisation(DictParametrisation)` subclass built via `.from_config`.
+> The sections below are updated to the final state; superseded choices are noted inline.
+
 ## Goal (from `refactor.md`)
 
 - Get rid of `instantiate`. Remove Hydra *for now* (to be reintroduced later behind
@@ -46,13 +54,12 @@ reattached there later without touching call sites.
 
 ## Decisions taken (and the options rejected)
 
-### 1. Where the ABC lives → **`anemoi.graphs.parametrisation`**
-`anemoi.models` already depends on `anemoi.graphs`, so the ABC must live at the shared
-lower layer. Rejected:
-- **`anemoi.utils` (external repo):** cleanest long-term home but needs a separate package
-  release to iterate — too much coordination for now.
+### 1. Where the ABC lives → **`anemoi.utils.parametrisation`**
+Final home is `anemoi.utils`, the lowest layer shared by graphs, models *and* training.
+(Round 1 first placed it in `anemoi.graphs` to avoid a cross-repo release; round 2 moved it
+to `anemoi.utils` as directed, since a clone was available to iterate on.) Rejected:
 - **One ABC per package (models + graphs each define their own):** avoids coupling but
-  duplicates the `get`/`create_module` surface and the build engine.
+  duplicates the `get`/`create_module` surface and the construction engine.
 
 ### 2. Key access convention → **flat, dotted semantic keys on a JSON dict**
 `params.get("model.encoder.num_heads", default)`; missing key with no default raises
@@ -79,23 +86,38 @@ Rejected:
 - **Require users to pass fully-built encoder instances:** impossible in general, because
   `edge_dim` isn't known until the model is being built.
 
-### 5. Concrete implementation → **`JSONParametrisation`**
-A dict-backed, JSON-serialisable `Parametrisation` with `from_json` / `from_file` /
-`to_json`. Serves both training (built from the resolved OmegaConf config via
-`OmegaConf.to_container(cfg, resolve=True)`) and inference (rebuilt from checkpoint JSON).
-A dedicated training-vs-inference subclass split can come later; one impl suffices now.
+### 5. Concrete implementations → **`DictParametrisation` + `TrainingParametrisation`**
+`anemoi.utils.parametrisation.DictParametrisation` is the dict-backed, JSON-serialisable
+base (`from_json` / `from_file` / `to_json`), used for inference and tests.
+`anemoi.training.parametrisation.TrainingParametrisation(DictParametrisation)` is the
+training-side subclass, built via `TrainingParametrisation.from_config(omegaconf_cfg)`
+(resolves interpolations; dataset-derived values can be layered on as `overrides`). The
+training→model boundary in `train/methods/base.py` uses it.
+
+### 6. No free `build()` function → **construction only via `create_module`**
+The module-level `build()` is removed; the engine is private (`_construct`) and reached only
+through `Parametrisation.create_module`. Everything — models *and* graphs — passes a
+`Parametrisation` and calls `create_module`. In graphs this means `GraphCreator` holds a
+`DictParametrisation` and threads it through `update_graph`/`register_attributes`/post-
+processors (an optional `parametrisation` arg, defaulted to a stateless instance so builders
+used directly in tests still work). Leaf helpers with no parametrisation in scope
+(`load_layer_kernels`) use a module-level stateless `DictParametrisation`.
+
+### 7. Interface constructor keyword → **`params=`**
+`AnemoiModelInterface(params=...)` (was `config=...`); the stored attribute is `model.params`.
 
 ## Architecture
 
-- `anemoi/graphs/parametrisation.py`
+- `anemoi/utils/parametrisation.py` (in the **anemoi-utils** repo)
   - `Parametrisation` (ABC): `get`, `to_dict`, `create_module`, `resolve`.
-  - `JSONParametrisation`: dict-backed concrete impl (+ JSON I/O).
-  - `build(spec, *args, **kwargs)`: Hydra-free engine (dotted `_target_`, `_partial_`,
-    `_recursive_`, `_args_`, call-time-kwargs-win). `create_module` delegates to it.
+  - `DictParametrisation`: dict-backed concrete impl (+ JSON I/O).
+  - `_construct` (private): Hydra-free engine (dotted `_target_`, `_partial_`, `_recursive_`,
+    `_args_`, call-time-kwargs-win), reached only via `create_module`. **No public `build`.**
   - `get_object` / `get_class` / `ParametrisationError`.
-- Graphs construction path (`create.py`, node/edge builders, `post_process.py`) uses the
-  module-level `build` (behaviour-preserving; post-processors still receive the raw graph
-  config), so Hydra is gone from graph creation.
+- `anemoi/training/parametrisation.py`: `TrainingParametrisation(DictParametrisation)`.
+- Graphs construction path (`create.py`, node/edge builders, `post_process.py`) builds via a
+  `Parametrisation.create_module`; `GraphCreator` threads its instance through the builder
+  methods (post-processors still also receive the raw graph config).
 - Models: `BaseGraphModel` and all subclasses take `params: Parametrisation` and build
   children via `_build_submodule` / `params.create_module`. The interface passes the
   `Parametrisation` object directly to the model class.

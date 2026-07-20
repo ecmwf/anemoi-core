@@ -95,7 +95,7 @@ def rebuild_model(checkpoint_path: str) -> AnemoiModelInterface:
     params = DictParametrisation(inputs.pop("config"))
 
     # 2. Rebuild the model -- create_module builds every sub-module without Hydra.
-    model = AnemoiModelInterface(config=params, **inputs)
+    model = AnemoiModelInterface(params=params, **inputs)
 
     # 3. Load the weights; this fills the placeholder graph / statistics / coordinate buffers
     #    with their real values.

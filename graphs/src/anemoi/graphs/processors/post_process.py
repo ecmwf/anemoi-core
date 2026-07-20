@@ -22,9 +22,13 @@ from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
-from anemoi.utils.parametrisation import build
+from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
+
+# Default (stateless) parametrisation used when a caller does not supply one.
+_DEFAULT_PARAMETRISATION = DictParametrisation()
 
 
 class PostProcessor(ABC):
@@ -329,12 +333,15 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
     @abstractmethod
     def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
 
-    def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> HeteroData:
+    def recompute_attributes(
+        self, graph: HeteroData, graph_config: dict, parametrisation: Parametrisation | None = None
+    ) -> HeteroData:
         """Recompute attributes"""
+        parametrisation = parametrisation or _DEFAULT_PARAMETRISATION
         edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
         for attr_name, edge_attr_builder in edge_attributes.items():
             LOGGER.info(f"Recomputing edge attribute {attr_name}.")
-            graph[self.edges_name][attr_name] = build(edge_attr_builder)(
+            graph[self.edges_name][attr_name] = parametrisation.create_module(edge_attr_builder)(
                 x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
             )
         return graph
@@ -358,7 +365,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         LOGGER.info(f"Removing {(~mask).sum()} edges from {self.edges_name}.")
         graph = self.removing_edges(graph, mask)
         graph_config = kwargs.get("graph_config", {})
-        graph = self.recompute_attributes(graph, graph_config)
+        graph = self.recompute_attributes(graph, graph_config, kwargs.get("parametrisation"))
         return graph
 
 
