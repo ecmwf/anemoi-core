@@ -13,8 +13,6 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -28,9 +26,8 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.utils import instantiate
 from anemoi.models.utils.config import broadcast_config_keys
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,42 +37,49 @@ class BaseGraphModel(nn.Module):
 
     def __init__(
         self,
+        params: Parametrisation,
         *,
-        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
+        residual=None,
     ) -> None:
         """Initializes the graph neural network.
 
         Parameters
         ----------
-        model_config : DictConfig
-            Model configuration
+        params : Parametrisation
+            Model configuration.
         data_indices : dict
             Data indices
         statistics : dict
             Data statistics
         graph_data : HeteroData
             Graph definition
+        residual : None | str | nn.Module, optional
+            Residual connection sub-module. ``None`` builds the class configured under
+            ``model.residual``; a string is resolved via ``params.create_module``; an
+            instance is used as-is.
         """
         super().__init__()
+        self.params = params
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
+        self._residual = residual
 
         self.dataset_names = list(data_indices.keys())
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = params.get("model.model.hidden_nodes_name")
 
-        self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.model.latent_skip
+        self.num_channels = params.get("model.num_channels")
+        self.latent_skip = params.get("model.model.latent_skip")
 
         trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
+            params.get("model.trainable_parameters"),
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
@@ -86,15 +90,15 @@ class BaseGraphModel(nn.Module):
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
-        self._build_networks(model_config)
+        self._build_networks()
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self._build_residual()
 
         # build boundings
-        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
+        # Model output bounding functions (e.g., to ensure outputs like TP are positive definite).
         # Multi-dataset: create ModuleDict with ModuleList per dataset
-        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+        self.boundings = build_boundings(params, self.data_indices, self.statistics)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property
@@ -138,12 +142,12 @@ class BaseGraphModel(nn.Module):
 
     @staticmethod
     def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig,
+        hidden_nodes_name: str | list[str],
     ) -> list[str]:
         if isinstance(hidden_nodes_name, str):
             return [hidden_nodes_name]
 
-        if isinstance(hidden_nodes_name, (list, ListConfig)):
+        if isinstance(hidden_nodes_name, (list, tuple)) or type(hidden_nodes_name).__name__ == "ListConfig":
             return list(hidden_nodes_name)
 
         raise TypeError(
@@ -223,9 +227,26 @@ class BaseGraphModel(nn.Module):
         return dim_sizes[0]
 
     @abstractmethod
-    def _build_networks(self, model_config: DotDict) -> None:
-        """Builds the networks for the model."""
+    def _build_networks(self) -> None:
+        """Builds the networks for the model (reading from ``self.params``)."""
         pass
+
+    def _build_submodule(self, value, *, spec_key: str, default=None, **runtime):
+        """Resolve a constructor-injected sub-module (see ``refactor.md``).
+
+        * ``value is None`` -> build the class configured at ``spec_key`` (falling back to
+          ``default`` if that key is absent), completing it with the runtime kwargs;
+        * ``value`` is a string -> resolve it via ``params.create_module``;
+        * otherwise -> use the given instance as-is.
+        """
+        match value:
+            case None:
+                spec = self.params.get(spec_key, default)
+                return self.params.create_module(spec, **runtime)
+            case str():
+                return self.params.create_module(value, **runtime)
+            case _:
+                return value
 
     @abstractmethod
     def _assemble_input(
@@ -241,13 +262,14 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(self, residual_config: DotDict) -> None:
+    def _build_residual(self) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-            self.residual[dataset_name] = instantiate(
-                residual_config,
+            self.residual[dataset_name] = self._build_submodule(
+                self._residual,
+                spec_key="model.residual",
                 graph=self._graph_data,
                 data_node_name=data_node_name,
                 statistics=self.statistics[dataset_name],

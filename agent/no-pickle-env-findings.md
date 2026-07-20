@@ -1,4 +1,4 @@
-# No-pickle: environment / dev-setup findings
+kput# No-pickle: environment / dev-setup findings
 
 Notes about running and testing the no-pickle work in this checkout.
 

@@ -13,10 +13,11 @@ from importlib.util import find_spec
 
 import torch
 import torch_geometric
-from hydra.utils import get_class
 from numpy import unique
 from omegaconf import DictConfig
 from torch.nn import Module
+
+from anemoi.utils.parametrisation import get_class
 
 LOGGER = logging.getLogger(__name__)
 

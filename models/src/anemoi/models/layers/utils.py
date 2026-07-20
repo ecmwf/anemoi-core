@@ -15,17 +15,9 @@ from typing import Optional
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.utils import InstantiationError
-from anemoi.models.utils import instantiate
 from anemoi.utils.config import DotDict
-
-# Backwards-compatible alias: the native backend raises ``InstantiationError`` while the
-# Hydra backend raises ``hydra.errors.InstantiationException``. Catch both so the kernel
-# loader behaves identically regardless of the active backend.
-try:  # pragma: no cover - depends on whether Hydra is installed
-    from hydra.errors import InstantiationException
-except ImportError:  # pragma: no cover
-    InstantiationException = InstantiationError
+from anemoi.utils.parametrisation import ParametrisationError
+from anemoi.utils.parametrisation import build
 
 LOGGER = logging.getLogger(__name__)
 
@@ -93,16 +85,16 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
 
 
 def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
-    """Load layer kernels from the config.
+    """Load layer kernels from the params.
 
-    This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
+    This function tries to load the layer kernels from the params. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
 
     Parameters
     ----------
     kernel_config : DotDict
         Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear"}}
     instance : bool
-        If True, instantiate the kernels. If False, return the config.
+        If True, instantiate the kernels. If False, return the params.
         This is useful for testing purposes.
         Defaults to True.
 
@@ -111,7 +103,7 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
     DotDict
         Container with layer factories.
     """
-    # If self.layer_kernels entry is missing from the config, use torch.nn kernels
+    # If self.layer_kernels entry is missing from the params, use torch.nn kernels
     default_kernels = {
         "Linear": {"_target_": "torch.nn.Linear"},
         "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
@@ -133,14 +125,14 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
 
     layer_kernels = DotDict()
 
-    # Loop through all kernels in the layer_kernels config entry and try import them
+    # Loop through all kernels in the layer_kernels params entry and try import them
     for name, kernel_entry in {**default_kernels, **kernel_config}.items():
         if instance:
             try:
-                layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
-            except (InstantiationException, InstantiationError):
+                layer_kernels[name] = build(kernel_entry, _partial_=True)
+            except ParametrisationError:
                 LOGGER.info(
-                    f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+                    f"{kernel_entry['_target_']} not found! Check your params.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
                 )
                 raise
             else:

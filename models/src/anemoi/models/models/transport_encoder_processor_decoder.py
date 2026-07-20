@@ -14,7 +14,6 @@ from typing import Optional
 
 import einops
 import torch
-from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -36,8 +35,8 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.models.transport import sampling_source_specs
-from anemoi.models.utils import instantiate
 from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,8 +48,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def __init__(
         self,
+        params: Parametrisation,
         *,
-        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
@@ -58,9 +57,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         graph_data: HeteroData,
     ) -> None:
 
-        model_config = DotDict(model_config)
-
-        transport_params = model_config.model.model.transport
+        transport_params = DotDict(params.get("model.model.transport"))
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -72,7 +69,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.transport_model_objective = get_transport_model_objective(transport_params.objective)
 
         super().__init__(
-            model_config=model_config,
+            params,
             data_indices=data_indices,
             statistics=statistics,
             graph_data=graph_data,
@@ -80,7 +77,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             n_step_output=n_step_output,
         )
 
-        self.noise_embedder = instantiate(transport_params.noise_embedder)
+        self.noise_embedder = self.params.create_module(transport_params.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -649,19 +646,17 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def __init__(
         self,
+        params: Parametrisation,
         *,
-        model_config: DictConfig,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
-        model_config = DotDict(model_config)
-
-        self.condition_on_residual = model_config.model.condition_on_residual
+        self.condition_on_residual = params.get("model.condition_on_residual")
         super().__init__(
-            model_config=model_config,
+            params,
             data_indices=data_indices,
             statistics=statistics,
             n_step_input=n_step_input,

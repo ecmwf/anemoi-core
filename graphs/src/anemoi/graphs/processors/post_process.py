@@ -16,13 +16,13 @@ from typing import Iterable
 from typing import Union
 
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
+from anemoi.utils.parametrisation import build
 
 LOGGER = logging.getLogger(__name__)
 
@@ -334,7 +334,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
         for attr_name, edge_attr_builder in edge_attributes.items():
             LOGGER.info(f"Recomputing edge attribute {attr_name}.")
-            graph[self.edges_name][attr_name] = instantiate(edge_attr_builder)(
+            graph[self.edges_name][attr_name] = build(edge_attr_builder)(
                 x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
             )
         return graph

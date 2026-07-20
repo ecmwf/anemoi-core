@@ -66,7 +66,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
 
     metadata = dict(**model.metadata)
     model.metadata = None
-    model.config = None
+    model.params = None
 
     return model, metadata
 

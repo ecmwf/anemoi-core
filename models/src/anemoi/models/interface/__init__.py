@@ -11,14 +11,14 @@ import uuid
 from typing import Optional
 
 import torch
-from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.utils import instantiate
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -29,7 +29,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
     Attributes
     ----------
-    config : DictConfig
+    params : DictConfig
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
@@ -58,7 +58,7 @@ class AnemoiModelInterface(torch.nn.Module):
     def __init__(
         self,
         *,
-        config: DictConfig,
+        params: Parametrisation,
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
@@ -69,7 +69,7 @@ class AnemoiModelInterface(torch.nn.Module):
         supporting_arrays: dict | None = None,
     ) -> None:
         super().__init__()
-        self.config = config
+        self.params = params
         self.id = str(uuid.uuid4())
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
@@ -124,14 +124,14 @@ class AnemoiModelInterface(torch.nn.Module):
         )
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
-    @staticmethod
     def _build_processor_pair(
+        self,
         processors_configs: dict,
         data_indices: dict,
         statistics: dict,
     ) -> tuple[Processors, Processors]:
         processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+            [name, self.params.create_module(processor, data_indices=data_indices, statistics=statistics)]
             for name, processor in processors_configs.items()
         ]
         return Processors(processors), Processors(processors, inverse=True)
@@ -173,7 +173,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.pre_processors_tendencies = torch.nn.ModuleDict()
         self.post_processors_tendencies = torch.nn.ModuleDict()
 
-        data_config = get_multiple_datasets_config(self.config.data)
+        data_config = get_multiple_datasets_config(DotDict(self.params.get("data")))
         for dataset_name in self.statistics.keys():
             # Build processors for each dataset
             pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
@@ -188,21 +188,16 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.pre_processors_tendencies[dataset_name] = pre_tend
                 self.post_processors_tendencies[dataset_name] = post_tend
 
-        # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "none"),
-        }
-        self.model = instantiate(
-            model_instantiate_config,
-            model_config=self.config,
+        # Build the model. The model class (``model.model._target_``) receives the Parametrisation
+        # object directly; its sub-modules default to the classes named in the params.
+        self.model = self.params.create_module(
+            self.params.get("model.model._target_"),
+            self.params,
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
         # Use the forward method of the model directly

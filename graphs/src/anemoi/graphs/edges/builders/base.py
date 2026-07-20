@@ -15,7 +15,6 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
@@ -25,8 +24,14 @@ from anemoi.graphs.utils import PYG_INSTRUCTIONS
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
+
+# Default (stateless) parametrisation used to build attribute objects when the caller does
+# not supply one -- e.g. builders exercised directly in tests.
+_DEFAULT_PARAMETRISATION = DictParametrisation()
 
 
 class BaseEdgeBuilder(ABC):
@@ -91,7 +96,9 @@ class BaseEdgeBuilder(ABC):
         graph[self.name].edge_type = edge_type
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
+    def register_attributes(
+        self, graph: HeteroData, config: DotDict, parametrisation: Parametrisation | None = None
+    ) -> HeteroData:
         """Register attributes in the edges of the graph specified.
 
         Parameters
@@ -100,21 +107,30 @@ class BaseEdgeBuilder(ABC):
             The graph to register the attributes.
         config : DotDict
             The configuration of the attributes.
+        parametrisation : Parametrisation, optional
+            Parametrisation used to build each attribute object. Defaults to a stateless
+            :class:`~anemoi.utils.parametrisation.DictParametrisation`.
 
         Returns
         -------
         HeteroData
             The graph with the registered attributes.
         """
+        parametrisation = parametrisation or _DEFAULT_PARAMETRISATION
         for attr_name, attr_config in config.items():
             edge_index = graph[self.name].edge_index
-            edge_attribute_builder = instantiate(attr_config)
+            edge_attribute_builder = parametrisation.create_module(attr_config)
             graph[self.name][attr_name] = edge_attribute_builder(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
         return graph
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(
+        self,
+        graph: HeteroData,
+        attrs_config: DotDict | None = None,
+        parametrisation: Parametrisation | None = None,
+    ) -> HeteroData:
         """Update the graph with the edges.
 
         Parameters
@@ -136,7 +152,7 @@ class BaseEdgeBuilder(ABC):
 
         if attrs_config is not None:
             t0 = time.time()
-            graph = self.register_attributes(graph, attrs_config)
+            graph = self.register_attributes(graph, attrs_config, parametrisation)
             t1 = time.time()
             LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
 

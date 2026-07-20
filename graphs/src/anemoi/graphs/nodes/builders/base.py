@@ -15,14 +15,19 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
+
+# Default (stateless) parametrisation used to build attribute objects when the caller does
+# not supply one -- e.g. builders exercised directly in tests.
+_DEFAULT_PARAMETRISATION = DictParametrisation()
 
 
 class BaseNodeBuilder(ABC):
@@ -69,7 +74,9 @@ class BaseNodeBuilder(ABC):
 
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict | None = None) -> HeteroData:
+    def register_attributes(
+        self, graph: HeteroData, config: DotDict | None = None, parametrisation: Parametrisation | None = None
+    ) -> HeteroData:
         """Register attributes in the nodes of the graph specified.
 
         Parameters
@@ -78,17 +85,21 @@ class BaseNodeBuilder(ABC):
             The graph to register the attributes.
         config : DotDict
             The configuration of the attributes.
+        parametrisation : Parametrisation, optional
+            Parametrisation used to build each attribute object. Defaults to a stateless
+            :class:`~anemoi.utils.parametrisation.DictParametrisation`.
 
         Returns
         -------
         HeteroData
             The graph with the registered attributes.
         """
+        parametrisation = parametrisation or _DEFAULT_PARAMETRISATION
         for hidden_attr in self.hidden_attributes:
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
 
         for attr_name, attr_config in config.items():
-            graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
+            graph[self.name][attr_name] = parametrisation.create_module(attr_config).compute(graph, self.name)
 
         return graph
 

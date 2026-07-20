@@ -19,9 +19,11 @@ This is the "Case 2" workflow described in ``no-pickle.md``::
 instead of the fragile "Case 1" ``model = torch.load(...)`` that unpickles a whole
 ``nn.Module`` (and drags Hydra / the training stack into the inference process).
 
-The constructor of ``AnemoiModelInterface`` builds its children with
-``anemoi.models.utils.instantiate``. By selecting the *native* instantiation backend we
-recreate every sub-module from the resolved config dict alone -- no Hydra import.
+The constructor of ``AnemoiModelInterface`` takes a
+:class:`anemoi.utils.parametrisation.Parametrisation` and rebuilds every sub-module
+through ``params.create_module`` -- no Hydra import. Here we use the JSON-backed
+:class:`~anemoi.utils.parametrisation.DictParametrisation`, built from the resolved
+config stored in the checkpoint metadata.
 
 Where the inputs come from
 --------------------------
@@ -52,8 +54,7 @@ import torch
 
 from anemoi.models.checkpoint import build_model_inputs
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.models.utils import instantiation_backend
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,11 +92,10 @@ def rebuild_model(checkpoint_path: str) -> AnemoiModelInterface:
     # 1. Assemble ALL constructor inputs from the JSON metadata only -- no unpickling.
     #    config + rebuilt data_indices + placeholder graph/statistics (filled by the weights).
     inputs = build_model_inputs(checkpoint_path)
-    config = DotDict(inputs.pop("config"))
+    params = DictParametrisation(inputs.pop("config"))
 
-    # 2. Rebuild the model -- the native backend instantiates every sub-module without Hydra.
-    with instantiation_backend("native"):
-        model = AnemoiModelInterface(config=config, **inputs)
+    # 2. Rebuild the model -- create_module builds every sub-module without Hydra.
+    model = AnemoiModelInterface(config=params, **inputs)
 
     # 3. Load the weights; this fills the placeholder graph / statistics / coordinate buffers
     #    with their real values.

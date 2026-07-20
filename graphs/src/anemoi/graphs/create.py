@@ -13,11 +13,11 @@ from itertools import chain
 from pathlib import Path
 
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import build
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,13 +55,13 @@ class GraphCreator:
             The updated graph with new nodes and edges added based on the configuration.
         """
         for nodes_name, nodes_cfg in self.config.get("nodes", {}).items():
-            graph = instantiate(nodes_cfg.node_builder, name=nodes_name).update_graph(
+            graph = build(nodes_cfg.node_builder, name=nodes_name).update_graph(
                 graph, attrs_config=nodes_cfg.get("attributes", {})
             )
 
         for edges_cfg in self.config.get("edges", {}):
             for edge_builder_cfg in edges_cfg.edge_builders:
-                edge_builder = instantiate(
+                edge_builder = build(
                     edge_builder_cfg,
                     source_name=edges_cfg.source_name,
                     target_name=edges_cfg.target_name,
@@ -119,7 +119,7 @@ class GraphCreator:
         Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
         """
         for processor in self.config.get("post_processors", []):
-            graph = instantiate(processor).update_graph(graph, graph_config=self.config)
+            graph = build(processor).update_graph(graph, graph_config=self.config)
 
         return graph
 
