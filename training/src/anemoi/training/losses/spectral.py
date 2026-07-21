@@ -471,7 +471,7 @@ class PowerSpectrumLoss(SpectralLoss):
             without_scalers=without_scalers,
             grid_shard_slice=None if is_sharded else grid_shard_slice,
         )
-        return self.reduce(result, squash=squash, group=group)
+        return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
 
 class LogSpectralDistance(SpectralLoss):
