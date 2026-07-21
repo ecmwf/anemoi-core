@@ -82,18 +82,14 @@ training:
             ignore_nans: False
             no_autocast: True
             alpha: 0.95
-        - _target_: anemoi.training.losses.MultiscaleLossWrapper
-          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}
-          weights: [1.0, 1.0, 1.0, 4.0]
-          per_scale_loss:
-            _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
-            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency']
-            time_aggregation_types: [mean, max, min, diff]
-            loss_fn:
-              _target_: anemoi.training.losses.CRPS
-              ignore_nans: False
-              no_autocast: True
-              alpha: 0.95
+        - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency']
+          time_aggregation_types: [mean, max, min, diff]
+          loss_fn:
+            _target_: anemoi.training.losses.CRPS
+            ignore_nans: False
+            no_autocast: True
+            alpha: 0.95
 
 
 task:
