@@ -274,7 +274,7 @@ Supported transforms include:
       training_loss:
         datasets:
           your_dataset_name:
-            _target_: anemoi.training.losses.spectral.SpectralL2Loss
+            _target_: anemoi.training.losses.spectral.LogSpectralDistance
             transform: fft2d
             x_dim: 10
             y_dim: 10
@@ -287,7 +287,7 @@ Spectral projections
 Before the spectral transform is applied, but after the grid has been subset, an optional sparse projection can remap
 the input field from its native (possibly unstructured) grid to the regular 2D grid
 expected by the transform. This is configured via the ``projection_config`` key and
-works with *any* spectral loss class (``SpectralCRPSLoss``, ``SpectralL2Loss``,
+works with *any* spectral loss class (``SpectralCRPSLoss``,
 ``LogSpectralDistance``, ``FourierCorrelationLoss``, …).
 
 Two modes are available:
@@ -334,7 +334,7 @@ Gaussian-weighted nearest-neighbour weights.
    training_loss:
      datasets:
        your_dataset_name:
-         _target_: anemoi.training.losses.spectral.SpectralL2Loss  # any spectral loss
+         _target_: anemoi.training.losses.spectral.LogSpectralDistance  # any spectral loss
          transform: fft2d
          x_dim: 256
          y_dim: 128
@@ -347,7 +347,7 @@ Gaussian-weighted nearest-neighbour weights.
    training_loss:
      datasets:
        your_dataset_name:
-         _target_: anemoi.training.losses.spectral.SpectralL2Loss  # any spectral loss
+         _target_: anemoi.training.losses.spectral.LogSpectralDistance  # any spectral loss
          transform: fft2d
          x_dim: 256
          y_dim: 128
@@ -660,7 +660,7 @@ harmonic transforms this is the number of total wavenumbers
 The following spectral scaler is available:
 
 -  :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler`:
-   uniform scaling by ``1 / n_spectral_modes`` of ``spectral_dims``-dimensional tensor. 
+   uniform scaling by ``1 / n_spectral_modes`` of ``spectral_dims``-dimensional tensor.
 
 Example: averaging over total wavenumbers for an SHT-based loss that
 reduces over the zonal wavenumber (e.g. ``PowerSpectrumLoss`` or

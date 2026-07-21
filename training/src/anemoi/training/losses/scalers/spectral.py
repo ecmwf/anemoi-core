@@ -63,7 +63,7 @@ class SpectralDimensionScaler(BaseScaler):
         self.spectral_dims = spectral_dims if spectral_dims is not None else self.n_spectral_modes
 
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
-        """Return uniform scaling values (i.e. ones).
+        """Return uniform scaling values (all entries equal to ``1 / n_spectral_modes``).
 
         Returns
         -------

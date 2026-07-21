@@ -457,8 +457,8 @@ class PowerSpectrumLoss(SpectralLoss):
         is_sharded = channel_shard_sizes is not None
         group = group if is_sharded else None
 
-        sc_pred = self.transform.forward(pred)
-        sc_target = self.transform.forward(target)
+        sc_pred = self._to_spectral(pred)
+        sc_target = self._to_spectral(target)
         pred_amp = self.transform.power_spectral_density(sc_pred)
         target_amp = self.transform.power_spectral_density(sc_target)
         diff = (pred_amp - target_amp) ** 2

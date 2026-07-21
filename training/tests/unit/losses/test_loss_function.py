@@ -433,7 +433,7 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
-    """``"!name""`` entries exclude scalers otherwise selected by ``"*"``."""
+    """``"!name"`` entries exclude scalers otherwise selected by ``"*"``."""
     loss_dic = {
         "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
         **spectral_loss_kwargs.get(loss_cls, {}),
@@ -670,7 +670,7 @@ def test_spectral_crps_cartesian_transform(transform: str) -> None:
     target = torch.randn(bs, 1, 1, grid, nvars)
 
     loss = _make_loss(
-        "anemoi.training.losses.spectral.LogSpectralDistance",
+        "anemoi.training.losses.spectral.SpectralCRPSLoss",
         transform=transform,
         x_dim=x_dim,
         y_dim=y_dim,

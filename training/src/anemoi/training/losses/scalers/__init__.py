@@ -30,7 +30,6 @@ __all__ = [
     "GeneralVariableLossScaler",
     "GraphNodeAttributeScaler",
     "LeadTimeDecayScaler",
-    "LinearSpectralDimensionScaler",
     "LinearVariableLevelScaler",
     "NaNMaskScaler",
     "NoTendencyScaler",

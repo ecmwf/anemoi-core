@@ -576,4 +576,6 @@ def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> N
 
     assert values.shape == (spectral_dims,), f"Expected scaler to have shape ({spectral_dims},), got {values.shape}"
     assert torch.allclose(values, values[0].expand_as(values)), f"Values are not uniform: {values}"
-    assert values[0] == 1.0 / n_spectral_modes, f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
+    assert values[0].item() == pytest.approx(
+        1.0 / n_spectral_modes,
+    ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
