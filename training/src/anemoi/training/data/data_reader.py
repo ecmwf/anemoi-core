@@ -454,6 +454,34 @@ class TrajectoryDataset(BaseAnemoiReader):
         aux_stats = self._auxiliary_reader.statistics
         return {key: np.concatenate([traj_stats[key], aux_stats[key]]) for key in traj_stats}
 
+    def statistics_tendencies(
+        self,
+        timestep: int | str | datetime.timedelta | None = None,
+    ) -> dict | None:
+        """Return tendency statistics concatenated from trajectory and auxiliary datasets."""
+        if timestep is None:
+            timestep = getattr(self, "timestep", None)
+        if timestep is None:
+            msg = "timestep must be provided to compute tendency statistics."
+            raise ValueError(msg)
+        try:
+            traj_tend = self.data.statistics_tendencies(timestep)
+        except (KeyError, AttributeError):
+            return None
+        if traj_tend is None or self._auxiliary_reader is None:
+            return traj_tend
+        try:
+            aux_tend = self._auxiliary_reader.data.statistics_tendencies(timestep)
+        except (KeyError, AttributeError):
+            aux_tend = None
+        if aux_tend is None:
+            # Auxiliary dataset has no tendency statistics: pad with neutral values
+            # (mean=0, stdev=1 → identity transform for static forcing fields).
+            n_aux = len(self._auxiliary_reader.variables)
+            aux_tend = {key: np.full(n_aux, 1.0 if key == "stdev" else 0.0, dtype=arr.dtype)
+                        for key, arr in traj_tend.items()}
+        return {key: np.concatenate([traj_tend[key], aux_tend[key]]) for key in traj_tend}
+
     @property
     def frequency(self) -> datetime.timedelta:
         """Return the step frequency (spacing between consecutive forecast steps)."""
