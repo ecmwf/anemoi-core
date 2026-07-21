@@ -651,23 +651,16 @@ harmonic transforms this is the number of total wavenumbers
 
 .. note::
 
-   You must know the size of the spectral dimension produced by your
+   You must know the size of the spectral dimension (``spectral_dims``) produced by your
    loss before configuring these scalers. A mismatch between
    the shape of the scaler and the loss tensor will be caught at
    runtime by the spectral-loss compatibility check, but only after
    model instantiation.
 
-The following spectral scalers are available:
+The following spectral scaler is available:
 
 -  :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler`:
-   uniform scaling by ``1 / n_spectral_modes``. Equivalent to averaging
-   over the total-wavenumber dimension.
--  :class:`~anemoi.training.losses.scalers.LinearSpectralDimensionScaler`:
-   linearly increasing weights with total wavenumber,
-   ``weight[i] = slope * i + y_intercept``. Useful to emphasise high
-   wavenumbers (small-scale structure). With default ``slope`` and
-   ``y_intercept`` (both ``1 / n_spectral_modes``) higher wavenumbers
-   receive larger weights.
+   uniform scaling by ``1 / n_spectral_modes`` of ``spectral_dims``-dimensional tensor. 
 
 Example: averaging over total wavenumbers for an SHT-based loss that
 reduces over the zonal wavenumber (e.g. ``PowerSpectrumLoss`` or

@@ -238,24 +238,9 @@ class SpectralDimensionScalerSchema(BaseModel):
     target_: Literal["anemoi.training.losses.scalers.SpectralDimensionScaler"] = Field(..., alias="_target_")
     n_spectral_modes: PositiveInt = Field(example=193)
     "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
-    n_spectral: PositiveInt | None = Field(default=None, example=193)
+    spectral_dims: PositiveInt | None = Field(default=None, example=193)
     "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``. "
     "Set explicitly for losses that keep the full (L, M) dimension flattened."
-    norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
-    "Normalisation method applied to the scaler values."
-
-
-class LinearSpectralDimensionScalerSchema(BaseModel):
-    target_: Literal["anemoi.training.losses.scalers.LinearSpectralDimensionScaler"] = Field(..., alias="_target_")
-    n_spectral_modes: PositiveInt = Field(example=193)
-    "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
-    n_spectral: PositiveInt | None = Field(default=None, example=193)
-    "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``."
-    slope: float | None = Field(default=None, example=0.01)
-    "Slope of the linear function. Positive values give higher weights to higher wavenumbers. "
-    "Defaults to ``1 / n_spectral_modes``."
-    y_intercept: float | None = Field(default=None, example=0.0)
-    "Constant offset (value at wavenumber 0). Defaults to ``1 / n_spectral_modes``."
     norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
     "Normalisation method applied to the scaler values."
 
@@ -272,7 +257,6 @@ ScalerSchema = (
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
     | SpectralDimensionScalerSchema
-    | LinearSpectralDimensionScalerSchema
 )
 
 
