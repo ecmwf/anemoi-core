@@ -12,7 +12,6 @@ from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
-from .spectral import LinearSpectralDimensionScaler
 from .spectral import SpectralDimensionScaler
 from .time_step import LeadTimeDecayScaler
 from .time_step import TimeStepScaler

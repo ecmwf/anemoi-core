@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -38,7 +38,7 @@ class SpectralDimensionScaler(BaseScaler):
     def __init__(
         self,
         n_spectral_modes: int,
-        n_spectral: int | None = None,
+        spectral_dims: int | None = None,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -48,8 +48,9 @@ class SpectralDimensionScaler(BaseScaler):
         ----------
         n_spectral_modes : int
             Number of total wavenumbers (L dimension) for SHT and total frequencies for 2D spectral transforms.
-        n_spectral : int, optional
-            Total number of spectral modes (length of the spectral dimension). Default to n_spectral_modes
+        spectral_dims : int, optional
+            Length of the spectral dimension. Defaults to n_spectral_modes.
+            In case of flattened spectral representation, the spectral dimension is higher than n_spectral_modes.
         norm : str, optional
             Type of normalization to apply.
             Options are None, unit-sum, unit-mean and l1.
@@ -59,7 +60,7 @@ class SpectralDimensionScaler(BaseScaler):
         super().__init__(norm=norm)
         del kwargs
         self.n_spectral_modes = n_spectral_modes
-        self.n_spectral = n_spectral if n_spectral is not None else self.n_spectral_modes
+        self.spectral_dims = spectral_dims if spectral_dims is not None else self.n_spectral_modes
 
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
         """Return uniform scaling values (i.e. ones).
@@ -75,4 +76,4 @@ class SpectralDimensionScaler(BaseScaler):
             self.n_spectral_modes,
         )
 
-        return torch.ones(self.n_spectral, dtype=torch.float32) / self.n_spectral_modes
+        return torch.ones(self.spectral_dims, dtype=torch.float32) / self.n_spectral_modes

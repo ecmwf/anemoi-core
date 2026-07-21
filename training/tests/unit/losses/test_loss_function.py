@@ -11,6 +11,7 @@
 from types import SimpleNamespace
 
 import einops
+import hydra
 import numpy as np
 import pytest
 import torch
@@ -27,7 +28,6 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import RMSELoss
 from anemoi.training.losses import SpectralAMSELoss
-from anemoi.training.losses import SpectralAMSELoss
 from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
@@ -37,11 +37,11 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
-    SpectralL2Loss: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
     FourierCorrelationLoss: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
     SpectralCRPSLoss: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
     SpectralAMSELoss: {"transform": "octahedral_sht", "nlat": 8},
+    PowerSpectrumLoss: {"transform": "octahedral_sht", "nlat": 8},
 }
 spectral_losses = list(spectral_loss_kwargs)
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss, *spectral_losses]
@@ -59,24 +59,6 @@ def _make_loss(target: str, output_mask: SimpleNamespace | None = None, **kwargs
     cfg.update(kwargs)
     cfg = _resolve_subgrid(cfg, output_mask)
     return get_loss_function(DictConfig(cfg))
-
-
-def _loss_dic(loss_cls: type[BaseLoss], **extra) -> dict:
-    """Build a Hydra-compatible config dict for a loss class with appropriate transform kwargs."""
-    base = {"_target_": f"anemoi.training.losses.{loss_cls.__name__}"}
-    if loss_cls in spectral_losses:
-        # configuration of losses that require a spectral transform, use fft2d and a small rectangular grid for testing
-        base.update(
-            {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
-        )
-    elif loss_cls in spectral_sht_losses:
-        # configuration of losses that require a spherical harmonic transform (power_spectral_density defined)
-        # use a small octahedral grid for testing
-        base.update(
-            {"transform": "octahedral_sht", "nlat": 8},
-        )
-    base.update(extra)
-    return base
 
 
 def _assert_variable_and_scalar_shapes(
@@ -376,6 +358,7 @@ def test_grid_invariance(
     losses,
 )
 def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
+    """Loss can be instantiated from a Hydra config with no ``scalers`` field."""
     loss_dic = {
         "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
         **spectral_loss_kwargs.get(loss_cls, {}),
@@ -389,13 +372,14 @@ def test_dynamic_init_include(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
+    """Scalers listed by name in the config are attached to the loss."""
     loss_dic = {
         "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
         **spectral_loss_kwargs.get(loss_cls, {}),
         "scalers": ["test"],
     }
     loss = get_loss_function(
-        DictConfig(_loss_dic(loss_cls, scalers=["test"])),
+        DictConfig(loss_dic),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -409,13 +393,14 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
+    """The ``"*"`` wildcard attaches every available scaler to the loss."""
     loss_dic = {
         "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
         **spectral_loss_kwargs.get(loss_cls, {}),
         "scalers": ["*"],
     }
     loss = get_loss_function(
-        DictConfig(_loss_dic(loss_cls, scalers=["*"])),
+        DictConfig(loss_dic),
         scalers={"test": ((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
@@ -429,13 +414,14 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
+    """An empty ``scalers`` list attaches none of the available scalers."""
     loss_dic = {
         "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
         **spectral_loss_kwargs.get(loss_cls, {}),
         "scalers": [],
     }
     loss = get_loss_function(
-        DictConfig(_loss_dic(loss_cls, scalers=[])),
+        DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -447,13 +433,14 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     losses,
 )
 def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
+    """``"!name""`` entries exclude scalers otherwise selected by ``"*"``."""
     loss_dic = {
         "_target_": f"anemoi.training.losses.{loss_cls.__name__}",
         **spectral_loss_kwargs.get(loss_cls, {}),
         "scalers": ["*", "!test"],
     }
     loss = get_loss_function(
-        DictConfig(_loss_dic(loss_cls, scalers=["*", "!test"])),
+        DictConfig(loss_dic),
         scalers={"test": (-1, torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
@@ -489,12 +476,12 @@ def test_fft2d_spectral_losses_shape_and_validation(target: str) -> None:
     ("loss_cls", "ensemble_size", "transform_kwargs", "grid_shard_sizes", "spectral_shard_sizes"),
     [
         pytest.param(
-            SpectralL2Loss,
+            PowerSpectrumLoss,
             1,
-            {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
-            [8, 8],
-            [8, 8],
-            id="fft2d-l2",
+            {"transform": "octahedral_sht", "nlat": 8},
+            [104, 104],
+            [2, 2],
+            id="octahedral-sht-power-spectrum",
         ),
         pytest.param(
             LogSpectralDistance,
@@ -683,7 +670,7 @@ def test_spectral_crps_cartesian_transform(transform: str) -> None:
     target = torch.randn(bs, 1, 1, grid, nvars)
 
     loss = _make_loss(
-        "anemoi.training.losses.spectral.SpectralCRPSLoss",
+        "anemoi.training.losses.spectral.LogSpectralDistance",
         transform=transform,
         x_dim=x_dim,
         y_dim=y_dim,
@@ -739,7 +726,7 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
     proj = csr_matrix(np.eye(n_dst, n_src, dtype=np.float32))
     mocker.patch("scipy.sparse.load_npz", return_value=proj)
 
-    loss = SpectralL2Loss(
+    loss = LogSpectralDistance(
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
@@ -776,7 +763,7 @@ def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
 
     output_mask = SimpleNamespace(as_tuple=lambda: (0, 8))
 
-    loss = _make_loss("anemoi.training.losses.spectral.SpectralL2Loss", output_mask=output_mask, **loss_cfg)
+    loss = _make_loss("anemoi.training.losses.spectral.LogSpectralDistance", output_mask=output_mask, **loss_cfg)
 
     pred = torch.randn(bs, 1, 1, n_total, nvars)
     target = torch.randn(bs, 1, 1, n_total, nvars)
@@ -793,7 +780,7 @@ def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture
     proj = csr_matrix(np.eye(n_wrong, n_src, dtype=np.float32))
     mocker.patch("scipy.sparse.load_npz", return_value=proj)
 
-    loss = SpectralL2Loss(
+    loss = LogSpectralDistance(
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
@@ -810,7 +797,7 @@ def test_spectral_loss_subgrid_out_of_bounds_raises() -> None:
     x_dim, y_dim = 4, 2  # expects 8 nodes
     n_total = 6  # fewer nodes than slice end requests
 
-    loss = SpectralL2Loss(
+    loss = LogSpectralDistance(
         transform="fft2d",
         x_dim=x_dim,
         y_dim=y_dim,
@@ -826,7 +813,7 @@ def test_spectral_loss_subgrid_out_of_bounds_raises() -> None:
 def test_spectral_loss_ambiguous_projection_config_raises() -> None:
     """Specifying both matrix_path and edges_name in projection_config should raise."""
     with pytest.raises(ValueError, match="at most one of"):
-        SpectralL2Loss(
+        LogSpectralDistance(
             transform="fft2d",
             x_dim=4,
             y_dim=2,
