@@ -10,6 +10,7 @@
 import pytest
 from pydantic import ValidationError
 
+from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -25,6 +26,27 @@ _TIME_AGG_CFG = {
         "scalers": ["node_weights"],
     },
 }
+
+
+def test_ddp_strategy_schema_accepts_local_synchronization() -> None:
+    schema = BaseDDPStrategySchema(
+        _target_="anemoi.training.distributed.strategy.DDPGroupStrategy",
+        num_gpus_per_model=4,
+        read_group_size=2,
+        use_local_synchronization=True,
+    )
+
+    assert schema.use_local_synchronization is True
+
+
+def test_ddp_strategy_schema_defaults_to_local_synchronization() -> None:
+    schema = BaseDDPStrategySchema(
+        _target_="anemoi.training.distributed.strategy.DDPGroupStrategy",
+        num_gpus_per_model=4,
+        read_group_size=2,
+    )
+
+    assert schema.use_local_synchronization is True
 
 
 def test_time_aggregate_loss_config_valid() -> None:
