@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import einops
-import hydra
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -28,6 +27,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.utils.enums import TensorDim
+from anemoi.utils.parametrisation import ParametrisationError
 
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss]
 spectral_losses = [SpectralL2Loss, SpectralCRPSLoss, FourierCorrelationLoss, LogSpectralDistance]
@@ -510,7 +510,7 @@ def test_sht_amse_loss() -> None:
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
 
     # fail for transform without PSD method (e.g. FFT2D)
-    with pytest.raises(hydra.errors.InstantiationException):
+    with pytest.raises(ParametrisationError):
         _ = get_loss_function(
             DictConfig(
                 {

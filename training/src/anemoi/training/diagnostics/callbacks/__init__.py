@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import timedelta
 
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
@@ -26,8 +24,12 @@ from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.diagnostics.callbacks.weight_averaging import _get_weight_averaging_callback
 from anemoi.training.utils.checkpoint import RegisterMigrations
+from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import ParametrisationError
 
 LOGGER = logging.getLogger(__name__)
+
+_PARAMETRISATION = DictParametrisation()
 
 
 def nestedget(config: DictConfig, key: str, default: object) -> object:
@@ -215,9 +217,9 @@ def _get_progress_bar_callback(diagnostics_cfg: DictConfig) -> list[Callback]:
     progress_bar_cfg = getattr(diagnostics_cfg, "progress_bar", None)
     if progress_bar_cfg is not None:
         try:
-            progress_bar = instantiate(progress_bar_cfg)
+            progress_bar = _PARAMETRISATION.create_module(progress_bar_cfg)
             LOGGER.info("Using progress bar: %s", type(progress_bar))
-        except InstantiationException:
+        except ParametrisationError:
             LOGGER.warning("Failed to instantiate progress bar callback from config: %s", progress_bar_cfg)
             progress_bar = TQDMProgressBar(refresh_rate=1, process_position=0)
     else:
@@ -275,7 +277,7 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     # (e.g. ${system.output.plots}) for values defined elsewhere in the config.
     # If a callback needs a runtime-computed value (resolved path, logger handle, etc.),
     # add a typed field to CallbacksContext and a dedicated helper function here instead.
-    trainer_callbacks.extend(instantiate(callback) for callback in diagnostics_cfg.callbacks)
+    trainer_callbacks.extend(_PARAMETRISATION.create_module(callback) for callback in diagnostics_cfg.callbacks)
 
     # Plotting callbacks — instantiated with global plotting settings from diagnostics.plot
     plot_cfg = getattr(diagnostics_cfg, "plot", None)
@@ -285,7 +287,7 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
         for callback_cfg in plot_cfg.callbacks:
             callback_cfg_dict = dict(callback_cfg)
             callback_cfg_dict["plotting_settings"] = plotting_settings
-            trainer_callbacks.append(instantiate(callback_cfg_dict))
+            trainer_callbacks.append(_PARAMETRISATION.create_module(callback_cfg_dict))
 
     # LearningRateMonitor when any experiment logger is active
     if context.wandb_enabled or context.mlflow_enabled:

@@ -13,14 +13,17 @@ import types
 from typing import Any
 
 import pytorch_lightning as pl
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from packaging.version import Version
 from pytorch_lightning.callbacks import Callback
 
+from anemoi.utils.parametrisation import DictParametrisation
+
 LOGGER = logging.getLogger(__name__)
 
 MIN_PL_VERSION = "2.6.0"
+
+_PARAMETRISATION = DictParametrisation()
 
 
 def _safe_swap_models(self: Any, pl_module: Any) -> None:
@@ -114,7 +117,7 @@ def _get_weight_averaging_callback(weight_averaging_config: DictConfig | None) -
         )
         raise RuntimeError(msg)
 
-    callback = instantiate(weight_averaging_config)
+    callback = _PARAMETRISATION.create_module(weight_averaging_config)
     LOGGER.info("Loaded weight averaging callback: %s", weight_averaging_config["_target_"])
 
     # Patch swap/copy methods to use name-based matching. Needed for dynamic scalers like NaNMaskScaler.

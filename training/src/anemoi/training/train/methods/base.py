@@ -20,7 +20,6 @@ from typing import Any
 
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
@@ -184,9 +183,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
+        # All object construction goes through a Parametrisation (Hydra-free). Training still
+        # owns the OmegaConf config; the parametrisation is a resolved, JSON-serialisable view.
+        self.parametrisation = TrainingParametrisation.from_config(config)
+
         # Create output_mask dictionary for each dataset
         self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
+            name: self.parametrisation.create_module(config.model.output_mask, nodes=graph_data[name])
+            for name in self.dataset_names
         }
 
         # Handle supporting_arrays merge with all output masks
@@ -197,9 +201,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.n_step_input = self.task.num_input_timesteps
         self.n_step_output = self.task.num_output_timesteps
 
-        # The model is built from a Parametrisation (Hydra-free). Training still owns the
-        # OmegaConf config; we hand the model a resolved, JSON-serialisable view of it.
-        params = TrainingParametrisation.from_config(config)
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
@@ -209,7 +210,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             n_step_output=self.n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
-            params=params,
+            params=self.parametrisation,
         )
         self.config = config
 
@@ -1143,13 +1144,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """Create optimizer and LR scheduler based on Hydra config."""
         optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
+        optimizer = self.parametrisation.create_module(
+            optimization_config.optimizer,
+            params=params,
+            lr=self.effective_lr,
+        )
         self.log_optimizer(optimizer)
 
         if not getattr(optimization_config, "lr_scheduler", None):
             return optimizer
 
-        scheduler = instantiate(optimization_config.lr_scheduler, optimizer=optimizer)
+        scheduler = self.parametrisation.create_module(optimization_config.lr_scheduler, optimizer=optimizer)
         return [optimizer], [{"scheduler": scheduler, **optimization_config.pl_lr_scheduler}]  # type: ignore[return-value]
 
     @staticmethod

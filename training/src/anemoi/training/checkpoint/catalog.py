@@ -34,14 +34,14 @@ Example
 >>> print(target)
 >>> 'anemoi.training.checkpoint.sources.S3Source'
 >>>
->>> # Create component using standard Hydra config
->>> from hydra.utils import instantiate
+>>> # Create component from a config spec via a Parametrisation
+>>> from anemoi.utils.parametrisation import DictParametrisation
 >>> config = {
 ...     '_target_': 'anemoi.training.checkpoint.sources.S3Source',
 ...     'bucket': 'my-bucket',
 ...     'key': 'model.ckpt'
 ... }
->>> source = instantiate(config)
+>>> source = DictParametrisation().create_module(config)
 """
 
 from __future__ import annotations
@@ -83,12 +83,12 @@ class ComponentCatalog:
     >>> # Get component class
     >>> source_class = ComponentCatalog.get_source_target('s3')
     >>>
-    >>> # Use with Hydra
+    >>> # Build from a config spec via a Parametrisation
     >>> config = {
     ...     '_target_': 'anemoi.training.checkpoint.sources.S3Source',
     ...     'bucket': 'my-bucket'
     ... }
-    >>> source = instantiate(config)
+    >>> source = DictParametrisation().create_module(config)
 
     See Also
     --------

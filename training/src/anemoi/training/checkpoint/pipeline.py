@@ -94,8 +94,11 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Union
 
-from hydra.utils import instantiate
 from omegaconf import DictConfig
+
+from anemoi.utils.parametrisation import DictParametrisation
+
+_PARAMETRISATION = DictParametrisation()
 
 if TYPE_CHECKING:
     from .base import CheckpointContext
@@ -217,9 +220,9 @@ class CheckpointPipeline:
         instantiated = []
         for i, stage in enumerate(stages):
             if isinstance(stage, dict | DictConfig):
-                # Use Hydra to instantiate from config
+                # Build the stage from its config spec (Hydra-free)
                 try:
-                    instantiated_stage = instantiate(stage)
+                    instantiated_stage = _PARAMETRISATION.create_module(stage)
                     instantiated.append(instantiated_stage)
                     LOGGER.debug("Instantiated stage %d from config: %s", i, instantiated_stage)
                 except Exception as e:
@@ -604,7 +607,7 @@ class CheckpointPipeline:
         """
         if isinstance(stage, dict | DictConfig):
             try:
-                stage = instantiate(stage)
+                stage = _PARAMETRISATION.create_module(stage)
             except Exception as e:
                 from .exceptions import CheckpointConfigError
 

@@ -133,10 +133,21 @@ transport ×2), interface, `layers/bounding`, `layers/utils` (layer kernels),
 mapper/processor/attention/FFT layers keep their explicit-kwarg constructors; the model
 reads their structural params from the parametrisation and passes them in.
 
-**Out of scope:** `anemoi.training` keeps Hydra as its launcher/config backbone. The
-training→model boundary wraps the resolved OmegaConf config into a `JSONParametrisation`
-(`train/methods/base.py`). Training's own `instantiate` calls (optimiser, scheduler, losses,
-scalers, callbacks, output_mask) are untouched.
+**Training (round 3 — now converted):** every `hydra.utils.instantiate` / `get_class` in
+`anemoi.training` now goes through a `Parametrisation` (`create_module` / `get_class`):
+
+* `train/methods/base.py` holds `self.parametrisation = TrainingParametrisation.from_config(config)`
+  and uses it for the model, `output_mask`, optimiser and scheduler;
+* stand-alone modules (`train.py`, `utils/hydra.py`, `checkpoint/pipeline.py`,
+  `diagnostics/logger.py`, `diagnostics/callbacks/*`, `losses/loss.py`,
+  `losses/scalers/scalers.py`) build through a module-level stateless `DictParametrisation`
+  (same pattern as the graph builders / `load_layer_kernels`);
+* `hydra.errors.InstantiationException` handling becomes `ParametrisationError` (two tests
+  updated to match).
+
+**Still Hydra (intentionally):** the *launcher / config-loading* framework only —
+`@hydra.main`, `hydra.compose`/`initialize`, and the search-path plugin. That is config
+loading, not object construction, and is out of scope for the "no instantiate" goal.
 
 ## Follow-ups
 
