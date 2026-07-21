@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -21,7 +21,11 @@ Any sub-module can be supplied three ways -- and mixed:
    constructible from those (``SkipConnection`` swallows them via ``**_``).
 
 Here the *processor* is injected as an instance and the *residual* as a string; everything
-else falls back to the parametrisation defaults. Everything runs on CPU (the GraphTransformer
+else falls back to the parametrisation defaults.
+
+The graph is built with the direct Python API (see ``graph.md``): ``GraphBuilder`` fed
+``ReducedGaussianGridNodes`` / ``CutOffEdges`` / ``KNNEdges`` objects that carry their
+attributes directly -- no YAML, no Hydra. Everything runs on CPU (the GraphTransformer
 layers fall back to the ``pyg`` attention backend when triton is unavailable).
 
     python build_model_four_ways.py
@@ -33,6 +37,13 @@ import torch
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.create import GraphBuilder
+from anemoi.graphs.edges import CutOffEdges
+from anemoi.graphs.edges import KNNEdges
+from anemoi.graphs.edges.attributes import EdgeDirection
+from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.nodes.attributes.area_weights import SphericalAreaWeights
+from anemoi.graphs.nodes.builders.from_reduced_gaussian import ReducedGaussianGridNodes
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
@@ -40,21 +51,28 @@ from anemoi.utils.parametrisation import DictParametrisation
 
 NUM_CHANNELS = 16
 SKIP_CONNECTION = "anemoi.models.layers.residual.SkipConnection"
+# Edge attributes registered on every edge type (see make_graph); the model reads these.
+EDGE_ATTRIBUTES = ["edge_length", "edge_direction"]
+
+
+def _edge_attrs() -> list:
+    return [EdgeLength(norm="unit-std"), EdgeDirection(norm="unit-std")]
 
 
 def make_graph() -> HeteroData:
-    """A tiny synthetic graph: 12 data nodes, 5 hidden nodes, all three edge types."""
-    gen = torch.Generator().manual_seed(0)
-    graph = HeteroData()
-    graph["data"].x = torch.rand(12, 2, generator=gen)  # lat/lon (radians)
-    graph["data"].num_nodes = 12
-    graph["hidden"].x = torch.rand(5, 2, generator=gen)
-    graph["hidden"].num_nodes = 5
-    for src, dst in [("data", "hidden"), ("hidden", "hidden"), ("hidden", "data")]:
-        edges = graph[(src, "to", dst)]
-        edges.edge_index = torch.randint(0, 5, (2, 20), generator=gen)
-        edges["edge_length"] = torch.rand(20, 1, generator=gen)
-    return graph
+    """Build a real graph with the Python API (see graph.md): reduced-Gaussian data and
+    hidden node sets, cut-off + KNN edges, each carrying edge_length/edge_direction.
+    """
+    data_nodes = ReducedGaussianGridNodes(grid="o16", name="data", attributes=[SphericalAreaWeights(norm="unit-max")])
+    hidden_nodes = ReducedGaussianGridNodes(
+        grid="o16", name="hidden", attributes=[SphericalAreaWeights(norm="unit-max")]
+    )
+    edges = [
+        CutOffEdges(source_name="data", target_name="hidden", cutoff_factor=0.6, attributes=_edge_attrs()),
+        KNNEdges(source_name="hidden", target_name="hidden", num_nearest_neighbours=8, attributes=_edge_attrs()),
+        KNNEdges(source_name="hidden", target_name="data", num_nearest_neighbours=3, attributes=_edge_attrs()),
+    ]
+    return GraphBuilder(nodes=[data_nodes, hidden_nodes], edges=edges).create()
 
 
 def make_parametrisation() -> DictParametrisation:
@@ -63,7 +81,7 @@ def make_parametrisation() -> DictParametrisation:
         num_chunks=1,
         num_heads=1,
         mlp_hidden_ratio=2,
-        sub_graph_edge_attributes=["edge_length"],
+        sub_graph_edge_attributes=EDGE_ATTRIBUTES,
         trainable_size=0,
         layer_kernels={},  # empty -> torch.nn defaults (Linear/LayerNorm/GELU)
     )
