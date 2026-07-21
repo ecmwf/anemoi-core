@@ -41,15 +41,21 @@ def export_log_output_file_path() -> tempfile._TemporaryFileWrapper:
     return temp
 
 
+_temp: tempfile._TemporaryFileWrapper | None = None
+
+
+def open_temp() -> None:
+    global _temp
+    _temp = export_log_output_file_path()
+
+
 def close_and_clean_temp(server2server: str, artifact_path: Path) -> None:
-    temp.close()
-    os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE")
-    os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY")
+    if _temp is not None:
+        _temp.close()
+    os.environ.pop("MLFLOW_EXPORT_IMPORT_LOG_OUTPUT_FILE", None)
+    os.environ.pop("MLFLOW_EXPORT_IMPORT_TMP_DIRECTORY", None)
     if server2server:
         shutil.rmtree(artifact_path)
-
-
-temp = export_log_output_file_path()
 
 
 import mlflow  # noqa: E402
@@ -345,6 +351,7 @@ class MlFlowSync:
         self,
     ) -> None:
         """Sync an offline run to the destination tracking uri."""
+        open_temp()
         src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
         dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
         http_client = create_http_client(dest_mlflow_client)
