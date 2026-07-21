@@ -660,7 +660,7 @@ harmonic transforms this is the number of total wavenumbers
 The following spectral scaler is available:
 
 -  :class:`~anemoi.training.losses.scalers.SpectralDimensionScaler`:
-   uniform scaling by ``1 / n_spectral_modes`` of ``spectral_dims``-dimensional tensor. 
+   uniform scaling by ``1 / n_spectral_modes`` of ``spectral_dims``-dimensional tensor.
 
 Example: averaging over total wavenumbers for an SHT-based loss that
 reduces over the zonal wavenumber (e.g. ``PowerSpectrumLoss`` or
