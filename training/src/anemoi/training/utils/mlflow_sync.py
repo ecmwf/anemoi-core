@@ -66,22 +66,6 @@ from mlflow.utils.mlflow_tags import MLFLOW_USER  # noqa: E402
 from mlflow.utils.validation import MAX_METRICS_PER_BATCH  # noqa: E402
 from mlflow.utils.validation import MAX_PARAMS_TAGS_PER_BATCH  # noqa: E402
 
-try:
-    import mlflow_export_import.common.utils as mlflow_utils
-    from mlflow_export_import.client.client_utils import create_http_client
-    from mlflow_export_import.run.export_run import _get_metrics_with_steps
-    from mlflow_export_import.run.export_run import _inputs_to_dict
-    from mlflow_export_import.run.import_run import _import_inputs
-    from mlflow_export_import.run.run_data_importer import _log_data
-    from mlflow_export_import.run.run_data_importer import _log_metrics
-
-except ImportError:
-    msg = (
-        "The 'mlflow-export-import' package is not installed."
-        "Please install it from https://github.com/mlflow/mlflow-export-import"
-    )
-    raise ImportError(msg) from None
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -93,6 +77,7 @@ def _log_tags(
     batch_size: int,
     src_user_id: str,
     extra_tags: dict,
+    _log_data: Any,
 ) -> None:
     def get_data(run_dct: dict, *args) -> list:
         del args  # unused
@@ -123,7 +108,13 @@ def _log_tags(
     _log_data(run_dct, run_id, batch_size, get_data, log_data, args_get)
 
 
-def _log_params(client: mlflow.MlflowClient, run_dct: dict[str, Any], run_id: str, batch_size: int) -> None:
+def _log_params(
+    client: mlflow.MlflowClient,
+    run_dct: dict[str, Any],
+    run_id: str,
+    batch_size: int,
+    _log_data: Any,
+) -> None:
     def get_data(run_dct: dict[str, Any], args: Any = None) -> list[mlflow.entities.Param]:  # noqa: ARG001
         cleaned_run_dct = clean_config_params(run_dct["params"])
         LOGGER.info("Logging %s parameters", len(cleaned_run_dct))
@@ -148,9 +139,11 @@ def import_run_data(
     run_id: str,
     src_user_id: str,
     extra_tags: dict,
+    _log_data: Any,
+    _log_metrics: Any,
 ) -> None:
 
-    _log_params(mlflow_client, run_dct, run_id, MAX_PARAMS_TAGS_PER_BATCH)
+    _log_params(mlflow_client, run_dct, run_id, MAX_PARAMS_TAGS_PER_BATCH, _log_data)
     _log_metrics(mlflow_client, run_dct, run_id, MAX_METRICS_PER_BATCH)
     _log_tags(
         mlflow_client,
@@ -159,6 +152,7 @@ def import_run_data(
         MAX_PARAMS_TAGS_PER_BATCH,
         src_user_id,
         extra_tags,
+        _log_data,
     )
 
 
@@ -351,6 +345,20 @@ class MlFlowSync:
         self,
     ) -> None:
         """Sync an offline run to the destination tracking uri."""
+        try:
+            import mlflow_export_import.common.utils as mlflow_utils
+            from mlflow_export_import.client.client_utils import create_http_client
+            from mlflow_export_import.run.export_run import _get_metrics_with_steps
+            from mlflow_export_import.run.export_run import _inputs_to_dict
+            from mlflow_export_import.run.import_run import _import_inputs
+            from mlflow_export_import.run.run_data_importer import _log_data
+            from mlflow_export_import.run.run_data_importer import _log_metrics
+        except ImportError:
+            msg = (
+                "The 'mlflow-export-import' package is not installed. "
+                "Please install it from https://github.com/mlflow/mlflow-export-import"
+            )
+            raise ImportError(msg) from None
         open_temp()
         src_mlflow_client = mlflow.MlflowClient(self.source_tracking_uri)
         dest_mlflow_client = mlflow.MlflowClient(self.dest_tracking_uri)
@@ -432,6 +440,8 @@ class MlFlowSync:
                 dst_run_id,
                 src_user_id,
                 self.extra_tags,
+                _log_data,
+                _log_metrics,
             )
             _import_inputs(http_client, src_run_dct, dst_run_id)
 
