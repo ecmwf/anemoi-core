@@ -189,6 +189,7 @@ def get_loss_function(
     target_cls = get_class(loss_config["_target_"])
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
+    compatibility_options = loss_config.pop("check_variables_compatibility", {})
 
     graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
     target = loss_config.get("_target_")
@@ -264,6 +265,7 @@ def get_loss_function(
             target_variables=target_variables,
             data_indices=data_indices,
         )
+        loss_function.compatibility_options = dict(compatibility_options)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 

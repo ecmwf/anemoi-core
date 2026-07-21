@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -21,9 +21,9 @@ class BaseICONNodeBuilder(BaseNodeBuilder):
 
     icon_node_class: type[ICONCellDataGrid] | type[ICONMultiMesh]
 
-    def __init__(self, name: str, grid_filename: str, max_level: int) -> None:
+    def __init__(self, name: str, grid_filename: str, max_level: int, attributes: list | None = None) -> None:
         self.icon_nodes = self.icon_node_class(icon_grid_filename=grid_filename, max_level=max_level)
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"icon_nodes"}
 
     def get_coordinates(self) -> torch.Tensor:

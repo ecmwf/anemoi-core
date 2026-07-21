@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -45,8 +45,9 @@ class LatLonNodes(BaseNodeBuilder):
         latitudes: list[float] | np.ndarray | torch.Tensor,
         longitudes: list[float] | np.ndarray | torch.Tensor,
         name: str,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.latitudes = latitudes if isinstance(latitudes, torch.Tensor) else torch.tensor(latitudes)
         self.longitudes = longitudes if isinstance(longitudes, torch.Tensor) else torch.tensor(longitudes)
 

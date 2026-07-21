@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -72,6 +72,19 @@ def create_graph_provider(
         )
     else:
         return NoOpGraphProvider()
+
+
+def normalize_projection_edges_name(
+    edges_name: tuple[str, str, str] | list[str] | None,
+) -> tuple[str, str, str]:
+    """Coerce a projection ``edges_name`` to the canonical PyG edge key ``(src, "to", dst)``.
+
+    Only the explicit 3-element form is accepted; YAML yields a list, which is returned as a
+    tuple (PyG's ``HeteroData`` requires a tuple key). Any other shape raises ``ValueError``.
+    """
+    if not (isinstance(edges_name, (list, tuple)) and len(edges_name) == 3):
+        raise ValueError(f"edges_name must be a (src, 'to', dst) triple, got {edges_name!r}")
+    return tuple(edges_name)
 
 
 class BaseGraphProvider(nn.Module, ABC):
@@ -648,3 +661,88 @@ class ProjectionGraphProvider(BaseGraphProvider):
             # sparse tensors can't be registered as buffers with ddp, so move on demand
             self.projection_matrix = self.projection_matrix.to(device)
         return self.projection_matrix
+
+    @classmethod
+    def from_config(
+        cls,
+        config: object,
+        graph_data: Optional[HeteroData] = None,
+        data_node_name: str = "data",
+    ) -> Optional["ProjectionGraphProvider"]:
+        """Create a provider from a config mapping, choosing the mode from the keys present.
+
+        - ``matrix_path`` → file mode.
+        - ``edges_name`` → edge mode (needs *graph_data*).
+        - ``num_nearest_neighbours`` + ``grid``/``node_builder`` → target-grid mode,
+          building a Gaussian-weighted KNN subgraph on the fly from ``sigma`` (needs
+          *graph_data*).
+
+        Returns ``None`` for an empty or ``None`` *config*, and raises ``ValueError`` on an
+        ambiguous config or when *graph_data* is required but missing.
+        """
+        # --- normalise to plain dict ---
+        if config is None:
+            return None
+        try:
+            from omegaconf import OmegaConf
+
+            if OmegaConf.is_config(config):
+                config = OmegaConf.to_container(config, resolve=True)
+        except ImportError:
+            pass
+        if not isinstance(config, dict):
+            config = dict(config)
+        if not config:
+            return None
+
+        has_matrix = "matrix_path" in config and config["matrix_path"] is not None
+        has_edges = "edges_name" in config and config["edges_name"] is not None
+
+        if has_matrix and has_edges:
+            raise ValueError("projection config must specify at most one of 'matrix_path' or 'edges_name', not both")
+
+        if has_matrix:
+            return cls(
+                file_path=config["matrix_path"],
+                row_normalize=bool(config.get("row_normalize", False)),
+            )
+
+        if has_edges:
+            if graph_data is None:
+                raise ValueError("graph_data is required for projection mode 'edges'")
+            return cls(
+                graph=graph_data,
+                edges_name=normalize_projection_edges_name(config["edges_name"]),
+                edge_weight_attribute=config.get("edge_weight_attribute"),
+                src_node_weight_attribute=config.get("src_node_weight_attribute"),
+                row_normalize=bool(config.get("row_normalize", False)),
+            )
+
+        # target-grid mode: require its signal key here for a clear error, not a deep KeyError.
+        if config.get("num_nearest_neighbours") is None:
+            raise ValueError(
+                "projection config must specify 'matrix_path', 'edges_name', or target-grid "
+                "keys ('num_nearest_neighbours' with 'grid' or 'node_builder')"
+            )
+        if graph_data is None:
+            raise ValueError("graph_data is required for projection mode 'target_grid'")
+
+        from anemoi.graphs.builders import build_node_to_node_projection_subgraph
+        from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+
+        target_node_name = config.get("target_node_name", "target_grid")
+        subgraph = build_node_to_node_projection_subgraph(graph_data, data_node_name, target_node_name, config)
+        # The on-the-fly KNN subgraph carries Gaussian distance weights (derived from the
+        # mandatory `sigma`) under DEFAULT_EDGE_WEIGHT_ATTRIBUTE. Consume them by default so
+        # `sigma` actually takes effect; otherwise _build_from_graph falls back to uniform
+        # weights and `sigma` is silently ignored. An explicit `edge_weight_attribute` wins.
+        edge_weight_attribute = config.get("edge_weight_attribute")
+        if edge_weight_attribute is None:
+            edge_weight_attribute = DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+        return cls(
+            graph=subgraph,
+            edges_name=(data_node_name, "to", target_node_name),
+            edge_weight_attribute=edge_weight_attribute,
+            src_node_weight_attribute=config.get("src_node_weight_attribute"),
+            row_normalize=bool(config.get("row_normalize", False)),
+        )

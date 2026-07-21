@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,6 +9,7 @@
 
 
 import logging
+from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -21,6 +22,9 @@ from torch_geometric.nn import radius
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
+
+TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -67,8 +71,9 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
         max_num_neighbours: int = 64,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, attributes=attributes)
 
         # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
         if cutoff_factor is None and cutoff_distance_km is None:

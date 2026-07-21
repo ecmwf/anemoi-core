@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -36,7 +36,7 @@ def test_update_graph():
     """Test update_graph method."""
     node_builder = TriNodes(1, "test_nodes")
     graph = HeteroData()
-    graph = node_builder.update_graph(graph, {})
+    graph = node_builder.update_graph(graph)
     assert "_resolutions" in graph["test_nodes"]
     assert "_nx_graph" in graph["test_nodes"]
     assert "_node_ordering" in graph["test_nodes"]

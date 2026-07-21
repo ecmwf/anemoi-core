@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,6 +18,7 @@ from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes import ICONCellGridNodes
 from anemoi.graphs.nodes import ICONMultiMeshNodes
+from anemoi.graphs.nodes.attributes.area_weights import UniformWeights
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 
@@ -148,12 +149,12 @@ def test_register_attributes(
     monkeypatch,
     graph_with_nodes: HeteroData,
 ):
-    """Test ICONNodes register correctly the weights."""
+    """Test ICON node builders register weights correctly."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
     nodes = ICONCellGridNodes(name="test_nodes", max_level=0, grid_filename="test.nc")
-    config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
 
-    graph = nodes.register_attributes(graph_with_nodes, config)
+    attr = UniformWeights(name="test_attr")
+    graph = nodes.register_attributes(graph_with_nodes, [attr])
 
     assert "test_attr" in graph["test_nodes"]
     assert torch.mean(graph["test_nodes"].test_attr) == 1.0

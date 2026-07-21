@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -54,7 +54,7 @@ class Create(Command):
                 GraphDescriptor(args.save_path).describe()
             return
 
-        graph_creator = GraphCreator(config=args.config)
+        graph_creator = GraphCreator(config_path=args.config)
         graph_creator.create(save_path=args.save_path, overwrite=args.overwrite)
 
         if args.description:

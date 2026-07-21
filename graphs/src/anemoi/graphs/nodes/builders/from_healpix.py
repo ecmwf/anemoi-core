@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -42,10 +42,10 @@ class HEALPixNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, resolution: int, name: str) -> None:
+    def __init__(self, resolution: int, name: str, attributes: list | None = None) -> None:
         """Initialize the HEALPixNodes builder."""
         self.resolution = resolution
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
 
         assert isinstance(resolution, int), "Resolution must be an integer."
@@ -80,8 +80,9 @@ class LimitedAreaHEALPixNodes(HEALPixNodes):
         name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(resolution, name)
+        super().__init__(resolution, name, attributes=attributes)
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
