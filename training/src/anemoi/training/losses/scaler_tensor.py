@@ -534,17 +534,12 @@ class ScaleTensor(nn.Module):
         resolved_scalers: dict[str, TENSOR_SPEC] = {}
 
         for name, (dims, scaler) in self.tensors.items():
-            if torch.compiler.is_compiling():
-                # Cast to plain int: dims may hold TensorDim (IntEnum) members, and
-                # torch.compile/Dynamo does not support the < / >= operators on enums.
-                int_dims = [int(d) for d in dims]
-                if any(d < 0 for d in int_dims):
-                    int_dims = [d if d >= 0 else ndim + d for d in int_dims]
-                resolved_scalers[name] = (int_dims, scaler)
-            else:
-                if any(d < 0 for d in dims):
-                    dims = [d if d >= 0 else ndim + d for d in dims]
-                    resolved_scalers[name] = (dims, scaler)
+            resolved_dims = [int(d) for d in dims] if torch.compiler.is_compiling() else list(dims)
+
+            if any(d < 0 for d in resolved_dims):
+                resolved_dims = [d if d >= 0 else ndim + d for d in resolved_dims]
+
+            resolved_scalers[name] = (resolved_dims, scaler)
 
         return ScaleTensor(**resolved_scalers)
 
