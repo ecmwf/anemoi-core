@@ -51,7 +51,6 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.distributed.shapes import ShardSizes
-
     from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 LOGGER = logging.getLogger(__name__)
