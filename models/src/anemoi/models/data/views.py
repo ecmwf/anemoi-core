@@ -65,6 +65,7 @@ class FlatView:
     coordinates: torch.Tensor
     device: torch.device | None
     shard_sizes: ShardSizes
+    batch_sizes: tuple[int, ...] | None = None
 
     def to(self, device: torch.device) -> "FlatView":
         """Return a copy of this view with all tensors moved to the given device."""
@@ -73,6 +74,7 @@ class FlatView:
             coordinates=self.coordinates.to(device),
             device=device,
             shard_sizes=self.shard_sizes,
+            batch_sizes=self.batch_sizes,
         )
 
 
@@ -146,9 +148,7 @@ class SourceView(ABC):
         pass
 
     @abstractmethod
-    def apply_func(
-        self, func: Callable, in_place: bool = False, impute_mask: list[torch.Tensor] | None = None, **kwargs
-    ) -> "SourceView":
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "SourceView":
         """Apply a function to this view, returning a new view with the same metadata."""
         pass
 
@@ -240,6 +240,7 @@ class GriddedSourceView(SourceView):
             coordinates=coordinates.to(device),
             device=device,
             shard_sizes=self.shard_sizes,
+            batch_sizes=None,
         )
 
     @property
@@ -257,13 +258,12 @@ class GriddedSourceView(SourceView):
         )
         return self.clone(data=new_data)
 
-    def apply_func(self, func: Callable, in_place: bool = False, impute_mask=None, **kwargs) -> "GriddedSourceView":
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSourceView":
         """Apply a function to this view, returning a new view with the same metadata."""
         new_data = func(
             self.data if in_place else self.data.clone(),
             statistics=self.statistics,
             name_to_index=self.name_to_index,
-            impute_mask=impute_mask,
             **kwargs,
         )
         return self.clone(data=new_data)
@@ -437,6 +437,7 @@ class TabularSourceView(SourceView):
             coordinates=coordinates.to(device),
             device=device,
             shard_sizes=flat_shard_sizes,
+            batch_sizes=tuple(sample.shape[self.layout.grid] for sample in self.data),
         )
 
     def unflatten(self, data: torch.Tensor) -> "TabularSourceView":
@@ -446,21 +447,16 @@ class TabularSourceView(SourceView):
         new_data = [data.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
         return self.clone(data=new_data)
 
-    def apply_func(self, func: Callable, in_place: bool = False, impute_mask: list[torch.Tensor] | None = None, **kwargs) -> "TabularSourceView":
-        """Apply a function to this view, returning a new view with the same metadata.
-
-        The impute_mask, when provided, must be a list aligned with self.data (one
-        boolean mask per sample over that sample's latlon dimension).
-        """
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSourceView":
+        """Apply a function to this view, returning a new view with the same metadata."""
         new_data = [
             func(
                 data if in_place else data.clone(),
                 statistics=self.statistics,
                 name_to_index=self.name_to_index,
-                impute_mask=None if impute_mask is None else impute_mask[i],
                 **kwargs,
             )
-            for i, data in enumerate(self.data)
+            for data in self.data
         ]
         return self.clone(data=new_data)
 

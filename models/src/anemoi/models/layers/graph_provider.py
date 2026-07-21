@@ -97,6 +97,8 @@ class BaseGraphProvider(nn.Module, ABC):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
     ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
@@ -110,6 +112,10 @@ class BaseGraphProvider(nn.Module, ABC):
             Source node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
         dst_coords : Tensor, optional
             Destination node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
+        src_batch_sizes : tuple[int, ...], optional
+            Number of source nodes in each variable-length batch sample.
+        dst_batch_sizes : tuple[int, ...], optional
+            Number of destination nodes in each variable-length batch sample.
         model_comm_group : ProcessGroup, optional
             Model communication group
         shard_edges : bool, optional
@@ -257,6 +263,8 @@ class StaticGraphProvider(BaseGraphProvider):
         batch_size: int,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
@@ -271,6 +279,10 @@ class StaticGraphProvider(BaseGraphProvider):
             Source node coordinates (ignored for static graphs)
         dst_coords : Tensor, optional
             Destination node coordinates (ignored for static graphs)
+        src_batch_sizes : tuple[int, ...], optional
+            Variable-length source sample sizes (ignored for static graphs).
+        dst_batch_sizes : tuple[int, ...], optional
+            Variable-length destination sample sizes (ignored for static graphs).
         model_comm_group : ProcessGroup, optional
             Model communication group
         shard_edges : bool, optional
@@ -311,6 +323,8 @@ class NoOpGraphProvider(BaseGraphProvider):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
     ) -> tuple[None, None, None]:
@@ -323,6 +337,10 @@ class NoOpGraphProvider(BaseGraphProvider):
         src_coords : Tensor, optional
             Unused
         dst_coords : Tensor, optional
+            Unused
+        src_batch_sizes : tuple[int, ...], optional
+            Unused
+        dst_batch_sizes : tuple[int, ...], optional
             Unused
         model_comm_group : ProcessGroup, optional
             Unused
@@ -367,26 +385,13 @@ class DynamicGraphProvider(BaseGraphProvider):
         """Return the edge dimension."""
         return self._edge_dim
 
-    def build_graph(self, src_coords: Tensor, dst_coords: Tensor, **kwargs) -> tuple[Tensor, Adj]:
-        """Build graph dynamically from source and destination nodes.
+    def _build_single_graph(self, src_coords: Tensor, dst_coords: Tensor) -> tuple[Tensor, Adj]:
+        """Build one dynamic graph without batch offsets."""
+        if src_coords.shape[0] == 0 or dst_coords.shape[0] == 0:
+            edge_attr = src_coords.new_empty((0, self._edge_dim), dtype=torch.float32)
+            edge_index = torch.empty((2, 0), dtype=torch.long, device=src_coords.device)
+            return edge_attr, edge_index
 
-        This method will be implemented in the future to support on-the-fly
-        graph construction (e.g., k-NN graphs, radius graphs, etc.).
-
-        Parameters
-        ----------
-        src_coords : Tensor
-            Source node features/positions
-        dst_coords : Tensor
-            Destination node features/positions
-        **kwargs
-            Additional parameters for graph construction algorithm
-
-        Returns
-        -------
-        tuple[Tensor, Adj]
-            Edge attributes and edge index
-        """
         source_coords = latlon_rad_to_cartesian(src_coords).to(dtype=torch.float32)
         target_coords = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
 
@@ -398,7 +403,7 @@ class DynamicGraphProvider(BaseGraphProvider):
             dim=1,
         )
 
-        if edge_attr.shape[0] > 0 and edge_attr.shape[1] != self._edge_dim:
+        if edge_attr.shape[1] != self._edge_dim:
             msg = (
                 f"Dynamic edge attribute width ({edge_attr.shape[1]}) does not match the declared "
                 f"edge_dim ({self._edge_dim}) derived from the edge-attribute builders' 'ndim'. "
@@ -408,16 +413,81 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         return edge_attr, edge_index
 
+    def build_graph(
+        self,
+        src_coords: Tensor,
+        dst_coords: Tensor,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
+        **kwargs,
+    ) -> tuple[Tensor, Adj]:
+        """Build graph dynamically from source and destination nodes.
+
+        This method will be implemented in the future to support on-the-fly
+        graph construction (e.g., k-NN graphs, radius graphs, etc.).
+
+        Parameters
+        ----------
+        src_coords : Tensor
+            Source node features/positions
+        dst_coords : Tensor
+            Destination node features/positions
+        src_batch_sizes : tuple[int, ...], optional
+            Number of source nodes in each variable-length batch sample.
+        dst_batch_sizes : tuple[int, ...], optional
+            Number of destination nodes in each variable-length batch sample.
+        **kwargs
+            Additional parameters for graph construction algorithm
+
+        Returns
+        -------
+        tuple[Tensor, Adj]
+            Edge attributes and edge index
+        """
+        if src_batch_sizes is None and dst_batch_sizes is None:
+            return self._build_single_graph(src_coords, dst_coords)
+        if src_batch_sizes is None or dst_batch_sizes is None:
+            raise ValueError("src_batch_sizes and dst_batch_sizes must be provided together.")
+        if len(src_batch_sizes) != len(dst_batch_sizes):
+            raise ValueError("src_batch_sizes and dst_batch_sizes must contain the same number of samples.")
+        if sum(src_batch_sizes) != src_coords.shape[0]:
+            raise ValueError("src_batch_sizes must sum to the number of source coordinates.")
+        if sum(dst_batch_sizes) != dst_coords.shape[0]:
+            raise ValueError("dst_batch_sizes must sum to the number of destination coordinates.")
+
+        edge_attrs = []
+        edge_indices = []
+        src_offset = 0
+        dst_offset = 0
+        for src_size, dst_size in zip(src_batch_sizes, dst_batch_sizes):
+            edge_attr, edge_index = self._build_single_graph(
+                src_coords[src_offset : src_offset + src_size],
+                dst_coords[dst_offset : dst_offset + dst_size],
+            )
+            edge_attrs.append(edge_attr)
+            edge_indices.append(edge_index + edge_index.new_tensor([[src_offset], [dst_offset]]))
+            src_offset += src_size
+            dst_offset += dst_size
+
+        return torch.cat(edge_attrs, dim=0), torch.cat(edge_indices, dim=1)
+
     def _get_edges_impl(
         self,
         src_coords: Tensor,
         dst_coords: Tensor,
+        src_batch_sizes: Optional[tuple[int, ...]],
+        dst_batch_sizes: Optional[tuple[int, ...]],
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges, separated for checkpointing."""
         # TODO(Jan): shard graph creation, gather edges, sort, shard
-        edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
+        edge_attr, edge_index = self.build_graph(
+            src_coords,
+            dst_coords,
+            src_batch_sizes=src_batch_sizes,
+            dst_batch_sizes=dst_batch_sizes,
+        )
         edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
         edge_attr = edge_attr.index_select(0, perm)
 
@@ -434,6 +504,8 @@ class DynamicGraphProvider(BaseGraphProvider):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
@@ -450,6 +522,10 @@ class DynamicGraphProvider(BaseGraphProvider):
             Source node coordinates
         dst_coords : Tensor, optional
             Destination node coordinates
+        src_batch_sizes : tuple[int, ...], optional
+            Number of source nodes in each variable-length batch sample.
+        dst_batch_sizes : tuple[int, ...], optional
+            Number of destination nodes in each variable-length batch sample.
         model_comm_group : ProcessGroup, optional
             Model communication group
         shard_edges : bool, optional
@@ -474,9 +550,23 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         if act_checkpoint:
             return checkpoint(
-                self._get_edges_impl, src_coords, dst_coords, shard_edges, model_comm_group, use_reentrant=False
+                self._get_edges_impl,
+                src_coords,
+                dst_coords,
+                src_batch_sizes,
+                dst_batch_sizes,
+                shard_edges,
+                model_comm_group,
+                use_reentrant=False,
             )
-        return self._get_edges_impl(src_coords, dst_coords, shard_edges, model_comm_group)
+        return self._get_edges_impl(
+            src_coords,
+            dst_coords,
+            src_batch_sizes,
+            dst_batch_sizes,
+            shard_edges,
+            model_comm_group,
+        )
 
 
 class ProjectionGraphProvider(BaseGraphProvider):

@@ -11,9 +11,13 @@ import datetime
 import logging
 from abc import ABC
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.utils.time_indices import normalize_time_indices
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Batch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -158,7 +162,10 @@ class BaseTask(ABC):
         return new_batch
 
     def get_targets(
-        self, batch: "Batch", data_indices: dict[str, IndexCollection], **kwargs
+        self,
+        batch: "Batch",
+        data_indices: dict[str, IndexCollection],
+        **kwargs,
     ) -> tuple["Batch", "Batch"]:
         """Extract model targets from a Batch, preserving coords and metadata.
 
@@ -173,18 +180,17 @@ class BaseTask(ABC):
 
         Returns
         -------
-        tuple[Batch, Batch]
-            ``(y, target)``. ``y`` holds target tensors per dataset
-            (shape ``(bs, num_outputs, ensemble, grid, full_nvar)``);
-            ``target`` mirrors ``y`` but with the variables axis sliced
-            to length ``0``, preserving coords / timedeltas / metadata /
-            layouts by reference.
+        tuple[Batch, Batch]: (target, target_forcing)
+            target holds the target tensors per dataset, shape (bs, num_outputs, ensemble, grid, full_nvar)).
+            target_forcing contains the output-time forcing variables used to
+            condition the decoder, preserving coordinates, timedeltas,
+            metadata and layouts.
         """
         time_indices = self.get_batch_output_indices(**kwargs)
         time_indices = normalize_time_indices(time_indices)
 
-        y = batch.select(time=time_indices)
-        for dataset_name, payload in y.data.items():
+        target_tensors = batch.select(time=time_indices)
+        for dataset_name, payload in target_tensors.data.items():
             LOGGER.debug(
                 "SHAPE: y[%s] = %s",
                 dataset_name,
@@ -192,24 +198,11 @@ class BaseTask(ABC):
             )
 
         var_indices = {
-            dataset_name: data_indices[dataset_name].data.output.full for dataset_name in batch.dataset_names
+            dataset_name: data_indices[dataset_name].data.input.forcing for dataset_name in batch.dataset_names
         }
-        target = y.select(variables=var_indices)
+        target_forcing = target_tensors.select(variables=var_indices)
 
-        empty_data = {}
-        for dataset_name, payload in target.data.items():
-            layout = y.layouts.get(dataset_name)
-            assert (
-                layout is not None
-            ), f"Layout is required for dataset '{dataset_name}' to determine variable axis for target slicing."
-            if isinstance(payload, list):
-                empty_data[dataset_name] = [t.narrow(layout.variables, 0, 0) for t in payload]
-            else:
-                empty_data[dataset_name] = payload.narrow(layout.variables, 0, 0)
-
-        target = target.with_data(empty_data)
-
-        return y, target
+        return target_tensors, target_forcing
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
@@ -240,7 +233,7 @@ class BaseTask(ABC):
 class BaseSingleStepTask(BaseTask):
     """Base class for single-step tasks."""
 
-    def advance_input(self, batch: "Batch", *args, **_kwargs) -> "Batch":
+    def advance_input(self, batch: "Batch", *_args, **_kwargs) -> "Batch":
         """Advance the input state for each dataset based on the task's requirements.
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.

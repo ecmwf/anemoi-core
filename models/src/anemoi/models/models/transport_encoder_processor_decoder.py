@@ -20,6 +20,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -237,7 +238,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch,
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -256,7 +257,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _forward_transport_network(
         self,
-        x: dict[str, torch.Tensor],
+        batch: Batch,
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -688,12 +689,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         dataset_name: str,
         x: torch.Tensor,
     ) -> torch.Tensor:
-        processors = post_processors[dataset_name]
-        if not hasattr(processors, "processors"):
-            return x
-        for processor in processors.processors.values():
-            if getattr(processor, "supports_skip_imputation", False):
-                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
+        del post_processors, dataset_name
         return x
 
     def _assemble_input(

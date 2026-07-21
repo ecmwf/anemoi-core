@@ -824,45 +824,60 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return total_loss, metrics_next, y_preds
 
-    def preprocess_batch(self, batch: Batch) -> Batch:
+    def _map_dataset_processors(self, batch: Batch, processors: Any, **kwargs) -> Batch:
+        """Apply per-dataset processors without mutating the selected batch."""
+        processed_batch = batch
+        for dataset_name, processor in processors.items():
+            if dataset_name in batch:
+                processed_batch = processed_batch.update_source(
+                    dataset_name,
+                    processor(batch[dataset_name], in_place=False, **kwargs),
+                )
+        return processed_batch
+
+    def preprocess_inputs(self, batch: Batch) -> Batch:
+        """Transform selected model inputs into model-input space."""
+        return self._map_dataset_processors(batch, self.model.pre_processors)
+
+    def preprocess_targets(self, batch: Batch) -> Batch:
+        """Normalize selected targets while preserving missing values."""
+        return self._map_dataset_processors(batch, self.model.pre_processors, skip_imputation=True)
+
+    def preprocess_rollout_targets(self, raw_targets: Batch) -> tuple[Batch, Batch]:
+        """Derive loss and rollout views independently from one raw target slice.
+
+        The loss target is normalized once with imputation skipped. Rollout values
+        are separately transformed into model-input space for forcing and boundary
+        updates; the normalized loss target is never processed a second time.
         """
-        Preprocess the batch using the model's pre-processors.
-        This includes the imputers, where we have to separate between inputs and outputs.
-        Only the former get imputed with default values; the outputs are left untouched.
-        """
-        new_batch = batch
-        input_indices = self.task.get_batch_input_indices()
-        for dataset_name, pre_processors in self.model.pre_processors.items():
-            view = batch[dataset_name]
-            impute_mask = self._build_input_impute_mask(view, input_indices)
-            updated_view = pre_processors(view, impute_mask=impute_mask)
-            # TODO: remove update_source, maybe batch.clone()??
-            new_batch = new_batch.update_source(dataset_name, updated_view)
-        return new_batch
+        return self.preprocess_targets(raw_targets), self.preprocess_inputs(raw_targets)
 
-    @staticmethod
-    def _build_input_impute_mask(view: SourceView, input_indices: list[int]) -> list[torch.Tensor] | None:
-        """Build a per-sample boolean grid mask that identifies model-input observations.
+    def postprocess_targets(
+        self,
+        batch: Batch,
+        layouts: dict[str, IndexSpace | str | None] | IndexSpace | str | None = None,
+    ) -> Batch:
+        """Transform normalized targets to physical space without mutating them."""
+        processed = batch
+        for dataset_name in self.model.post_processors:
+            if dataset_name not in batch:
+                continue
+            layout = layouts.get(dataset_name) if isinstance(layouts, dict) else layouts
+            processed = processed.update_source(
+                dataset_name,
+                self._postprocess_dataset_view(batch[dataset_name], dataset_name, layout),
+            )
+        return processed
 
-        Only sparse datasets are masked: for each sample, points that
-        belong to an input time-window have mask==True (imputed), all
-        other points (target windows) have mask==False (NaNs preserved for loss masking).
-
-        For gridded datasets (or sparse views without boundaries), we return None.
-        """
-        if not view.layout.time_in_grid or view.boundaries is None:
-            return None
-
-        grid_dim = view.layout.grid
-        masks: list[torch.Tensor] = []
-        for sample_tensor, sample_bounds in zip(view.data, view.boundaries):
-            n_points = sample_tensor.shape[grid_dim]
-            mask = torch.zeros(n_points, dtype=torch.bool, device=sample_tensor.device)
-            for t in input_indices:
-                s = sample_bounds[t]
-                mask[s.start : s.stop] = True
-            masks.append(mask)
-        return masks
+    def _postprocess_dataset_view(
+        self,
+        view: SourceView,
+        dataset_name: str,
+        layout: IndexSpace | str | None = None,
+    ) -> SourceView:
+        """Postprocess one view using the same metadata alignment as batch targets."""
+        aligned = self._align_view_to_layout(view, layout, dataset_name)
+        return self.model.post_processors[dataset_name](aligned, in_place=False)
 
     def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
@@ -884,15 +899,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if not self.keep_batch_sharded:
             batch = self.allgather_batch(batch)
 
-        # Batch normalization (the underlying ``batch.data`` dict should be mutated in-place)
-        batch = self.preprocess_batch(batch)
-
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
         LOGGER.debug("on_after_batch_transfer batch:\n%r", batch)
-
-        # Prepare scalers, e.g. init delayed scalers and update scalers
-        self._prepare_loss_scalers()
 
         return batch
 
@@ -904,15 +913,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> Batch:
         """Transfer the :class:`Batch` to ``device`` (skipping static coords)."""
         return batch.to(device, non_blocking=True)
-
-    def _prepare_loss_scalers(self) -> None:
-        """Prepare scalers for training and validation before every step."""
-        # Delayed scalers need to be initialized after the pre-processors once
-        if self.is_first_step:
-            self.update_scalers(callback=AvailableCallbacks.ON_TRAINING_START)
-            self.is_first_step = False
-        self.update_scalers(callback=AvailableCallbacks.ON_BATCH_START)
-        return
 
     @abstractmethod
     def _step(
@@ -1021,7 +1021,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         metrics = {}
 
         # Handle multi-dataset case for post-processors
-        post_processor = self.model.post_processors[dataset_name]
         metrics_dict = self.metrics[dataset_name]
         val_metric_ranges = self.val_metric_ranges[dataset_name]
 
@@ -1030,11 +1029,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # variable axis.
         # The metadata of the prediction view must be realigned to
         # the variables actually present in its tensor *before* the normalisation
-        y_postprocessed = post_processor(self._align_view_to_layout(y, target_layout, dataset_name), in_place=False)
-        y_pred_postprocessed = post_processor(
-            self._align_view_to_layout(y_pred, pred_layout, dataset_name),
-            in_place=False,
-        )
+        y_postprocessed = self._postprocess_dataset_view(y, dataset_name, target_layout)
+        y_pred_postprocessed = self._postprocess_dataset_view(y_pred, dataset_name, pred_layout)
 
         suffix = "" if step is None else f"/{step + 1}"
         for metric_name, metric in metrics_dict.items():

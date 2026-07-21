@@ -46,13 +46,13 @@ def compute_valid_data_indices(
             msg = f"No valid date indices found for data reader '{dataset_name}': {ds}"
             raise ValueError(msg)
 
-        LOGGER.info("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
+        LOGGER.debug("Data reader '%s' has %d valid indices", dataset_name, len(valid_date_indices))
 
     if len(valid_date_indices_intersection) == 0:
         msg = "No valid date indices found after intersection across all datasets."
         raise ValueError(msg)
 
-    LOGGER.info("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
+    LOGGER.debug("MultiDataset has %d valid indices after intersection.", len(valid_date_indices_intersection))
 
     return valid_date_indices_intersection
 

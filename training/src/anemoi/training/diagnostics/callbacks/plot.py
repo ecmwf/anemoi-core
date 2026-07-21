@@ -823,6 +823,7 @@ class PlotLoss(BasePerBatchPlotCallback):
                 # Pass the full target batch; index the per-dataset SourceView afterwards.
                 batch_obj = batch if isinstance(batch, Batch) else Batch(data=batch)
                 y_true_batch, _ = pl_module.task.get_targets(batch_obj, data_indices, **task_kwargs)
+                y_true_batch = pl_module.preprocess_targets(y_true_batch)
                 y_true = y_true_batch[dataset_name]
                 loss = reduce_to_last_dim(
                     self.loss[dataset_name](
@@ -972,9 +973,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             )
             latlons = np.rad2deg(view.coordinates[self.sample_idx].detach().cpu().numpy())
 
-        # Restrict to the output variables and post-process via the SourceView API.
+        # Restrict to the output variables, normalize without imputation, then
+        # convert back to physical space for plotting.
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
-        input_view = view.select(variables=feature_indices).apply_func(lambda t, **_: t.detach().cpu())
+        selected = batch.select(variables={dataset_name: feature_indices})
+        input_view = pl_module.preprocess_targets(selected)[dataset_name].apply_func(lambda t, **_: t.detach().cpu())
         data = self.post_processors[dataset_name](input_view, in_place=False).data[self.sample_idx]
 
         output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
@@ -1050,22 +1053,15 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs: TrainingStepOutput,
         batch: Batch,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Build the plotting fields and coordinates for a sparse/observation dataset.
+        """Build the plotting fields and coordinates for a tabular observation dataset.
 
-        Scattered observations have *different* locations at input and output times, so
-        the gridded plot-adapter time-slicing is invalid. Instead, extract the fields
-        directly from the per-dataset :class:`SourceView` using its layout-aware
-        ``select_time`` API: the input panel from the analysis-time observations and the
-        target panel from the output-time observations (each at their own coordinates).
-        The prediction is read from ``outputs.predictions`` (already at the target/output
-        observation locations).
+        We extract the fields directly from the per-dataset SourceView using select_time.
 
         Returns
         -------
         tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-            ``(input_latlons, output_latlons, x, y_true, y_pred)``.
+            Shape: (input_latlons, output_latlons, x, y_true, y_pred).
         """
-        view = batch[dataset_name]
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         task = pl_module.task
 
@@ -1075,20 +1071,18 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         output_indices = task.get_batch_output_indices(**step_kwargs)
 
         def _field_and_coords(sub_view: SourceView) -> tuple[np.ndarray, np.ndarray]:
-            sub_view = self.post_processors[dataset_name](
-                sub_view.apply_func(lambda t, **_: t.detach().cpu()),
-                in_place=False,
-            )
             field = sub_view.data[self.sample_idx]  # (grid, vars) for sparse obs
             coords = sub_view.coordinates[self.sample_idx]
-            return field.numpy(), np.rad2deg(coords.detach().cpu().numpy())
+            return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
 
         # Input panel: observations at the analysis (last input) timestep.
-        input_view = view.select_time(input_indices[-1]).select(variables=feature_indices)
+        input_batch = batch.select(time={dataset_name: input_indices[-1]}, variables={dataset_name: feature_indices})
+        input_view = input_batch[dataset_name]
         x, input_latlons = _field_and_coords(input_view)
 
         # Target panel: observations at the output timesteps.
-        target_view = view.select_time(output_indices).select(variables=feature_indices)
+        target_batch = batch.select(time={dataset_name: output_indices}, variables={dataset_name: feature_indices})
+        target_view = target_batch[dataset_name]
         y_true, output_latlons = _field_and_coords(target_view)
 
         # Prediction (already at the output/target observation locations).
@@ -1121,6 +1115,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         focus_area: list[dict] | None = None,
         prediction_label: str = "pred",
         auxiliary_label: str = "corrupted targets",
+        dpi: int = 200,
         plotting_settings: PlottingSettings | None = None,
     ) -> None:
         """Initialise the PlotSample callback.
@@ -1145,6 +1140,8 @@ class PlotSample(BasePlotAdditionalMetrics):
             Dataset names, by default None
         focus_area : list[dict] | None, optional
             Focus area configuration, by default None
+        dpi : int, optional
+            Figure render resolution in dots per inch, by default 200
         plotting_settings : PlottingSettings, optional
             Plotting configuration settings, by default None (uses defaults)
         """
@@ -1166,6 +1163,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         self.colormaps = colormaps
         self.prediction_label = prediction_label
         self.auxiliary_label = auxiliary_label
+        self.dpi = dpi
 
         LOGGER.info(
             "Using defined accumulation colormap for fields: %s",
@@ -1369,6 +1367,7 @@ class PlotSample(BasePlotAdditionalMetrics):
             auxiliary_label=self.auxiliary_label,
             sparse=sparse,
             output_latlons=output_latlons,
+            dpi=self.dpi,
         )
 
 

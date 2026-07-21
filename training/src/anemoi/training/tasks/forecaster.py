@@ -10,10 +10,10 @@
 import datetime
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 
-from anemoi.models.data.batch import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
@@ -21,6 +21,9 @@ from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from anemoi.models.data.batch import Batch
 
 
 class RolloutConfig:
@@ -141,8 +144,7 @@ class Forecaster(BaseTask):
         self,
         x: torch.Tensor,
         y_pred: torch.Tensor,
-        batch: torch.Tensor,
-        rollout_step: int = 0,
+        output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
     ) -> torch.Tensor:
@@ -154,9 +156,6 @@ class Forecaster(BaseTask):
 
         x = x.roll(-keep_steps, dims=1)
 
-        # Compute batch indices for the output offsets of this rollout step
-        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
-
         for i in range(keep_steps):
             # Get prognostic variables
             x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
@@ -166,8 +165,7 @@ class Forecaster(BaseTask):
                 data_indices.model.output.prognostic,
             ]
 
-            batch_time_index = output_batch_indices[-(i + 1)]
-            true_state = batch[:, batch_time_index]
+            true_state = output_values[:, -(i + 1)]
 
             if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
                 true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
@@ -179,9 +177,9 @@ class Forecaster(BaseTask):
             )
 
             # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
+            x[:, -(i + 1), ..., data_indices.model.input.forcing] = output_values[
                 :,
-                batch_time_index,
+                -(i + 1),
                 ...,
                 data_indices.data.input.forcing,
             ]
@@ -191,7 +189,7 @@ class Forecaster(BaseTask):
         self,
         x: "Batch",
         y_pred: "Batch",
-        batch: "Batch",
+        output_values: "Batch",
         rollout_step: int = 0,
         data_indices: dict[str, IndexCollection] | None = None,
         output_mask: dict[str, object] | None = None,
@@ -201,6 +199,7 @@ class Forecaster(BaseTask):
         Sparse observation datasets (``layout.time_in_grid=True``) are not
         autoregressive — their input state is passed through unchanged.
         """
+        del rollout_step
         new_data = {}
         for dataset_name, view in x.items():
             if view.layout.time_in_grid:
@@ -211,8 +210,7 @@ class Forecaster(BaseTask):
             new_data[dataset_name] = self._advance_dataset_input(
                 x[dataset_name].data,
                 y_pred[dataset_name].data.to(x[dataset_name].data.dtype),
-                batch[dataset_name].data,
-                rollout_step=rollout_step,
+                output_values[dataset_name].data,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],
             )

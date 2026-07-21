@@ -10,8 +10,8 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional
 from collections import defaultdict
+from typing import Optional
 
 import torch
 from hydra.utils import instantiate
@@ -242,7 +242,11 @@ class BaseGraphModel(nn.Module):
         if self.use_encoder_data_output[dataset_name]:
             return self._calculate_input_dim(dataset_name)
         else:
-            return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+            return (
+                self.num_input_channels_decoding_forcings[dataset_name]
+                + COORDS_DIM
+                + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+            )
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         if self.is_dataset_static[dataset_name]:

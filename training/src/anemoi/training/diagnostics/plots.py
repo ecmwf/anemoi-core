@@ -485,6 +485,7 @@ def _setup_figure_and_colormaps(
     datashader: bool,
     projection_kind: str,
     colormaps: dict[str, Colormap] | None = None,
+    dpi: int | None = None,
 ) -> tuple[Figure, np.ndarray, np.ndarray, np.ndarray, object, dict]:
     """Create a projected figure grid and normalise the colormaps dict.
 
@@ -502,6 +503,8 @@ def _setup_figure_and_colormaps(
         Projection name when *datashader* is False.
     colormaps : dict[str, Colormap] | None, optional
         Colormap configuration dict, by default None.
+    dpi : int | None, optional
+        Figure render resolution, by default Matplotlib's configured DPI.
 
     Returns
     -------
@@ -517,6 +520,7 @@ def _setup_figure_and_colormaps(
         n_plots_x,
         n_plots_y,
         figsize=figsize,
+        dpi=dpi,
         layout=LAYOUT,
         subplot_kw=subplot_kw,
     )
@@ -569,6 +573,7 @@ def plot_predicted_multilevel_flat_sample(
     *,
     sparse: bool = False,
     output_latlons: np.ndarray | None = None,
+    dpi: int | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -604,6 +609,8 @@ def plot_predicted_multilevel_flat_sample(
     output_latlons : np.ndarray, optional
         Output (target / prediction) observation coordinates of shape (n_out, 2). Only
         used when ``sparse`` is True; defaults to ``latlons`` when not provided.
+    dpi : int | None, optional
+        Figure render resolution, by default Matplotlib's configured DPI.
 
     Returns
     -------
@@ -628,6 +635,7 @@ def plot_predicted_multilevel_flat_sample(
         datashader=datashader,
         projection_kind=projection_kind,
         colormaps=colormaps,
+        dpi=dpi,
     )
 
     # Sparse: project the (potentially different) output coordinates with the same
@@ -675,6 +683,7 @@ def plot_predicted_multilevel_flat_sample(
                 auxiliary=ya,
                 auxiliary_label=auxiliary_label,
                 diagnostic_only=diagnostic_only,
+                marker_size=4,
             )
         else:
             plot_flat_sample(
@@ -996,6 +1005,7 @@ def plot_flat_sparse_sample(
     auxiliary: np.ndarray | None = None,
     auxiliary_label: str = "corrupted targets",
     diagnostic_only: bool = False,
+    marker_size: float = 4,
 ) -> None:
     """Plot a "flat" 1D sample for sparse observations.
 
@@ -1043,6 +1053,8 @@ def plot_flat_sparse_sample(
         Label for the auxiliary panel, by default "corrupted targets".
     diagnostic_only : bool, optional
         Whether the variable is diagnostic-only and should omit the input panel.
+    marker_size : float, optional
+        Scatter marker area in points squared, by default 4.
 
     Returns
     -------
@@ -1114,7 +1126,43 @@ def plot_flat_sparse_sample(
                 title=titles[ii],
                 datashader=datashader,
                 transform=transform,
+                marker_size=marker_size,
             )
+
+
+def _plot_empty_map(
+    ax: plt.axes,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    title: str | None,
+    transform: object | None,
+) -> None:
+    """Render map context and an explanatory label for an empty field."""
+    finite_coords = np.isfinite(lon) & np.isfinite(lat)
+    lon = lon[finite_coords]
+    lat = lat[finite_coords]
+    if lon.size > 0:
+        ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
+        dy, dx = ymax - ymin, xmax - xmin
+        ybuffer = max(dy * 0.05, 1e-6)
+        xbuffer = max(dx * 0.05, 1e-6)
+        if transform is not None:
+            ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=transform)
+        else:
+            ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
+            ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
+    elif hasattr(ax, "set_global"):
+        ax.set_global()
+    else:
+        ax.set_xlim((-np.pi, np.pi))
+        ax.set_ylim((-np.pi / 2, np.pi / 2))
+
+    map_features.plot(ax)
+    if title is not None:
+        ax.set_title(title)
+    ax.text(0.5, 0.5, "No finite observations", ha="center", va="center", transform=ax.transAxes)
+    ax.set_aspect("auto", adjustable=None)
+    _hide_axes_ticks(ax)
 
 
 def single_plot(
@@ -1128,6 +1176,7 @@ def single_plot(
     title: str | None = None,
     datashader: bool = False,
     transform: object | None = None,
+    marker_size: float = 1,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -1156,6 +1205,8 @@ def single_plot(
         Scatter plot, by default False
     transform:
         Projection for the plot, by default None
+    marker_size : float, optional
+        Scatter marker area in points squared, by default 1.
 
     Returns
     -------
@@ -1169,16 +1220,15 @@ def single_plot(
     data = np.asarray(data)
     lon = np.asarray(lon)
     lat = np.asarray(lat)
+    source_lon = lon
+    source_lat = lat
     finite = np.isfinite(data)
     if not finite.all():
         data = data[finite]
         lon = lon[finite]
         lat = lat[finite]
     if data.size == 0:
-        # nothing left to plot - blank the panel
-        if title is not None:
-            ax.set_title(title)
-        ax.axis("off")
+        _plot_empty_map(ax, source_lon, source_lat, title, transform)
         return
 
     if not datashader:
@@ -1187,7 +1237,7 @@ def single_plot(
             lat,
             c=data,
             cmap=cmap,
-            s=1,
+            s=marker_size,
             alpha=1.0,
             norm=norm,
             rasterized=False,

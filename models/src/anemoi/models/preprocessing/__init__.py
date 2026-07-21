@@ -126,7 +126,6 @@ class BasePreprocessor(nn.Module, ABC):
         x: SourceView,
         in_place: bool = True,
         inverse: bool = False,
-        impute_mask: list[torch.Tensor] | None = None,
         **kwargs,
     ) -> SourceView:
         """Process the input tensor.
@@ -139,10 +138,6 @@ class BasePreprocessor(nn.Module, ABC):
             Whether to process the tensor in place
         inverse : bool
             Whether to inverse transform the input
-        impute_mask : list[torch.Tensor] | None
-            Optional per-sample boolean mask over the grid/points dimension, forwarded to
-            the applied transform. Imputers use it to restrict imputation to the inputs only.
-            Not used for gridded fields.
         **kwargs
             Additional keyword arguments to pass to transform/inverse_transform
 
@@ -155,9 +150,9 @@ class BasePreprocessor(nn.Module, ABC):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
 
         if inverse:
-            return x.apply_func(self.inverse_transform, in_place=in_place, impute_mask=impute_mask, **kwargs)
+            return x.apply_func(self.inverse_transform, in_place=in_place, **kwargs)
 
-        return x.apply_func(self.transform, in_place=in_place, impute_mask=impute_mask, **kwargs)
+        return x.apply_func(self.transform, in_place=in_place, **kwargs)
 
 
 class Processors(nn.Module):
@@ -174,7 +169,7 @@ class Processors(nn.Module):
         super().__init__()
 
         self.inverse = inverse
-        self.first_run = True
+        # self.first_run = True
 
         if inverse:
             # Reverse the order of processors for inverse transformation
@@ -204,6 +199,8 @@ class Processors(nn.Module):
             Processed tensor
         """
         for processor in self.processors.values():
+            if self.inverse and getattr(processor, "supports_skip_imputation", False):
+                continue
             x = processor(x, in_place=in_place, inverse=self.inverse, **kwargs)
 
         return x

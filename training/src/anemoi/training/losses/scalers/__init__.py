@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .base_scaler import TensorDim
-# from .loss_weights_mask import NaNMaskScaler
+
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
@@ -30,7 +30,6 @@ __all__ = [
     "GraphNodeAttributeScaler",
     "LeadTimeDecayScaler",
     "LinearVariableLevelScaler",
-    # "NaNMaskScaler",
     "NoTendencyScaler",
     "NoVariableLevelScaler",
     "PolynomialVariableLevelScaler",

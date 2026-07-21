@@ -16,6 +16,7 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import Callback
 
+from anemoi.models.data import Batch
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -46,7 +47,7 @@ class PerTimestepMetrics(Callback):
         trainer: pl.Trainer,
         pl_module: pl.LightningModule,
         outputs: list,  # noqa: ARG002
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         batch_idx: int,
     ) -> None:
         if batch_idx % self.every_n_batches != 0:
@@ -59,45 +60,46 @@ class PerTimestepMetrics(Callback):
         prec = trainer.precision
         dtype = precision_mapping.get(prec)
 
-        context = (
-            torch.autocast(device_type=next(iter(batch.values())).device.type, dtype=dtype)
-            if dtype is not None
-            else nullcontext()
-        )
+        context = torch.autocast(device_type=batch.device.type, dtype=dtype) if dtype is not None else nullcontext()
 
         with context, torch.no_grad():
             self._eval_per_timestep(pl_module, batch)
 
-    def _eval_per_timestep(self, pl_module: pl.LightningModule, batch: dict[str, torch.Tensor]) -> None:
+    def _eval_per_timestep(self, pl_module: pl.LightningModule, batch: Batch) -> None:
         """Run model and compute metrics per timestep."""
         # Get inputs and targets via the task
-        x = pl_module.task.get_inputs(batch, data_indices=pl_module.data_indices)
+        x = pl_module.preprocess_inputs(pl_module.task.get_inputs(batch, data_indices=pl_module.data_indices))
         x = pl_module._expand_ens_dim(x) if hasattr(pl_module, "_expand_ens_dim") else x
 
         # Run model forward
         y_pred = pl_module(x)
 
         # Get targets
-        y = pl_module.task.get_targets(batch)
+        raw_y, _ = pl_module.task.get_targets(batch, data_indices=pl_module.data_indices)
+        y = pl_module.preprocess_targets(raw_y)
+        y_physical = pl_module.postprocess_targets(y)
 
-        batch_size = next(iter(batch.values())).shape[0]
+        batch_size = batch.size
 
         # For each dataset, compute per-timestep metrics
         for dataset_name in y_pred:
-            pred = y_pred[dataset_name]  # (bs, time, ens, grid, var)
-            target = y[dataset_name]  # (bs, time, ens, grid, var)
+            pred = y_pred[dataset_name]
+            target = y[dataset_name]
+            target_physical = y_physical[dataset_name]
 
-            n_timesteps = target.shape[TensorDim.TIME]
+            n_timesteps = target.data.shape[TensorDim.TIME]
 
             # Gather ensemble members across the ensemble comm group
             if hasattr(pl_module, "ens_comm_subgroup") and pl_module.ens_comm_subgroup is not None:
                 from anemoi.models.distributed.graph import gather_tensor
 
-                pred = gather_tensor(
-                    pred.clone(),
-                    dim=TensorDim.ENSEMBLE_DIM,
-                    sizes=[pred.size(TensorDim.ENSEMBLE_DIM)] * pl_module.ens_comm_subgroup_size,
-                    mgroup=pl_module.ens_comm_subgroup,
+                pred = pred.clone(
+                    data=gather_tensor(
+                        pred.data.clone(),
+                        dim=TensorDim.ENSEMBLE_DIM,
+                        sizes=[pred.data.size(TensorDim.ENSEMBLE_DIM)] * pl_module.ens_comm_subgroup_size,
+                        mgroup=pl_module.ens_comm_subgroup,
+                    ),
                 )
 
             # Post-process for metrics (in physical space)
@@ -108,11 +110,10 @@ class PerTimestepMetrics(Callback):
 
             for t in range(n_timesteps):
                 # Slice single timestep: remove time dim
-                pred_t = pred[:, t : t + 1, :, :, :]  # keep time dim for post-processor
-                target_t = target[:, t : t + 1, :, :, :]
+                pred_t = pred.select(time=slice(t, t + 1))
+                target_t_post = target_physical.select(time=slice(t, t + 1))
 
                 pred_t_post = post_processor(pred_t, in_place=False)
-                target_t_post = post_processor(target_t, in_place=False)
 
                 for metric_name, metric in metrics_dict.items():
                     if not isinstance(metric, BaseLoss):

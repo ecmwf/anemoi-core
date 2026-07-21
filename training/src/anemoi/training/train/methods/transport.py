@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -25,6 +26,9 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
+if TYPE_CHECKING:
+    from anemoi.models.data import Batch
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -36,8 +40,8 @@ class PredictionMode:
 
     def prepare_target(
         self,
-        batch: dict[str, torch.Tensor],
-        x: dict[str, torch.Tensor],
+        batch: Batch,
+        x: Batch,
     ) -> PreparedPredictionTarget:
         raise NotImplementedError
 
@@ -55,25 +59,30 @@ class PredictionMode:
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
 
-    def _reference_state_target_space(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _reference_state_target_space(self, x: Batch) -> dict[str, torch.Tensor]:
         # Use the latest input state as a source field, selecting the same
         # variables that the model predicts for the future state.
         reference: dict[str, torch.Tensor] = {}
-        for dataset_name, batch_dataset in batch.items():
-            var_idx = self.module.data_indices[dataset_name].data.output.full.to(device=batch_dataset.device)
-            reference_step = batch_dataset.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, var_idx)
+        for dataset_name, input_view in x.items():
+            output_names = self.module.data_indices[dataset_name].model.output.ordered_names
+            positions = torch.as_tensor(
+                [input_view.name_to_index[name] for name in output_names],
+                device=input_view.data.device,
+            )
+            reference_step = input_view.data.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, positions)
             if self.module.n_step_output > 1:
                 reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
             reference[dataset_name] = reference_step
-        return self.module.reduce_data_output_target_to_model_output(reference)
+        return reference
 
     def prepare_target(
         self,
-        batch: dict[str, torch.Tensor],
-        x: dict[str, torch.Tensor],
+        batch: Batch,
+        x: Batch,
     ) -> PreparedPredictionTarget:
-        del x
-        target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        raw_target, _ = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        target_batch = self.module.preprocess_targets(raw_target)
+        target_full = target_batch.data
         target_data_output = self.module.get_data_output_target(target_full)
         model_target = self.module.reduce_data_output_target_to_model_output(target_data_output)
         return PreparedPredictionTarget(
@@ -84,7 +93,8 @@ class StatePredictionMode(PredictionMode):
             aux={
                 # For state prediction, the reference source is already in the
                 # same state space as the target, so store it directly.
-                "transport_reference_source": self._reference_state_target_space(batch),
+                "transport_reference_source": self._reference_state_target_space(x),
+                "target_batch": target_batch,
             },
         )
 
@@ -233,11 +243,13 @@ class TendencyPredictionMode(PredictionMode):
 
     def prepare_target(
         self,
-        batch: dict[str, torch.Tensor],
-        x: dict[str, torch.Tensor],
+        batch: Batch,
+        x: Batch,
     ) -> PreparedPredictionTarget:
         """Build tendency targets for training and state targets for validation metrics."""
-        state_target = self.module.task.get_targets(batch)
+        raw_state_target, _ = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        state_target_batch = self.module.preprocess_targets(raw_state_target)
+        state_target = state_target_batch.data
         y_data_output = self.module.get_data_output_target(state_target)
 
         pre_processors_tendencies = getattr(self.module.model, "pre_processors_tendencies", None)
@@ -249,8 +261,8 @@ class TendencyPredictionMode(PredictionMode):
             raise AttributeError(msg)
 
         x_ref = self.module.model.model.apply_reference_state_truncation(
-            x,
-            self.module._grid_shard_sizes(x),
+            x.data,
+            {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
         )
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
@@ -269,10 +281,11 @@ class TendencyPredictionMode(PredictionMode):
                 # Build a reference-state source only if source.kind asks for it;
                 # Gaussian and zero sources do not need this projection.
                 "transport_reference_source": lambda: reference_state_sampling_source(
-                    x,
+                    x.data,
                     data_indices=self.module.data_indices,
                     n_step_output=self.module.n_step_output,
                 ),
+                "target_batch": state_target_batch,
             },
         )
 
@@ -469,7 +482,7 @@ class TransportTraining(BaseTransportTraining):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch,
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
@@ -497,11 +510,11 @@ class TransportTraining(BaseTransportTraining):
 
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Run one training or validation step for the selected transport objective."""
-        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         prepared_target = self.prediction_mode.prepare_target(batch, x)
         prepared_objective = self.transport_objective.prepare(prepared_target)
 
@@ -523,12 +536,18 @@ class TransportTraining(BaseTransportTraining):
             metric_prediction = self.prediction_mode.reconstruct_prediction(endpoint_prediction, prepared_target)
             metric_target = self.prediction_mode.prepare_metric_target(prepared_target)
 
+        target_batch = prepared_target.aux["target_batch"]
+        loss_prediction_batch = target_batch.with_data(loss_prediction)
+        loss_target_batch = target_batch.with_data(prepared_objective.loss_target)
+        metric_prediction_batch = None if metric_prediction is None else target_batch.with_data(metric_prediction)
+        metric_target_batch = None if metric_target is None else target_batch.with_data(metric_target)
+
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
-            loss_prediction,
-            prepared_objective.loss_target,
-            metric_prediction=metric_prediction,
-            metric_target=metric_target,
+            loss_prediction_batch,
+            loss_target_batch,
+            metric_prediction=metric_prediction_batch,
+            metric_target=metric_target_batch,
             weights=prepared_objective.weights,
             validation_mode=validation_mode,
             pred_layout=prepared_objective.pred_layout,

@@ -230,22 +230,26 @@ class EnsembleTraining(BaseTrainingModule):
 
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        first_payload = next(iter(batch.data.values()))
+        dtype = first_payload[0].dtype if isinstance(first_payload, list) else first_payload.dtype
+        loss = torch.zeros(1, dtype=dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
-        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for task_step_kwargs in task_steps:
-            y_pred = self(x, **task_step_kwargs)
+            raw_y, target = self.task.get_targets(batch, data_indices=self.data_indices, **task_step_kwargs)
+            y, rollout_values = self.preprocess_rollout_targets(raw_y)
+            target = self.preprocess_inputs(target)
 
-            y = self.task.get_targets(batch, **task_step_kwargs)
+            y_pred = self(x, target=target, **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -262,7 +266,7 @@ class EnsembleTraining(BaseTrainingModule):
             x = self.task.advance_input(
                 x,
                 y_pred,
-                batch,
+                rollout_values,
                 **task_step_kwargs,
                 data_indices=self.data_indices,
                 output_mask=self.output_mask,

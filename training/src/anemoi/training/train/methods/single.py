@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -18,6 +19,9 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Batch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,19 +31,23 @@ class SingleTraining(BaseTrainingModule):
 
     def _step(
         self,
-        batch: "Batch",
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        first_payload = next(iter(batch.data.values()))
+        dtype = first_payload[0].dtype if isinstance(first_payload, list) else first_payload.dtype
+        loss = torch.zeros(1, dtype=dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []
 
-        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for task_kwargs in task_steps:
-            y, target = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+            raw_y, target = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+            y, rollout_values = self.preprocess_rollout_targets(raw_y)
+            target = self.preprocess_inputs(target)
 
             y_pred = self(x, target=target)
 
@@ -58,7 +66,7 @@ class SingleTraining(BaseTrainingModule):
             x = self.task.advance_input(
                 x,
                 y_preds_next,
-                batch,
+                rollout_values,
                 **task_kwargs,
                 data_indices=self.data_indices,
                 output_mask=self.output_mask,
