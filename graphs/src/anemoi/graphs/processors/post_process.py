@@ -22,7 +22,7 @@ from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -338,7 +338,7 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
             edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
 
         # Hydra-free build of each edge-attribute spec (already-built objects pass through).
-        parametrisation = DictParametrisation()
+        parametrisation = Parametrisation.from_dict()
         for attr_name, edge_attr_builder in edge_attributes.items():
             LOGGER.info(f"Recomputing edge attribute {attr_name}.")
             graph[self.edges_name][attr_name] = parametrisation.create_module(edge_attr_builder)(

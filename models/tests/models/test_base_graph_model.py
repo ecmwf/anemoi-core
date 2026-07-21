@@ -13,7 +13,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.models.models.base import BaseGraphModel
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 class DummyGraphModel(BaseGraphModel):
@@ -72,7 +72,7 @@ def _make_hierarchical_graph() -> HeteroData:
 
 
 def test_base_graph_model_builds_with_json_parametrisation() -> None:
-    params = DictParametrisation(
+    params = Parametrisation.from_dict(
         {
             "model": {
                 "num_channels": 8,
@@ -106,7 +106,7 @@ def test_base_graph_model_builds_with_json_parametrisation() -> None:
 
 
 def test_base_graph_model_accepts_hidden_node_lists() -> None:
-    params = DictParametrisation(
+    params = Parametrisation.from_dict(
         {
             "model": {
                 "num_channels": 8,

@@ -22,7 +22,7 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 @dataclass
@@ -35,7 +35,7 @@ class GraphTransformerProcessorConfig:
     attn_channels: int | None = None
     qk_norm: bool = True
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DictParametrisation) = None
+    layer_kernels: field(default_factory=Parametrisation.from_dict) = None
     graph_attention_backend: str = "pyg"
     edge_dim: int = None  # Will be set from graph_provider
     edge_pre_mlp: bool = False

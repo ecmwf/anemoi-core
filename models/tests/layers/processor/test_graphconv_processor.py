@@ -21,7 +21,7 @@ from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 @dataclass
@@ -31,7 +31,7 @@ class GNNProcessorInit:
     num_chunks: int = 2
     mlp_extra_layers: int = 0
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DictParametrisation) = None
+    layer_kernels: field(default_factory=Parametrisation.from_dict) = None
     edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):

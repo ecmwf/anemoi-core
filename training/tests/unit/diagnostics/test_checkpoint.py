@@ -24,13 +24,13 @@ from torch import nn
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.checkpoints import load_metadata
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 class DummyModel(torch.nn.Module):
     """Dummy pytorch model for testing."""
 
-    def __init__(self, *, params: DictParametrisation, metadata: dict):
+    def __init__(self, *, params: Parametrisation, metadata: dict):
         super().__init__()
 
         self.params = params
@@ -49,7 +49,7 @@ class DummyModel(torch.nn.Module):
 class DummyModule(BoringModel):
     """Dummy lightning module for testing."""
 
-    def __init__(self, *, params: DictParametrisation, metadata: dict) -> None:
+    def __init__(self, *, params: Parametrisation, metadata: dict) -> None:
         super().__init__()
         self.model = DummyModel(params=params, metadata=metadata)
         self.save_hyperparameters()
@@ -65,9 +65,9 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def config() -> DictConfig:
+def params() -> Parametrisation:
     config = DictConfig({"diagnostics": {"log": {"wandb": {"enabled": False}, "mlflow": {"enabled": False}}}})
-    return DictParametrisation(map_config_to_primitives(OmegaConf.to_container(config, resolve=True)))
+    return Parametrisation.from_dict(map_config_to_primitives(OmegaConf.to_container(config, resolve=True)))
 
 
 @pytest.fixture
@@ -176,19 +176,19 @@ def test_time_based_checkpoint_skip_logic_after_interval(tmp_path: Path) -> None
 
 
 @pytest.fixture
-def metadata(config: DictConfig) -> dict:
+def metadata(params: Parametrisation) -> dict:
     return map_config_to_primitives(
         {
-            "config": config,
+            "config": params.to_dict(),
         },
     )
 
 
 @pytest.fixture
-def model(metadata: dict, config: DictConfig) -> DummyModule:
+def model(metadata: dict, params: Parametrisation) -> DummyModule:
     kwargs = {
         "metadata": metadata,
-        "params": config,
+        "params": params,
     }
     return DummyModule(**kwargs)
 

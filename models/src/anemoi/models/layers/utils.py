@@ -15,7 +15,8 @@ from typing import Any
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import DictParametrisationBase
+from anemoi.utils.parametrisation import Parametrisation
 from anemoi.utils.parametrisation import ParametrisationError
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ _DEFAULT_KERNELS = {
 }
 
 
-class LayerKernels(DictParametrisation):
+class LayerKernels(DictParametrisationBase):
     """A :class:`~anemoi.utils.parametrisation.Parametrisation` of layer kernels.
 
     Holds the (JSON-serialisable) kernel config and exposes the built partial factories by
@@ -57,7 +58,7 @@ class LayerKernels(DictParametrisation):
     """
 
     def __init__(self, kernel_config: Any = None, instance: bool = True) -> None:
-        if isinstance(kernel_config, DictParametrisation):
+        if isinstance(kernel_config, Parametrisation):
             kernel_config = kernel_config.to_dict()
         merged = {**_DEFAULT_KERNELS, **(dict(kernel_config) if kernel_config else {})}
         super().__init__(merged)

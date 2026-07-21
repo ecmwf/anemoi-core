@@ -22,7 +22,7 @@ from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBaseMapper
 from anemoi.models.layers.mapper import GraphTransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 class ConcreteGraphTransformerBaseMapper(GraphTransformerBaseMapper):
@@ -47,7 +47,7 @@ class MapperConfig:
     attn_channels: int | None = None
     qk_norm: bool = True
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DictParametrisation) = None
+    layer_kernels: field(default_factory=Parametrisation.from_dict) = None
     shard_strategy: str = "edges"
     graph_attention_backend: str = "pyg"
     edge_dim: int = None  # Will be set from graph_provider

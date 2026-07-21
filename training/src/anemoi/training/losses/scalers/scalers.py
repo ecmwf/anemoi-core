@@ -14,7 +14,6 @@ from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.parametrisation import HydraParametrisation
-from anemoi.utils.parametrisation import DictParametrisation
 from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ def create_scalers(
 ) -> tuple[dict[str, TENSOR_SPEC], dict[str, BaseUpdatingScaler]]:
     # Accept a Parametrisation or a raw config mapping (normalised to one).
     if not isinstance(scalers_config, Parametrisation):
-        scalers_config = DictParametrisation(scalers_config)
+        scalers_config = Parametrisation.from_dict(scalers_config)
 
     scalers, updating_scalars = {}, {}
     for name, config in scalers_config.to_dict().items():

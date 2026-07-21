@@ -20,7 +20,6 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.processors.post_process import PostProcessor
-from anemoi.utils.parametrisation import DictParametrisation
 from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
@@ -172,13 +171,13 @@ class GraphCreator(GraphBuilder):
             case Parametrisation():
                 params = config
             case str() | Path():
-                params = DictParametrisation(OmegaConf.to_container(OmegaConf.load(config), resolve=True))
+                params = Parametrisation.from_dict(OmegaConf.to_container(OmegaConf.load(config), resolve=True))
             case DictConfig():
-                params = DictParametrisation(OmegaConf.to_container(config, resolve=True))
+                params = Parametrisation.from_dict(OmegaConf.to_container(config, resolve=True))
             case _:
-                params = DictParametrisation(dict(config))
+                params = Parametrisation.from_dict(dict(config))
 
-        self.config = params.to_dict()
+        self.params = params
 
         super().__init__(
             nodes=_parse_nodes(params),

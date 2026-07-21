@@ -54,7 +54,7 @@ import torch
 
 from anemoi.models.checkpoint import build_model_inputs
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ def rebuild_model(checkpoint_path: str) -> AnemoiModelInterface:
     # 1. Assemble ALL constructor inputs from the JSON metadata only -- no unpickling.
     #    config + rebuilt data_indices + placeholder graph/statistics (filled by the weights).
     inputs = build_model_inputs(checkpoint_path)
-    params = DictParametrisation(inputs.pop("config"))
+    params = Parametrisation.from_dict(inputs.pop("config"))
 
     # 2. Rebuild the model -- create_module builds every sub-module without Hydra.
     model = AnemoiModelInterface(params=params, **inputs)

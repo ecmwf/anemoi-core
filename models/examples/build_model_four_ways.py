@@ -47,7 +47,7 @@ from anemoi.graphs.nodes.builders.from_reduced_gaussian import ReducedGaussianGr
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 NUM_CHANNELS = 16
 SKIP_CONNECTION = "anemoi.models.layers.residual.SkipConnection"
@@ -75,7 +75,7 @@ def make_graph() -> HeteroData:
     return GraphBuilder(nodes=[data_nodes, hidden_nodes], edges=edges).create()
 
 
-def make_parametrisation() -> DictParametrisation:
+def make_parametrisation() -> Parametrisation:
     """A small model parametrisation (what training would build from the dataset)."""
     layer = dict(
         num_chunks=1,
@@ -85,7 +85,7 @@ def make_parametrisation() -> DictParametrisation:
         trainable_size=0,
         layer_kernels={},  # empty -> torch.nn defaults (Linear/LayerNorm/GELU)
     )
-    return DictParametrisation(
+    return Parametrisation.from_dict(
         {
             "model": {
                 "num_channels": NUM_CHANNELS,

@@ -17,7 +17,7 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.mapper import PointWiseBackwardMapper
 from anemoi.models.layers.mapper import PointWiseForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 @dataclass
@@ -28,7 +28,7 @@ class PointWiseMapperConfig:
     out_channels_dst: int = 5
     cpu_offload: bool = False
     gradient_checkpointing: bool = True
-    layer_kernels: field(default_factory=DictParametrisation) = None
+    layer_kernels: field(default_factory=Parametrisation.from_dict) = None
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

@@ -19,7 +19,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.processor import PointWiseMLPProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 
 @dataclass
@@ -30,7 +30,7 @@ class PointWiseMLPProcessorConfig:
     mlp_hidden_ratio: int = 4
     dropout_p: float = 0.1
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DictParametrisation) = None
+    layer_kernels: field(default_factory=Parametrisation.from_dict) = None
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

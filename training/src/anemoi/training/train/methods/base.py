@@ -41,10 +41,10 @@ from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
-from anemoi.training.parametrisation import TrainingParametrisation
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+from anemoi.utils.parametrisation import Parametrisation
 
 _chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 _trainable_edge_perm_fix_migration = importlib.import_module(
@@ -184,10 +184,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
-        # All object construction goes through the Parametrisation. TrainingParametrisation is
-        # Hydra-backed (create_module -> hydra.utils.instantiate), so this matches current
-        # practice; at inference the same parametrisation is rebuilt from checkpoint JSON.
-        self.parametrisation = TrainingParametrisation.from_config(config)
+        # The model is built through a Parametrisation. The (resolved) OmegaConf config is
+        # handed over as a Hydra-free DictParametrisation via Parametrisation.from_dict, so the
+        # model can be rebuilt identically at inference from the checkpoint JSON (no Hydra).
+        self.parametrisation: Parametrisation = Parametrisation.from_dict(OmegaConf.to_container(config, resolve=True))
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {
