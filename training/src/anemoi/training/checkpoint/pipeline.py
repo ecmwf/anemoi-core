@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -25,11 +25,12 @@ Example
 -------
 >>> from anemoi.training.checkpoint import CheckpointPipeline, CheckpointContext
 >>> from anemoi.training.checkpoint.sources import LocalSource
->>> from anemoi.training.checkpoint.loading import LoadingStrategy
+>>> from anemoi.training.checkpoint.loading import WeightsOnlyLoader
 >>>
 >>> # Build a pipeline manually
 >>> pipeline = CheckpointPipeline([
 ...     LocalSource(path='/tmp/checkpoint.pt'),
+...     WeightsOnlyLoader(strict=False),
 ... ])
 >>>
 >>> # Or build from Hydra config
@@ -38,6 +39,8 @@ Example
 ...     'stages': [
 ...         {'_target_': 'anemoi.training.checkpoint.sources.LocalSource',
 ...          'path': '/tmp/checkpoint.pt'},
+...         {'_target_': 'anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader',
+...          'strict': False}
 ...     ]
 ... })
 >>> pipeline = CheckpointPipeline.from_config(config)
@@ -541,9 +544,11 @@ class CheckpointPipeline:
     async def execute(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute the pipeline.
 
-        Main entry point for pipeline execution. Uses async or sync
-        execution based on the async_execution flag. This method can
-        be called from both async and sync contexts.
+        Main entry point for pipeline execution. This method is always
+        asynchronous and delegates to :meth:`execute_async`; await it from
+        an async context, or wrap it with ``asyncio.run`` from a sync one.
+        Use :meth:`execute_sync` if you need a blocking call that manages
+        the event loop for you.
 
         Parameters
         ----------

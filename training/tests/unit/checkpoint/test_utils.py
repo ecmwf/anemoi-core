@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -387,7 +387,7 @@ class TestValidateCheckpoint:
             },
         }
 
-        assert validate_checkpoint(checkpoint) is True
+        assert validate_checkpoint(checkpoint, check_tensors=True) is True
 
     @pytest.mark.unit
     def test_validate_checkpoint_nested_nan_tensors(self) -> None:

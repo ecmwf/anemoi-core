@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -44,6 +44,7 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
@@ -222,7 +223,19 @@ class AnemoiTrainer(ABC):
                     and hasattr(data_node_cfg, "node_builder")
                     and hasattr(data_node_cfg.node_builder, "dataset")
                 ):
-                    data_node_cfg.node_builder.dataset = dataset_path
+                    # Build the dataset value for the graph node builder.
+                    # Start with the bare dataset path, then merge any keys from
+                    # dataset_config that are not part of DatasetConfigSchema
+                    # (e.g. check_variables_compatibility).  Schema-managed keys
+                    # are excluded to avoid forwarding complex validated objects
+                    # or None defaults (e.g. select: None, frequency: Frequency(...)).
+                    graph_dataset_value: str | dict = {"dataset": dataset_path}
+                    if isinstance(reader_cfg, (DictConfig, dict)):
+                        _schema_keys = set(DatasetConfigSchema.model_fields.keys())
+                        graph_dataset_value.update(
+                            {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
+                        )
+                    data_node_cfg.node_builder.dataset = graph_dataset_value
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
@@ -330,7 +343,11 @@ class AnemoiTrainer(ABC):
         from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
         ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
-        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata)
+        compat_cfg = self.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
 
     @cached_property
     def model(self) -> pl.LightningModule:
@@ -361,11 +378,16 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
+
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu,
+                # The model will be sent to GPU when trainer.fit() is called
                 model = training_method_cls.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",
                 )
 
             model.data_indices = self.data_indices
@@ -378,8 +400,11 @@ class AnemoiTrainer(ABC):
             # Freeze the chosen model weights
             LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
             for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
-                LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                is_found = freeze_submodule_by_name(model.model.model, submodule_name)
+                if is_found:
+                    LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                else:
+                    LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
 
         return model
 
@@ -540,6 +565,22 @@ class AnemoiTrainer(ABC):
 
         if self.config.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
+        # For GPU, check if 'cuda' is available
+        # For historical reasons, on AMD GPUs the API is still called 'cuda' even though ROCm is used.
+        if (
+            self.config.system.hardware.accelerator == "gpu" or self.config.system.hardware.accelerator == "cuda"
+        ) and not torch.cuda.is_available():
+            msg = (
+                "GPU accelerator requested but running on GPUs is not possible. "
+                "Possible reasons include no GPUs being available on the node,"
+                "or PyTorch not being installed with CUDA/ROCm support. "
+                "*Note* on aarch64 systems, the default torch wheel does not have CUDA/ROCm support."
+                "To install PyTorch with CUDA support on aarch64, you should pass the index-url argument to pip install"
+                "e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`"
+                "Please check your setup and run "
+                "`python -c 'import torch; print(torch.cuda.is_available())'` to confirm GPU support.",
+            )
+            raise RuntimeError(msg)
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
@@ -714,7 +755,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

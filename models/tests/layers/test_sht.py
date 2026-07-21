@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -60,7 +60,7 @@ def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
     raise ValueError(f"Unknown grid_kind={grid_kind!r}")
 
 
-@pytest.fixture(params=["regular", "reduced", "octahedral"])
+@pytest.fixture
 def sht_setup(request):
     # Choose GPUs if available
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -94,6 +94,7 @@ def sht_setup(request):
     }
 
 
+@pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
 def test_idempotency_direct_inverse(sht_setup):
     """Direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
@@ -111,6 +112,7 @@ def test_idempotency_direct_inverse(sht_setup):
     assert torch.allclose(before, after, rtol=tolerance)
 
 
+@pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
 def test_idempotency_inverse_direct(sht_setup):
     """Inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]

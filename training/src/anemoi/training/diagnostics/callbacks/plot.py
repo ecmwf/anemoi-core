@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -66,9 +66,16 @@ class PlottingSettings(PydanticBaseModel):
     @classmethod
     def from_plot_config(cls, plot_cfg: DictConfig, save_basedir: str | Path | None) -> "PlottingSettings":
         """Construct from a validated diagnostics.plot config node."""
+        projection_kind = plot_cfg.projection_kind
+        if plot_cfg.datashader and projection_kind != "equirectangular":
+            LOGGER.warning(
+                "datashader=True requires equirectangular projection; ignoring projection_kind=%s",
+                projection_kind,
+            )
+            projection_kind = "equirectangular"
         return cls(
             datashader=plot_cfg.datashader,
-            projection_kind=plot_cfg.projection_kind,
+            projection_kind=projection_kind,
             asynchronous=plot_cfg.asynchronous,
             save_basedir=save_basedir,
             colormaps=OmegaConf.select(plot_cfg, "colormaps", default=None),
@@ -408,6 +415,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
+                processed_cache={},
                 **plot_kwargs,
                 **kwargs,
             )
@@ -734,9 +742,10 @@ class PlotLoss(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
+        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
-        _ = batch_idx
+        _ = batch_idx, processed_cache
 
         if self.latlons is None:
             self.latlons = {}
@@ -763,6 +772,10 @@ class PlotLoss(BasePerBatchPlotCallback):
                     RuntimeWarning,
                 )
 
+            sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
+                parameter_names,
+            )
+
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs.predictions[i][dataset_name]
                 y_true = pl_module.task.get_targets(
@@ -783,9 +796,6 @@ class PlotLoss(BasePerBatchPlotCallback):
                     .numpy(),
                 )
 
-                sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
-                    parameter_names,
-                )
                 loss = loss[argsort_indices]
                 fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
 
@@ -876,8 +886,13 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         members: int | list[int] | None = 0,
+        processed_cache: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
+
+        Results are cached in ``processed_cache`` when provided, keyed by ``(dataset_name, members)``.
+        Subsequent calls with the same key return the cached result without recomputation, avoiding
+        redundant post-processing when multiple callbacks process the same batch.
 
         Parameters
         ----------
@@ -893,11 +908,16 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         members : int | list[int] | None, optional
             Ensemble members to select. Only used when the plot adapter is ensemble-aware.
             None returns all members. Default is 0 (first member).
+        processed_cache : dict | None, optional
+            Optional dict for caching computed results across callbacks within the same batch.
+            Should be created fresh per batch (e.g. in ``on_validation_batch_end``) so that
+            it is not shared across batches. Safe for async execution since each batch
+            invocation captures its own dict. Default is None (no caching).
 
         Returns
         -------
         tuple[np.ndarray, np.ndarray]
-            The data and output tensors for plotting.
+            The post-processed input data and output tensor for plotting.
         """
         if self.latlons is None:
             self.latlons = {}
@@ -910,6 +930,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             outputs.predictions,
             list,
         ), "outputs.predictions must be a list of per-step dicts."
+
+        members_key = tuple(members) if isinstance(members, list) else members
+        cache_key = (dataset_name, members_key)
+        if processed_cache is not None and cache_key in processed_cache:
+            return processed_cache[cache_key]
 
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
@@ -926,7 +951,10 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
         data = data.numpy()
 
-        return data, output_tensor
+        result = (data, output_tensor)
+        if processed_cache is not None:
+            processed_cache[cache_key] = result
+        return result
 
     def process_output_tensor(
         self,
@@ -1060,6 +1088,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch_idx: int,
         epoch: int,
         auxiliary_output: dict[str, torch.Tensor] | None = None,
+        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
 
@@ -1082,6 +1111,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                 outputs,
                 batch,
                 members=self._get_process_members(),
+                processed_cache=processed_cache,
             )
             auxiliary_tensor = (
                 None
@@ -1122,7 +1152,8 @@ class PlotSample(BasePlotAdditionalMetrics):
                     )
                 }
 
-            for x, y_true, y_pred, tag_suffix in pl_module.plot_adapter.iter_plot_samples(data, output_tensor):
+            plot_samples = list(pl_module.plot_adapter.iter_plot_samples(data, output_tensor))
+            for x, y_true, y_pred, tag_suffix in plot_samples:
                 auxiliary = auxiliary_by_suffix.get(tag_suffix)
                 fig = self._make_figure(
                     plot_parameters_dict,
@@ -1320,12 +1351,13 @@ class PlotSpectrum(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
+        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
 
         local_rank = pl_module.local_rank
         for dataset_name in dataset_names:
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, processed_cache=processed_cache)
 
             # Apply spatial mask
             latlons, data, output_tensor = self.focus_mask.apply(
@@ -1435,6 +1467,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
+        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
 
@@ -1442,7 +1475,7 @@ class PlotHistogram(BasePlotAdditionalMetrics):
 
         for dataset_name in dataset_names:
 
-            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch)
+            data, output_tensor = self.process(pl_module, dataset_name, outputs, batch, processed_cache=processed_cache)
 
             # Build dictionary of indices and parameters to be plotted
             input_data = pl_module.data_indices[dataset_name].data.input.todict()
