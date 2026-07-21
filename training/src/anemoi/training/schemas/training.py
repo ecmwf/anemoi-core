@@ -360,39 +360,9 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
         return self
 
 
-class TimeAggregateLossWrapperSchema(BaseModel):
-    """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
-
-    target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
-    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
-    "Time aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: BaseLossSchema | CRPSSchema
-    "Inner loss function applied to each time-aggregated output."
-    scalers: list[str] | None = None
-    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
-
-    @field_validator("loss_fn", mode="before")
-    @classmethod
-    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
-        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
-
-        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
-        """
-        if isinstance(v, dict) and "scalers" not in v:
-            v["scalers"] = []
-        else:
-            from omegaconf import DictConfig
-            from omegaconf.omegaconf import open_dict
-
-            if isinstance(v, DictConfig) and "scalers" not in v:
-                with open_dict(v):
-                    v["scalers"] = []
-        return v
-
-
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: CRPSSchema | TimeAggregateLossWrapperSchema | BaseLossSchema
+    per_scale_loss: CRPSSchema | BaseLossSchema
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
     # Deprecated: pass inside multiscale_config instead.
@@ -429,6 +399,36 @@ class MultiScaleLossSchema(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+
+class TimeAggregateLossWrapperSchema(BaseModel):
+    """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
+
+    target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
+    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
+    "Time aggregation operations to apply over the time dimension before computing the loss."
+    loss_fn: BaseLossSchema | CRPSSchema
+    "Inner loss function applied to each time-aggregated output."
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+
+    @field_validator("loss_fn", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
+
+        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
+        """
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
 
 
 class HuberLossSchema(BaseLossSchema):
