@@ -12,12 +12,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import Any
 
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 
 def instantiate_with_runtime_kwargs(instantiate_config: DictConfig, **runtime_kwargs: Any) -> Any:

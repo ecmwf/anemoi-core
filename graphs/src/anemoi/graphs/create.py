@@ -20,12 +20,13 @@ from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.processors.post_process import PostProcessor
 from anemoi.utils.config import DotDict
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
-# Config specs are built into objects through a (stateless) parametrisation, not Hydra.
-_PARAMETRISATION = DictParametrisation()
+# Config specs are built into objects through a Hydra-backed parametrisation
+# (create_module -> hydra.utils.instantiate), matching current practice.
+_PARAMETRISATION = HydraParametrisation()
 
 
 class GraphBuilder:

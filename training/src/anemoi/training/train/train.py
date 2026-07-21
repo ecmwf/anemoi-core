@@ -49,14 +49,14 @@ from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 from anemoi.utils.parametrisation import get_class
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
 
-# Object construction goes through a (stateless) Parametrisation rather than Hydra.
-_PARAMETRISATION = DictParametrisation()
+# Object construction goes through a Hydra-backed Parametrisation (current practice).
+_PARAMETRISATION = HydraParametrisation()
 
 PL_VERSION = version.parse(pl.__version__)
 

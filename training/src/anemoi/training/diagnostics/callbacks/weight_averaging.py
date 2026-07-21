@@ -24,13 +24,13 @@ from torch.optim.swa_utils import AveragedModel as _TorchAveragedModel
 from torch.optim.swa_utils import get_ema_avg_fn
 from torch.optim.swa_utils import get_swa_avg_fn
 
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
 MIN_PL_VERSION = "2.6.0"
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 
 class _UpdateModelPlan(NamedTuple):

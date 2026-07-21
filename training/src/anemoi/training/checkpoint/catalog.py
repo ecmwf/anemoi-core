@@ -35,13 +35,13 @@ Example
 >>> 'anemoi.training.checkpoint.sources.S3Source'
 >>>
 >>> # Create component from a config spec via a Parametrisation
->>> from anemoi.utils.parametrisation import DictParametrisation
+>>> from anemoi.utils.parametrisation import HydraParametrisation
 >>> config = {
 ...     '_target_': 'anemoi.training.checkpoint.sources.S3Source',
 ...     'bucket': 'my-bucket',
 ...     'key': 'model.ckpt'
 ... }
->>> source = DictParametrisation().create_module(config)
+>>> source = HydraParametrisation().create_module(config)
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ class ComponentCatalog:
     ...     '_target_': 'anemoi.training.checkpoint.sources.S3Source',
     ...     'bucket': 'my-bucket'
     ... }
-    >>> source = DictParametrisation().create_module(config)
+    >>> source = HydraParametrisation().create_module(config)
 
     See Also
     --------

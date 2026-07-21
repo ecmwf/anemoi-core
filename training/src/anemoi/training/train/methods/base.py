@@ -184,8 +184,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
-        # All object construction goes through a Parametrisation (Hydra-free). Training still
-        # owns the OmegaConf config; the parametrisation is a resolved, JSON-serialisable view.
+        # All object construction goes through the Parametrisation. TrainingParametrisation is
+        # Hydra-backed (create_module -> hydra.utils.instantiate), so this matches current
+        # practice; at inference the same parametrisation is rebuilt from checkpoint JSON.
         self.parametrisation = TrainingParametrisation.from_config(config)
 
         # Create output_mask dictionary for each dataset

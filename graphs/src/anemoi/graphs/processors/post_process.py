@@ -22,11 +22,11 @@ from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 
 class PostProcessor(ABC):

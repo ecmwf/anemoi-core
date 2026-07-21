@@ -96,9 +96,9 @@ from typing import Union
 
 from omegaconf import DictConfig
 
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 if TYPE_CHECKING:
     from .base import CheckpointContext
@@ -220,7 +220,7 @@ class CheckpointPipeline:
         instantiated = []
         for i, stage in enumerate(stages):
             if isinstance(stage, dict | DictConfig):
-                # Build the stage from its config spec (Hydra-free)
+                # Build the stage from its config spec via Hydra (create_module)
                 try:
                     instantiated_stage = _PARAMETRISATION.create_module(stage)
                     instantiated.append(instantiated_stage)

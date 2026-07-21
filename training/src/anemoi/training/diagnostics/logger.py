@@ -14,11 +14,11 @@ import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 
 def get_mlflow_logger(

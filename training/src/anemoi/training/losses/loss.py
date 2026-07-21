@@ -22,12 +22,12 @@ from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 from anemoi.utils.parametrisation import get_class
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]

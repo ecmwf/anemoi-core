@@ -14,11 +14,11 @@ from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.utils.config import DotDict
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
-_PARAMETRISATION = DictParametrisation()
+_PARAMETRISATION = HydraParametrisation()
 
 
 def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, TENSOR_SPEC], dict[str, BaseUpdatingScaler]]:

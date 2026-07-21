@@ -16,13 +16,14 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.utils.config import DotDict
-from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import HydraParametrisation
 from anemoi.utils.parametrisation import ParametrisationError
 
 LOGGER = logging.getLogger(__name__)
 
-# Layer kernels are leaf factories; build them through a stateless parametrisation.
-_PARAMETRISATION = DictParametrisation()
+# Layer kernels are leaf factories, built through a Hydra-backed parametrisation
+# (create_module -> hydra.utils.instantiate), matching current practice.
+_PARAMETRISATION = HydraParametrisation()
 
 
 def compute_mlp_hidden_dim(num_channels: int, mlp_hidden_ratio: float) -> int:
