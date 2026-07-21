@@ -341,10 +341,11 @@ class LossVariableMapper(BaseLossWrapper):
         pred_filtered = pred[..., pred_indices]
         target_filtered = target[..., target_indices]
 
-        # torch.compile performance change
-        # Make contiguous to prevent a changing stride forcing specialisation
-        pred_filtered = pred_filtered.contiguous()
-        target_filtered = target_filtered.contiguous()
+        if torch.compiler.is_compiling():
+            # torch.compile performance change
+            # Make contiguous to prevent a changing stride forcing specialisation
+            pred_filtered = pred_filtered.contiguous()
+            target_filtered = target_filtered.contiguous()
 
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(
