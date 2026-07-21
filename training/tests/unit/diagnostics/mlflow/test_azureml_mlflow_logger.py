@@ -26,19 +26,19 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def tmp_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: str) -> Path:
-    uri = (Path(tmp_path) / "mlruns").as_uri()
+def tmp_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: str) -> str:
+    uri = f"sqlite:///{Path(tmp_path) / 'mlflow.db'}"
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     return uri
 
 
 @pytest.fixture
-def tmp_client(tmp_uri: Path) -> MlflowClient:
+def tmp_client(tmp_uri: str) -> MlflowClient:
     return MlflowClient(tmp_uri)
 
 
 @pytest.fixture
-def default_logger(tmp_path: str, tmp_uri: Path) -> AnemoiAzureMLflowLogger:
+def default_logger(tmp_path: str, tmp_uri: str) -> AnemoiAzureMLflowLogger:
     return AnemoiAzureMLflowLogger(
         identity=AzureIdentity("managed"),
         experiment_name="test_experiment",
