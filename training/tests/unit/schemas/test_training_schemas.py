@@ -110,11 +110,27 @@ def test_multiscale_config_on_the_fly_requires_base_parameters_with_num_scales()
 
 
 def test_multiscale_loss_disk_mode_valid() -> None:
-    MultiScaleLossSchema(**{**_MULTISCALE_BASE, "multiscale_config": {"loss_matrices": ["filter.npz", None]}})
+    MultiScaleLossSchema(
+        **{
+            **_MULTISCALE_BASE,
+            "multiscale_config": {"loss_matrices": ["filter.npz", None]},
+        },
+    )
 
 
 def test_multiscale_loss_on_the_fly_valid() -> None:
     MultiScaleLossSchema(**{**_MULTISCALE_BASE, "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG})
+
+
+def test_multiscale_loss_sparse_projector_num_chunks_defaults_to_one() -> None:
+    schema = MultiScaleLossSchema(**_MULTISCALE_BASE)
+    assert schema.sparse_projector_num_chunks == 1
+
+    schema = MultiScaleLossSchema(**{**_MULTISCALE_BASE, "sparse_projector_num_chunks": 2})
+    assert schema.sparse_projector_num_chunks == 2
+
+    with pytest.raises(ValidationError):
+        MultiScaleLossSchema(**{**_MULTISCALE_BASE, "sparse_projector_num_chunks": 0})
 
 
 def test_multiscale_loss_mixed_mode_rejected() -> None:
@@ -162,8 +178,14 @@ def test_combined_loss_with_scalers_valid() -> None:
         **{
             **_COMBINED_LOSS_BASE,
             "losses": [
-                {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["nan_mask_weights"]},
-                {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["nan_mask_weights"]},
+                {
+                    "_target_": "anemoi.training.losses.MSELoss",
+                    "scalers": ["nan_mask_weights"],
+                },
+                {
+                    "_target_": "anemoi.training.losses.MAELoss",
+                    "scalers": ["nan_mask_weights"],
+                },
             ],
             "loss_weights": [1.0, 1.0],
         },
@@ -175,7 +197,10 @@ def test_combined_loss_with_multiscale_valid() -> None:
         **{
             **_COMBINED_LOSS_BASE,
             "losses": [
-                {**_MULTISCALE_BASE, "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG},
+                {
+                    **_MULTISCALE_BASE,
+                    "multiscale_config": _ON_THE_FLY_MULTISCALE_CONFIG,
+                },
             ],
         },
     )

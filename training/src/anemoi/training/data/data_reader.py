@@ -466,13 +466,6 @@ class TrajectoryDataset(BaseAnemoiReader):
         )
         raise ValueError(msg)
 
-    def statistics_tendencies(
-        self,
-        timestep: int | str | datetime.timedelta | None = None,  # noqa: ARG002
-    ) -> dict | None:
-        """Tendency statistics are not defined for forecast datasets."""
-        return None
-
     def get_sample(
         self,
         sequence: int,

@@ -295,6 +295,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
+    recompile_limit: PositiveInt = 32
+    "How many times torch.compile will recompile a function for a given input shape."
 
 
 class NoOpNoiseInjectorSchema(BaseModel):

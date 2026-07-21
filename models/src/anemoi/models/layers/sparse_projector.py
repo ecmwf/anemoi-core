@@ -13,6 +13,8 @@ import torch
 class SparseProjector(torch.nn.Module):
     """Applies a sparse projection matrix to input tensors.
 
+    The projection matrix is provided by the GraphProvider in CSR format.
+
     Stateless: the matrix is passed to :meth:`forward`, not stored.
     """
 
@@ -27,34 +29,71 @@ class SparseProjector(torch.nn.Module):
         super().__init__()
         self.autocast = autocast
 
-    def forward(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        projection_matrix: torch.Tensor,
+        num_chunks: int = 1,
+    ) -> torch.Tensor:
         """Apply sparse projection.
 
         Parameters
         ----------
         x : torch.Tensor
-            Input tensor
+            Input tensor with shape ``[..., input_nodes, channels]``.
         projection_matrix : torch.Tensor
             Sparse projection matrix (assumed to be on the correct device)
+        num_chunks : int
+            Number of chunks to project with sparse matmul. ``1``
+            projects all in one matmul.
 
         Returns
         -------
         torch.Tensor
             Projected tensor
         """
-        out = []
-        with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
-            for i in range(x.shape[0]):
-                out.append(torch.sparse.mm(projection_matrix, x[i, ...]))
-        return torch.stack(out)
+        input_shape = x.shape
+        x = x.reshape(-1, *input_shape[-2:])
 
-    def project(self, batch: torch.Tensor, provider: object) -> torch.Tensor:
-        """Project ``batch`` of shape ``[..., nodes, vars]`` through the *provider*'s matrix.
+        try:
+            if num_chunks == 1:
+                out = self._project_flattened(x, projection_matrix)
+            else:
+                out = torch.cat(
+                    [self._project_flattened(chunk, projection_matrix) for chunk in torch.chunk(x, num_chunks, dim=0)],
+                    dim=0,
+                )
+        except torch.cuda.OutOfMemoryError as e:
+            raise torch.cuda.OutOfMemoryError(
+                f"Out of memory during sparse projection. Consider doubling the number of chunks (currently {num_chunks}). This will reduce memory usage at the cost of additional kernel launches, which can increase runtime. Original error: {e}"
+            ) from e
 
-        Handles arbitrary leading dimensions; the *provider* supplies the matrix via ``get_edges(device=...)``.
+        return out.reshape(*input_shape[:-2], *out.shape[-2:])
+
+    def _project_flattened(self, x: torch.Tensor, projection_matrix: torch.Tensor) -> torch.Tensor:
+        """Project an input whose leading dimensions have already been flattened.
+
+        Expected x shape: [flat_batch, input_nodes, channels]
+        projection_matrix shape: [output_nodes, input_nodes]
         """
-        input_shape = batch.shape
-        batch = batch.reshape(-1, *input_shape[-2:])
-        projection_matrix = provider.get_edges(device=batch.device)
-        batch = self(batch, projection_matrix)
-        return batch.reshape(*input_shape[:-2], *batch.shape[-2:])
+        batch_size = x.shape[0]
+        input_nodes = x.shape[1]
+        trailing_shape = x.shape[2:]
+
+        # [B, N, ...] -> [B, N, C]
+        x_flat = x.reshape(batch_size, input_nodes, -1)
+
+        # Move batch/features into the dense RHS columns:
+        # [B, N, C] -> [N, B, C] -> [N, B*C]
+        x_rhs = x_flat.permute(1, 0, 2).reshape(input_nodes, -1)
+
+        with torch.amp.autocast(device_type=x.device.type, enabled=self.autocast):
+            # One sparse matmul instead of B sparse matmuls:
+            # [M, N] @ [N, B*C] -> [M, B*C]
+            out = torch.sparse.mm(projection_matrix, x_rhs)
+
+        output_nodes = out.shape[0]
+
+        # [M, B*C] -> [M, B, C] -> [B, M, C] -> [B, M, ...]
+        out = out.reshape(output_nodes, batch_size, -1).permute(1, 0, 2)
+        return out.reshape(batch_size, output_nodes, *trailing_shape)
