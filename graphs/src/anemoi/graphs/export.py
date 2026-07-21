@@ -17,7 +17,6 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.utils.config import DotDict
 
 
 class GraphExporter:
@@ -25,26 +24,28 @@ class GraphExporter:
 
     def __init__(
         self,
-        graph: str | Path | HeteroData | dict | DotDict | DictConfig,
+        graph: str | Path | HeteroData | dict | DictConfig,
         output_path: str | Path,
         edges_name: Iterable[tuple[str, str, str]] = None,
         edge_attribute_name: str = None,
         **kwargs,
     ):
-        if isinstance(graph, HeteroData):
-            self.graph = graph
-        elif isinstance(graph, (Path, str)):
-            graph_path = Path(graph)
-            if graph_path.suffix == ".pt":
-                self.graph = torch.load(graph_path, weights_only=False, map_location="cpu")
-            elif graph_path.suffix in (".yaml", ".yml"):
+        match graph:
+            case HeteroData():
+                self.graph = graph
+            case str() | Path():
+                graph_path = Path(graph)
+                match graph_path.suffix:
+                    case ".pt":
+                        self.graph = torch.load(graph_path, weights_only=False, map_location="cpu")
+                    case ".yaml" | ".yml":
+                        self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
+                    case _:
+                        raise ValueError(
+                            "The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml / .yml)."
+                        )
+            case _:
                 self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
-            else:
-                raise ValueError(
-                    "The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml / .yml)."
-                )
-        else:
-            self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
 
         self.edges_name = self.graph.edge_types if edges_name is None else edges_name
         self.edge_attribute_name = edge_attribute_name

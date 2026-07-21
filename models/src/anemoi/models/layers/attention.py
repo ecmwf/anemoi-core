@@ -30,7 +30,7 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class MultiHeadSelfAttention(nn.Module):
         self,
         num_heads: int,
         embed_dim: int,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         attn_channels: Optional[int] = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,

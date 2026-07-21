@@ -23,8 +23,8 @@ from anemoi.training.diagnostics.callbacks.plot import PlottingSettings
 from anemoi.training.diagnostics.callbacks.provenance import ParentUUIDCallback
 from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.diagnostics.callbacks.weight_averaging import _get_weight_averaging_callback
+from anemoi.training.parametrisation import HydraParametrisation
 from anemoi.training.utils.checkpoint import RegisterMigrations
-from anemoi.utils.parametrisation import HydraParametrisation
 from anemoi.utils.parametrisation import ParametrisationError
 
 LOGGER = logging.getLogger(__name__)

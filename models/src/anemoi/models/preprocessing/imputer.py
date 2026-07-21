@@ -37,7 +37,7 @@ class BaseImputer(BasePreprocessor, ABC):
 
         Parameters
         ----------
-        config : DotDict
+        config : dict
             configuration object of the processor
         data_indices : IndexCollection
             Data indices for input and output variables

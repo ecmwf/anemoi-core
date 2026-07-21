@@ -17,7 +17,6 @@ from torch_geometric.data import HeteroData
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.utils.config import DotDict
 from anemoi.utils.parametrisation import Parametrisation
 
 
@@ -173,11 +172,11 @@ class AnemoiModelInterface(torch.nn.Module):
         self.pre_processors_tendencies = torch.nn.ModuleDict()
         self.post_processors_tendencies = torch.nn.ModuleDict()
 
-        data_config = get_multiple_datasets_config(DotDict(self.params.get("data")))
+        data_config = get_multiple_datasets_config(self.params.get("data"))
         for dataset_name in self.statistics.keys():
             # Build processors for each dataset
             pre, post, pre_tend, post_tend = self._build_processors_for_dataset(
-                data_config[dataset_name].processors,
+                data_config[dataset_name]["processors"],
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
                 self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,

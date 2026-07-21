@@ -23,7 +23,7 @@ from torch_geometric.utils import softmax
 
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 
 class GraphConv(MessagePassing):
@@ -33,7 +33,7 @@ class GraphConv(MessagePassing):
         self,
         in_channels: int,
         out_channels: int,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         mlp_extra_layers: int = 0,
         mlp_implementation: MLPImplementation = "mlp",
         **kwargs,
@@ -46,7 +46,7 @@ class GraphConv(MessagePassing):
             Number of input channels.
         out_channels : int
             Number of output channels.
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         mlp_extra_layers : int, optional

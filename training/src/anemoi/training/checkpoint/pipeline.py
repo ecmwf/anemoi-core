@@ -96,7 +96,7 @@ from typing import Union
 
 from omegaconf import DictConfig
 
-from anemoi.utils.parametrisation import HydraParametrisation
+from anemoi.training.parametrisation import HydraParametrisation
 
 _PARAMETRISATION = HydraParametrisation()
 

@@ -30,7 +30,7 @@ from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class BaseProcessor(nn.Module, ABC):
         num_chunks: int,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize BaseProcessor.
@@ -77,7 +77,7 @@ class BaseProcessor(nn.Module, ABC):
             Whether to offload processing to CPU, by default False
         gradient_checkpointing : bool
             Whether to enable gradient checkpointing, by default True
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         **kwargs : dict
@@ -159,7 +159,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         mlp_hidden_ratio: float,
         cpu_offload: bool = False,
         dropout_p: float = 0.0,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ):
         super().__init__(
@@ -221,7 +221,7 @@ class TransformerProcessor(BaseProcessor):
         use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -260,7 +260,7 @@ class TransformerProcessor(BaseProcessor):
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -330,7 +330,7 @@ class GNNProcessor(BaseProcessor):
         mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize GNNProcessor.
@@ -353,7 +353,7 @@ class GNNProcessor(BaseProcessor):
             Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
 
@@ -471,7 +471,7 @@ class GraphTransformerProcessor(BaseProcessor):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -504,7 +504,7 @@ class GraphTransformerProcessor(BaseProcessor):
             Implementation of feed-forward blocks in processor layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"

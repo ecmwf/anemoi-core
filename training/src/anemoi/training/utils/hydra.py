@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import Any
 
-from anemoi.utils.parametrisation import HydraParametrisation
+from anemoi.training.parametrisation import HydraParametrisation
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig

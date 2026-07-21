@@ -23,6 +23,9 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
+from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.parametrisation import Parametrisation
 
@@ -36,9 +39,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         params: Parametrisation,
         *,
-        encoder=None,
-        processor=None,
-        decoder=None,
+        encoder=GraphTransformerForwardMapper,
+        processor=GraphTransformerProcessor,
+        decoder=GraphTransformerBackwardMapper,
         **kwargs,
     ) -> None:
         """Initialise the model.
@@ -47,20 +50,29 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ----------
         params : Parametrisation
             Model configuration.
-        encoder, processor, decoder : None | str | nn.Module, optional
-            Sub-modules. ``None`` builds the class configured under ``model.{encoder,
-            processor,decoder}``; a string is resolved via ``params.create_module``; an
-            instance is used as-is. The model always injects the runtime-computed
-            channel/edge dimensions.
+        encoder, processor, decoder : type | str | nn.Module, optional
+            Sub-modules. Default to their classes (the defaults live in the code, not the
+            parameters); a string / ``_target_`` mapping is built via
+            ``params.create_module``; an instance is used as-is. The model injects the
+            runtime-computed channel/edge dimensions and the structural settings from
+            ``model.{encoder,processor,decoder}``.
         """
-        # Stash injected sub-module specs before nn.Module.__init__ runs (inside
-        # super().__init__). object.__setattr__ avoids premature nn.Module registration when
-        # an already-built module instance is passed; the real registration happens when the
-        # sub-modules are placed into the ModuleDicts in _build_networks.
+        # Stash the sub-module choices before nn.Module.__init__ runs (inside super().__init__).
+        # object.__setattr__ avoids premature nn.Module registration when an already-built
+        # instance is passed; registration happens when they are placed into the ModuleDicts.
         object.__setattr__(self, "_encoder", encoder)
         object.__setattr__(self, "_processor", processor)
         object.__setattr__(self, "_decoder", decoder)
         super().__init__(params, **kwargs)
+
+    def _submodule_settings(self, key: str) -> dict:
+        """Structural settings for a sub-module, read from the parameters (``model.<key>``).
+
+        Only public keys are returned (``_target_`` and other ``_``-prefixed directives are
+        dropped); the chosen class/instance comes from the constructor argument, not here.
+        """
+        spec = self.params.get(f"model.{key}", {}) or {}
+        return {k: v for k, v in spec.items() if not k.startswith("_")}
 
     def _build_networks(self) -> None:
         """Builds the model components."""
@@ -77,10 +89,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=self.params.get("model.encoder.trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = self._build_submodule(
+            self.encoder[dataset_name] = self.params.create_module(
                 self._encoder,
-                spec_key="model.encoder",
-                _recursive_=False,  # Avoids building of layer_kernels here
+                _recursive_=False,  # Avoids building of layer_kernels here (spec path)
+                **self._submodule_settings("encoder"),
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.num_channels,
@@ -96,10 +108,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             trainable_size=self.params.get("model.processor.trainable_size", 0),
         )
 
-        self.processor = self._build_submodule(
+        self.processor = self.params.create_module(
             self._processor,
-            spec_key="model.processor",
-            _recursive_=False,  # Avoids building of layer_kernels here
+            _recursive_=False,  # Avoids building of layer_kernels here (spec path)
+            **self._submodule_settings("processor"),
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -116,10 +128,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=self.params.get("model.decoder.trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = self._build_submodule(
+            self.decoder[dataset_name] = self.params.create_module(
                 self._decoder,
-                spec_key="model.decoder",
-                _recursive_=False,  # Avoids building of layer_kernels here
+                _recursive_=False,  # Avoids building of layer_kernels here (spec path)
+                **self._submodule_settings("decoder"),
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
                 hidden_dim=self.num_channels,

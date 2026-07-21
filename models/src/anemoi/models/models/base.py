@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from typing import Any
 from typing import Optional
 
 import torch
@@ -26,6 +27,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.parametrisation import Parametrisation
 
@@ -44,7 +46,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        residual=None,
+        residual: Any = SkipConnection,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -58,10 +60,10 @@ class BaseGraphModel(nn.Module):
             Data statistics
         graph_data : HeteroData
             Graph definition
-        residual : None | str | nn.Module, optional
-            Residual connection sub-module. ``None`` builds the class configured under
-            ``model.residual``; a string is resolved via ``params.create_module``; an
-            instance is used as-is.
+        residual : type | str | nn.Module, optional
+            Residual connection sub-module. Defaults to the :class:`SkipConnection` class
+            (the default lives in the code, not the parameters); a string / ``_target_``
+            mapping is built via ``params.create_module``; an instance is used as-is.
         """
         super().__init__()
         self.params = params
@@ -231,23 +233,6 @@ class BaseGraphModel(nn.Module):
         """Builds the networks for the model (reading from ``self.params``)."""
         pass
 
-    def _build_submodule(self, value, *, spec_key: str, default=None, **runtime):
-        """Resolve a constructor-injected sub-module (see ``refactor.md``).
-
-        * ``value is None`` -> build the class configured at ``spec_key`` (falling back to
-          ``default`` if that key is absent), completing it with the runtime kwargs;
-        * ``value`` is a string -> resolve it via ``params.create_module``;
-        * otherwise -> use the given instance as-is.
-        """
-        match value:
-            case None:
-                spec = self.params.get(spec_key, default)
-                return self.params.create_module(spec, **runtime)
-            case str():
-                return self.params.create_module(value, **runtime)
-            case _:
-                return value
-
     @abstractmethod
     def _assemble_input(
         self,
@@ -267,9 +252,8 @@ class BaseGraphModel(nn.Module):
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-            self.residual[dataset_name] = self._build_submodule(
+            self.residual[dataset_name] = self.params.create_module(
                 self._residual,
-                spec_key="model.residual",
                 graph=self._graph_data,
                 data_node_name=data_node_name,
                 statistics=self.statistics[dataset_name],

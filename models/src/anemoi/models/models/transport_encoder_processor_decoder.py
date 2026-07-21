@@ -35,7 +35,6 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.models.transport import sampling_source_specs
-from anemoi.utils.config import DotDict
 from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
@@ -57,7 +56,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         graph_data: HeteroData,
     ) -> None:
 
-        transport_params = DotDict(params.get("model.model.transport"))
+        transport_params = params.get("model.model.transport")
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -66,7 +65,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_channels = self.noise_conditioning.channels
         self.noise_cond_dim = self.noise_conditioning.cond_dim
         self.inference_defaults = transport_params.get("inference_defaults", {})
-        self.transport_model_objective = get_transport_model_objective(transport_params.objective)
+        self.transport_model_objective = get_transport_model_objective(transport_params["objective"])
 
         super().__init__(
             params,
@@ -77,7 +76,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             n_step_output=n_step_output,
         )
 
-        self.noise_embedder = self.params.create_module(transport_params.noise_embedder)
+        self.noise_embedder = self.params.create_module(transport_params["noise_embedder"])
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
     def _calculate_input_dim(self, dataset_name: str) -> int:

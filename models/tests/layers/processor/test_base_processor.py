@@ -15,7 +15,7 @@ import pytest
 
 from anemoi.models.layers.processor import BaseProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ProcessorInit:
     num_layers: int = 4
     num_channels: int = 128
     num_chunks: int = 2
-    layer_kernels: field(default_factory=DotDict) = None
+    layer_kernels: field(default_factory=DictParametrisation) = None
     cpu_offload: bool = False
 
     def __post_init__(self):

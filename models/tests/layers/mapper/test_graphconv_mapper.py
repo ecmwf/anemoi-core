@@ -22,7 +22,7 @@ from anemoi.models.layers.mapper import GNNBackwardMapper
 from anemoi.models.layers.mapper import GNNBaseMapper
 from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
 
 
 class ConcreteGNNBaseMapper(GNNBaseMapper):
@@ -45,7 +45,7 @@ class MapperConfig:
     num_chunks: int = 2
     mlp_extra_layers: int = 2
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DotDict) = None
+    layer_kernels: field(default_factory=DictParametrisation) = None
     edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):

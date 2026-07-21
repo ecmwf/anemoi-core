@@ -11,7 +11,6 @@
 import pytest
 import torch
 import torch.nn as nn
-from hydra.utils import instantiate
 from hypothesis import given
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -107,7 +106,7 @@ def test_forward_output(
     dropout_p,
 ):
     num_channels = num_heads * factor_attention_heads
-    layer_kernels = instantiate(load_layer_kernels(kernel_config={}))
+    layer_kernels = load_layer_kernels(kernel_config={})
     block = TransformerMapperBlock(
         num_channels=num_channels,
         hidden_dim=hidden_dim,

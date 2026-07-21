@@ -39,7 +39,7 @@ from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class BaseMapper(nn.Module, ABC):
         out_channels_dst: Optional[int] = None,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize BaseMapper."""
@@ -157,7 +157,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict = None,
+        layer_kernels: Parametrisation = None,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -194,7 +194,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict, optional
+        layer_kernels : Parametrisation, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
@@ -495,7 +495,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict = None,
+        layer_kernels: Parametrisation = None,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -532,7 +532,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
         shard_strategy : str, optional
             Strategy to shard tensors, by default "edges"
@@ -616,7 +616,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         mlp_implementation: MLPImplementation = "mlp",
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
-        layer_kernels: DotDict = None,
+        layer_kernels: Parametrisation = None,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -655,7 +655,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Whether to initialise the data extractor to zero
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict, optional
+        layer_kernels : Parametrisation, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
@@ -720,7 +720,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict = None,
+        layer_kernels: Parametrisation = None,
         **kwargs,
     ) -> None:
         """Initialize GNNBaseMapper.
@@ -747,7 +747,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict, optional
+        layer_kernels : Parametrisation, optional
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -876,7 +876,7 @@ class GNNForwardMapper(GNNBaseMapper):
         mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize GNNForwardMapper.
@@ -903,7 +903,7 @@ class GNNForwardMapper(GNNBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool, optional
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -981,7 +981,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize GNNBackwardMapper.
@@ -1008,7 +1008,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             Implementation of feed-forward blocks in mapper layers.
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -1280,7 +1280,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize TransformerBaseMapper.
@@ -1319,7 +1319,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -1440,7 +1440,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerForwardMapper.
@@ -1479,7 +1479,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -1563,7 +1563,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
         use_rotary_embeddings: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
         """Initialize TransformerBackwardMapper.
@@ -1602,7 +1602,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
             Whether to offload processing to CPU, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """

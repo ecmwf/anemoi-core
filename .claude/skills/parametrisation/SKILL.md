@@ -15,58 +15,59 @@ See `agent/parametrisation-refactor.md` for the full rationale and rejected opti
 ## Core API (`anemoi.utils.parametrisation`)
 
 - `Parametrisation` (ABC): `get(key, default=MISSING)` (dotted keys, raises
-  `ParametrisationError` if missing and no default), `to_dict()`, `create_module(spec, ...)`
-  (dotted-path string or `_target_` mapping; `_partial_`/`_recursive_`/`_args_`; call-time
-  kwargs win), `resolve(value, default_factory, ...)`.
-- `DictParametrisation(dict)`: concrete, JSON-serialisable impl (`from_json` / `from_file` /
-  `to_json`). Use in tests, examples and inference.
-- `TrainingParametrisation` (in `anemoi.training.parametrisation`): the training-side
-  subclass, `TrainingParametrisation.from_config(omegaconf_cfg)` — used at the training→model
-  boundary.
-- When a leaf helper or a graph builder method needs to build something but has no
-  parametrisation in scope, it takes one as an (optional) argument, or falls back to a
-  module-level stateless `DictParametrisation()`.
+  `ParametrisationError` if missing and no default), `to_dict()`, and `create_module(spec, ...)`
+  — the **single construction entry point**. `create_module` dispatches on `spec`:
+  - a **class** → instantiated `spec(*args, **kwargs)` (spec-build directives `_recursive_`/`_partial_` are dropped);
+  - a **dotted-path string** / `_target_` **mapping** / **list** → built via `_build_spec`;
+  - `None` → `None`; an already-built **instance** → returned unchanged.
+- `_build_spec` is the overridable spec-builder: Hydra-free (`_construct`) in
+  `DictParametrisation`; `hydra.utils.instantiate` in `HydraParametrisation`.
+- `DictParametrisation(dict)`: JSON-serialisable impl (`from_json`/`from_file`/`to_json`).
+  Used by `anemoi.graphs`, `anemoi.models`, tests, examples and inference (Hydra-free).
+- `HydraParametrisation` + `TrainingParametrisation` live in **`anemoi.training.parametrisation`**
+  (Hydra is a training concern). `TrainingParametrisation.from_config(omegaconf_cfg)` is built
+  by the trainer and handed to the model. `anemoi.graphs`/`anemoi.models` must NOT import them.
+- No free `build()` function; no `_build_submodule` (deleted); no `resolve` (deleted).
 
 ## Writing a module that builds children
 
 Every constructor takes `params: Parametrisation` first. A child sub-module is a keyword arg
-defaulting to `None`, dispatched by type:
+whose **default is its class (in code)** — not `None`, not a config `_target_` lookup:
 
 ```python
 from anemoi.utils.parametrisation import Parametrisation
 
 class MyModel(BaseGraphModel):
-    def __init__(self, params: Parametrisation, *, encoder=None, **kwargs):
-        self._encoder = encoder
+    def __init__(self, params: Parametrisation, *, encoder=GraphTransformerForwardMapper, **kwargs):
+        object.__setattr__(self, "_encoder", encoder)   # stash before nn.Module.__init__
         super().__init__(params, **kwargs)
 
-    def _build_networks(self):                      # no args; read self.params
-        self.encoder = self._build_submodule(
-            self._encoder,
-            spec_key="model.encoder",               # None -> build the configured class
-            _recursive_=False,                      # keep layer_kernels as config for the child
-            in_channels_src=..., edge_dim=...,      # runtime dims the model computes
+    def _build_networks(self):                          # no args; read self.params
+        self.encoder = self.params.create_module(
+            self._encoder,                              # class default / str / instance
+            _recursive_=False,                          # keep layer_kernels as config (spec path)
+            **self._submodule_settings("encoder"),      # structural settings from params (num_heads, …)
+            in_channels_src=..., edge_dim=...,          # runtime dims the model computes
         )
 ```
 
-`_build_submodule(value, *, spec_key, default=None, **runtime)` (on `BaseGraphModel`):
-`None` → `create_module(get(spec_key, default), **runtime)`; `str` → `create_module(value,
-**runtime)`; instance → used as-is.
-
-When a module builds *many* children from one spec (e.g. hierarchical down/up processors),
-call `self.params.create_module(self.params.get("model.processor"), _recursive_=False, ...)`
-directly instead of `_build_submodule`.
+`self.params.create_module(value, **kwargs)` handles class/str/instance/spec/None directly.
+When a module builds *many* children from one config spec (e.g. hierarchical down/up
+processors), call `self.params.create_module(self.params.get("model.processor"),
+_recursive_=False, ...)` with the spec mapping.
 
 ## Rules
 
-- Read scalars/specs with `self.params.get("dotted.key", default)`. Never navigate config
-  trees by attribute access, and never pass sub-config dicts around as constructor kwargs.
-- Read structural params (num_heads, num_layers, …) from `params`; inject model-computed
-  dims (edge_dim, in_channels_*) as explicit kwargs.
-- Leaf layers (mappers, processors, attention, FFT) keep their explicit-kwarg constructors —
-  do not thread `params` into them unless asked.
+- Construct only via `params.create_module(...)`. Never `import hydra` or
+  `hydra.utils.instantiate` outside `HydraParametrisation._build_spec`.
+- Sub-module **class defaults live in the signature (code)**, not in config `_target_`.
+  Structural **values** (num_heads, num_layers, layer_kernels, …) still come from `params`.
+- Read scalars/specs with `self.params.get("dotted.key", default)`.
+- `layer_kernels` is a `LayerKernels` (a `Parametrisation`); leaf layers keep
+  `layer_kernels.Linear(...)` / `["LayerNorm"]` access. Its type hint is `Parametrisation`.
+- Leaf layers (mappers, processors, attention, FFT) keep explicit-kwarg constructors — don't
+  thread `params` into them unless asked.
 - Tests/examples build models with `DictParametrisation({...})`, not OmegaConf/DotDict.
-- The stored attribute on the interface is `model.params` (not `model.config`); the
-  `AnemoiModelInterface` constructor keyword is `params=`.
-- Graph builders (`update_graph`/`register_attributes`) and post-processors take an optional
-  `parametrisation` argument; `GraphCreator` threads its own instance through.
+- Interface: keyword is `params=`; stored attribute is `model.params` (not `model.config`).
+- Graph builders build attributes via a `parametrisation` (default: a stateless
+  `DictParametrisation`); `GraphCreator` threads its own instance through.

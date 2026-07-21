@@ -10,7 +10,6 @@
 import pytest
 import torch
 import torch.nn as nn
-from hydra.errors import InstantiationException
 from hypothesis import given
 from hypothesis import strategies as st
 from omegaconf import OmegaConf
@@ -18,6 +17,7 @@ from omegaconf import OmegaConf
 from anemoi.models.layers.utils import CheckpointWrapper
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.utils.parametrisation import ParametrisationError
 
 
 class TestLayerUtils:
@@ -81,7 +81,7 @@ class TestLayerUtils:
             }
         )
 
-        with pytest.raises(InstantiationException):
+        with pytest.raises(ParametrisationError):
             load_layer_kernels(kernels_config)
 
     @given(input_shape=st.lists(st.integers(1, 20), min_size=2, max_size=4))

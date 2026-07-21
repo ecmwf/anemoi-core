@@ -151,9 +151,45 @@ loading, not object construction, and is out of scope for the "no instantiate" g
 
 ## Follow-ups
 
-- Reintroduce Hydra *behind* `create_module` (string specs → Hydra targets).
-- Optionally split `Parametrisation` into training/inference subclasses.
-- Optionally push structural params down as explicit constructor args on the mapper/processor
-  classes (the "purely flat semantic keys" end state).
+- Optionally split `Parametrisation` further / push more structural params to code defaults.
 - Serialise the `Parametrisation` JSON into the checkpoint next to a pure `state_dict`
   (the original no-pickle goal).
+
+## Update (rounds 4–5): Hydra home, DotDict removal, code defaults
+
+* **`HydraParametrisation` moved to `anemoi.training`.** It is the "bring back Hydra" hook:
+  `create_module` → `hydra.utils.instantiate`; `get` reads the OmegaConf config. `anemoi.utils`
+  no longer knows about Hydra. `anemoi.graphs` / `anemoi.models` cannot depend on training, so
+  their construction sites use the Hydra-free `DictParametrisation` (this also keeps model
+  *inference* Hydra-free). `TrainingParametrisation(HydraParametrisation)` is what the trainer
+  builds and hands to the model.
+* **`DotDict` → `Parametrisation`.** No `anemoi.utils.config.DotDict` on the models/graphs/
+  training construction path. `load_layer_kernels` now returns a `LayerKernels` (a
+  `Parametrisation` that still exposes factories via `.Linear(...)` / `["LayerNorm"]`).
+* **`create_module` is the one dispatch; `_build_submodule` deleted.** `create_module`
+  handles class / dotted-string / `_target_`-mapping / instance / `None`; spec construction is
+  the overridable `_build_spec` (Hydra-free in `DictParametrisation`, Hydra in
+  `HydraParametrisation`).
+* **Defaults live in code** (`defaults.md`). Sub-module constructor args default to their
+  classes (`encoder=GraphTransformerForwardMapper`, `residual=SkipConnection`, …), not to a
+  config `_target_` lookup.
+
+## Breaking changes & migration (summary)
+
+Per-package change notes live in `agent/parametrisation-release-notes.md` (the `CHANGELOG.md`
+files are auto-generated from PRs, so we don't hand-edit them). Key migrations:
+
+| Before | After |
+|--------|-------|
+| `AnemoiModelInterface(config=<DictConfig>)` | `AnemoiModelInterface(params=<Parametrisation>)` |
+| `model.config` | `model.params` |
+| `from anemoi.models.utils import instantiate` | `params.create_module(spec, ...)` |
+| model class chosen by `model.<sub>._target_` | code default class, or pass `encoder=<class/str/instance>` |
+| `load_layer_kernels(...) -> DotDict` | `-> LayerKernels` (same `.Linear(...)` access) |
+| kernel build error `hydra.errors.InstantiationException` | `anemoi.utils.parametrisation.ParametrisationError` |
+| training `hydra.utils.instantiate(cfg)` | `TrainingParametrisation`/`HydraParametrisation`.create_module(cfg) |
+| graph YAML `GraphCreator(cfg)` | still works; or `GraphBuilder(nodes=[...], edges=[...])` |
+
+Inference: `DictParametrisation.from_file(config.json)` → `AnemoiModelInterface(params=...)`
+→ `load_state_dict` (no Hydra, no unpickling). Training keeps the Hydra launcher
+(`@hydra.main`, `compose`/`initialize`).

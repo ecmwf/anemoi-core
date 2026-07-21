@@ -96,20 +96,18 @@ def test_print_variable_scaling() -> None:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.scalers.scalers import create_scalers
     from anemoi.training.losses.utils import print_variable_scaling
-    from anemoi.utils.config import DotDict
+    from anemoi.utils.parametrisation import DictParametrisation
 
     data_config = {"data": {"forcing": ["f1"], "target": [], "prognostic": ["f2"], "diagnostic": ["tp", "imerg"]}}
     name_to_index = {"tp": 0, "imerg": 1, "f1": 2, "f2": 3}
     data_indices = IndexCollection(DictConfig(data_config), name_to_index)
     metadata_extractor = ExtractVariableGroupAndLevel(
-        DotDict(
-            {
-                "default": "sfc",
-            },
-        ),
+        {
+            "default": "sfc",
+        },
     )
     scalers, _ = create_scalers(
-        DotDict(
+        DictParametrisation(
             {
                 "general_variable": {
                     "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",

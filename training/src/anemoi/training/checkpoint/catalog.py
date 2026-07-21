@@ -35,7 +35,7 @@ Example
 >>> 'anemoi.training.checkpoint.sources.S3Source'
 >>>
 >>> # Create component from a config spec via a Parametrisation
->>> from anemoi.utils.parametrisation import HydraParametrisation
+>>> from anemoi.training.parametrisation import HydraParametrisation
 >>> config = {
 ...     '_target_': 'anemoi.training.checkpoint.sources.S3Source',
 ...     'bucket': 'my-bucket',

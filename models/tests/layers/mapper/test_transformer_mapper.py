@@ -20,7 +20,7 @@ from anemoi.models.layers.mapper import TransformerBackwardMapper
 from anemoi.models.layers.mapper import TransformerBaseMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
 
 
 def _conditional_layer_kernel_config(condition_shape: int):
@@ -52,7 +52,7 @@ class MapperConfig:
     cpu_offload: bool = False
     window_size: Optional[int] = None
     use_rotary_embeddings: bool = False
-    layer_kernels: field(default_factory=DotDict) = None
+    layer_kernels: field(default_factory=DictParametrisation) = None
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

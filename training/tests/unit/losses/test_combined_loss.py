@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from hydra.errors import InstantiationException
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
@@ -26,7 +27,6 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace
-from anemoi.utils.parametrisation import ParametrisationError
 
 
 class FakeGroup:
@@ -61,7 +61,7 @@ def test_combined_loss() -> None:
 
 def test_combined_loss_invalid_loss_weights() -> None:
     """Test the combined loss function with invalid loss weights."""
-    with pytest.raises(ParametrisationError):
+    with pytest.raises(InstantiationException):
         get_loss_function(
             DictConfig(
                 {

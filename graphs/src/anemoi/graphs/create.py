@@ -14,19 +14,16 @@ from pathlib import Path
 
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.processors.post_process import PostProcessor
-from anemoi.utils.config import DotDict
-from anemoi.utils.parametrisation import HydraParametrisation
+from anemoi.utils.parametrisation import DictParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
-
-# Config specs are built into objects through a Hydra-backed parametrisation
-# (create_module -> hydra.utils.instantiate), matching current practice.
-_PARAMETRISATION = HydraParametrisation()
 
 
 class GraphBuilder:
@@ -167,63 +164,64 @@ class GraphBuilder:
 class GraphCreator(GraphBuilder):
     """Create a graph from a configuration file."""
 
-    def __init__(self, config: str | Path | DotDict | DictConfig):
-        if isinstance(config, Path) or isinstance(config, str):
-            config = DotDict.from_file(config)
-        elif isinstance(config, DictConfig):
-            config = DotDict(config)
+    def __init__(self, config: str | Path | dict | DictConfig | Parametrisation):
+        # Normalise the recipe into a Parametrisation: it both holds the config (``get``) and
+        # builds the node/edge/attribute objects from their ``_target_`` specs
+        # (``create_module``). Files and OmegaConf configs are normalised to a plain mapping.
+        match config:
+            case Parametrisation():
+                params = config
+            case str() | Path():
+                params = DictParametrisation(OmegaConf.to_container(OmegaConf.load(config), resolve=True))
+            case DictConfig():
+                params = DictParametrisation(OmegaConf.to_container(config, resolve=True))
+            case _:
+                params = DictParametrisation(dict(config))
 
-        self.config = config
-
-        nodes = _parse_nodes(config)
-        edges = _parse_edges(config)
-        post_processors = _parse_post_processors(config)
+        self.config = params.to_dict()
 
         super().__init__(
-            nodes=nodes,
-            edges=edges,
-            post_processors=post_processors,
+            nodes=_parse_nodes(params),
+            edges=_parse_edges(params),
+            post_processors=_parse_post_processors(params),
         )
 
 
-def _parse_nodes(cfg: DotDict) -> list[BaseNodeBuilder]:
+def _parse_nodes(params: Parametrisation) -> list[BaseNodeBuilder]:
     _nodes = []
-    nodes_cfg = cfg.get("nodes")
+    nodes_cfg = params.get("nodes", None)
     if nodes_cfg:
         for node_name, node_cfg in nodes_cfg.items():
-            node_builder_cfg = node_cfg.node_builder
-            attributes_cfg = node_cfg.get("attributes")
+            node_builder_cfg = node_cfg["node_builder"]
+            attributes_cfg = node_cfg.get("attributes") or {}
 
-            attributes = []
-            if attributes_cfg:
-                for attr_name, attr_cfg in attributes_cfg.items():
-                    attributes.append(_PARAMETRISATION.create_module(attr_cfg, name=attr_name))
+            attributes = [
+                params.create_module(attr_cfg, name=attr_name) for attr_name, attr_cfg in attributes_cfg.items()
+            ]
 
-            node = _PARAMETRISATION.create_module(node_builder_cfg, name=node_name, attributes=attributes)
+            node = params.create_module(node_builder_cfg, name=node_name, attributes=attributes)
             _nodes.append(node)
     return _nodes
 
 
-def _parse_edges(cfg: DotDict) -> list[BaseEdgeBuilder]:
+def _parse_edges(params: Parametrisation) -> list[BaseEdgeBuilder]:
     _edges = []
-    edges_cfg = cfg.get("edges")
+    edges_cfg = params.get("edges", None)
     if edges_cfg:
         for edge_cfg in edges_cfg:
-            source_name = edge_cfg.source_name
-            target_name = edge_cfg.target_name
+            source_name = edge_cfg["source_name"]
+            target_name = edge_cfg["target_name"]
             source_mask_attr_name = edge_cfg.get("source_mask_attr_name")
             target_mask_attr_name = edge_cfg.get("target_mask_attr_name")
-            attributes_cfg = edge_cfg.get("attributes")
+            attributes_cfg = edge_cfg.get("attributes") or {}
 
-            attributes = []
-            if attributes_cfg:
-                for attr_name, attr_cfg in attributes_cfg.items():
-                    attributes.append(_PARAMETRISATION.create_module(attr_cfg, name=attr_name))
+            attributes = [
+                params.create_module(attr_cfg, name=attr_name) for attr_name, attr_cfg in attributes_cfg.items()
+            ]
 
             # Each edge can have multiple edge builders
-            edge_builders_list = []
-            for builder_cfg in edge_cfg.edge_builders:
-                edge_builder = _PARAMETRISATION.create_module(
+            for builder_cfg in edge_cfg["edge_builders"]:
+                edge_builder = params.create_module(
                     builder_cfg,
                     source_name=source_name,
                     target_name=target_name,
@@ -231,17 +229,16 @@ def _parse_edges(cfg: DotDict) -> list[BaseEdgeBuilder]:
                     target_mask_attr_name=target_mask_attr_name,
                     attributes=attributes,  # Pass attributes to each builder
                 )
-                edge_builders_list.append(edge_builder)
-            _edges.extend(edge_builders_list)
+                _edges.append(edge_builder)
     return _edges
 
 
-def _parse_post_processors(cfg: DotDict) -> list[PostProcessor]:
+def _parse_post_processors(params: Parametrisation) -> list[PostProcessor]:
     _post_processors = []
-    post_processors_cfg = cfg.get("post_processors")
+    post_processors_cfg = params.get("post_processors", None)
     if post_processors_cfg:
         for pp_cfg in post_processors_cfg:
-            post_processor = _PARAMETRISATION.create_module(pp_cfg)
+            post_processor = params.create_module(pp_cfg)
             _post_processors.append(post_processor)
     return _post_processors
 

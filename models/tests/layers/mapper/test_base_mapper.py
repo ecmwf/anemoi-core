@@ -18,7 +18,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.mapper import BaseMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisation
 
 
 class ConcreteBaseMapper(BaseMapper):
@@ -51,7 +51,7 @@ class BaseMapperConfig:
     hidden_dim: int = 128
     out_channels_dst: int = 5
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DotDict) = None
+    layer_kernels: field(default_factory=DictParametrisation) = None
     edge_dim: int = None  # Will be set from graph_provider
 
     def __post_init__(self):

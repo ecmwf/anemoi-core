@@ -14,7 +14,7 @@ import pytorch_lightning as pl
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.utils.parametrisation import HydraParametrisation
+from anemoi.training.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 

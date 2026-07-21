@@ -24,7 +24,7 @@ from torch.optim.swa_utils import AveragedModel as _TorchAveragedModel
 from torch.optim.swa_utils import get_ema_avg_fn
 from torch.optim.swa_utils import get_swa_avg_fn
 
-from anemoi.utils.parametrisation import HydraParametrisation
+from anemoi.training.parametrisation import HydraParametrisation
 
 LOGGER = logging.getLogger(__name__)
 
