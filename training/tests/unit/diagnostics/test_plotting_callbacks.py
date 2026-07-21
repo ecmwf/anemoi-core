@@ -28,6 +28,7 @@ from anemoi.training.diagnostics.evaluation.plotting.batch_output import histogr
 from anemoi.training.diagnostics.evaluation.plotting.batch_output import sample_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.batch_output import spectrum_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_trainable_modules
+from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -147,6 +148,24 @@ def test_plot_loss_instantiation():
     )
     assert len(callback2.parameter_groups) == 2
     assert callback2.parameter_groups["group_a"] == ["t2m", "tp"]
+
+
+def test_batch_output_plot_rejects_loss_plot_fn() -> None:
+    """BatchOutputPlot must reject loss_plot_fn at init, not silently fail at runtime."""
+    with pytest.raises(TypeError, match="never supply"):
+        BatchOutputPlot(
+            tag_infix="test",
+            sample_idx=0,
+            parameters=["t2m"],
+            dataset_names=["data"],
+            plot_fn=loss_plot_fn,
+        )
+
+
+def test_loss_curve_plot_rejects_batch_output_plot_fn() -> None:
+    """LossCurvePlot must reject a BatchOutputPlotFn (e.g. sample_plot_fn) at init."""
+    with pytest.raises(TypeError, match="never supply"):
+        LossCurvePlot(parameter_groups={}, plot_fn=sample_plot_fn)
 
 
 def test_graph_trainable_features_plot_handles_noop_processor_graph_provider():

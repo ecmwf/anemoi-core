@@ -218,8 +218,33 @@ def validate_plot_fn(plot_fn: Any, protocol: type, callback_name: str) -> None:
     params = set(sig.parameters)
     has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
 
-    # **kwargs covers all requirements.
+    # Params the function requires explicitly (no default, not *args/**kwargs).
+    _no_default = (inspect.Parameter.empty,)
+    explicit_required = frozenset(
+        name
+        for name, p in sig.parameters.items()
+        if p.default in _no_default
+        and p.kind
+        not in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        )
+    )
+
     if has_var_keyword:
+        # **kwargs covers any missing protocol params, but the function may
+        # still declare required params the callback will never supply.
+        unsatisfied = explicit_required - required
+        if unsatisfied:
+            known = KNOWN_PLOT_FN_TARGETS.get(protocol, ())
+            raise TypeError(
+                f"{callback_name} received a plot_fn ({fn.__qualname__!r}) that declares "
+                f"required parameter(s) the callback will never supply: "
+                f"{', '.join(sorted(unsatisfied))}.\n"
+                f"This plot_fn is likely intended for a different callback. "
+                f"A {protocol.__name__}-compatible function must accept: "
+                f"{', '.join(sorted(required))}.\n" + (f"Built-in options: {', '.join(known)}" if known else ""),
+            )
         return
 
     missing = required - params
