@@ -91,7 +91,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.module.grid_dim,
-                grid_shard_sizes=self.module.grid_shard_sizes[dataset_name],
+                grid_shard_sizes=(self.module.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None),
             )
 
         return loss(y_pred, y, **loss_kwargs)
