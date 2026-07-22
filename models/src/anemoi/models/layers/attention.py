@@ -16,6 +16,8 @@ import os
 from functools import partial
 from typing import Optional
 from typing import Union
+from importlib.util import find_spec
+from importlib.metadata import version as pkg_version
 
 import einops
 import torch
@@ -60,6 +62,14 @@ class MultiHeadSelfAttention(nn.Module):
         the full requirements.
         You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
         wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
+
+    "flex_attention"
+        Flex attention uses torch compile to compile a custom attention kernel. It is slightly slower than 
+        flash-attention v2 but much faster than SDPA. It requires triton to be installed and torch >=2.6.0.
+        If you are running on an Nvidia Hopper GPU or newer, you can use flex attention with the flash attention 
+        v4 backend. This gives further speedups compared to flex attention with the triton backend. To use
+        the flash attention v4 backend, you have to install flash attention v4 with the command
+        `pip install flash-attn-4`.
     """
 
     def __init__(
@@ -366,16 +376,27 @@ class FlexAttentionWrapper(nn.Module):
     """Wrapper for PyTorch flex attention."""
 
     def __init__(self, **kwargs):
+        """Flex attention wrapper for PyTorch flex attention.
+
+        Initalisation checks if flex attention is available in the current PyTorch installation.
+
+        Either Triton (default) or flash attention v4 can be used as a backend for flex attention.
+        The default behavior is to use Triton as a backend. 
+        If flash attention v4 is available, it will be used as a backend for flex attention,
+        which gives approx 2x performance in the attention kernel.
+        you can pass the argument `use_triton_backend=True` via the config to force Triton as a 
+        backend for flex attention.
+        """
         super().__init__()
 
-        try:
-            from torch.nn.attention.flex_attention import create_block_mask
-            from torch.nn.attention.flex_attention import flex_attention
-        except ImportError as e:
+        if find_spec("torch.nn.attention.flex_attention") is None:
             raise ImportError(
                 "Flex attention is not available in this PyTorch installation. "
                 "Please upgrade PyTorch or select a different attention backend."
-            ) from e
+            )
+
+        from torch.nn.attention.flex_attention import create_block_mask
+        from torch.nn.attention.flex_attention import flex_attention
 
         self.attention = flex_attention
         self.create_block_mask = create_block_mask
@@ -390,16 +411,24 @@ class FlexAttentionWrapper(nn.Module):
             # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
             # One reason to use flex attention with the flash attention v4 backend, rather then using flash attention v4 directly, is
             # flex attentions support for custom block masks.
-            # if flash attention is not available then the triton backend will be used for flex attention
-            try:
-                from flash_attn.cute import flash_attn_func  # noqa: F401
-
+            if find_spec("flash_attn.cute") is not None:
                 LOGGER.info("Using flash attention v4 backend for flex attention.")
                 self._use_flash4_backend = True
-            except ImportError as e:
-                e_v4 = e
-                LOGGER.debug(f"Flash attention v4 not available: {e_v4}")
-        LOGGER.info("Using flex_attention.")
+            else:
+                LOGGER.debug("Flash attention v4 not available.")
+        else:
+            # using triton for flex attention backend. 
+            # check triton is installed and torch >= 2.6.0
+            if find_spec("triton") is None:
+                raise ImportError(
+                    "Triton is not available for the flex attention triton backend. "
+                    "Please install triton or select a different attention backend."
+                )
+            if pkg_version("torch") < "2.6.0":
+                raise ImportError(
+                    "PyTorch version must be >= 2.6.0 for the flex attention triton backend. "
+                    "Please upgrade PyTorch or select a different attention backend."
+                )
 
         self._kernel_options = {"BACKEND": "FLASH"} if self._use_flash4_backend else {}
 
@@ -430,10 +459,7 @@ class FlexAttentionWrapper(nn.Module):
             )
 
         if causal:
-            raise NotImplementedError("Causal masking is not supported yet.")
-
-        # for some reason this triggers for 4 heads and 64 embed dim
-        # assert query.shape[3]//query.shape[1] >= 16, "Flex attention requires that embedding dimension per head is at least 16. Please increase attn_channels or decrease num_heads to use flex attention."
+            raise NotImplementedError("Causal masking is not supported.")
 
         def sliding_window_mask(b, h, q_idx, kv_idx):
             return torch.abs(q_idx - kv_idx) <= window_size
@@ -450,11 +476,11 @@ class FlexAttentionWrapper(nn.Module):
             block_mask = compiled_block_mask(mask_mod, *mask_shape, query.device, **block_mask_kwargs)
 
         if self._compile:
-            flex_flash = torch.compile(
+            flex_attn = torch.compile(
                 partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
             )
 
-        return flex_flash(query, key, value)
+        return flex_attn(query, key, value)
 
 
 class FlashAttentionWrapper(nn.Module):
