@@ -16,13 +16,13 @@ from typing import Iterable
 from typing import Union
 
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -310,10 +310,12 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self,
         source_name: str,
         target_name: str,
+        edge_attributes: dict | None = None,
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
         self.edges_name = (self.source_name, "to", self.target_name)
+        self.edge_attributes = edge_attributes or {}
         super().__init__()
 
     def removing_edges(self, graph: HeteroData, mask: torch.Tensor) -> HeteroData:
@@ -331,10 +333,15 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
 
     def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> HeteroData:
         """Recompute attributes"""
-        edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
+        edge_attributes = self.edge_attributes
+        if not edge_attributes:
+            edge_attributes = get_edge_attributes(graph_config, self.source_name, self.target_name)
+
+        # Hydra-free build of each edge-attribute spec (already-built objects pass through).
+        parametrisation = Parametrisation.from_dict()
         for attr_name, edge_attr_builder in edge_attributes.items():
             LOGGER.info(f"Recomputing edge attribute {attr_name}.")
-            graph[self.edges_name][attr_name] = instantiate(edge_attr_builder)(
+            graph[self.edges_name][attr_name] = parametrisation.create_module(edge_attr_builder)(
                 x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
             )
         return graph
@@ -390,8 +397,9 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         max_length_km: float,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        edge_attributes: dict | None = None,
     ) -> None:
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, edge_attributes=edge_attributes)
         self.treshold = max_length_km
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name

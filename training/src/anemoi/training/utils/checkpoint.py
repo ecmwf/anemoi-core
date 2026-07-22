@@ -66,7 +66,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
 
     metadata = dict(**model.metadata)
     model.metadata = None
-    model.config = None
+    model.params = None
 
     return model, metadata
 
@@ -91,9 +91,28 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     save_path = Path(save_path)
     inference_filepath = save_path.parent / f"inference-{save_path.name}"
 
+    metadata = _add_reconstruction_metadata(dict(metadata), model)
+
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata)
     return inference_filepath
+
+
+def _add_reconstruction_metadata(metadata: dict, model: torch.nn.Module) -> dict:
+    """Inject the pickle-free reconstruction bundle into the checkpoint metadata.
+
+    The bundle (serialised data indices, timestep counts, graph structure) lets a model be
+    rebuilt from config + state_dict without unpickling. Best-effort: if ``model`` is not a
+    full ``AnemoiModelInterface`` the metadata is returned unchanged. See no-pickle docs.
+    """
+    from anemoi.models.checkpoint import RECONSTRUCTION_KEY
+    from anemoi.models.checkpoint import build_reconstruction_metadata_from_interface
+
+    try:
+        metadata[RECONSTRUCTION_KEY] = build_reconstruction_metadata_from_interface(model)
+    except Exception as err:  # noqa: BLE001 - never block checkpoint saving on this
+        LOGGER.warning("Could not build reconstruction metadata: %s", err)
+    return metadata
 
 
 def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:

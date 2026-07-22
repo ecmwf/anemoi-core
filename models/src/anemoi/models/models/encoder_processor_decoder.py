@@ -13,7 +13,6 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -24,8 +23,11 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
+from anemoi.models.layers.mapper import GraphTransformerForwardMapper
+from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.models import BaseGraphModel
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +35,40 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
-    def _build_networks(self, model_config: DotDict) -> None:
+    def __init__(
+        self,
+        params: Parametrisation,
+        *,
+        encoder=None,
+        processor=None,
+        decoder=None,
+        **kwargs,
+    ) -> None:
+        """Initialise the model.
+
+        Parameters
+        ----------
+        params : Parametrisation
+            Model configuration.
+        encoder, processor, decoder : type | str | nn.Module, optional
+            Sub-modules. ``None`` (the default) resolves the class from
+            ``model.{encoder,processor,decoder}._target_`` if present, otherwise falls back to
+            the code defaults (:class:`GraphTransformerForwardMapper` /
+            :class:`GraphTransformerProcessor` / :class:`GraphTransformerBackwardMapper`); a
+            class / string / ``_target_`` mapping is built via ``params.create_module``; an
+            instance is used as-is. The model injects the runtime-computed channel/edge
+            dimensions and the structural settings from ``model.{encoder,processor,decoder}``.
+            See :meth:`BaseGraphModel._create_submodule`.
+        """
+        # Stash the sub-module choices before nn.Module.__init__ runs (inside super().__init__).
+        # object.__setattr__ avoids premature nn.Module registration when an already-built
+        # instance is passed; registration happens when they are placed into the ModuleDicts.
+        object.__setattr__(self, "_encoder", encoder)
+        object.__setattr__(self, "_processor", processor)
+        object.__setattr__(self, "_decoder", decoder)
+        super().__init__(params, **kwargs)
+
+    def _build_networks(self) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
@@ -42,15 +77,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=self.params.get("model.encoder.sub_graph_edge_attributes", None),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=self.params.get("model.encoder.trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
+            self.encoder[dataset_name] = self._create_submodule(
+                "encoder",
+                self._encoder,
+                GraphTransformerForwardMapper,
+                _recursive_=False,  # Avoids building of layer_kernels here (spec path)
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.num_channels,
@@ -60,15 +97,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
             graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            edge_attributes=self.params.get("model.processor.sub_graph_edge_attributes", None),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            trainable_size=self.params.get("model.processor.trainable_size", 0),
         )
 
-        self.processor = instantiate(
-            model_config.model.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
+        self.processor = self._create_submodule(
+            "processor",
+            self._processor,
+            GraphTransformerProcessor,
+            _recursive_=False,  # Avoids building of layer_kernels here (spec path)
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -79,15 +118,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=self.params.get("model.decoder.sub_graph_edge_attributes", None),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=self.params.get("model.decoder.trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
+            self.decoder[dataset_name] = self._create_submodule(
+                "decoder",
+                self._decoder,
+                GraphTransformerBackwardMapper,
+                _recursive_=False,  # Avoids building of layer_kernels here (spec path)
                 in_channels_src=self.num_channels,
                 in_channels_dst=self.target_dim[dataset_name],
                 hidden_dim=self.num_channels,
@@ -158,7 +199,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
-            # bounding performed in the order specified in the config file
+            # bounding performed in the order specified in the params file
             x_out = bounding(x_out)
         return x_out
 

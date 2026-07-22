@@ -165,8 +165,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             Path(lightning_checkpoint_filepath).parent.mkdir(parents=True, exist_ok=True)
 
-            save_config = model.config
-            model.config = None
+            save_config = model.params
+            model.params = None
 
             tmp_metadata = model.metadata
             model.metadata = None
@@ -184,7 +184,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 
-            model.config = save_config
+            model.params = save_config
             model.metadata = tmp_metadata
             model.supporting_arrays = tmp_supporting_arrays
 

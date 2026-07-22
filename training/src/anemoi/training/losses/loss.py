@@ -12,8 +12,6 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-from hydra.utils import get_class
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
@@ -23,9 +21,13 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.variable_mapper import LossVariableMapper
+from anemoi.training.parametrisation import HydraParametrisation
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.utils.parametrisation import get_class
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
+
+_PARAMETRISATION = HydraParametrisation()
 
 NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
 WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
@@ -126,7 +128,7 @@ def _build_wrapped_loss(
     """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
     inner_loss_config = loss_config.pop("loss_fn")
     inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
-    wrapper = instantiate(loss_config, loss_fn=inner_loss)
+    wrapper = _PARAMETRISATION.create_module(loss_config, loss_fn=inner_loss)
     # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
     if scalers_to_include and scalers:
         resolved = (
@@ -206,7 +208,7 @@ def get_loss_function(
             data_node_name=data_node_name,
             **kwargs,
         )
-        return instantiate(
+        return _PARAMETRISATION.create_module(
             loss_config,
             per_scale_loss=per_scale_loss,
             **kwargs,
@@ -238,7 +240,7 @@ def get_loss_function(
         context=factory_context,
     )
 
-    loss_function = instantiate(
+    loss_function = _PARAMETRISATION.create_module(
         loss_config,
         **constructor_kwargs,
         **kwargs,

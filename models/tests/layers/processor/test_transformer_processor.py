@@ -20,7 +20,7 @@ from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 
 @dataclass
@@ -38,7 +38,7 @@ class TransformerProcessorConfig:
     window_size: Optional[int] = None
     qk_norm: bool = True
     cpu_offload: bool = False
-    layer_kernels: field(default_factory=DotDict) = None
+    layer_kernels: field(default_factory=Parametrisation.from_dict) = None
 
     def __post_init__(self):
         self.layer_kernels = load_layer_kernels(instance=False)

@@ -11,11 +11,14 @@
 import logging
 
 import pytorch_lightning as pl
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.training.parametrisation import HydraParametrisation
+
 LOGGER = logging.getLogger(__name__)
+
+_PARAMETRISATION = HydraParametrisation()
 
 
 def get_mlflow_logger(
@@ -37,7 +40,7 @@ def get_mlflow_logger(
         "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
     )
     mlflow_config["save_dir"] = mlflow_config.get("save_dir", str(paths.logs.mlflow))
-    logger = instantiate(
+    logger = _PARAMETRISATION.create_module(
         mlflow_config,
         run_id=run_id,
         fork_run_id=fork_run_id,
@@ -91,7 +94,7 @@ def get_wandb_logger(
         wandb_config.pop(key, None)
 
     try:
-        logger = instantiate(
+        logger = _PARAMETRISATION.create_module(
             wandb_config,
             id=run_id,
             save_dir=save_dir,

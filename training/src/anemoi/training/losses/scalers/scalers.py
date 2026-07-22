@@ -10,20 +10,28 @@
 
 import logging
 
-from hydra.utils import instantiate
-
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
-from anemoi.utils.config import DotDict
+from anemoi.training.parametrisation import HydraParametrisation
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
+_PARAMETRISATION = HydraParametrisation()
 
-def create_scalers(scalers_config: DotDict, **kwargs) -> tuple[dict[str, TENSOR_SPEC], dict[str, BaseUpdatingScaler]]:
+
+def create_scalers(
+    scalers_config: Parametrisation,
+    **kwargs,
+) -> tuple[dict[str, TENSOR_SPEC], dict[str, BaseUpdatingScaler]]:
+    # Accept a Parametrisation or a raw config mapping (normalised to one).
+    if not isinstance(scalers_config, Parametrisation):
+        scalers_config = Parametrisation.from_dict(scalers_config)
+
     scalers, updating_scalars = {}, {}
-    for name, config in scalers_config.items():
-        scaler_builder: BaseScaler = instantiate(config, **kwargs)
+    for name, config in scalers_config.to_dict().items():
+        scaler_builder: BaseScaler = _PARAMETRISATION.create_module(config, **kwargs)
 
         if isinstance(scaler_builder, BaseUpdatingScaler):
             updating_scalars[name] = scaler_builder

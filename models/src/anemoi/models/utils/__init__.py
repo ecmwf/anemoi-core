@@ -6,3 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+# Object construction now goes through ``anemoi.utils.parametrisation`` (Parametrisation,
+# create_module, build). The old Hydra-backed ``instantiate`` shim has been removed.

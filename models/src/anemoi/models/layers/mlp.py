@@ -15,7 +15,7 @@ from typing import Literal
 import torch
 from torch import nn
 
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class GatedMLPLayer(nn.Module):
     """Single gated feed-forward layer used by GLU variants."""
 
     def __init__(
-        self, in_features: int, out_features: int, layer_kernels: DotDict, mlp_implementation: MLPImplementation
+        self, in_features: int, out_features: int, layer_kernels: Parametrisation, mlp_implementation: MLPImplementation
     ):
         super().__init__()
         Linear = layer_kernels.Linear
@@ -54,7 +54,7 @@ class GatedMLPLayer(nn.Module):
 def build_feedforward_layer(
     in_features: int,
     out_features: int,
-    layer_kernels: DotDict,
+    layer_kernels: Parametrisation,
     mlp_implementation: MLPImplementation = "mlp",
 ) -> nn.Module:
     """Build one feed-forward layer module."""
@@ -70,7 +70,7 @@ def build_feedforward_layer(
 def build_feedforward_modules(
     in_features: int,
     out_features: int,
-    layer_kernels: DotDict,
+    layer_kernels: Parametrisation,
     mlp_implementation: MLPImplementation = "mlp",
 ) -> list[nn.Module]:
     """Build one feed-forward layer as a flat list of modules."""
@@ -102,7 +102,7 @@ class MLP(nn.Module):
         in_features: int,
         hidden_dim: int,
         out_features: int,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         n_extra_layers: int = 0,
         final_activation: bool = False,
         layer_norm: bool = True,
@@ -126,7 +126,7 @@ class MLP(nn.Module):
             Whether to apply layer norm after activation, by default True
         mlp_implementation : MLPImplementation, optional
             Implementation of hidden feed-forward layers: `mlp`, `glu`, `swiglu`, `geglu`, or `reglu`.
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
 

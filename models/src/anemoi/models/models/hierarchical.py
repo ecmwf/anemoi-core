@@ -12,7 +12,6 @@ import logging
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -30,7 +29,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     """Message passing hierarchical graph neural network."""
 
-    def _build_networks(self, model_config):
+    def _build_networks(self):
         """Builds the model components."""
         # note that this is called by the super class init
         # self.hidden_dims is the dimentionality of features at each depth
@@ -43,14 +42,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for dataset_name in self.dataset_names:
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=self.params.get("model.encoder.sub_graph_edge_attributes", None),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=self.params.get("model.encoder.trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
+            self.encoder[dataset_name] = self.params.create_module(
+                self.params.get("model.encoder"),
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
@@ -59,7 +58,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
         # Level processors
-        self.level_process = model_config.model.enable_hierarchical_level_processing
+        self.level_process = self.params.get("model.enable_hierarchical_level_processing")
         if self.level_process:
             self.down_level_processor = nn.ModuleDict()
             self.down_level_processor_graph_providers = nn.ModuleDict()
@@ -71,35 +70,35 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 # Create graph providers for down level processor
                 self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
                     graph=self._graph_data[(nodes_names, "to", nodes_names)],
-                    edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+                    edge_attributes=self.params.get("model.processor.sub_graph_edge_attributes", None),
                     src_size=self.node_attributes.num_nodes[nodes_names],
                     dst_size=self.node_attributes.num_nodes[nodes_names],
-                    trainable_size=model_config.model.processor.get("trainable_size", 0),
+                    trainable_size=self.params.get("model.processor.trainable_size", 0),
                 )
 
-                self.down_level_processor[nodes_names] = instantiate(
-                    model_config.model.processor,
+                self.down_level_processor[nodes_names] = self.params.create_module(
+                    self.params.get("model.processor"),
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
-                    num_layers=model_config.model.level_process_num_layers,
+                    num_layers=self.params.get("model.level_process_num_layers"),
                 )
 
                 # Create graph providers for up level processor
                 self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
                     graph=self._graph_data[(nodes_names, "to", nodes_names)],
-                    edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+                    edge_attributes=self.params.get("model.processor.sub_graph_edge_attributes", None),
                     src_size=self.node_attributes.num_nodes[nodes_names],
                     dst_size=self.node_attributes.num_nodes[nodes_names],
-                    trainable_size=model_config.model.processor.get("trainable_size", 0),
+                    trainable_size=self.params.get("model.processor.trainable_size", 0),
                 )
 
-                self.up_level_processor[nodes_names] = instantiate(
-                    model_config.model.processor,
+                self.up_level_processor[nodes_names] = self.params.create_module(
+                    self.params.get("model.processor"),
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
-                    num_layers=model_config.model.level_process_num_layers,
+                    num_layers=self.params.get("model.level_process_num_layers"),
                 )
 
         # Main processor at deepest level
@@ -107,14 +106,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             graph=self._graph_data[
                 (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
             ],
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            edge_attributes=self.params.get("model.processor.sub_graph_edge_attributes", None),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
             dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            trainable_size=self.params.get("model.processor.trainable_size", 0),
         )
 
-        self.processor = instantiate(
-            model_config.model.processor,
+        self.processor = self.params.create_module(
+            self.params.get("model.processor"),
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
             edge_dim=self.processor_graph_provider.edge_dim,
@@ -129,14 +128,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=self.params.get("model.encoder.sub_graph_edge_attributes", None),
                 src_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_size=self.node_attributes.num_nodes[dst_nodes_name],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=self.params.get("model.encoder.trainable_size", 0),
             )
 
-            self.downscale[src_nodes_name] = instantiate(
-                model_config.model.encoder,
+            self.downscale[src_nodes_name] = self.params.create_module(
+                self.params.get("model.encoder"),
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
@@ -153,14 +152,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=self.params.get("model.decoder.sub_graph_edge_attributes", None),
                 src_size=self.node_attributes.num_nodes[src_nodes_name],
                 dst_size=self.node_attributes.num_nodes[dst_nodes_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=self.params.get("model.decoder.trainable_size", 0),
             )
 
-            self.upscale[src_nodes_name] = instantiate(
-                model_config.model.decoder,
+            self.upscale[src_nodes_name] = self.params.create_module(
+                self.params.get("model.decoder"),
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
@@ -175,14 +174,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=self.params.get("model.decoder.sub_graph_edge_attributes", None),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=self.params.get("model.decoder.trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
+            self.decoder[dataset_name] = self.params.create_module(
+                self.params.get("model.decoder"),
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
                 in_channels_dst=self.input_dim[dataset_name],

@@ -10,15 +10,15 @@
 from types import SimpleNamespace
 
 import torch
-from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.models.base import BaseGraphModel
+from anemoi.utils.parametrisation import Parametrisation
 
 
 class DummyGraphModel(BaseGraphModel):
-    def _build_networks(self, model_config) -> None:
-        self.seen_hidden_name = model_config.model.model.hidden_nodes_name
+    def _build_networks(self) -> None:
+        self.seen_hidden_name = self.params.get("model.model.hidden_nodes_name")
 
     def _assemble_input(self, x, batch_size, grid_shard_sizes=None, model_comm_group=None):
         return x
@@ -71,8 +71,8 @@ def _make_hierarchical_graph() -> HeteroData:
     return graph
 
 
-def test_base_graph_model_builds_with_omegaconf_config() -> None:
-    model_config = OmegaConf.create(
+def test_base_graph_model_builds_with_json_parametrisation() -> None:
+    params = Parametrisation.from_dict(
         {
             "model": {
                 "num_channels": 8,
@@ -93,7 +93,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     )
 
     model = DummyGraphModel(
-        model_config=model_config,
+        params,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input=1,
@@ -105,8 +105,8 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     assert "data" in model.residual
 
 
-def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
-    model_config = OmegaConf.create(
+def test_base_graph_model_accepts_hidden_node_lists() -> None:
+    params = Parametrisation.from_dict(
         {
             "model": {
                 "num_channels": 8,
@@ -127,7 +127,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
     )
 
     model = DummyGraphModel(
-        model_config=model_config,
+        params,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input=1,

@@ -28,7 +28,7 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_std: int,
         noise_channels_dim: int,
         noise_mlp_hidden_dim: int,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         noise_matrix: Optional[str] = None,
         noise_edges_name: Optional[tuple[str, str, str]] = None,
         edge_weight_attribute: Optional[str] = None,
@@ -234,7 +234,7 @@ class NoiseInjector(BaseNoiseInjector):
         noise_channels_dim: int,
         noise_mlp_hidden_dim: int,
         num_channels: int,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         noise_matrix: Optional[str] = None,
         graph_data: Optional[HeteroData] = None,
     ) -> None:
@@ -250,7 +250,7 @@ class NoiseInjector(BaseNoiseInjector):
             Hidden dimension of noise MLP
         num_channels : int
             Number of model channels for projection
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             Layer kernel configurations
         noise_matrix : str, optional
             Optional path to noise truncation matrix

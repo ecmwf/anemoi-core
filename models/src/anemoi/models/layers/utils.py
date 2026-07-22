@@ -10,16 +10,89 @@
 
 import logging
 import math
-from typing import Optional
+from typing import Any
 
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import DictParametrisationBase
+from anemoi.utils.parametrisation import Parametrisation
+from anemoi.utils.parametrisation import ParametrisationError
 
 LOGGER = logging.getLogger(__name__)
+
+# Default kernels used when the layer_kernels config omits an entry (falls back to torch.nn).
+_DEFAULT_KERNELS = {
+    "Linear": {"_target_": "torch.nn.Linear"},
+    "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
+    "Activation": {"_target_": "torch.nn.GELU"},
+    "QueryNorm": {
+        "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+        "_partial_": True,
+        "bias": False,
+    },
+    "KeyNorm": {
+        "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
+        "_partial_": True,
+        "bias": False,
+    },
+}
+
+
+class LayerKernels(DictParametrisationBase):
+    """A :class:`~anemoi.utils.parametrisation.Parametrisation` of layer kernels.
+
+    Holds the (JSON-serialisable) kernel config and exposes the built partial factories by
+    name via attribute or item access, so leaf layers keep using ``layer_kernels.Linear(...)``
+    / ``layer_kernels["QueryNorm"]`` unchanged. Construction is Hydra-free (it uses the
+    ``DictParametrisation`` engine), keeping ``anemoi.models`` importable at inference.
+
+    Parameters
+    ----------
+    kernel_config : Parametrisation | dict, optional
+        Kernel configuration, e.g. ``{"Linear": {"_target_": "torch.nn.Linear"}}``. Missing
+        entries fall back to :data:`_DEFAULT_KERNELS`.
+    instance : bool
+        If True (default), build each kernel into a partial factory; if False, keep the raw
+        config entries (useful for testing).
+    """
+
+    def __init__(self, kernel_config: Any = None, instance: bool = True) -> None:
+        if isinstance(kernel_config, Parametrisation):
+            kernel_config = kernel_config.to_dict()
+        merged = {**_DEFAULT_KERNELS, **(dict(kernel_config) if kernel_config else {})}
+        super().__init__(merged)
+
+        factories: dict[str, Any] = {}
+        for name, entry in merged.items():
+            if not instance:
+                factories[name] = entry
+                continue
+            try:
+                factories[name] = self.create_module(entry, _partial_=True)
+            except ParametrisationError:
+                LOGGER.info(
+                    f"{entry['_target_']} not found! Check your model.layer_kernels {name} entry. "
+                    "Maybe the kernel is not installed or the import string is incorrect?"
+                )
+                raise
+            LOGGER.info(f"{name} kernel: {entry['_target_']}.")
+        object.__setattr__(self, "_factories", factories)
+
+    def __getattr__(self, name: str) -> Any:
+        # Only fires for attributes not found normally; expose kernels, guard internals.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            return self.__dict__["_factories"][name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __getitem__(self, name: str) -> Any:
+        return self._factories[name]
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._factories
 
 
 def compute_mlp_hidden_dim(num_channels: int, mlp_hidden_ratio: float) -> int:
@@ -84,59 +157,22 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:
-    """Load layer kernels from the config.
+def load_layer_kernels(kernel_config: Any = None, instance: bool = True) -> LayerKernels:
+    """Load layer kernels as a :class:`LayerKernels` parametrisation.
 
-    This function tries to load the layer kernels from the config. If the layer kernel is not supplied, it will fall back to the torch.nn implementation.
+    Missing entries fall back to the ``torch.nn`` defaults. The returned object exposes the
+    built partial factories by name (``kernels.Linear(...)`` / ``kernels["QueryNorm"]``).
 
     Parameters
     ----------
-    kernel_config : DotDict
-        Kernel configuration, e.g. {"Linear": {"_target_": "torch.nn.Linear"}}
+    kernel_config : Parametrisation | dict, optional
+        Kernel configuration, e.g. ``{"Linear": {"_target_": "torch.nn.Linear"}}``.
     instance : bool
-        If True, instantiate the kernels. If False, return the config.
-        This is useful for testing purposes.
-        Defaults to True.
+        If True (default), build the kernels; if False, keep the raw config (for testing).
 
     Returns
     -------
-    DotDict
-        Container with layer factories.
+    LayerKernels
+        Parametrisation exposing the layer-kernel factories.
     """
-    # If self.layer_kernels entry is missing from the config, use torch.nn kernels
-    default_kernels = {
-        "Linear": {"_target_": "torch.nn.Linear"},
-        "LayerNorm": {"_target_": "torch.nn.LayerNorm"},
-        "Activation": {"_target_": "torch.nn.GELU"},
-        "QueryNorm": {
-            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
-            "_partial_": True,
-            "bias": False,
-        },
-        "KeyNorm": {
-            "_target_": "anemoi.models.layers.normalization.AutocastLayerNorm",
-            "_partial_": True,
-            "bias": False,
-        },
-    }
-
-    if kernel_config is None:
-        kernel_config = DotDict()
-
-    layer_kernels = DotDict()
-
-    # Loop through all kernels in the layer_kernels config entry and try import them
-    for name, kernel_entry in {**default_kernels, **kernel_config}.items():
-        if instance:
-            try:
-                layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
-            except InstantiationException:
-                LOGGER.info(
-                    f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
-                )
-                raise InstantiationException
-            else:
-                LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
-        else:
-            layer_kernels[name] = kernel_entry
-    return layer_kernels
+    return LayerKernels(kernel_config, instance=instance)

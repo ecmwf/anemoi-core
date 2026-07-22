@@ -20,8 +20,6 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from hydra.utils import get_class
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from packaging import version
@@ -41,6 +39,7 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.parametrisation import HydraParametrisation
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -51,9 +50,13 @@ from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.utils.parametrisation import get_class
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
+
+# Object construction goes through a Hydra-backed Parametrisation (current practice).
+_PARAMETRISATION = HydraParametrisation()
 
 PL_VERSION = version.parse(pl.__version__)
 
@@ -128,7 +131,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def task(self) -> BaseTask:
         """Task instance."""
-        return instantiate(self.config.task)
+        return _PARAMETRISATION.create_module(self.config.task)
 
     @cached_property
     def datamodule(self) -> Any:
@@ -685,7 +688,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
-        return instantiate(
+        return _PARAMETRISATION.create_module(
             self.config.training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )

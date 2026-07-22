@@ -13,11 +13,8 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
-from omegaconf import DictConfig
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -25,8 +22,9 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.ensemble import NoiseConditioning
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,32 +32,20 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
-    def __init__(
-        self,
-        *,
-        model_config: DictConfig,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        n_step_input: int,
-        n_step_output: int,
-    ) -> None:
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            n_step_input=n_step_input,
-            n_step_output=n_step_output,
-        )
+    def __init__(self, params: Parametrisation, *, noise_injector=None, **kwargs) -> None:
+        self.condition_on_residual = params.get("model.condition_on_residual")
+        # See AnemoiModelEncProcDec.__init__: stash before nn.Module.__init__ runs.
+        object.__setattr__(self, "_noise_injector", noise_injector)
+        super().__init__(params, **kwargs)
 
-    def _build_networks(self, model_config: DotDict) -> None:
-        super()._build_networks(model_config)
+    def _build_networks(self) -> None:
+        super()._build_networks()
 
-        self.noise_injector = instantiate(
-            model_config.model.noise_injector,
-            _recursive_=False,
+        self.noise_injector = self._create_submodule(
+            "noise_injector",
+            self._noise_injector,
+            NoiseConditioning,
+            _recursive_=False,  # Avoids building of layer_kernels here (spec path)
             num_channels=self.num_channels,
             graph_data=self._graph_data,
         )

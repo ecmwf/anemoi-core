@@ -48,7 +48,7 @@ from anemoi.models.layers.mlp import build_feedforward_layer
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
-from anemoi.utils.config import DotDict
+from anemoi.utils.parametrisation import Parametrisation
 
 if is_triton_available():
     from anemoi.models.triton.gt import GraphTransformerFunction
@@ -86,7 +86,7 @@ class BaseBlock(nn.Module, ABC):
 class PointWiseMLPProcessorBlock(BaseBlock):
     """Point-wise block with MLPs."""
 
-    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
+    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: Parametrisation, dropout_p: float = 0.0):
         super().__init__()
         assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
         activation = layer_kernels.Activation()
@@ -130,7 +130,7 @@ class TransformerProcessorBlock(BaseBlock):
         hidden_dim: int,
         num_heads: int,
         window_size: Optional[int],
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         attn_channels: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
@@ -206,7 +206,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         hidden_dim: int,
         num_heads: int,
         window_size: Optional[int],
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         attn_channels: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
@@ -285,7 +285,7 @@ class GraphConvBaseBlock(BaseBlock):
         mlp_hidden_ratio: float = 1.0,
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = True,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         edge_dim: Optional[int] = None,
         **kwargs,
     ) -> None:
@@ -305,7 +305,7 @@ class GraphConvBaseBlock(BaseBlock):
             Ratio of MLP hidden dimension to out_channels. Default 1.0 preserves existing behaviour.
         update_src_nodes: bool
             Update src if src and dst nodes are given, by default True
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         """
@@ -405,7 +405,7 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         num_chunks: int,
         mlp_extra_layers: int = 0,
         update_src_nodes: bool = True,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         **kwargs,
     ) -> None:
         """Initialize GNN Mapper Block.
@@ -422,7 +422,7 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
             Extra layers in MLP, by default 0
         update_src_nodes : bool, optional
             Update src if src and dst nodes are given, by default True
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
         kwargs : dict
             Additional arguments for the base class.
@@ -494,7 +494,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         attn_channels: Optional[int] = None,
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -521,7 +521,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Normalize query and key
         update_src_nodes: bool, by default False
             Update src if src and dst nodes are given
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         graph_attention_backend: str, by default "triton"
@@ -882,7 +882,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -908,7 +908,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Normalize query and key, by default False
         update_src_nodes: bool
             Update src if src and dst nodes are given, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"
@@ -1044,7 +1044,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
-        layer_kernels: DotDict,
+        layer_kernels: Parametrisation,
         shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
@@ -1068,7 +1068,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Normalize query and key, by default False
         update_src_nodes: bool
             Update src if src and dst nodes are given, by default False
-        layer_kernels : DotDict
+        layer_kernels : Parametrisation
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"
