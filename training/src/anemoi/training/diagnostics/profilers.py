@@ -534,10 +534,14 @@ class BenchmarkProfiler(Profiler):
         batch_size_tr = self.config.dataloader.batch_size.training
         batch_size_val = self.config.dataloader.batch_size.validation
 
-        # average over the last n iterations to smooth out per-iteration fluctuations
-        num_iterations = 10
+        # skip the first 100 iterations to avoid warmup effects on the throughput calculation
+        # if training on less then 100 iterations, skip 50% of the iterations to avoid warmup effects
+        # on the throughput calculation
+        warmup_iterations = 100
+        if self.config.dataloader.limit_batches.get("training", 0) < warmup_iterations:
+            warmup_iterations = int(self.config.dataloader.limit_batches.get("training", 0) * 0.5)
         training_rates_array = np.array(progressbar.training_rates)
-        training_throughput = training_rates_array[-num_iterations:].mean()
+        training_throughput = training_rates_array[warmup_iterations:].mean()
         speed_metrics["training_avg_throughput"] = training_throughput
         speed_metrics["training_avg_throughput_per_sample"] = training_throughput / batch_size_tr
 
