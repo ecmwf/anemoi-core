@@ -14,10 +14,10 @@ import logging
 import math
 import os
 from functools import partial
+from importlib.metadata import version as pkg_version
+from importlib.util import find_spec
 from typing import Optional
 from typing import Union
-from importlib.util import find_spec
-from importlib.metadata import version as pkg_version
 
 import einops
 import torch
@@ -64,9 +64,9 @@ class MultiHeadSelfAttention(nn.Module):
         wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
 
     "flex_attention"
-        Flex attention uses torch compile to compile a custom attention kernel. It is slightly slower than 
+        Flex attention uses torch compile to compile a custom attention kernel. It is slightly slower than
         flash-attention v2 but much faster than SDPA. It requires triton to be installed and torch >=2.6.0.
-        If you are running on an Nvidia Hopper GPU or newer, you can use flex attention with the flash attention 
+        If you are running on an Nvidia Hopper GPU or newer, you can use flex attention with the flash attention
         v4 backend. This gives further speedups compared to flex attention with the triton backend. To use
         the flash attention v4 backend, you have to install flash attention v4 with the command
         `pip install flash-attn-4`.
@@ -381,10 +381,10 @@ class FlexAttentionWrapper(nn.Module):
         Initalisation checks if flex attention is available in the current PyTorch installation.
 
         Either Triton (default) or flash attention v4 can be used as a backend for flex attention.
-        The default behavior is to use Triton as a backend. 
+        The default behavior is to use Triton as a backend.
         If flash attention v4 is available, it will be used as a backend for flex attention,
         which gives approx 2x performance in the attention kernel.
-        you can pass the argument `use_triton_backend=True` via the config to force Triton as a 
+        you can pass the argument `use_triton_backend=True` via the config to force Triton as a
         backend for flex attention.
         """
         super().__init__()
@@ -417,7 +417,7 @@ class FlexAttentionWrapper(nn.Module):
             else:
                 LOGGER.debug("Flash attention v4 not available.")
         else:
-            # using triton for flex attention backend. 
+            # using triton for flex attention backend.
             # check triton is installed and torch >= 2.6.0
             if find_spec("triton") is None:
                 raise ImportError(
@@ -479,6 +479,8 @@ class FlexAttentionWrapper(nn.Module):
             flex_attn = torch.compile(
                 partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
             )
+        else:
+            flex_attn = partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options)
 
         return flex_attn(query, key, value)
 
