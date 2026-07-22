@@ -14,7 +14,6 @@ import logging
 import math
 import os
 from functools import partial
-from importlib.metadata import version as pkg_version
 from importlib.util import find_spec
 from typing import Optional
 from typing import Union
