@@ -65,7 +65,7 @@ class MultiHeadSelfAttention(nn.Module):
 
     "flex_attention"
         Flex attention uses torch compile to compile a custom attention kernel. It is slightly slower than
-        flash-attention v2 but much faster than SDPA. It requires triton to be installed and torch >=2.6.0.
+        flash-attention v2 but much faster than SDPA. It requires triton to be installed.
         If you are running on an Nvidia Hopper GPU or newer, you can use flex attention with the flash attention
         v4 backend. This gives further speedups compared to flex attention with the triton backend. To use
         the flash attention v4 backend, you have to install flash attention v4 with the command
@@ -418,16 +418,11 @@ class FlexAttentionWrapper(nn.Module):
                 LOGGER.debug("Flash attention v4 not available.")
         else:
             # using triton for flex attention backend.
-            # check triton is installed and torch >= 2.6.0
+            # check triton is installed
             if find_spec("triton") is None:
                 raise ImportError(
                     "Triton is not available for the flex attention triton backend. "
                     "Please install triton or select a different attention backend."
-                )
-            if pkg_version("torch") < "2.6.0":
-                raise ImportError(
-                    "PyTorch version must be >= 2.6.0 for the flex attention triton backend. "
-                    "Please upgrade PyTorch or select a different attention backend."
                 )
 
         self._kernel_options = {"BACKEND": "FLASH"} if self._use_flash4_backend else {}
@@ -477,10 +472,10 @@ class FlexAttentionWrapper(nn.Module):
 
         if self._compile:
             flex_attn = torch.compile(
-                partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
+                partial(self.attention, block_mask=block_mask, kernel_options=self._kernel_options), dynamic=False
             )
         else:
-            flex_attn = partial(self.flex_attention, block_mask=block_mask, kernel_options=self._kernel_options)
+            flex_attn = partial(self.attention, block_mask=block_mask, kernel_options=self._kernel_options)
 
         return flex_attn(query, key, value)
 
