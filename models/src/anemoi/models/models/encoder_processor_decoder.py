@@ -9,6 +9,7 @@
 
 
 import logging
+from pathlib import PosixPath
 from typing import Optional
 
 import einops
@@ -41,11 +42,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.dataset_names:
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
+                graph=(
+                    self._graph_data[(dataset_name, "to", self._graph_name_hidden)]
+                    if type(self._graph_data) is not PosixPath
+                    else self._graph_data
+                ),
                 edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[dataset_name],
-                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+                src_size=(
+                    self.node_attributes.num_nodes[dataset_name] if type(self._graph_data) is not PosixPath else "data"
+                ),
+                dst_size=(
+                    self.node_attributes.num_nodes[self._graph_name_hidden]
+                    if type(self._graph_data) is not PosixPath
+                    else "hidden"
+                ),
                 trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                dataset_name=dataset_name if type(self._graph_data) is PosixPath else None,
             )
 
             self.encoder[dataset_name] = instantiate(
@@ -59,11 +71,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            graph=(
+                self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+                if type(self._graph_data) is not PosixPath
+                else self._graph_data
+            ),
             edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            src_size=(
+                self.node_attributes.num_nodes[self._graph_name_hidden]
+                if type(self._graph_data) is not PosixPath
+                else "hidden"
+            ),
+            dst_size=(
+                self.node_attributes.num_nodes[self._graph_name_hidden]
+                if type(self._graph_data) is not PosixPath
+                else "hidden"
+            ),
             trainable_size=model_config.model.processor.get("trainable_size", 0),
+            dataset_name=self.dataset_names[0] if type(self._graph_data) is PosixPath else None,
         )
 
         self.processor = instantiate(
@@ -78,11 +103,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.decoder = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
+                graph=(
+                    self._graph_data[(self._graph_name_hidden, "to", dataset_name)]
+                    if type(self._graph_data) is not PosixPath
+                    else self._graph_data
+                ),
                 edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
+                src_size=(
+                    self.node_attributes.num_nodes[self._graph_name_hidden]
+                    if type(self._graph_data) is not PosixPath
+                    else "hidden"
+                ),
+                dst_size=(
+                    self.node_attributes.num_nodes[dataset_name] if type(self._graph_data) is not PosixPath else "data"
+                ),
                 trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                dataset_name=dataset_name if type(self._graph_data) is PosixPath else None,
             )
 
             self.decoder[dataset_name] = instantiate(
@@ -229,7 +265,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-
         for dataset_name in dataset_names:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
@@ -248,6 +283,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
+                device=x[dataset_name].device,
             )
 
             enc_shard_info = BipartiteGraphShardInfo(
@@ -280,6 +316,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ) = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
+            device=x[dataset_names[0]].device,  # Use the device of the first dataset for processor edges
         )
 
         x_latent_proc = self.processor(
@@ -305,7 +342,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dec_edge_shard_sizes,
             ) = self.decoder_graph_provider[
                 dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group, device=x[dataset_name].device)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,

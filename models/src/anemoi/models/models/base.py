@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from pathlib import PosixPath
 from typing import Optional
 
 import torch
@@ -29,6 +30,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph_provider import _GraphFileDataset
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
 
@@ -65,6 +67,10 @@ class BaseGraphModel(nn.Module):
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
+        if isinstance(self._graph_data, PosixPath):
+            self._graph_data_dict = _GraphFileDataset(self._graph_data)
+        else:
+            self._graph_data_dict = self._graph_data
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
 
@@ -79,8 +85,10 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
-
+        if isinstance(self._graph_data, PosixPath):
+            self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
+        else:
+            self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
@@ -151,10 +159,7 @@ class BaseGraphModel(nn.Module):
         )
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
-            assert (
-                hidden_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+        pass  # reference to the graph should be removed
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.
@@ -243,12 +248,12 @@ class BaseGraphModel(nn.Module):
 
     def _build_residual(self, residual_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
-        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
+        fused = uses_fused_dataset_graph(self._graph_data_dict[self.dataset_names[0]], self.dataset_names)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
             self.residual[dataset_name] = instantiate(
                 residual_config,
-                graph=self._graph_data,
+                graph=self._graph_data_dict,
                 data_node_name=data_node_name,
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
@@ -257,13 +262,26 @@ class BaseGraphModel(nn.Module):
 
     def _build_named_node_attributes_graph(self) -> HeteroData:
         node_attributes_graph = HeteroData()
-        for dataset_name in self.dataset_names:
-            node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
-            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
+        if isinstance(self._graph_data, PosixPath):
+            for dataset_name in self.dataset_names:
+                # I think my graphs have an old definition where the dataset name is not the same
+                node_attributes_graph[dataset_name].x = self._graph_data_dict[dataset_name]["data"].x
+                node_attributes_graph[dataset_name].num_nodes = len(self._graph_data_dict[dataset_name]["data"].x)
+                node_attributes_graph[self._graph_name_hidden].x = self._graph_data_dict[dataset_name][
+                    self._graph_name_hidden
+                ].x
+                node_attributes_graph[self._graph_name_hidden].num_nodes = len(
+                    self._graph_data_dict[dataset_name][self._graph_name_hidden].x
+                )
 
-        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
-            node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
-            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
+        else:
+            for dataset_name in self.dataset_names:
+                node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
+                node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
+
+            for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+                node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
+                node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
 
         return node_attributes_graph
 

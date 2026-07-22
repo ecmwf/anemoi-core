@@ -7,11 +7,180 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from pathlib import Path
+
 import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.graph_provider import FileGraphProvider
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+NUM_SRC_NODES = 5
+NUM_DST_NODES = 4
+NUM_EDGES = 8
+EDGE_ATTR_DIM = 3
+
+
+def _make_fake_graph(seed: int = 0) -> HeteroData:
+    """Create a small fake HeteroData graph with random edges and attributes."""
+    rng = torch.Generator().manual_seed(seed)
+
+    graph = HeteroData()
+    graph[("data", "to", "hidden")]["edge_index"] = torch.stack(
+        [
+            torch.randint(0, NUM_SRC_NODES, (NUM_EDGES,), generator=rng),
+            torch.randint(0, NUM_DST_NODES, (NUM_EDGES,), generator=rng),
+        ]
+    )
+    graph[("data", "to", "hidden")]["edge_length"] = torch.randn(NUM_EDGES, EDGE_ATTR_DIM, generator=rng)
+    graph["data"].num_nodes = NUM_SRC_NODES
+    graph["hidden"].num_nodes = NUM_DST_NODES
+    return graph
+
+
+@pytest.fixture()
+def graph_dir(tmp_path: Path) -> Path:
+    """Save multiple fake graphs to a temporary directory and return the path."""
+    graphs_path = tmp_path / "graphs"
+    graphs_path.mkdir()
+
+    for i in range(4):
+        g = _make_fake_graph(seed=i)
+        torch.save(g, graphs_path / f"graph_{i:01d}.pt")
+
+    return graphs_path
+
+
+# ---------------------------------------------------------------------------
+# FileGraphProvider tests
+# ---------------------------------------------------------------------------
+
+
+def test_file_graph_provider_len(graph_dir: Path) -> None:
+    """Provider reports correct number of graph files."""
+    provider = FileGraphProvider(
+        graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
+        num_workers=1,
+        pin_memory=False,
+    )
+    assert len(provider) == 4
+
+
+def test_file_graph_provider_edge_dim(graph_dir: Path) -> None:
+    """edge_dim matches the attribute width."""
+    provider = FileGraphProvider(
+        graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
+        num_workers=1,
+        pin_memory=False,
+    )
+    assert provider.edge_dim == EDGE_ATTR_DIM
+
+
+def test_file_graph_provider_iteration(graph_dir: Path) -> None:
+    """Iterating over the provider yields all graphs."""
+    provider = FileGraphProvider(
+        graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
+        num_workers=1,
+        pin_memory=False,
+    )
+
+    print(provider._dataset)
+    assert len(provider) == 4
+
+    for g in provider:
+        assert hasattr(g[("data", "to", "hidden")], "edge_index")
+        assert g[("data", "to", "hidden")].edge_index.shape == (2, NUM_EDGES)
+
+
+def test_file_graph_provider_get_edges_no_shard(graph_dir: Path) -> None:
+    """get_edges returns correct shapes without sharding."""
+    provider = FileGraphProvider(
+        graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
+        num_workers=1,
+        pin_memory=False,
+    )
+
+    # Load a graph and pass it to get_edges
+    edge_attr, edge_index, shard_sizes = provider.get_edges(batch_size=1, shard_edges=False, device=torch.device("cpu"))
+
+    assert edge_attr.shape == (NUM_EDGES, EDGE_ATTR_DIM)
+    assert edge_index.shape == (2, NUM_EDGES)
+    assert shard_sizes is None
+
+
+def test_file_graph_provider_get_edges_batch_expansion(graph_dir: Path) -> None:
+    """get_edges expands edges correctly for batch_size > 1."""
+    provider = FileGraphProvider(
+        graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="graph_1",
+        num_workers=1,
+        pin_memory=False,
+    )
+
+    batch_size = 3
+    edge_attr, edge_index, _ = provider.get_edges(batch_size=batch_size, shard_edges=False, device=torch.device("cpu"))
+
+    assert edge_attr.shape == (NUM_EDGES * batch_size, EDGE_ATTR_DIM)
+    assert edge_index.shape == (2, NUM_EDGES * batch_size)
+
+
+def test_file_graph_provider_missing_dir(tmp_path: Path) -> None:
+    """Raises FileNotFoundError for a nonexistent directory."""
+    with pytest.raises(FileNotFoundError):
+        FileGraphProvider(
+            graph_dir=tmp_path / "nonexistent",
+            src_size="data",
+            dst_size="hidden",
+            edge_attributes=["edge_length"],
+            dataset_name="graph_1",
+            num_workers=1,
+            pin_memory=False,
+        )
+
+
+def test_file_graph_provider_empty_dir(tmp_path: Path) -> None:
+    """Raises RuntimeError when directory has no graph files."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(RuntimeError):
+        FileGraphProvider(
+            graph_dir=empty,
+            src_size="data",
+            dst_size="hidden",
+            edge_attributes=["edge_length"],
+            dataset_name="graph_1",
+            num_workers=1,
+            pin_memory=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# ProjectionGraphProvider tests
+# ---------------------------------------------------------------------------
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
