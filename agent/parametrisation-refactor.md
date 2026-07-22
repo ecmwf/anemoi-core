@@ -86,13 +86,15 @@ Rejected:
 - **Require users to pass fully-built encoder instances:** impossible in general, because
   `edge_dim` isn't known until the model is being built.
 
-### 5. Concrete implementations → **`DictParametrisation` + `TrainingParametrisation`**
-`anemoi.utils.parametrisation.DictParametrisation` is the dict-backed, JSON-serialisable
-base (`from_json` / `from_file` / `to_json`), used for inference and tests.
-`anemoi.training.parametrisation.TrainingParametrisation(DictParametrisation)` is the
-training-side subclass, built via `TrainingParametrisation.from_config(omegaconf_cfg)`
-(resolves interpolations; dataset-derived values can be layered on as `overrides`). The
-training→model boundary in `train/methods/base.py` uses it.
+### 5. Concrete implementations → **`DictParametrisation` + `HydraParametrisation`**
+`anemoi.utils.parametrisation.DictParametrisation` is the dict-backed, Hydra-free leaf
+(constructed via `Parametrisation.from_dict`; serialised via `to_dict`), used by models,
+graphs, inference and tests. It and `HydraParametrisation` both subclass
+`DictParametrisationBase` (never each other — no instantiated class is subclassed).
+`anemoi.training.parametrisation.HydraParametrisation` overrides `_build_spec` to call
+`hydra.utils.instantiate` (imported lazily) and is used only by the training launcher. The
+training→model boundary in `train/methods/base.py` builds
+`Parametrisation.from_dict(OmegaConf.to_container(cfg, resolve=True))`.
 
 ### 6. No free `build()` function → **construction only via `create_module`**
 The module-level `build()` is removed; the engine is private (`_construct`) and reached only
@@ -170,9 +172,12 @@ loading, not object construction, and is out of scope for the "no instantiate" g
   handles class / dotted-string / `_target_`-mapping / instance / `None`; spec construction is
   the overridable `_build_spec` (Hydra-free in `DictParametrisation`, Hydra in
   `HydraParametrisation`).
-* **Defaults live in code** (`defaults.md`). Sub-module constructor args default to their
-  classes (`encoder=GraphTransformerForwardMapper`, `residual=SkipConnection`, …), not to a
-  config `_target_` lookup.
+* **Sub-module class resolution** (`defaults.md`, `BaseGraphModel._create_submodule`).
+  Constructor args (`encoder`/`processor`/`decoder`/`residual`/`noise_injector`) default to
+  `None`; the class is chosen in priority order: explicit override → `model.<sub>._target_` in
+  the parameters → the code default class (`GraphTransformerForwardMapper`, `SkipConnection`,
+  …). This keeps config-driven architecture selection (`model=gnn`/`transformer`) working while
+  the code default is the fallback when no `_target_` is given.
 
 ## Breaking changes & migration (summary)
 
@@ -187,9 +192,9 @@ files are auto-generated from PRs, so we don't hand-edit them). Key migrations:
 | model class chosen by `model.<sub>._target_` | code default class, or pass `encoder=<class/str/instance>` |
 | `load_layer_kernels(...) -> DotDict` | `-> LayerKernels` (same `.Linear(...)` access) |
 | kernel build error `hydra.errors.InstantiationException` | `anemoi.utils.parametrisation.ParametrisationError` |
-| training `hydra.utils.instantiate(cfg)` | `TrainingParametrisation`/`HydraParametrisation`.create_module(cfg) |
+| training `hydra.utils.instantiate(cfg)` | `HydraParametrisation().create_module(cfg)` (launcher only) |
 | graph YAML `GraphCreator(cfg)` | still works; or `GraphBuilder(nodes=[...], edges=[...])` |
 
-Inference: `DictParametrisation.from_file(config.json)` → `AnemoiModelInterface(params=...)`
+Inference: `Parametrisation.from_dict(checkpoint_config)` → `AnemoiModelInterface(params=...)`
 → `load_state_dict` (no Hydra, no unpickling). Training keeps the Hydra launcher
 (`@hydra.main`, `compose`/`initialize`).

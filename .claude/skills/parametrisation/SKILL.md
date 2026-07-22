@@ -22,11 +22,16 @@ See `agent/parametrisation-refactor.md` for the full rationale and rejected opti
   - `None` → `None`; an already-built **instance** → returned unchanged.
 - `_build_spec` is the overridable spec-builder: Hydra-free (`_construct`) in
   `DictParametrisation`; `hydra.utils.instantiate` in `HydraParametrisation`.
-- `DictParametrisation(dict)`: JSON-serialisable impl (`from_json`/`from_file`/`to_json`).
-  Used by `anemoi.graphs`, `anemoi.models`, tests, examples and inference (Hydra-free).
-- `HydraParametrisation` + `TrainingParametrisation` live in **`anemoi.training.parametrisation`**
-  (Hydra is a training concern). `TrainingParametrisation.from_config(omegaconf_cfg)` is built
-  by the trainer and handed to the model. `anemoi.graphs`/`anemoi.models` must NOT import them.
+- Serialisation is dict-only: `Parametrisation.from_dict(mapping)` (the factory — build the
+  default `DictParametrisation` without naming a concrete subclass) and `params.to_dict()`
+  (the plain, JSON-serialisable mapping). There are no `from_json`/`from_file`/`to_json`
+  helpers — use `json.loads`/`json.dumps` around the dict if you need a string.
+- `DictParametrisation`: the Hydra-free leaf. Used by `anemoi.graphs`, `anemoi.models`, tests,
+  examples and inference. Never construct it directly — go through `Parametrisation.from_dict`.
+- `HydraParametrisation` lives in **`anemoi.training.parametrisation`** (Hydra is a training
+  concern); it overrides `_build_spec` to call `hydra.utils.instantiate` (imported lazily) and
+  is used only by the training launcher. `anemoi.graphs`/`anemoi.models` must NOT import it.
+  The model boundary builds `Parametrisation.from_dict(OmegaConf.to_container(cfg, resolve=True))`.
 - No free `build()` function; no `_build_submodule` (deleted); no `resolve` (deleted).
 
 ## Writing a module that builds children
@@ -60,14 +65,19 @@ _recursive_=False, ...)` with the spec mapping.
 
 - Construct only via `params.create_module(...)`. Never `import hydra` or
   `hydra.utils.instantiate` outside `HydraParametrisation._build_spec`.
-- Sub-module **class defaults live in the signature (code)**, not in config `_target_`.
-  Structural **values** (num_heads, num_layers, layer_kernels, …) still come from `params`.
+- Build model sub-modules via `BaseGraphModel._create_submodule(config_key, override,
+  default_cls, **runtime)`. Class resolution priority: explicit constructor `override` →
+  `model.<config_key>._target_` in `params` → `default_cls` (code fallback). Constructor args
+  (`encoder`/`processor`/`decoder`/`residual`/`noise_injector`) default to `None`. Structural
+  **values** (num_heads, num_layers, layer_kernels, …) come from `params`; a `_target_` mapping
+  carries them, otherwise they are read from `model.<key>` public keys.
 - Read scalars/specs with `self.params.get("dotted.key", default)`.
 - `layer_kernels` is a `LayerKernels` (a `Parametrisation`); leaf layers keep
   `layer_kernels.Linear(...)` / `["LayerNorm"]` access. Its type hint is `Parametrisation`.
 - Leaf layers (mappers, processors, attention, FFT) keep explicit-kwarg constructors — don't
   thread `params` into them unless asked.
-- Tests/examples build models with `DictParametrisation({...})`, not OmegaConf/DotDict.
+- Tests/examples build models with `Parametrisation.from_dict({...})`, not OmegaConf/DotDict
+  and never a concrete subclass at the call site.
 - Interface: keyword is `params=`; stored attribute is `model.params` (not `model.config`).
 - Graph builders build attributes via a `parametrisation` (default: a stateless
-  `DictParametrisation`); `GraphCreator` threads its own instance through.
+  `Parametrisation.from_dict({})`); `GraphCreator` threads its own instance through.

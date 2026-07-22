@@ -11,12 +11,14 @@ for the design rationale and the migration table.
 
 * **`anemoi.utils.parametrisation`** — Hydra-free construction mechanism shared by
   `anemoi.graphs`, `anemoi.models` and `anemoi.training`:
-  * `Parametrisation` (ABC): `get(key, default)`, `to_dict()`, and `create_module(spec, ...)` —
-    the single construction entry point. `create_module` dispatches on the argument: a class
-    is instantiated, a dotted-path string / `_target_` mapping / list is built via
-    `_build_spec`, `None` returns `None`, an already-built instance is returned unchanged.
-  * `DictParametrisation`: JSON-serialisable, dict-backed impl (`from_json`/`from_file`/`to_json`);
-    `_build_spec` is Hydra-free.
+  * `Parametrisation` (ABC): `get(key, default)`, `to_dict()`, `from_dict(mapping)` (factory)
+    and `create_module(spec, ...)` — the single construction entry point. `create_module`
+    dispatches on the argument: a class is instantiated, a dotted-path string / `_target_`
+    mapping / list is built via `_build_spec`, `None` returns `None`, an already-built instance
+    is returned unchanged. Serialisation is dict-only (`from_dict` / `to_dict`); wrap with
+    `json.loads` / `json.dumps` for a string.
+  * `DictParametrisationBase` (common base, never instantiated) and the Hydra-free leaf
+    `DictParametrisation`; `_build_spec` is Hydra-free.
   * `ParametrisationError`, and dotted-path helpers `get_object` / `get_class`.
 
 ## models
@@ -28,12 +30,15 @@ for the design rationale and the migration table.
   `params.create_module(...)`. The `anemoi.models.utils.instantiate` shim is removed.
 * **`AnemoiModelInterface`** now takes `params:` (a `Parametrisation`) instead of `config:`
   (OmegaConf `DictConfig`), stored as `model.params` (was `model.config`). Inference builds it
-  from checkpoint JSON with `DictParametrisation(...)`; training uses `TrainingParametrisation`.
-* **Sub-modules default to classes in code.** `encoder`, `processor`, `decoder`, `residual`,
-  `noise_injector` are constructor arguments defaulting to their classes (e.g.
-  `encoder=GraphTransformerForwardMapper`). A config `model.<sub>._target_` no longer *selects*
-  the class — override with a class, dotted-path string, or built `nn.Module`. Structural
-  settings (num_heads, num_layers, layer_kernels, …) are still read from the parametrisation.
+  from the checkpoint's config dict with `Parametrisation.from_dict(...)`; training builds the
+  same way from the resolved OmegaConf config.
+* **Sub-module class selection.** `encoder`, `processor`, `decoder`, `residual`,
+  `noise_injector` are constructor arguments (default `None`). The class is resolved in
+  priority order: an explicit constructor override (class / dotted-path string / built
+  `nn.Module`) → the `model.<sub>._target_` named in the parameters → the code default class
+  (e.g. `GraphTransformerForwardMapper`). This keeps `model=gnn` / `transformer` selectable via
+  config while providing a code fallback. Structural settings (num_heads, num_layers,
+  layer_kernels, …) are read from the parametrisation. See `BaseGraphModel._create_submodule`.
 * **`load_layer_kernels` returns a `LayerKernels`** (a `Parametrisation`) instead of a
   `DotDict`; attribute/item access (`layer_kernels.Linear(...)`, `["LayerNorm"]`) is unchanged.
   A kernel that cannot be built raises `ParametrisationError` (was `InstantiationException`).

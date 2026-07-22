@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any
 from typing import Optional
 
@@ -46,7 +47,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        residual: Any = SkipConnection,
+        residual: Any = None,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -61,9 +62,10 @@ class BaseGraphModel(nn.Module):
         graph_data : HeteroData
             Graph definition
         residual : type | str | nn.Module, optional
-            Residual connection sub-module. Defaults to the :class:`SkipConnection` class
-            (the default lives in the code, not the parameters); a string / ``_target_``
-            mapping is built via ``params.create_module``; an instance is used as-is.
+            Residual connection sub-module. ``None`` (the default) resolves the class from
+            ``model.residual._target_`` if present, otherwise falls back to the code default
+            :class:`SkipConnection`; a class / string / ``_target_`` mapping is built via
+            ``params.create_module``; an instance is used as-is. See :meth:`_create_submodule`.
         """
         super().__init__()
         self.params = params
@@ -247,13 +249,45 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
+    def _submodule_settings(self, key: str) -> dict:
+        """Structural settings for a sub-module, read from the parameters (``model.<key>``).
+
+        Only public keys are returned (``_target_`` and other ``_``-prefixed directives are
+        dropped). Used when the class comes from the code default or an explicit override; a
+        ``_target_`` mapping already carries these settings (see :meth:`_create_submodule`).
+        """
+        spec = self.params.get(f"model.{key}", {}) or {}
+        return {k: v for k, v in spec.items() if not k.startswith("_")}
+
+    def _create_submodule(self, config_key: str, override: Any, default_cls: type, **runtime: Any) -> Any:
+        """Build a sub-module, choosing its class in priority order:
+
+        1. an explicit constructor ``override`` (class / dotted string / built ``nn.Module``);
+        2. the class named in ``model.<config_key>._target_`` -- the parametrisation selects it;
+        3. the code ``default_cls``.
+
+        Runtime dimensions in ``runtime`` are always injected (they win over config values).
+        Structural settings (``model.<config_key>`` public keys) are injected for cases 1 and 3;
+        in case 2 the ``_target_`` mapping already carries them, so they are not added again.
+        """
+        if override is not None:
+            return self.params.create_module(override, **self._submodule_settings(config_key), **runtime)
+
+        spec = self.params.get(f"model.{config_key}", None)
+        if isinstance(spec, Mapping) and "_target_" in spec:
+            return self.params.create_module(spec, **runtime)
+
+        return self.params.create_module(default_cls, **self._submodule_settings(config_key), **runtime)
+
     def _build_residual(self) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-            self.residual[dataset_name] = self.params.create_module(
+            self.residual[dataset_name] = self._create_submodule(
+                "residual",
                 self._residual,
+                SkipConnection,
                 graph=self._graph_data,
                 data_node_name=data_node_name,
                 statistics=self.statistics[dataset_name],

@@ -32,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
-    def __init__(self, params: Parametrisation, *, noise_injector=NoiseConditioning, **kwargs) -> None:
+    def __init__(self, params: Parametrisation, *, noise_injector=None, **kwargs) -> None:
         self.condition_on_residual = params.get("model.condition_on_residual")
         # See AnemoiModelEncProcDec.__init__: stash before nn.Module.__init__ runs.
         object.__setattr__(self, "_noise_injector", noise_injector)
@@ -41,10 +41,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def _build_networks(self) -> None:
         super()._build_networks()
 
-        self.noise_injector = self.params.create_module(
+        self.noise_injector = self._create_submodule(
+            "noise_injector",
             self._noise_injector,
+            NoiseConditioning,
             _recursive_=False,  # Avoids building of layer_kernels here (spec path)
-            **self._submodule_settings("noise_injector"),
             num_channels=self.num_channels,
             graph_data=self._graph_data,
         )

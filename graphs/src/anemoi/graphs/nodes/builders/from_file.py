@@ -45,7 +45,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
 
     def __init__(self, dataset: DictConfig | str, name: str, attributes: list | None = None) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
-        self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
+        self.dataset = OmegaConf.to_container(dataset, resolve=True) if OmegaConf.is_config(dataset) else dataset
         super().__init__(name, attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
