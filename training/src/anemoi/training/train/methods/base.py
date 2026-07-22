@@ -26,7 +26,6 @@ from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
@@ -239,9 +238,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
-            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
@@ -275,7 +271,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 dataset_scalers,
                 data_indices[dataset_name],
                 graph_data=graph_data,
-                data_node_name=data_node_name,
+                data_node_name=dataset_name,
             )
 
             # Check unit compatibility between predicted and target variables
@@ -287,7 +283,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
-                data_node_name=data_node_name,
+                data_node_name=dataset_name,
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
