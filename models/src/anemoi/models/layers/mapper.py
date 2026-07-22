@@ -686,6 +686,9 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         )
 
         if self.in_channels_src != self.hidden_dim:
+            LOGGER.info(
+                f"The processor latents are linearly projected from {self.in_channels_src} to {self.hidden_dim} channels."
+            )
             self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
         else:
             self.emb_nodes_src = nn.Identity()

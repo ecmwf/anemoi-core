@@ -27,6 +27,7 @@ processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
+  num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)

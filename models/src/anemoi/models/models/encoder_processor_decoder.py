@@ -83,8 +83,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self.processor = instantiate(
             model_config.model.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
-            num_channels=self.latent_aggregator.hidden_dim,
             edge_dim=self.processor_graph_provider.edge_dim,
+        )
+
+        assert self.processor.num_channels == self.latent_aggregator.hidden_dim, (
+            f"Processor number of channels ({self.processor.num_channels}) must match latent aggregator output channels"
+            f" ({self.latent_aggregator.hidden_dim})."
         )
 
         # Decoder hidden -> data
