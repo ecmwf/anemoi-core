@@ -161,6 +161,15 @@ attributes:
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+  - module: anemoi.training.losses.CRPS
+    options:
+      dynamic: false
+      fullgraph: true
+      mode: max-autotune
+
+# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
+# A higher limit can result in better performance but will increase compilation time and disk space
+recompile_limit: 32 # need to increase recompile limit when compiling CRPS w dynamic=false
 
 # Bounding configuration
 bounding: #These are applied in order
