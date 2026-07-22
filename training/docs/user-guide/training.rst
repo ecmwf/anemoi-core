@@ -105,7 +105,7 @@ seed can replay the same sequence of random choices after restart. This
 is usually not a concern when the seed comes from ``SLURM_JOB_ID``,
 because a new SLURM job normally gets a new job ID.
 
-Anemoi Training derives 32-bit runtime seeds from the selected base seed
+Anemoi Training derives unsigned 32-bit runtime seeds from the selected base seed
 for the trainer, model communication groups, and data-loading epochs. Both
 the base seed and the derived trainer seed are stored in the checkpoint
 metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also

@@ -37,7 +37,8 @@ def derive_seed(base_seed: int, context: SeedContext, *keys: int) -> int:
     Returns
     -------
     int
-        Seed in the range [0, 2**32 - 1].
+        Unsigned 32-bit seed in the range [0, 2**32 - 1].
+        Returned as a Python integer for compatibility with random.seed().
 
     """
     seed_seq = np.random.SeedSequence(entropy=base_seed, spawn_key=(context, *keys))
