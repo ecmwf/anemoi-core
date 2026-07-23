@@ -82,11 +82,11 @@ def check_env_and_warn() -> None:
     using_expandable_segments = options.get("expandable_segments", "False").lower() == "true"
     if using_expandable_segments:
         LOGGER.warning(
-            "You are using the 'expandable_segments' option for PyTorchs CUDA caching memory "
-            "allocator, alongside torch.compile()."
-            "This can cause null pointer exceptions at runtime 'RuntimeError: Expected "
-            "curr_block->next == nullptr to be true, but got false.'"
-            "To avoid this error, unset expandable segments e.g. 'unset PYTORCH_CUDA_ALLOC_CONF' "
+            "You are using the 'expandable_segments' option for PyTorch's CUDA caching memory "
+            "allocator, alongside torch.compile(). "
+            "This can cause null pointer exceptions at runtime: 'RuntimeError: Expected "
+            "curr_block->next == nullptr to be true, but got false.' "
+            "To avoid this error, unset expandable segments (e.g. 'unset PYTORCH_CUDA_ALLOC_CONF') "
             "or try upgrading your PyTorch.",
         )
 
