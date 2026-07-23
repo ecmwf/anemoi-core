@@ -14,7 +14,7 @@ from typing import Optional
 import einops
 import torch
 from hydra.utils import instantiate
-from torch import Tensor
+from torch import Tensor, Value
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
@@ -163,6 +163,45 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         return x_data_latent, x_skip, grid_shard_sizes
+
+    def _assemble_targets(
+        self,
+        x_input_data: Tensor,
+        x_encoded_data: Tensor,
+        batch_size: int,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: ProcessGroup | None = None,
+        dataset_name: str | None = None,
+    ) -> tuple[Tensor, ShardSizes]:
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+            
+        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+
+        x_targets = []
+        for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
+            if target_feature == "coordinates":
+                coords = self.node_attributes.get_coordinates(dataset_name) # (num_points, coords_dim)
+                new_target = einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
+            elif target_feature == "forcings":
+                new_target = x_input_data[self._internal_input_idx[dataset_name]] # TODO: this should point to future forcings
+            elif target_feature == "prognostics":
+                new_target = x_input_data[self._internal_input_idx[dataset_name]]
+            elif target_feature == "trainable_parameters":
+                node_trainable_params = self.node_attributes.trainable_tensors[dataset_name].trainable # (num_points, ?)
+                new_target = einops.repeat(node_trainable_params, "e f -> (repeat e) f", repeat=batch_size)
+            elif target_feature == "encoded_data":
+                new_target = x_encoded_data
+            else:
+                raise ValueError("")
+            
+            if grid_shard_sizes is not None:
+                new_target = shard_tensor(new_target, 0, grid_shard_sizes, model_comm_group)
+            
+            x_targets.append(new_target)
+
+        if len(x_targets) == 1:
+            return x_targets[0]
+        return torch.cat(x_targets, dim=-1)
 
     def _assemble_output(
         self,
@@ -335,6 +374,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in self.target_datasets:
+            x_target_latent, shard_sizes_target = self._assemble_forcings(
+                x[dataset_name],
+                x_data_latent_dict[dataset_name],
+                batch_size,
+                grid_shard_sizes,
+                model_comm_group,
+                dataset_name,
+            )
+
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -346,13 +394,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
+                dst_nodes=shard_sizes_target,  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
 
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, x_target_latent),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
