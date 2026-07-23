@@ -377,7 +377,7 @@ class FlexAttentionWrapper(nn.Module):
     def __init__(self, **kwargs):
         """Flex attention wrapper for PyTorch flex attention.
 
-        Initalisation checks if flex attention is available in the current PyTorch installation.
+        Initialization checks if flex attention is available in the current PyTorch installation.
 
         Either Triton (default) or flash attention v4 can be used as a backend for flex attention.
         The default behavior is to use Triton as a backend.
