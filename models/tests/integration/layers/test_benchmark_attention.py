@@ -83,7 +83,7 @@ def _time_backend(backend, query, key, value, window_size, mode="fwd"):
 @pytest.mark.gpu
 @pytest.mark.parametrize("window_size", [None, 1120], ids=["global", "sliding_window"])
 @pytest.mark.parametrize("mode", ["fwd", "fwd_plus_bwd"], ids=["forward", "forward & backward"])
-def test_attention_backend_benchmark(window_size, mode):
+def test_attention_backend_benchmark(window_size, mode, capsys):
     """Benchmark flex attention against SDPA and flash attention on a large input.
 
     The global case compares flex, SDPA, and flash. The sliding-window case focuses on flex and
@@ -123,6 +123,7 @@ def test_attention_backend_benchmark(window_size, mode):
             continue
         torch.testing.assert_close(output, reference, atol=5e-2, rtol=5e-2)
 
-    print(f"Attention benchmark: window_size={window_size}, dtype={dtype}, shape={(Z, H, N_CTX, HEAD_DIM)}")
-    for name, elapsed in timings.items():
-        print(f"  {name}: {elapsed * 1e3:.2f} ms")
+    with capsys.disabled():
+        print(f"Attention benchmark: mode={mode}, window_size={window_size}, dtype={dtype}, shape={(Z, H, N_CTX, HEAD_DIM)}")
+        for name, elapsed in timings.items():
+            print(f"  {name}: {elapsed * 1e3:.2f} ms")
