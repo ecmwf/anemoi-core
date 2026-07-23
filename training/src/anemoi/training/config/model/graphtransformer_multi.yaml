@@ -104,7 +104,7 @@ decoders:
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
     datasets: [ "cerra" ]
-    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs 
+    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
