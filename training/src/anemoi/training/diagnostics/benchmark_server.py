@@ -22,6 +22,7 @@ from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from typing import Final
 
 import pandas as pd
 import yaml
@@ -37,7 +38,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce mem
 
 LOGGER = logging.getLogger(__name__)
 
-BENCHMARK_SERVER_ARTIFACT_LIMIT = 10
+BENCHMARK_SERVER_ARTIFACT_LIMIT: Final = 10
+MLFLOW_LOG_RETENTION_LIMIT: Final = 10
 
 
 def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
@@ -776,6 +778,47 @@ def track_accuracy_results(
     LOGGER.info("Updating accuracy benchmark metrics on server")
     for accuracy_benchmark_value in accuracy_benchmark_results:
         benchmark_server.set_value(accuracy_benchmark_value)
+
+
+@rank_zero_only
+def prune_mlflow_runs(
+    client: Any,
+    experiment_name: str,
+    run_name: str,
+    keep_latest: int = MLFLOW_LOG_RETENTION_LIMIT,
+    protected_run_ids: list[str] | None = None,
+) -> None:
+    """Deletes old mlflow runs for a benchmark/accuracy test, keeping only the most recent ones.
+
+    Once such a test has passed, only its most recent mlflow runs are useful for future
+    comparisons; older ones just accumulate on the tracking server. This keeps the
+    ``keep_latest`` most recent runs (by start time) matching ``run_name`` within
+    ``experiment_name`` and deletes the rest, always preserving any run listed in
+    ``protected_run_ids`` (e.g. a pinned reference run used for comparisons) regardless of age.
+
+    client: an mlflow tracking client (e.g. AnemoiMlflowClient) exposing the standard
+            MlflowClient interface (get_experiment_by_name, search_runs, delete_run).
+    """
+    protected_run_ids = set(protected_run_ids or [])
+
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        LOGGER.info("No mlflow experiment named '%s' found, nothing to prune", experiment_name)
+        return
+
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.mlflow.runName = '{run_name}'",
+        order_by=["attribute.start_time DESC"],
+    )
+
+    runs_to_maybe_delete = runs[keep_latest:]
+    for run in runs_to_maybe_delete:
+        if run.info.run_id in protected_run_ids:
+            LOGGER.debug("Keeping protected mlflow run %s", run.info.run_id)
+            continue
+        LOGGER.info("Deleting mlflow run %s (exceeds retention limit of %s)", run.info.run_id, keep_latest)
+        client.delete_run(run.info.run_id)
 
 
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:
