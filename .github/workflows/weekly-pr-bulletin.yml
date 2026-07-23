@@ -161,13 +161,10 @@ jobs:
             ].sort();
 
             // ── breaking config PRs ───────────────────────────────────────────────
-            const seenBreaking = new Set();
-            const breakingPRs = [...openedWithComp, ...mergedWithComp].filter(({ pr, files }) => {
-              if (seenBreaking.has(pr.number)) return false;
-              if (!isBreakingConfigPR(pr, files)) return false;
-              seenBreaking.add(pr.number);
-              return true;
-            });
+            const breakingMerged = mergedWithComp.filter(({ pr, files }) => isBreakingConfigPR(pr, files));
+            const breakingOpen   = openedWithComp.filter(({ pr, files }) =>
+              isBreakingConfigPR(pr, files) && !mergedWithComp.some(m => m.pr.number === pr.number)
+            );
 
             // ── contributors ──────────────────────────────────────────────────────
             const contributorLogins = new Set();
@@ -179,7 +176,7 @@ jobs:
             const fmt = d => d.toISOString().slice(0, 10);
 
             // ── build markdown bulletin ───────────────────────────────────────────
-            const compEmoji = { graphs: '🕸️', models: '🧠', training: '🏋️', core: '⚙️' };
+            const compEmoji = { core: '⚙️', training: '🏋️', models: '🧠', graphs: '🕸️' };
 
             function prLine(pr, files) {
               const author = pr.user ? pr.user.login : 'unknown';
@@ -188,6 +185,12 @@ jobs:
               const line = `- [#${pr.number}](${pr.html_url})${flag} **${pr.title.trim()}** — ${author}`;
               return summary ? `${line}\n  > ${summary}` : line;
             }
+
+            const compOrder = ['core', 'training', 'models', 'graphs'];
+            const allComponentsSorted = [
+              ...compOrder.filter(c => allComponents.includes(c)),
+              ...allComponents.filter(c => !compOrder.includes(c)).sort(),
+            ];
 
             const lines = [];
             lines.push(`## 📋 anemoi-core Weekly PR Bulletin`);
@@ -198,7 +201,7 @@ jobs:
             lines.push(`| PRs opened | ${opened.length} |`);
             lines.push(`| PRs merged | ${merged.length} |`);
             lines.push(`| 🚀 Releases | ${releasePRs.length} |`);
-            lines.push(`| ⚠️ Breaking / config | ${breakingPRs.length} |`);
+            lines.push(`| ⚠️ Breaking / config | ${breakingMerged.length + breakingOpen.length} |`);
             lines.push(`| Contributors | ${contributorLogins.size} |`);
 
             if (contributorLogins.size > 0) {
@@ -206,10 +209,19 @@ jobs:
               lines.push(`**Contributors:** ${[...contributorLogins].join(', ')}`);
             }
 
-            if (breakingPRs.length > 0) {
+            if (breakingMerged.length > 0 || breakingOpen.length > 0) {
               lines.push('');
               lines.push(`### ⚠️ Breaking / Config-Schema Changes`);
-              for (const { pr, files } of breakingPRs) lines.push(prLine(pr, files));
+              if (breakingMerged.length > 0) {
+                lines.push('');
+                lines.push(`**Merged (${breakingMerged.length})**`);
+                for (const { pr, files } of breakingMerged) lines.push(prLine(pr, files));
+              }
+              if (breakingOpen.length > 0) {
+                lines.push('');
+                lines.push(`**Open (${breakingOpen.length})**`);
+                for (const { pr, files } of breakingOpen) lines.push(prLine(pr, files));
+              }
             }
 
             if (releasePRs.length > 0) {
@@ -218,7 +230,7 @@ jobs:
               for (const pr of releasePRs) lines.push(prLine(pr, null));
             }
 
-            for (const comp of allComponents) {
+            for (const comp of allComponentsSorted) {
               const emoji = compEmoji[comp] || '📦';
               lines.push('');
               lines.push(`### ${emoji} ${comp.charAt(0).toUpperCase() + comp.slice(1)}`);
