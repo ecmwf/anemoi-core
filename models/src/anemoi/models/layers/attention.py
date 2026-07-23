@@ -384,8 +384,6 @@ class FlexAttentionWrapper(nn.Module):
         The default behavior is to use Triton as a backend.
         If flash attention v4 is available, it will be used as a backend for flex attention,
         which gives approx 2x performance in the attention kernel.
-        you can pass the argument `use_triton_backend=True` via the config to force Triton as a
-        backend for flex attention.
         """
         super().__init__()
 
@@ -405,18 +403,17 @@ class FlexAttentionWrapper(nn.Module):
         self._compile = True
         self._use_flash4_backend = False
 
-        if not kwargs.get("use_triton_backend", False):
 
-            # Try import flash attention v4
-            # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
-            # One reason to use flex attention with the flash attention v4 backend, rather then using flash attention v4 directly, is
-            # flex attentions support for custom block masks.
-            if find_spec("flash_attn.cute") is not None:
-                LOGGER.info("Using flash attention v4 backend for flex attention.")
-                self._use_flash4_backend = True
-            else:
-                LOGGER.debug("Flash attention v4 not available.")
+        # Try import flash attention v4
+        # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
+        # One reason to use flex attention with the flash attention v4 backend, rather then using flash attention v4 directly, is
+        # flex attentions support for custom block masks.
+        self._kernel_options = {}
+        if find_spec("flash_attn.cute") is not None:
+            LOGGER.info("Using flash attention v4 backend for flex attention.")
+            self._kernel_options["BACKEND"] = "FLASH"
         else:
+            LOGGER.debug("Flash attention v4 not available.")
             # using triton for flex attention backend.
             # check triton is installed
             if find_spec("triton") is None:
@@ -425,7 +422,6 @@ class FlexAttentionWrapper(nn.Module):
                     "Please install triton or select a different attention backend."
                 )
 
-        self._kernel_options = {"BACKEND": "FLASH"} if self._use_flash4_backend else {}
 
     def forward(
         self,
