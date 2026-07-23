@@ -34,6 +34,8 @@ from anemoi.graphs.create import load_graph_from_file
 from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.distributed.random import seed_torch_rng_sources
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -365,7 +367,9 @@ class AnemoiTrainer(ABC):
 
         training_method_cfg = self.config.training.method
         training_method_cls = get_class(training_method_cfg._target_)
-        model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
+        seed_torch_rng_sources(self.initial_seed, self.strategy.global_rank, reset_synced=True)
+        with use_synced_torch_rng():
+            model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -378,17 +382,17 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-
                 # Load to CPU explictly, to avoid loading entire model on GPU initially
                 # Modifications to the model occur on cpu,
                 # The model will be sent to GPU when trainer.fit() is called
-                model = training_method_cls.load_from_checkpoint(
-                    self.last_checkpoint,
-                    **kwargs,
-                    strict=False,
-                    weights_only=False,  # required for Pytorch Lightning 2.6
-                    map_location="cpu",
-                )
+                with use_synced_torch_rng():
+                    model = training_method_cls.load_from_checkpoint(
+                        self.last_checkpoint,
+                        **kwargs,
+                        strict=False,
+                        weights_only=False,  # required for Pytorch Lightning 2.6
+                        map_location="cpu",
+                    )
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config

@@ -10,6 +10,7 @@
 import pytest
 import torch
 
+from anemoi.models.distributed.random import seed_torch_rng_sources
 from anemoi.models.transport.schedules import KarrasSigmaTrainingDistribution
 from anemoi.models.transport.schedules import UniformTimeTrainingDistribution
 from anemoi.models.transport.schedules import UnitTimeSchedule
@@ -44,6 +45,7 @@ def test_time_schedule_rejects_sigma_parameters() -> None:
 def test_training_condition_distribution_samples_one_shared_condition_per_sample_and_ensemble(
     distribution,
 ) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     shapes = {
         "a": (2, 1, 3, 5, 4),
         "b": (2, 2, 3, 7, 1),

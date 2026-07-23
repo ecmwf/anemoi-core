@@ -15,6 +15,7 @@ from abc import abstractmethod
 
 import torch
 
+from anemoi.models.distributed.random import use_synced_torch_rng
 from anemoi.models.transport.paths import karras_sigma_from_unit_time
 
 # Small tolerance used when a sigma schedule provides an explicit final noise value.
@@ -277,7 +278,8 @@ class SigmaTrainingDistribution(TrainingConditionDistribution):
         device: torch.device,
         dtype: torch.dtype | None,
     ) -> torch.Tensor:
-        unit_time = torch.rand((batch_size, ensemble_size), device=device, dtype=dtype)
+        with use_synced_torch_rng():
+            unit_time = torch.rand((batch_size, ensemble_size), device=device, dtype=dtype)
         return self._sigma_from_unit_time(unit_time)
 
     @abstractmethod
@@ -346,7 +348,8 @@ class UniformTimeTrainingDistribution(TrainingConditionDistribution):
         device: torch.device,
         dtype: torch.dtype | None,
     ) -> torch.Tensor:
-        return torch.rand((batch_size, ensemble_size), device=device, dtype=dtype)
+        with use_synced_torch_rng():
+            return torch.rand((batch_size, ensemble_size), device=device, dtype=dtype)
 
 
 def exponential_sigma_from_unit_time(

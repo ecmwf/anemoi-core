@@ -8,10 +8,12 @@ import math
 
 import torch
 
+from anemoi.models.distributed.random import seed_torch_rng_sources
 from anemoi.models.transport import random_fields
 
 
 def test_randn_with_grid_sharding_creates_full_grid_before_sharding(monkeypatch) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     calls = {}
 
     def fake_randn(shape, device=None, dtype=None):

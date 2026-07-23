@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from copy import deepcopy
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -60,7 +61,6 @@ def test_pointwisemlp_processor_uses_only_pointwise_blocks(pointwisemlp_processo
     assert all(isinstance(block, PointWiseMLPProcessorBlock) for block in pointwisemlp_processor.proc)
 
 
-@pytest.fixture(params=[0.1, None])
 def test_pointwisemlp_processor_with_sharding_dropout_forward(pointwisemlp_processor, pointwisemlp_processor_init):
     gridsize = 100
     batch_size = 1
@@ -71,15 +71,71 @@ def test_pointwisemlp_processor_with_sharding_dropout_forward(pointwisemlp_proce
 
     # Mock distributed group
     fake_model_comm_group = MagicMock()
-    fake_model_comm_group.size.return_value = 1
+    fake_model_comm_group.size.return_value = 2
 
-    with pytest.raises(ValueError, match="Dropout is not supported when model is sharded"):
-        pointwisemlp_processor.forward(
-            x,
-            batch_size,
-            shard_info,
-            model_comm_group=fake_model_comm_group,
-        )
+    output = pointwisemlp_processor.forward(
+        x,
+        batch_size,
+        shard_info,
+        model_comm_group=fake_model_comm_group,
+    )
+
+    assert output.shape == x.shape
+
+
+def test_pointwisemlp_processor_checkpointed_dropout_preserves_rng(pointwisemlp_processor_init):
+    gridsize = 12
+    batch_size = 1
+    shard_info = GraphShardInfo(nodes=[gridsize])
+    fake_model_comm_group = MagicMock()
+    fake_model_comm_group.size.return_value = 2
+
+    config = asdict(pointwisemlp_processor_init)
+    config["num_channels"] = 8
+    config["mlp_hidden_ratio"] = 2
+    config["dropout_p"] = 0.5
+
+    checkpointed_config = deepcopy(config)
+    checkpointed_config["gradient_checkpointing"] = True
+    eager_config = deepcopy(config)
+    eager_config["gradient_checkpointing"] = False
+
+    torch.manual_seed(123)
+    checkpointed = PointWiseMLPProcessor(**checkpointed_config)
+    eager = PointWiseMLPProcessor(**eager_config)
+    eager.load_state_dict(checkpointed.state_dict())
+
+    checkpointed.train()
+    eager.train()
+
+    x = torch.randn(gridsize, config["num_channels"])
+    x_checkpointed = x.clone().requires_grad_()
+    x_eager = x.clone().requires_grad_()
+
+    torch.manual_seed(456)
+    checkpointed_out = checkpointed(
+        x_checkpointed,
+        batch_size,
+        shard_info,
+        model_comm_group=fake_model_comm_group,
+    )
+    checkpointed_loss = checkpointed_out.square().sum()
+    checkpointed_loss.backward()
+
+    torch.manual_seed(456)
+    eager_out = eager(
+        x_eager,
+        batch_size,
+        shard_info,
+        model_comm_group=fake_model_comm_group,
+    )
+    eager_loss = eager_out.square().sum()
+    eager_loss.backward()
+
+    assert torch.allclose(checkpointed_out, eager_out)
+    assert torch.allclose(x_checkpointed.grad, x_eager.grad)
+    for checkpointed_param, eager_param in zip(checkpointed.parameters(), eager.parameters(), strict=True):
+        assert torch.allclose(checkpointed_param.grad, eager_param.grad)
 
 
 def test_pointwisemlp_processor_forward(pointwisemlp_processor, pointwisemlp_processor_init):

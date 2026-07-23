@@ -22,6 +22,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.random import seed_torch_rng_sources
 from anemoi.models.preprocessing import Processors
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantSettings
@@ -545,6 +546,7 @@ def _prepared_target_with_reference_source() -> PreparedPredictionTarget:
 
 
 def test_transport_source_default_is_gaussian(monkeypatch: pytest.MonkeyPatch) -> None:
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     objective = _transport_objective_with_source("default")
     prepared = _prepared_target_with_reference_source()
 
@@ -578,6 +580,7 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stochastic interpolants train drift in MODEL_OUTPUT space."""
+    seed_torch_rng_sources(1234, global_rank=0, seed_default=False, reset_synced=True)
     module = SimpleNamespace(
         model=SimpleNamespace(
             model=SimpleNamespace(
