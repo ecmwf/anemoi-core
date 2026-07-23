@@ -204,11 +204,6 @@ jobs:
             lines.push(`| ⚠️ Breaking / config | ${breakingMerged.length + breakingOpen.length} |`);
             lines.push(`| Contributors | ${contributorLogins.size} |`);
 
-            if (contributorLogins.size > 0) {
-              lines.push('');
-              lines.push(`**Contributors:** ${[...contributorLogins].join(', ')}`);
-            }
-
             if (breakingMerged.length > 0 || breakingOpen.length > 0) {
               lines.push('');
               lines.push(`### ⚠️ Breaking / Config-Schema Changes`);
