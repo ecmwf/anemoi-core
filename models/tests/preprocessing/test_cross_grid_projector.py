@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import io
 
 import pytest
 import torch
@@ -15,10 +14,10 @@ import torch
 from anemoi.models.preprocessing import ProcessorMode
 from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
     """Build a CrossGridProjector from a synthetic .npz sparse matrix.
@@ -30,13 +29,14 @@ def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
     import tempfile
 
     import numpy as np
-    from scipy.sparse import csr_matrix, save_npz
+    from scipy.sparse import csr_matrix
+    from scipy.sparse import save_npz
 
     ratio = n_src // n_dst
     # _build_from_file reads shape as (n_dst, n_src): rows = dst, cols = src.
     # (matches the SparseProjector convention: W @ x where W is (n_dst, n_src))
     row = np.repeat(np.arange(n_dst), ratio)  # dst node indices (rows)
-    col = np.arange(n_src)                     # src node indices (cols)
+    col = np.arange(n_src)  # src node indices (cols)
     data = np.ones(n_src, dtype=np.float32)
     mat = csr_matrix((data, (row, col)), shape=(n_dst, n_src))
 
@@ -50,6 +50,7 @@ def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
 # ---------------------------------------------------------------------------
 # ProcessorMode enum
 # ---------------------------------------------------------------------------
+
 
 class TestProcessorMode:
     def test_values(self):
@@ -68,6 +69,7 @@ class TestProcessorMode:
 # ---------------------------------------------------------------------------
 # CrossGridProjector
 # ---------------------------------------------------------------------------
+
 
 class TestCrossGridProjector:
     N_SRC = 8

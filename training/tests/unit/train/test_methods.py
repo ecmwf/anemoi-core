@@ -39,6 +39,7 @@ from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObj
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.methods.stochastic_interpolant import StochasticInterpolantTransportObjective
+from anemoi.training.train.methods.transport import ResidualPredictionMode
 from anemoi.training.train.methods.transport import StatePredictionMode
 from anemoi.training.train.methods.transport import TendencyPredictionMode
 from anemoi.training.train.methods.transport import TransportTraining
@@ -2216,3 +2217,244 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
     assert "rmse_metric/data/z500/2" in metrics_step1
     # Keys must be distinct across steps
     assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))
+
+
+# ── ResidualPredictionMode ────────────────────────────────────────────────────
+#
+# ResidualPredictionMode expects the batch to be already normalized (like every
+# other prediction mode).  It denormalizes the projected lres and the target,
+# subtracts them to obtain the raw residual, and then renormalizes the residual
+# with the residual (tendency-space) pre-processor.  Reconstruction is the
+# inverse of that flow.  The tests below use additive processors so the
+# round-trip can be verified numerically.
+
+
+class _AdditiveProcessor:
+    """Toy processor: forward adds ``offset``; called with ``in_place=False``.
+
+    Ignores extra kwargs (``data_index``, ``skip_imputation``, ...) so the same
+    stub can stand in for either state or tendency pre/post-processors.
+    """
+
+    def __init__(self, offset: float) -> None:
+        self.offset = offset
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, x: torch.Tensor, in_place: bool = True, **kwargs: Any) -> torch.Tensor:
+        assert in_place is False, "ResidualPredictionMode must call processors with in_place=False."
+        self.calls.append({"x_shape": tuple(x.shape), "kwargs": kwargs})
+        return x + self.offset
+
+
+def _make_residual_module(
+    *,
+    pre_offset: float,
+    post_offset: float,
+    tend_pre_offset: float,
+    tend_post_offset: float,
+    lres_name: str = "in_lres",
+    target_name: str = "out",
+) -> tuple[SimpleNamespace, dict[str, _AdditiveProcessor]]:
+    """Build a minimal fake module exposing the surface used by ResidualPredictionMode.
+
+    - ``spatial_pre_processors`` is keyed by ``lres_name`` (the presence of the
+      key is what identifies the lres dataset).
+    - ``pre_processors`` / ``post_processors`` are keyed per dataset (state).
+    - ``pre_processors_tendencies`` / ``post_processors_tendencies`` provide the
+      residual normalization statistics.
+    """
+    processors = {
+        "state_pre": {name: _AdditiveProcessor(pre_offset) for name in (lres_name, target_name)},
+        "state_post": {name: _AdditiveProcessor(post_offset) for name in (lres_name, target_name)},
+        "tend_pre": {target_name: _AdditiveProcessor(tend_pre_offset)},
+        "tend_post": {target_name: _AdditiveProcessor(tend_post_offset)},
+    }
+
+    # Full name-to-index has 2 vars: both are model output vars (no split).
+    name_to_index = {"v0": 0, "v1": 1}
+    data_indices = {
+        lres_name: _make_minimal_index_collection(name_to_index),
+        target_name: _make_minimal_index_collection(name_to_index),
+    }
+
+    task = SimpleNamespace(
+        target_datasets=[target_name],
+        input_datasets=[lres_name],
+        get_targets=lambda batch, **_kw: {n: batch[n] for n in [target_name]},
+    )
+
+    def _get_data_output_target(target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        out = {}
+        for name, tensor in target_full.items():
+            idx = data_indices[name].data.output.full.to(device=tensor.device)
+            out[name] = tensor.index_select(-1, idx)
+        return out
+
+    def _reduce(y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # In these tests, model output = data output, so this is an identity map.
+        return dict(y)
+
+    module = SimpleNamespace(
+        model=SimpleNamespace(
+            spatial_pre_processors={lres_name: object()},
+            pre_processors=processors["state_pre"],
+            post_processors=processors["state_post"],
+            pre_processors_tendencies=processors["tend_pre"],
+            post_processors_tendencies=processors["tend_post"],
+        ),
+        data_indices=data_indices,
+        task=task,
+        n_step_input=1,
+        n_step_output=1,
+        get_data_output_target=_get_data_output_target,
+        reduce_data_output_target_to_model_output=_reduce,
+        config=SimpleNamespace(
+            training=SimpleNamespace(transport={"objective": "edm_diffusion"}),
+        ),
+    )
+    return module, {
+        "pre": processors["state_pre"][target_name],
+        "post": processors["state_post"][target_name],
+        "pre_lres": processors["state_pre"][lres_name],
+        "post_lres": processors["state_post"][lres_name],
+        "tend_pre": processors["tend_pre"][target_name],
+        "tend_post": processors["tend_post"][target_name],
+    }
+
+
+def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes() -> None:
+    """prepare_target denormalizes lres and target, computes residual, then normalizes with tendency stats."""
+    module, _procs = _make_residual_module(
+        pre_offset=100.0,
+        post_offset=-100.0,
+        tend_pre_offset=10.0,
+        tend_post_offset=-10.0,
+    )
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+
+    # Normalized batch — a fully normalized tensor for lres and target on the same grid.
+    b, t, e, g = 2, 1, 1, 4
+    lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
+    target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
+    batch = {"in_lres": lres_tensor, "out": target_tensor}
+
+    prepared = mode.prepare_target(batch, x={})
+
+    # Denormalized lres cached for reconstruction: 5.0 + (-100.0) = -95.0
+    assert set(prepared.aux) >= {"x_lres_on_hres", "transport_reference_source"}
+    torch.testing.assert_close(prepared.aux["x_lres_on_hres"], lres_tensor - 100.0)
+
+    # loss_target is the normalized residual in DATA_OUTPUT space.
+    # denorm(target) - denorm(lres) = (8 - 100) - (5 - 100) = -92 - (-95) = 3
+    # normalized with tendency pre (+10) = 13
+    expected_residual = torch.full_like(target_tensor, 13.0)
+    assert prepared.loss_target_layout == IndexSpace.DATA_OUTPUT
+    torch.testing.assert_close(prepared.loss_target["out"], expected_residual)
+    # model_target is loss_target reduced to model output (identity here).
+    torch.testing.assert_close(prepared.model_target["out"], expected_residual)
+
+    # metric_target is the state target as returned by task.get_targets (normalized).
+    torch.testing.assert_close(prepared.metric_target["out"], target_tensor)
+
+
+def test_residual_prediction_mode_reconstruct_prediction_inverts_prepare_target() -> None:
+    """Feeding model_target back through reconstruct_prediction recovers the normalized target."""
+    module, _ = _make_residual_module(
+        pre_offset=100.0,
+        post_offset=-100.0,
+        tend_pre_offset=10.0,
+        tend_post_offset=-10.0,
+    )
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+
+    b, t, e, g = 2, 1, 1, 4
+    lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
+    target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
+    batch = {"in_lres": lres_tensor, "out": target_tensor}
+
+    prepared = mode.prepare_target(batch, x={})
+    # Feed the model_target back as a perfect prediction.
+    reconstructed = mode.reconstruct_prediction(prepared.model_target, prepared)
+
+    # Round-trip should return the original normalized target.
+    torch.testing.assert_close(reconstructed["out"], target_tensor)
+
+
+def test_residual_prediction_mode_prepare_metric_target_is_identity() -> None:
+    """prepare_metric_target returns the normalized state target without an imputer inverse."""
+    module, _ = _make_residual_module(
+        pre_offset=1.0,
+        post_offset=-1.0,
+        tend_pre_offset=1.0,
+        tend_post_offset=-1.0,
+    )
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+
+    target_tensor = torch.randn(1, 1, 1, 2, 2)
+    prepared = PreparedPredictionTarget(
+        model_target={},
+        loss_target={},
+        loss_target_layout=IndexSpace.DATA_OUTPUT,
+        metric_target={"out": target_tensor},
+        aux={},
+    )
+    metric_target = mode.prepare_metric_target(prepared)
+    # No transformation should be applied.
+    torch.testing.assert_close(metric_target["out"], target_tensor)
+
+
+def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> None:
+    """ResidualPredictionMode must refuse the stochastic_interpolant objective for now."""
+    module, _ = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=0.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    module.config = SimpleNamespace(
+        training=SimpleNamespace(transport={"objective": "stochastic_interpolant"}),
+    )
+    with pytest.raises(NotImplementedError, match="stochastic_interpolant"):
+        ResidualPredictionMode(module)
+
+
+def test_residual_prediction_mode_requires_exactly_one_spatial_preprocessor() -> None:
+    """prepare_target validates that exactly one dataset has a spatial pre-processor."""
+    module, _ = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=0.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    module.model.spatial_pre_processors = {"a": object(), "b": object()}
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+
+    with pytest.raises(ValueError, match="exactly one spatial pre-processor"):
+        mode.prepare_target({}, x={})
+
+
+def test_residual_prediction_mode_falls_back_to_state_processors_when_tendency_absent() -> None:
+    """If pre/post_processors_tendencies are empty the state processors normalize the residual."""
+    module, _procs = _make_residual_module(
+        pre_offset=100.0,
+        post_offset=-100.0,
+        tend_pre_offset=99.0,  # would be used if tendency processors were present
+        tend_post_offset=-99.0,
+    )
+    module.model.pre_processors_tendencies = {}
+    module.model.post_processors_tendencies = {}
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+
+    b, t, e, g = 1, 1, 1, 2
+    batch = {
+        "in_lres": torch.full((b, t, e, g, 2), 5.0),
+        "out": torch.full((b, t, e, g, 2), 8.0),
+    }
+    prepared = mode.prepare_target(batch, x={})
+    # Fallback to state pre-processor (+100) on the raw residual (=3): expect 103.
+    torch.testing.assert_close(prepared.model_target["out"], torch.full((b, t, e, g, 2), 103.0))
