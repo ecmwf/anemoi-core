@@ -124,6 +124,8 @@ def test_attention_backend_benchmark(window_size, mode, capsys):
         torch.testing.assert_close(output, reference, atol=5e-2, rtol=5e-2)
 
     with capsys.disabled():
-        print(f"Attention benchmark: mode={mode}, window_size={window_size}, dtype={dtype}, shape={(Z, H, N_CTX, HEAD_DIM)}")
+        print(
+            f"Attention benchmark: mode={mode}, window_size={window_size}, dtype={dtype}, shape={(Z, H, N_CTX, HEAD_DIM)}"
+        )
         for name, elapsed in timings.items():
             print(f"  {name}: {elapsed * 1e3:.2f} ms")

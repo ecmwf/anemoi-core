@@ -402,7 +402,6 @@ class FlexAttentionWrapper(nn.Module):
         self._compile = True
         self._use_flash4_backend = False
 
-
         # prioritise flash attention v4 over triton backend
         # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
         # if it is not available, we will use triton as a backend for flex attention
@@ -419,7 +418,6 @@ class FlexAttentionWrapper(nn.Module):
                     "Neither flash-attn v4 nor triton is available for flex attention. "
                     "Please install triton (or flash-attn-4) or select a different attention backend."
                 )
-
 
     def forward(
         self,
