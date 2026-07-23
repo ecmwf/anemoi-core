@@ -624,12 +624,53 @@ def test_spectral_amse_octahedral_sht_shapes_and_transform_validation() -> None:
     target = torch.zeros_like(pred)
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
 
-    with pytest.raises(AssertionError, match="must contain a PSD method"):
-        SpectralAMSELoss(
-            transform="fft2d",
-            x_dim=4,
-            y_dim=4,
-        )
+
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_amse_cartesian_transforms(transform: str) -> None:
+    """AMSE works with the 2D transforms via radial-wavenumber binning."""
+    nvars = 3
+    x_dim, y_dim = 8, 6
+    points = x_dim * y_dim
+
+    loss = _make_loss(
+        "anemoi.training.losses.spectral.SpectralAMSELoss",
+        transform=transform,
+        x_dim=x_dim,
+        y_dim=y_dim,
+    )
+
+    # shapes (squash False -> per-variable, squash True -> scalar)
+    pred = torch.zeros((2, 1, 1, points, nvars))
+    target = torch.zeros_like(pred)
+    _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+    # AMSE(x, x) == 0 and AMSE >= 0 (fp64 to avoid the loss's known fp32 sqrt/square
+    # eps-rounding, which is transform-agnostic)
+    torch.manual_seed(0)
+    pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    other = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    assert abs(loss(pred, pred, squash=True).item()) < 1e-6
+    assert loss(pred, pred + other, squash=True).item() >= -1e-9
+
+    # the transform's spectral-density contract (Parseval partition, cross self-consistency)
+    # is covered for all transforms in models/tests/layers/test_spectral_density.py
+
+    # gradients flow back through the radial-binning path (index_add_); the existing
+    # backward tests cover SpectralCRPS / SpectralL2Loss, not AMSE's binning
+    pred = pred.clone().requires_grad_(True)
+    loss(pred, target.double(), squash=True).backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+    # patch-wise FFT2D has no single (ky, kx) plane to bin, so AMSE must reject it
+    if transform == "fft2d":
+        with pytest.raises(AssertionError, match="does not support patch-wise FFT2D"):
+            SpectralAMSELoss(
+                transform="fft2d",
+                x_dim=x_dim,
+                y_dim=y_dim,
+                patch_size=[3, 4],
+            )
 
 
 def test_spectral_l2_octahedral_sht_shapes_and_grid_validation() -> None:
