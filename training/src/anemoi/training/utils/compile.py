@@ -76,7 +76,12 @@ def check_env_and_warn() -> None:
     conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
 
     # convert 'keyword1:value,keyword2:value,...' into a dict
-    options = dict(item.split(":", 1) for item in conf.split(",") if ":" in item)
+    options: dict[str, str] = {}
+    for item in conf.split(","):
+        if ":" not in item:
+            continue
+        key, value = (s.strip() for s in item.split(":", 1))
+        options[key] = value
 
     # check if expandable segments is true
     using_expandable_segments = options.get("expandable_segments", "False").lower() == "true"
