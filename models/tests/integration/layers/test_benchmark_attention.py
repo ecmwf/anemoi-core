@@ -49,21 +49,35 @@ def _run_backend(backend, query, key, value, window_size):
     )
 
 
-def _time_backend(backend, query, key, value, window_size):
+def _time_backend(backend, query, key, value, window_size, mode="fwd"):
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
-    _run_backend(backend, query, key, value, window_size)
+    # Use grad-enabled inputs when benchmarking backward.
+    q, k, v = query, key, value
+    if mode == "fwd_plus_bwd":
+        q = query.detach().clone().requires_grad_(True)
+        k = key.detach().clone().requires_grad_(True)
+        v = value.detach().clone().requires_grad_(True)
+
+    # Warmup
+    out = _run_backend(backend, q, k, v, window_size)
+    if mode == "fwd_plus_bwd":
+        out.sum().backward()
+        q.grad = k.grad = v.grad = None
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
     start = time.perf_counter()
-    output = _run_backend(backend, query, key, value, window_size)
+    out = _run_backend(backend, q, k, v, window_size)
+    if mode == "fwd_plus_bwd":
+        out.sum().backward()
+        out = out.detach()
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
-    return time.perf_counter() - start, output
+    return time.perf_counter() - start, out
 
 
 @pytest.mark.gpu
