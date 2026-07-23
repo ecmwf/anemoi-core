@@ -12,7 +12,6 @@ import gc
 import logging
 import os
 import time
-from pathlib import Path
 
 import psutil
 import pytest
@@ -22,7 +21,7 @@ from torch.cuda import empty_cache
 from torch.cuda import reset_peak_memory_stats
 
 from anemoi.training.diagnostics.benchmark_server import benchmark
-from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
+from anemoi.training.diagnostics.benchmark_server import get_benchmark_store
 from anemoi.training.diagnostics.benchmark_server import track_dataloader_benchmark_results
 from anemoi.training.train.profiler import AnemoiProfiler
 
@@ -151,9 +150,8 @@ def test_benchmark_training_cycle(
     # Run model with profiler
     AnemoiProfiler(cfg).profile()
 
-    # determine store from benchmark config
-    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
-    user, hostname, path = parse_benchmark_config(config_path)
-    store: str = f"ssh://{user}@{hostname}:{path}"
+    # determine store from benchmark config (per-kind, so benchmark artefacts
+    # land under the 'benchmarks' subdirectory on the server)
+    store = get_benchmark_store("benchmarks")
 
     benchmark(cfg, test_case, store)

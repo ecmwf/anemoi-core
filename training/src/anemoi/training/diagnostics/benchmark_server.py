@@ -49,6 +49,30 @@ def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
     return user, hostname, path
 
 
+DEFAULT_BENCHMARK_CONFIG_PATH = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+
+
+def get_benchmark_store(kind: str, config_path: Path = DEFAULT_BENCHMARK_CONFIG_PATH) -> str:
+    """Build an ssh:// store URL for a given kind of integration test.
+
+    Reads user/hostname from the anemoi-benchmark yaml and resolves the remote
+    directory for ``kind`` (e.g. ``"benchmarks"``, ``"accuracy"``) as follows:
+
+    - If the yaml has a ``paths`` mapping and ``paths[kind]`` is set, use it
+      verbatim.
+    - Otherwise treat the yaml's ``path`` entry as a base directory and append
+      ``kind`` as a subdirectory (so benchmarks and accuracy results live in
+      sibling directories on the remote host).
+    """
+    with config_path.open("r") as f:
+        cfg = yaml.safe_load(f)
+    user = cfg["user"]
+    hostname = cfg["hostname"]
+    paths = cfg.get("paths") or {}
+    remote_path = paths[kind] if kind in paths else f"{cfg['path']}/{kind}"
+    return f"ssh://{user}@{hostname}:{remote_path}"
+
+
 class BenchmarkValue:
     """A class which stores information about a benchmark, and functions to output them."""
 
@@ -696,9 +720,7 @@ def track_dataloader_benchmark_results(
         LOGGER.info("Skipping dataloader benchmark tracking: not on main branch")
         return
 
-    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
-    user, hostname, path = parse_benchmark_config(config_path)
-    store = f"ssh://{user}@{hostname}:{path}"
+    store = get_benchmark_store("benchmarks")
     benchmark_server = parse_benchmark_location(store, test_case=test_case)
 
     commit = get_git_revision_hash()
@@ -718,6 +740,42 @@ def track_dataloader_benchmark_results(
     LOGGER.info("Updating dataloader benchmark metrics on server")
     for dataloader_benchmark_value in dataloader_benchmark_results:
         benchmark_server.set_value(dataloader_benchmark_value)
+
+
+@rank_zero_only
+def track_accuracy_results(
+    test_case: str,
+    final_loss: float,
+) -> None:
+    """Track accuracy test metrics by updating the remote benchmark server on main."""
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping accuracy benchmark tracking: not on main branch")
+        return
+
+    # Accuracy and performance benchmarks live under sibling directories on
+    # the remote host (see get_benchmark_store): the yaml's 'path' entry is
+    # treated as a base and the kind ('benchmarks' / 'accuracy') is appended,
+    # unless overridden via a 'paths' mapping in the yaml.
+    store = get_benchmark_store("accuracy")
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
+
+    commit = get_git_revision_hash()
+    today = datetime.now(tz=UTC).date()
+    accuracy_benchmark_results = [
+        BenchmarkValue(
+            name="accuracyFinalLoss",
+            value=final_loss,
+            unit="",
+            date=today,
+            commit=commit,
+            op=operator.le,
+            tolerance=0,
+        ),
+    ]
+
+    LOGGER.info("Updating accuracy benchmark metrics on server")
+    for accuracy_benchmark_value in accuracy_benchmark_results:
+        benchmark_server.set_value(accuracy_benchmark_value)
 
 
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:
