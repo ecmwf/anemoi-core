@@ -204,8 +204,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_targets.append(new_target)
 
         if len(x_targets) == 1:
-            return x_targets[0]
-        return torch.cat(x_targets, dim=-1)
+            return x_targets[0], grid_shard_sizes
+
+        return torch.cat(x_targets, dim=-1), grid_shard_sizes
 
     def _assemble_output(
         self,
