@@ -41,8 +41,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: int | dict[str, int],
+        n_step_output: int | dict[str, int],
     ) -> None:
         self.condition_on_residual = DotDict(model_config).model.condition_on_residual
         super().__init__(
@@ -89,7 +89,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
+            n_step_output=self._get_n_step_output(dataset_name),
         )
 
         if grid_shard_sizes is not None:
@@ -133,7 +133,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 "(bs e n) (time vars) -> bs time e n vars",
                 bs=batch_size,
                 e=ensemble_size,
-                time=self.n_step_output,
+                time=self._get_n_step_output(dataset_name),
             )
             .to(dtype=dtype)
             .clone()
