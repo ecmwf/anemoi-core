@@ -213,7 +213,7 @@ class MultiDataset(IterableDataset):
             dataset.set_reader_group_info(reader_group_rank, reader_group_size)
 
         LOGGER.info(
-            "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
+            "MultiDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
             "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d, "
             "sample_comm_group_id %d, sample_comm_num_groups %d",
             global_rank,
@@ -250,7 +250,7 @@ class MultiDataset(IterableDataset):
         self.sample_comm_num_groups = ens_comm_num_groups
 
         LOGGER.info(
-            "NativeGridDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "MultiDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
             "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d, "
             "sample_comm_group_id %d, sample_comm_num_groups %d",
             self.global_rank,
@@ -278,6 +278,17 @@ class MultiDataset(IterableDataset):
 
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
+        LOGGER.info(
+            "%s sample counts: %d valid globally, %d assigned to sample rank %d/%d, %d assigned to worker %d/%d.",
+            self.label.capitalize(),
+            len(self.valid_date_indices),
+            shard_size,
+            self.sample_comm_group_id,
+            self.sample_comm_num_groups,
+            high - low,
+            worker_id,
+            n_workers,
+        )
         LOGGER.info(
             "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
             worker_id,

@@ -379,11 +379,59 @@ class DynamicGraphProvider(BaseGraphProvider):
         self.edge_builder = instantiate(edge_builder_config[0], source_name="-", target_name="-")
         self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
         self._edge_dim = sum(attr.ndim for attr in self.attributes_config.values())
+        self._capture_request: tuple[str, str] | None = None
+        self._captured_graph: HeteroData | None = None
 
     @property
     def edge_dim(self) -> int:
         """Return the edge dimension."""
         return self._edge_dim
+
+    def capture_next_graph(self, source_name: str, target_name: str) -> None:
+        """Arm a one-shot capture of the next complete, sorted dynamic graph."""
+        if source_name == target_name:
+            raise ValueError("Captured bipartite graph node names must be distinct.")
+        if self._capture_request is not None or self._captured_graph is not None:
+            raise RuntimeError("A dynamic graph capture is already armed or waiting to be consumed.")
+        self._capture_request = (source_name, target_name)
+
+    def consume_captured_graph(self) -> HeteroData | None:
+        """Return and clear the captured graph, cancelling an unfulfilled request."""
+        graph = self._captured_graph
+        self._capture_request = None
+        self._captured_graph = None
+        return graph
+
+    def _capture_sorted_graph(
+        self,
+        src_coords: Tensor,
+        dst_coords: Tensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+    ) -> None:
+        if self._capture_request is None:
+            return
+
+        source_name, target_name = self._capture_request
+        self._capture_request = None
+        edge_name = (source_name, "to", target_name)
+
+        graph = HeteroData()
+        graph[source_name].x = src_coords.detach().cpu()
+        graph[target_name].x = dst_coords.detach().cpu()
+        graph[edge_name].edge_index = edge_index.detach().cpu()
+
+        offset = 0
+        for attribute_name, attribute_builder in self.attributes_config.items():
+            width = attribute_builder.ndim
+            graph[edge_name][attribute_name] = edge_attr[:, offset : offset + width].detach().cpu()
+            offset += width
+
+        if offset != edge_attr.shape[1]:
+            raise RuntimeError(
+                f"Captured edge attribute width ({edge_attr.shape[1]}) does not match configured width ({offset}).",
+            )
+        self._captured_graph = graph
 
     def _build_single_graph(self, src_coords: Tensor, dst_coords: Tensor) -> tuple[Tensor, Adj]:
         """Build one dynamic graph without batch offsets."""
@@ -392,14 +440,14 @@ class DynamicGraphProvider(BaseGraphProvider):
             edge_index = torch.empty((2, 0), dtype=torch.long, device=src_coords.device)
             return edge_attr, edge_index
 
-        source_coords = latlon_rad_to_cartesian(src_coords).to(dtype=torch.float32)
-        target_coords = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
+        source_cartesian = latlon_rad_to_cartesian(src_coords).to(dtype=torch.float32)
+        target_cartesian = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
 
-        edge_index = self.edge_builder.compute_edge_index_from_coords(source_coords, target_coords)
-        edge_index = edge_index.to(source_coords.device)
+        edge_index = self.edge_builder.compute_edge_index_from_coords(source_cartesian, target_cartesian)
+        edge_index = edge_index.to(source_cartesian.device)
 
         edge_attr = torch.cat(
-            [attr.propagate(edge_index, x=(source_coords, target_coords)) for attr in self.attributes_config.values()],
+            [attr.propagate(edge_index, x=(src_coords, dst_coords)) for attr in self.attributes_config.values()],
             dim=1,
         )
 
@@ -490,6 +538,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         )
         edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
         edge_attr = edge_attr.index_select(0, perm)
+        self._capture_sorted_graph(src_coords, dst_coords, edge_attr, edge_index)
 
         if shard_edges:
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(

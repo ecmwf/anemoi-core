@@ -133,7 +133,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
-        return MultiDataset(
+        dataset = MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
@@ -141,6 +141,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
         )
+        LOGGER.info(
+            "%s dataset has %d valid samples after applying relative date indices %s.",
+            label.capitalize(),
+            len(dataset.valid_date_indices),
+            relative_date_indices,
+        )
+        return dataset
 
     def set_epoch(self, epoch: int) -> None:
         """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
@@ -187,6 +194,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         assert stage in {"training", "validation", "test"}
 
         extra = {}
+        batch_size = self.config.dataloader.batch_size[stage]
+        num_workers = self.config.dataloader.num_workers[stage]
+
+        LOGGER.info(
+            "Creating %s dataloader from %d valid samples (batch_size=%d, num_workers=%d).",
+            stage,
+            len(ds.valid_date_indices),
+            batch_size,
+            num_workers,
+        )
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
             import multiprocessing
@@ -198,8 +215,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return DataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size[stage],
-            num_workers=self.config.dataloader.num_workers[stage],
+            batch_size=batch_size,
+            num_workers=num_workers,
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
