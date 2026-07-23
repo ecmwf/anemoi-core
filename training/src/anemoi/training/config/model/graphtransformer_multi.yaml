@@ -47,7 +47,7 @@ encoders:
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-      hidden_dim: ${model.num_channels}
+      num_channels: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
@@ -65,7 +65,7 @@ encoders:
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-      hidden_dim: ${model.num_channels}
+      num_channels: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
@@ -89,7 +89,7 @@ decoders:
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-      hidden_dim: ${model.num_channels}
+      num_channels: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
@@ -104,12 +104,12 @@ decoders:
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
     datasets: [ "cerra" ]
-    use_encoded_latents: True
+    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs 
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-      hidden_dim: ${model.num_channels}
+      num_channels: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp

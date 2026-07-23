@@ -24,14 +24,14 @@ from .common_components import TransformerModelComponent
 class GNNEncoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNForwardMapper"] = Field(..., alias="_target_")
     "GNN encoder object from anemoi.models.layers.mapper."
-    hidden_dim: NonNegativeInt = Field(example=512)
+    num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the GNN encoder. Default to 512."
 
 
 class GraphTransformerEncoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GraphTransformerForwardMapper"] = Field(..., alias="_target_")
     "Graph Transfromer Encoder object from anemoi.models.layers.mapper."
-    hidden_dim: NonNegativeInt = Field(example=512)
+    num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Graph Transformer encoder. Default to 512."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
@@ -60,7 +60,7 @@ class GraphTransformerEncoderSchema(TransformerModelComponent):
 class TransformerEncoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.TransformerForwardMapper"] = Field(..., alias="_target_")
     "Transformer Encoder object from anemoi.models.layers.mapper."
-    hidden_dim: NonNegativeInt = Field(example=512)
+    num_channels: NonNegativeInt = Field(example=512)
     "Hidden dimension of the Transformer encoder. Default to 512."
     window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
@@ -77,3 +77,5 @@ class TransformerEncoderSchema(TransformerModelComponent):
 class PointWiseForwardMapperSchema(PointWiseMapperComponent):
     target_: Literal["anemoi.models.layers.mapper.PointWiseForwardMapper"] = Field(..., alias="_target_")
     "Point-wise encoder object from anemoi.models.layers.mapper."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the Point-wise encoder. Default to 512."
