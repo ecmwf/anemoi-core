@@ -404,20 +404,23 @@ class FlexAttentionWrapper(nn.Module):
         self._compile = True
         self._use_flash4_backend = False
 
-        if not kwargs.get("use_triton_backend", False):
+        use_triton_backend = kwargs.get("use_triton_backend", False)
 
-            # Try import flash attention v4
-            # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
-            # One reason to use flex attention with the flash attention v4 backend, rather then using flash attention v4 directly, is
-            # flex attentions support for custom block masks.
+        if not use_triton_backend:
+            # Try import flash attention v4. If available it can be used as a backend for flex attention.
             if find_spec("flash_attn.cute") is not None:
                 LOGGER.info("Using flash attention v4 backend for flex attention.")
                 self._use_flash4_backend = True
             else:
                 LOGGER.debug("Flash attention v4 not available.")
+                # Fall back to Triton; ensure it's actually installed so we fail with a clear error.
+                if find_spec("triton") is None:
+                    raise ImportError(
+                        "Neither flash-attn v4 nor triton is available for flex attention. "
+                        "Please install triton (or flash-attn-4) or select a different attention backend."
+                    )
         else:
-            # using triton for flex attention backend.
-            # check triton is installed
+            # Using triton for flex attention backend.
             if find_spec("triton") is None:
                 raise ImportError(
                     "Triton is not available for the flex attention triton backend. "
