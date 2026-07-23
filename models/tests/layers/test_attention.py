@@ -18,8 +18,10 @@ from hypothesis import settings
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.layers.attention import FlexAttentionWrapper
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.attention import SDPAAttentionWrapper
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -248,6 +250,98 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     assert (
         peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb
     ), "Sliding window attention should not use more memory than global attention"
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("window_size", [None, 4])
+def test_multi_head_self_attention_forward_flex_matches_sdpa(window_size, layer_kernels):
+    """Compare flex attention against SDPA for global and sliding-window attention.
+
+    The sliding-window case is the important regression check because it exercises the
+    block-mask path in the flex backend.
+    """
+
+    pytest.importorskip("torch.nn.attention.flex_attention")
+    if not torch.cuda.is_available():
+        pytest.skip("Flex attention comparison requires CUDA")
+
+    num_heads = 4
+    embed_dim = 64
+    # embed dim/num heads must be at least 16
+    batch_size = 1
+    grid = 16
+    device = "cuda"
+
+    torch.manual_seed(0)
+
+    flex_mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="flex_attention",
+        window_size=window_size,
+    )
+    sdpa_mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        window_size=window_size,
+    )
+    sdpa_mhsa.load_state_dict(flex_mhsa.state_dict())
+
+    x = torch.randn(batch_size * grid, embed_dim, device=device, requires_grad=True)
+    x_ref = x.detach().clone().requires_grad_(True)
+    shard_info = GraphShardInfo(nodes=[grid])
+
+    flex_out = flex_mhsa.forward(x, shard_info, batch_size)
+    sdpa_out = sdpa_mhsa.forward(x_ref, shard_info, batch_size)
+
+    assert flex_out.shape == sdpa_out.shape == x.shape
+    torch.testing.assert_close(flex_out, sdpa_out, atol=1e-4, rtol=1e-4)
+
+    flex_out.sum().backward()
+    sdpa_out.sum().backward()
+
+    torch.testing.assert_close(x.grad, x_ref.grad, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("window_size", [None, -1, 4])
+@pytest.mark.parametrize(("query_length", "key_length"), [(16, 16), (12, 16)], ids=["self", "cross"])
+def test_flex_triton_backend_matches_sdpa_sliding_window(window_size, query_length, key_length):
+    """Compare the flex attention Triton backend (uncompiled) against SDPA.
+
+    This exercises the flex wrapper directly so we can force the Triton backend
+    (rather than the flash-attention v4 backend) and disable torch.compile, using
+    small inputs and a sliding window.
+    """
+    pytest.importorskip("torch.nn.attention.flex_attention")
+    pytest.importorskip("triton")
+    if not torch.cuda.is_available():
+        pytest.skip("Flex attention comparison requires CUDA")
+
+    batch_size = 1
+    num_heads = 4
+    head_dim = 16  # flex attention requires head_dim >= 16
+    device = "cuda"
+
+    torch.manual_seed(0)
+
+    flex = FlexAttentionWrapper(use_triton_backend=True)
+    flex._compile = False  # run uncompiled
+    sdpa = SDPAAttentionWrapper()
+
+    # shape: batch heads grid vars
+    query = torch.randn(batch_size, num_heads, query_length, head_dim, device=device)
+    key = torch.randn(batch_size, num_heads, key_length, head_dim, device=device)
+    value = torch.randn(batch_size, num_heads, key_length, head_dim, device=device)
+
+    flex_out = flex(query, key, value, batch_size, window_size=window_size)
+    sdpa_out = sdpa(query, key, value, batch_size, window_size=window_size)
+
+    assert flex_out.shape == sdpa_out.shape == query.shape
+    torch.testing.assert_close(flex_out, sdpa_out, atol=1e-4, rtol=1e-4)
 
 
 def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
