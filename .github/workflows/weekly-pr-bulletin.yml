@@ -9,17 +9,19 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   bulletin:
     name: Generate Weekly PR Bulletin
     runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.bulletin.outputs.body }}
 
     steps:
-      - name: Collect PRs and post to Teams
+      - name: Collect PRs and build bulletin
+        id: bulletin
         uses: actions/github-script@v7
-        env:
-          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -178,133 +180,81 @@ jobs:
 
             // ── date range ────────────────────────────────────────────────────────
             const fmt = d => d.toISOString().slice(0, 10);
-            const dateRange = `${fmt(weekAgo)} – ${fmt(now)}`;
-            const repoUrl = `https://github.com/${owner}/${repo}`;
 
-            // ── build Teams Adaptive Card ─────────────────────────────────────────
+            // ── build markdown bulletin ───────────────────────────────────────────
             const compEmoji = { graphs: '🕸️', models: '🧠', training: '🏋️', core: '⚙️' };
 
-            // Render a PR as TextBlocks: title line + optional auto-extracted summary
-            function prBlocks(pr, files) {
-              const author = pr.user ? pr.user.login : 'unknown';
+            function prLine(pr, files) {
+              const author = pr.user ? `@${pr.user.login}` : 'unknown';
               const flag = isBreakingConfigPR(pr, files) ? ' ⚠️' : '';
-              const blocks = [
-                {
-                  type: 'TextBlock',
-                  text: `[#${pr.number}](${pr.html_url})${flag} **${pr.title.trim()}** — @${author}`,
-                  wrap: true,
-                  size: 'Small',
-                },
-              ];
               const summary = summarizePR(pr);
-              if (summary) {
-                blocks.push({
-                  type: 'TextBlock',
-                  text: summary,
-                  wrap: true,
-                  size: 'Small',
-                  isSubtle: true,
-                  spacing: 'None',
-                });
-              }
-              return blocks;
+              const line = `- [#${pr.number}](${pr.html_url})${flag} **${pr.title.trim()}** — ${author}`;
+              return summary ? `${line}\n  > ${summary}` : line;
             }
 
-            const summaryFacts = [
-              { title: 'Period',                 value: dateRange },
-              { title: 'PRs opened',             value: String(opened.length) },
-              { title: 'PRs merged',             value: String(merged.length) },
-              { title: '\u26a0\ufe0f Breaking / config', value: String(breakingPRs.length) },
-              { title: 'Contributors',           value: String(contributorLogins.size) },
-            ];
+            const lines = [];
+            lines.push(`## 📋 anemoi-core Weekly PR Bulletin`);
+            lines.push(`**Period:** ${fmt(weekAgo)} – ${fmt(now)}`);
+            lines.push('');
+            lines.push(`| Metric | Count |`);
+            lines.push(`|--------|-------|`);
+            lines.push(`| PRs opened | ${opened.length} |`);
+            lines.push(`| PRs merged | ${merged.length} |`);
+            lines.push(`| ⚠️ Breaking / config | ${breakingPRs.length} |`);
+            lines.push(`| Contributors | ${contributorLogins.size} |`);
+
             if (contributorLogins.size > 0) {
-              summaryFacts.push({ title: 'Who', value: [...contributorLogins].join(', ') });
+              lines.push('');
+              lines.push(`**Contributors:** ${[...contributorLogins].map(l => `@${l}`).join(', ')}`);
             }
 
-            const bodyBlocks = [];
-
-            // Breaking changes alert — shown at the top before component sections
             if (breakingPRs.length > 0) {
-              bodyBlocks.push({
-                type: 'TextBlock',
-                text: '\u26a0\ufe0f Breaking / Config-Schema Changes',
-                weight: 'Bolder',
-                size: 'Medium',
-                color: 'Warning',
-                spacing: 'Medium',
-              });
-              for (const { pr, files } of breakingPRs) {
-                bodyBlocks.push(...prBlocks(pr, files));
-              }
-            }
-
-            if (allComponents.length === 0) {
-              bodyBlocks.push({
-                type: 'TextBlock',
-                text: 'No pull request activity this week.',
-                isSubtle: true,
-                wrap: true,
-              });
+              lines.push('');
+              lines.push(`### ⚠️ Breaking / Config-Schema Changes`);
+              for (const { pr, files } of breakingPRs) lines.push(prLine(pr, files));
             }
 
             for (const comp of allComponents) {
               const emoji = compEmoji[comp] || '📦';
-              bodyBlocks.push({
-                type: 'TextBlock',
-                text: `${emoji} ${comp.charAt(0).toUpperCase() + comp.slice(1)}`,
-                weight: 'Bolder',
-                size: 'Medium',
-                spacing: 'Large',
-              });
+              lines.push('');
+              lines.push(`### ${emoji} ${comp.charAt(0).toUpperCase() + comp.slice(1)}`);
 
               const compMerged = mergedByComp[comp] || [];
               const compOpened = openedByComp[comp] || [];
 
               if (compMerged.length > 0) {
-                bodyBlocks.push({ type: 'TextBlock', text: `Merged (${compMerged.length})`, weight: 'Bolder', size: 'Small', spacing: 'Small' });
-                for (const { pr, files } of compMerged) bodyBlocks.push(...prBlocks(pr, files));
+                lines.push('');
+                lines.push(`**Merged (${compMerged.length})**`);
+                for (const { pr, files } of compMerged) lines.push(prLine(pr, files));
               }
               if (compOpened.length > 0) {
-                bodyBlocks.push({ type: 'TextBlock', text: `Opened (${compOpened.length})`, weight: 'Bolder', size: 'Small', spacing: 'Small' });
-                for (const { pr, files } of compOpened) bodyBlocks.push(...prBlocks(pr, files));
+                lines.push('');
+                lines.push(`**Opened (${compOpened.length})**`);
+                for (const { pr, files } of compOpened) lines.push(prLine(pr, files));
               }
             }
 
-            const card = {
-              type: 'message',
-              attachments: [
-                {
-                  contentType: 'application/vnd.microsoft.card.adaptive',
-                  content: {
-                    $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-                    type: 'AdaptiveCard',
-                    version: '1.5',
-                    body: [
-                      { type: 'TextBlock', text: '📋 anemoi-core Weekly PR Bulletin', weight: 'Bolder', size: 'Large' },
-                      { type: 'FactSet', facts: summaryFacts },
-                      ...bodyBlocks,
-                      { type: 'TextBlock', text: `[View all PRs on GitHub](${repoUrl}/pulls)`, size: 'Small', isSubtle: true, spacing: 'Large', wrap: true },
-                    ],
-                  },
-                },
-              ],
-            };
-
-            // ── POST to Teams webhook ─────────────────────────────────────────────
-            const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
-            if (!webhookUrl) {
-              throw new Error('TEAMS_WEBHOOK_URL secret is not set.');
+            if (allComponents.length === 0) {
+              lines.push('');
+              lines.push('_No pull request activity this week._');
             }
 
-            const response = await fetch(webhookUrl, {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body:    JSON.stringify(card),
-            });
+            lines.push('');
+            lines.push('---');
+            lines.push(`_Generated by the [Weekly PR Bulletin](https://github.com/${owner}/${repo}/actions/workflows/weekly-pr-bulletin.yml) workflow._`);
 
-            if (!response.ok) {
-              const text = await response.text();
-              throw new Error(`Teams webhook returned ${response.status}: ${text}`);
-            }
+            core.setOutput('body', lines.join('\n'));
+            console.log(`Bulletin ready (${opened.length} opened, ${merged.length} merged).`);
 
-            console.log(`Bulletin posted to Teams (${opened.length} opened, ${merged.length} merged).`);
+  notify-team:
+    needs: bulletin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post weekly bulletin
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: 294
+          body: |
+            ${{ needs.bulletin.outputs.body }}
+
+            cc: @mc4117
