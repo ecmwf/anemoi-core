@@ -68,7 +68,7 @@ def _time_backend(backend, query, key, value, window_size):
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("window_size", [None, 1120], ids=["global", "sliding_window"])
-@pytest.mark.parametrize("mode", ["fwd", "fwd_plus_bwd"], ids=["forward", "fowrward & backward"])
+@pytest.mark.parametrize("mode", ["fwd", "fwd_plus_bwd"], ids=["forward", "forward & backward"])
 def test_attention_backend_benchmark(window_size, mode):
     """Benchmark flex attention against SDPA and flash attention on a large input.
 
