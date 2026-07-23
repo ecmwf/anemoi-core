@@ -378,7 +378,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in self.target_datasets:
-            x_target_latent, shard_sizes_target = self._assemble_forcings(
+            x_target_latent, shard_sizes_target = self._assemble_targets(
                 x[dataset_name],
                 x_data_latent_dict[dataset_name],
                 batch_size,
