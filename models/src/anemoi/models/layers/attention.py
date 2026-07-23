@@ -14,7 +14,6 @@ import logging
 import math
 import os
 from functools import partial
-from importlib.metadata import version as pkg_version
 from importlib.util import find_spec
 from typing import Optional
 from typing import Union
@@ -378,7 +377,7 @@ class FlexAttentionWrapper(nn.Module):
     def __init__(self, **kwargs):
         """Flex attention wrapper for PyTorch flex attention.
 
-        Initalisation checks if flex attention is available in the current PyTorch installation.
+        Initialization checks if flex attention is available in the current PyTorch installation.
 
         Either Triton (default) or flash attention v4 can be used as a backend for flex attention.
         The default behavior is to use Triton as a backend.
@@ -404,10 +403,9 @@ class FlexAttentionWrapper(nn.Module):
         self._use_flash4_backend = False
 
 
-        # Try import flash attention v4
+        # prioritise flash attention v4 over triton backend
         # if this is avilable it can be used as a backend for flex attention which gives approx 2x performance
-        # One reason to use flex attention with the flash attention v4 backend, rather then using flash attention v4 directly, is
-        # flex attentions support for custom block masks.
+        # if it is not available, we will use triton as a backend for flex attention
         self._kernel_options = {}
         if find_spec("flash_attn.cute") is not None:
             LOGGER.info("Using flash attention v4 backend for flex attention.")
@@ -418,8 +416,8 @@ class FlexAttentionWrapper(nn.Module):
             # check triton is installed
             if find_spec("triton") is None:
                 raise ImportError(
-                    "Triton is not available for the flex attention triton backend. "
-                    "Please install triton or select a different attention backend."
+                    "Neither flash-attn v4 nor triton is available for flex attention. "
+                    "Please install triton (or flash-attn-4) or select a different attention backend."
                 )
 
 
