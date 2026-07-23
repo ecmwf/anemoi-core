@@ -36,6 +36,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
     name: str = "MultiscaleLossWrapper"
     needs_graph_data: bool = True
+    needs_data_node_name: bool = True
 
     def __init__(
         self,
