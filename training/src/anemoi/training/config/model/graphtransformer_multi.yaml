@@ -84,7 +84,7 @@ latent_aggregator:
 decoders:
   global: # user-defined key. It will appear in the state-dict
     datasets: [ "era5" ]
-    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs 
+    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:

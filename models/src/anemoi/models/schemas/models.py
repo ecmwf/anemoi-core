@@ -277,7 +277,9 @@ class DecodersSchema(BaseModel):
     "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(default_factory=list)
     "List of edge attributes for the sub-graph."
-    input_target_features: list[Literal["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]] = Field(default_factory=lambda: ["encoded_data"])
+    input_target_features: list[
+        Literal["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]
+    ] = Field(default_factory=lambda: ["encoded_data"])
     "Whether to use the encoded latents from the encoder."
     mapper: Union[
         GNNDecoderSchema,

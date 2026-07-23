@@ -14,7 +14,7 @@ from typing import Optional
 import einops
 import torch
 from hydra.utils import instantiate
-from torch import Tensor, Value
+from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
@@ -174,29 +174,33 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dataset_name: str | None = None,
     ) -> tuple[Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-            
+
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
         x_targets = []
         for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
             if target_feature == "coordinates":
-                coords = self.node_attributes.get_coordinates(dataset_name) # (num_points, coords_dim)
+                coords = self.node_attributes.get_coordinates(dataset_name)  # (num_points, coords_dim)
                 new_target = einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
             elif target_feature == "forcings":
-                new_target = x_input_data[self._internal_input_idx[dataset_name]] # TODO: this should point to future forcings
+                new_target = x_input_data[
+                    self._internal_input_idx[dataset_name]
+                ]  # TODO: this should point to future forcings
             elif target_feature == "prognostics":
                 new_target = x_input_data[self._internal_input_idx[dataset_name]]
             elif target_feature == "trainable_parameters":
-                node_trainable_params = self.node_attributes.trainable_tensors[dataset_name].trainable # (num_points, ?)
+                node_trainable_params = self.node_attributes.trainable_tensors[
+                    dataset_name
+                ].trainable  # (num_points, ?)
                 new_target = einops.repeat(node_trainable_params, "e f -> (repeat e) f", repeat=batch_size)
             elif target_feature == "encoded_data":
                 new_target = x_encoded_data
             else:
                 raise ValueError("")
-            
+
             if grid_shard_sizes is not None:
                 new_target = shard_tensor(new_target, 0, grid_shard_sizes, model_comm_group)
-            
+
             x_targets.append(new_target)
 
         if len(x_targets) == 1:

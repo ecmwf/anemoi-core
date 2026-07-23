@@ -120,7 +120,7 @@ class BaseGraphModel(nn.Module):
             assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = str(decoder_name)
-            
+
             decoder_target_features = decoder_config.input_target_features
             assert all([f in valid_target_decoder_features for f in decoder_target_features])
             self.decoders_target_input[decoder_name] = decoder_config.input_target_features
@@ -201,7 +201,7 @@ class BaseGraphModel(nn.Module):
             elif target_feature == "trainable_parameters":
                 num_features += self.node_attributes.num_trainable_parameters[dataset_name]
             elif target_feature == "encoded_data":
-                # TODO: Get this from self.encoder[self.dataset2decoder[dataset_name]].???
+                # TODO: Get this from self.encoder[self.dataset2decoder[dataset_name]].???
                 num_features += self._calculate_input_dim(dataset_name)
             else:
                 raise ValueError(f"The key {target_feature} is not valid.")
