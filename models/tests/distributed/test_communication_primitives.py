@@ -405,9 +405,7 @@ def _test_expand_rejects_wrong_local_size_rank(
 
 
 @pytest.mark.distributed
-def test_expand_sharded_tensor_rejects_wrong_local_size(
-    distributed_backend: str, distributed_world_size: int
-) -> None:
+def test_expand_sharded_tensor_rejects_wrong_local_size(distributed_backend: str, distributed_world_size: int) -> None:
     run_distributed_test(
         _test_expand_rejects_wrong_local_size_rank,
         backend=distributed_backend,
