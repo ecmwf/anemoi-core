@@ -89,24 +89,9 @@ jobs:
               return plain.length > 200 ? plain.slice(0, 197) + '\u2026' : plain;
             }
 
-            // Detect PRs carrying breaking changes or config-schema modifications
-            const BREAKING_LABELS = ['breaking-change', 'breaking', 'config-change', 'configuration', 'deprecation'];
-            const CONFIG_FILE_PATTERNS = [/\.ya?ml$/, /\.json$/, /\.toml$/, /\.cfg$/, /\.ini$/, /conf\.py$/];
-
+            // Detect PRs carrying breaking changes (! in title per conventional commits)
             function isBreakingConfigPR(pr, files) {
-              const labels = pr.labels.map(l => l.name.toLowerCase());
-              if (BREAKING_LABELS.some(bl => labels.includes(bl))) return true;
-              if (/breaking/i.test(pr.title)) return true;
-              if (/!/.test(pr.title)) return true;
-              if (pr.body && /breaking[\s_-]?change/i.test(pr.body)) return true;
-              if (files) {
-                const hasConfigChange = files.some(f =>
-                  !f.includes('/tests/') && !f.includes('/docs/') &&
-                  CONFIG_FILE_PATTERNS.some(p => p.test(f))
-                );
-                if (hasConfigChange) return true;
-              }
-              return false;
+              return /!/.test(pr.title);
             }
 
             // ── fetch PRs opened in the last 7 days ──────────────────────────────
@@ -185,7 +170,7 @@ jobs:
             const compEmoji = { graphs: '🕸️', models: '🧠', training: '🏋️', core: '⚙️' };
 
             function prLine(pr, files) {
-              const author = pr.user ? `@${pr.user.login}` : 'unknown';
+              const author = pr.user ? pr.user.login : 'unknown';
               const flag = isBreakingConfigPR(pr, files) ? ' ⚠️' : '';
               const summary = summarizePR(pr);
               const line = `- [#${pr.number}](${pr.html_url})${flag} **${pr.title.trim()}** — ${author}`;
@@ -205,7 +190,7 @@ jobs:
 
             if (contributorLogins.size > 0) {
               lines.push('');
-              lines.push(`**Contributors:** ${[...contributorLogins].map(l => `@${l}`).join(', ')}`);
+              lines.push(`**Contributors:** ${[...contributorLogins].join(', ')}`);
             }
 
             if (breakingPRs.length > 0) {
