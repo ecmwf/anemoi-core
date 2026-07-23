@@ -16,6 +16,7 @@ from pathlib import Path
 
 import psutil
 import pytest
+import torch.distributed as dist
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.cuda import empty_cache
@@ -157,3 +158,9 @@ def test_benchmark_training_cycle(
     store: str = f"ssh://{user}@{hostname}:{path}"
 
     benchmark(cfg, test_case, store)
+
+    # barrier to ensure all processes have completed before finishing the test
+    # otherwise process 0 will finish the final test before process 0
+    # has finished comparing the results against the benchmark server
+    # torch.dist is initialized in the benchmark function, so we can use it here
+    dist.barrier()
