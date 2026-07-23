@@ -19,6 +19,26 @@ from torch.nn import Module
 LOGGER = logging.getLogger(__name__)
 
 
+def _rfft_complex_dtype(dtype: torch.dtype) -> torch.dtype:
+    if dtype == torch.float16:
+        return torch.complex32
+    if dtype == torch.float32:
+        return torch.complex64
+    if dtype == torch.float64:
+        return torch.complex128
+    raise TypeError(f"Unsupported real FFT dtype: {dtype}")
+
+
+def _irfft_real_dtype(dtype: torch.dtype) -> torch.dtype:
+    if dtype == torch.complex32:
+        return torch.float16
+    if dtype == torch.complex64:
+        return torch.float32
+    if dtype == torch.complex128:
+        return torch.float64
+    raise TypeError(f"Unsupported inverse real FFT dtype: {dtype}")
+
+
 def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarray:
     r"""Helper routine which returns the Legendre-Gauss nodes and weights
     on the interval [a, b].
@@ -67,6 +87,11 @@ def legpoly(
     inverse : bool, optional
         Whether to invert the normalisation factor or not. Should be set to True for the inverse Legendre transform and
         False for the forward Legendre transform. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Legendre polynomial values.
 
     Notes
     -----
@@ -128,8 +153,14 @@ class SphericalHarmonicTransform(Module):
 
     Methods
     -------
-    rfft_rings_reduced(x: Tensor) -> Tensor
-        Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+    rfft_rings_reduced_naive(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using a naive loop.
+    rfft_rings_reduced_banded(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each of a band of latitudes of a reduced grid using a naive loop.
+    rfft_rings_reduced_cuda(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using the CUDA backend.
+    rfft_rings_reduced_graphed(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid with a graphed implementation.
     rfft_rings_regular(x: Tensor) -> Tensor
         Performs direct real-to-complex FFT on each latitude ring of a regular grid.
     forward(x: Tensor) -> Tensor
@@ -140,7 +171,13 @@ class SphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphed_rfft: bool = False) -> None:
+    def __init__(
+        self,
+        lons_per_lat: list[int],
+        truncation: int,
+        use_cuda_fft: bool = False,
+        use_graphed_rfft: bool = False,
+    ) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
         Parameters
@@ -149,6 +186,8 @@ class SphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
+        use_cuda_fft : bool, optional
+            Whether to use the CUDA FFT extension for supported reduced grids. Default is False.
         use_graphed_rfft : bool, optional
             Whether to use CUDA graphs for the reduced grid rFFT. Default is False.
         """
@@ -165,14 +204,19 @@ class SphericalHarmonicTransform(Module):
 
         # Set offsets to start of each latitude in flattened grid dimension
         self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
+        self._max_m = max(self.lons_per_lat) // 2 + 1
 
         # Set padding for each latitude so every rFFT output ring has the same length
         self.rlon = [max(self.lons_per_lat) // 2 - nlon // 2 for nlon in self.lons_per_lat]
 
-        # Use more efficient batched rfft for regular grids
-        if len(set(self.lons_per_lat)) > 1:
+        # Determine the FFT backend
+        unique_nlons = set(self.lons_per_lat)
+        if len(unique_nlons) > 1:
+            # Reduced grids have different ring lengths; regular grids can use one batched FFT.
             if use_graphed_rfft:
                 self.rfft_rings = self.rfft_rings_reduced_graphed
+            elif use_cuda_fft:
+                self.rfft_rings = self.rfft_rings_reduced_cuda
             else:
                 self.rfft_rings = self.rfft_rings_reduced_naive
         else:
@@ -238,23 +282,13 @@ class SphericalHarmonicTransform(Module):
         torch.Tensor
             Fourier space field [..., latitude, zonal wavenumber m]
         """
-
-        if x.dtype == torch.float16:
-            cdtype = torch.complex32
-        elif x.dtype == torch.float32:
-            cdtype = torch.complex64
-        elif x.dtype == torch.float64:
-            cdtype = torch.complex128
-        else:
-            raise TypeError(f"SphericalHarmonicTransform:rfft_rings_reduced Unsupported dtype: {x.dtype}")
-
         # Prepare zero-padded output tensor for filling with rfft
         output_tensor = torch.zeros(
             *x.shape[:-1],
             end_lat - start_lat,
-            max(self.lons_per_lat) // 2 + 1,
+            self._max_m,
             device=x.device,
-            dtype=cdtype,
+            dtype=_rfft_complex_dtype(x.dtype),
         )
 
         # Do a real-to-complex FFT on each latitude
@@ -262,6 +296,27 @@ class SphericalHarmonicTransform(Module):
             output_tensor[..., i, : nlon // 2 + 1] = torch.fft.rfft(x[..., slon : slon + nlon], norm="forward")
 
         return output_tensor
+
+    def rfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
+        r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
+        Uses the CUDA backend.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            field [..., grid]
+
+        Returns
+        -------
+        torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+        """
+        from anemoi.models.layers.cuda_fft import cuda_rfft
+
+        if x.device.type != "cuda":
+            raise RuntimeError('CUDA rFFT requested but input device is not "cuda"')
+
+        return cuda_rfft(x, self.lons_per_lat)
 
     def rfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
@@ -309,7 +364,7 @@ class SphericalHarmonicTransform(Module):
         Returns
         -------
         torch.Tensor
-            Fourier space field [..., latitude, zonal wavenumber m]
+            Fourier space field [..., latitude, zonal wavenumber m].
         """
 
         return torch.fft.rfft(x.reshape(*x.shape[:-1], self.nlat, self.lons_per_lat[0]), norm="forward")
@@ -325,14 +380,18 @@ class SphericalHarmonicTransform(Module):
         Returns
         -------
         torch.Tensor
-            spectral representation of field [..., total wavenumber l, zonal wavenumber m]
+            Spectral representation of field [..., total wavenumber l, zonal wavenumber m].
         """
 
         x = 2.0 * torch.pi * self.rfft_rings(x)
         x = torch.view_as_real(x)
+        weight = self.weight
+        if weight.device != x.device or weight.dtype != x.dtype:
+            weight = weight.to(device=x.device, dtype=x.dtype)
+            self.weight = weight
 
-        rl = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 0], self.weight.to(x.dtype))
-        im = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 1], self.weight.to(x.dtype))
+        rl = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 0], weight)
+        im = torch.einsum("...km, mlk -> ...lm", x[..., : self.truncation + 1, 1], weight)
 
         x = torch.stack((rl, im), -1)
         x = torch.view_as_complex(x)
@@ -357,8 +416,14 @@ class InverseSphericalHarmonicTransform(Module):
 
     Methods
     -------
-    irfft_rings_reduced(x: Tensor) -> Tensor
+    irfft_rings_reduced_naive(x: Tensor) -> Tensor
         Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+    irfft_rings_reduced_banded(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each of a band of latitudes of a reduced grid using a naive loop.
+    irfft_rings_reduced_cuda(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid using the CUDA backend.
+    irfft_rings_reduced_graphed(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid with a graphed implementation.
     irfft_rings_regular(x: Tensor) -> Tensor
         Performs inverse complex-to-real FFT on each latitude ring of a regular grid.
     forward(x: Tensor) -> Tensor
@@ -369,7 +434,13 @@ class InverseSphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphed_irfft: bool = False) -> None:
+    def __init__(
+        self,
+        lons_per_lat: list[int],
+        truncation: int,
+        use_cuda_fft: bool = False,
+        use_graphed_irfft: bool = False,
+    ) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
 
         Parameters
@@ -378,6 +449,8 @@ class InverseSphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
+        use_cuda_fft : bool, optional
+            Whether to use the CUDA FFT extension for supported reduced grids. Default is False.
         use_graphed_irfft : bool, optional
             Whether to use CUDA graphs for the reduced grid irFFT. Default is False.
         """
@@ -394,10 +467,12 @@ class InverseSphericalHarmonicTransform(Module):
         # Set offsets to start of each latitude in flattened grid dimension
         self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
 
-        # Use more efficient batched rfft for regular grids
         if len(set(self.lons_per_lat)) > 1:
+            # Reduced grids need per-ring inverse FFTs.
             if use_graphed_irfft:
                 self.irfft_rings = self.irfft_rings_reduced_graphed
+            elif use_cuda_fft:
+                self.irfft_rings = self.irfft_rings_reduced_cuda
             else:
                 self.irfft_rings = self.irfft_rings_reduced_naive
         else:
@@ -465,7 +540,7 @@ class InverseSphericalHarmonicTransform(Module):
             *x.shape[:-2],
             sum(self.lons_per_lat[start_lat:end_lat]),
             device=x.device,
-            dtype=torch.float32 if x.dtype == torch.complex64 else torch.float64,
+            dtype=_irfft_real_dtype(x.dtype),
         )
 
         # Do a complex-to-real IFFT on each latitude
@@ -475,6 +550,14 @@ class InverseSphericalHarmonicTransform(Module):
             )
 
         return output_tensor
+
+    def irfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
+        from anemoi.models.layers.cuda_fft import cuda_irfft
+
+        if x.device.type != "cuda":
+            raise RuntimeError('CUDA irFFT requested but input device is not "cuda"')
+
+        return cuda_irfft(x, self.lons_per_lat)
 
     def irfft_rings_reduced_graphed(self, x: Tensor) -> Tensor:
         r"""Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
@@ -522,7 +605,7 @@ class InverseSphericalHarmonicTransform(Module):
         Returns
         -------
         torch.Tensor
-            field [..., grid]
+            Field [..., grid].
         """
 
         return torch.fft.irfft(x, self.lons_per_lat[0], norm="forward").reshape(*x.shape[:-2], self.n_grid_points)
@@ -538,15 +621,19 @@ class InverseSphericalHarmonicTransform(Module):
         Returns
         -------
         torch.Tensor
-            field [..., grid]
+            Field [..., grid].
         """
 
         x = torch.view_as_real(x)
+        pct = self.pct
+        if pct.device != x.device or pct.dtype != x.dtype:
+            pct = pct.to(device=x.device, dtype=x.dtype)
+            self.pct = pct
 
-        rl = torch.einsum("...lm, mlk -> ...km", x[..., 0], self.pct.to(x.dtype))
-        im = torch.einsum("...lm, mlk -> ...km", x[..., 1], self.pct.to(x.dtype))
+        rl = torch.einsum("...lm, mlk -> ...km", x[..., 0], pct)
+        im = torch.einsum("...lm, mlk -> ...km", x[..., 1], pct)
 
-        x = torch.stack((rl, im), -1).to(x.dtype)
+        x = torch.stack((rl, im), -1)
         x = torch.view_as_complex(x)
         x = self.irfft_rings(x)
 
