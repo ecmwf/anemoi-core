@@ -36,6 +36,7 @@ processor:
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
 
