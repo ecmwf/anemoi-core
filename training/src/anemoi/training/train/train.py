@@ -743,7 +743,7 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
-        prepare_compilation(self.model, self.config.model, self.config.training)
+        self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
 
