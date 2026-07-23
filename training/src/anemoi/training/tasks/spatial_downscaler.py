@@ -27,9 +27,9 @@ class SpatialDownscaler(BaseTimelessTask):
     output-only datasets (e.g. ``out_hres``) by explicit name lists rather than
     by time position (all snapshots share the same single timestep, t=0).
 
-    ``normalize_batch`` is ``False`` because ``ResidualPredictionMode`` needs raw
-    (unnormalized) tensors to compute ``y - interp(x_lres)`` in data space before
-    applying residual-specific normalization statistics.
+    The batch is normalized in the standard way; ``ResidualPredictionMode``
+    denormalizes lres and target internally to compute ``y - interp(x_lres)`` in
+    physical space, then renormalizes the residual with tendency-space statistics.
     """
 
     name: str = "spatial_downscaler"
@@ -40,16 +40,6 @@ class SpatialDownscaler(BaseTimelessTask):
         self.target_datasets = target_datasets
         # No-op placeholder; a proper adapter will be added with downscaling diagnostics.
         self._plot_adapter = SpatialDownscalerPlotAdapter(self)
-
-    @property
-    def normalize_batch(self) -> bool:
-        """Skip batch-wide normalization.
-
-        ``ResidualPredictionMode`` needs raw (unnormalized) tensors so it can
-        compute ``y - interp(x_lres)`` in data space before applying residual
-        normalization statistics.
-        """
-        return False
 
     def get_inputs(
         self,

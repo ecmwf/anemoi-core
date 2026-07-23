@@ -295,7 +295,12 @@ class TendencyPredictionMode(PredictionMode):
 
 
 class ResidualPredictionMode(PredictionMode):
-    """Prediction mode for spatial downscaling: model predicts y - interp(x_lres).
+    """Prediction mode for spatial downscaling: model predicts the residual y - interp(x_lres).
+
+    The batch enters this mode already normalized (like every other prediction mode).
+    ``prepare_target`` denormalizes the projected lres source and the target so the
+    residual can be computed in physical space, then renormalizes it with residual
+    (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
 
     The lres dataset is identified as the single entry in
     ``model.spatial_pre_processors`` (i.e. the dataset registered via
@@ -331,14 +336,8 @@ class ResidualPredictionMode(PredictionMode):
             return tend
         return self.module.model.post_processors
 
-    def prepare_target(
-        self,
-        batch: dict[str, torch.Tensor],
-        x: dict[str, torch.Tensor],
-    ) -> PreparedPredictionTarget:
-        del x
-        # Identify the lres dataset as the one with a registered spatial pre-processor.
-        # This avoids hard-coding the dataset name (e.g. "in_lres").
+    def _lres_dataset_name(self) -> str:
+        """Identify the lres dataset by its registered spatial pre-processor."""
         lres_names = list(self.module.model.spatial_pre_processors.keys())
         if len(lres_names) != 1:
             msg = (
@@ -346,34 +345,65 @@ class ResidualPredictionMode(PredictionMode):
                 f"(the lres dataset); got: {lres_names}."
             )
             raise ValueError(msg)
-        lres_name = lres_names[0]
-        # x_lres_on_hres is already reprojected onto the hres grid by CrossGridProjector.
-        x_lres_on_hres = batch[lres_name]
+        return lres_names[0]
+
+    def prepare_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
+    ) -> PreparedPredictionTarget:
+        """Compute the normalized residual target from an already-normalized batch.
+
+        Steps:
+        1. Denormalize the projected lres source (state post-processor).
+        2. Denormalize each target's output-full slice (state post-processor).
+        3. Compute the physical residual ``y - interp(x_lres)``.
+        4. Renormalize the residual with the tendency-space pre-processor.
+        """
+        del x
+        lres_name = self._lres_dataset_name()
+
+        # 1. Denormalize projected lres source.
+        x_lres_on_hres = self.module.model.post_processors[lres_name](
+            batch[lres_name],
+            in_place=False,
+        )
 
         target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         target_data_output = self.module.get_data_output_target(target_full)
 
-        # Compute raw residual for output (hres target) datasets only.
+        pre_proc = self._residual_pre_processors()
         residual_data_output: dict[str, torch.Tensor] = {}
-        for dataset_name, y_ds in target_data_output.items():
-            # Channel-match: select lres variables that exist in this output dataset.
-            lres_idx = self.module.data_indices[dataset_name].data.output.full.to(device=y_ds.device)
+        model_residual_data_output: dict[str, torch.Tensor] = {}
+        for dataset_name, y_ds_norm in target_data_output.items():
+            output_full = self.module.data_indices[dataset_name].data.output.full
+            # 2. Denormalize the target's output-full slice.
+            y_ds = self.module.model.post_processors[dataset_name](
+                y_ds_norm,
+                in_place=False,
+                data_index=output_full,
+            )
+            # 3. Channel-match lres to target's output-full and compute physical residual.
+            lres_idx = output_full.to(device=y_ds.device)
             x_interp = x_lres_on_hres.index_select(-1, lres_idx)
             residual_data_output[dataset_name] = y_ds - x_interp
+            # 4. Renormalize with residual (tendency-space) pre-processor.
+            model_residual_data_output[dataset_name] = pre_proc[dataset_name](
+                residual_data_output[dataset_name],
+                in_place=False,
+                data_index=output_full,
+            )
 
-        # Normalize residuals using tendency/residual statistics.
-        pre_proc = self._residual_pre_processors()
-        model_residual = {}
-        for dataset_name, res_ds in residual_data_output.items():
-            model_residual[dataset_name] = pre_proc[dataset_name](res_ds, in_place=False)
-        model_residual = self.module.reduce_data_output_target_to_model_output(model_residual)
+        model_residual = self.module.reduce_data_output_target_to_model_output(model_residual_data_output)
 
         return PreparedPredictionTarget(
             model_target=model_residual,
-            loss_target=residual_data_output,
+            loss_target=model_residual_data_output,
             loss_target_layout=IndexSpace.DATA_OUTPUT,
             metric_target=target_full,
             aux={
+                # Denormalized projected lres, cached for reconstruction so we do
+                # not have to denormalize twice.
                 "x_lres_on_hres": x_lres_on_hres,
                 "transport_reference_source": self._reference_state_target_space(batch),
             },
@@ -400,16 +430,34 @@ class ResidualPredictionMode(PredictionMode):
         prediction: dict[str, torch.Tensor],
         prepared: PreparedPredictionTarget,
     ) -> dict[str, torch.Tensor]:
+        """Turn a normalized residual prediction back into a normalized state.
+
+        Inverse of :meth:`prepare_target`:
+        denormalize residual (tendency post-processor) → add cached denormalized
+        ``x_interp`` → renormalize state (state pre-processor).
+        """
         x_lres_on_hres = prepared.aux["x_lres_on_hres"]
-        post_proc = self._residual_post_processors()
+        post_res = self._residual_post_processors()
         states: dict[str, torch.Tensor] = {}
         for dataset_name, pred_ds in prediction.items():
+            output_full = self.module.data_indices[dataset_name].data.output.full
             # Denormalize residual prediction.
-            denormed = post_proc[dataset_name](pred_ds, in_place=False)
-            # Add back interpolated source (channel-matched).
-            lres_idx = self.module.data_indices[dataset_name].data.output.full.to(device=denormed.device)
+            denormed = post_res[dataset_name](
+                pred_ds,
+                in_place=False,
+                data_index=output_full,
+            )
+            # Add back interpolated (denormalized) source (channel-matched).
+            lres_idx = output_full.to(device=denormed.device)
             x_interp = x_lres_on_hres.index_select(-1, lres_idx)
-            states[dataset_name] = denormed + x_interp
+            state = denormed + x_interp
+            # Renormalize sum with state pre-processor so downstream metric code
+            # sees a tensor in the same normalized space as ``metric_target``.
+            states[dataset_name] = self.module.model.pre_processors[dataset_name](
+                state,
+                in_place=False,
+                data_index=output_full,
+            )
         return states
 
 
