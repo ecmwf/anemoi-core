@@ -99,6 +99,7 @@ def prepare_compilation(
     """Reads model_config and marks the matching submodules in model for compilation."""
     if hasattr(model_config, "compile"):
         model = mark_for_compilation(model, model_config.compile)
+        check_env_and_warn()  # warn if env settings interfere with compilation
     recompile_limit = getattr(model_config, "recompile_limit", None)
     if hasattr(training_config, "recompile_limit"):
         LOGGER.warning(
