@@ -34,7 +34,6 @@ from anemoi.graphs.create import load_graph_from_file
 from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
@@ -48,6 +47,7 @@ from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import get_base_seed
@@ -674,26 +674,6 @@ class AnemoiTrainer(ABC):
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
-    def prepare_compilation(self) -> None:
-
-        if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model.compile)
-        recompile_limit = getattr(self.config.model, "recompile_limit", None)
-        if hasattr(self.config.training, "recompile_limit"):
-            LOGGER.warning(
-                "The recompile_limit in config.training is deprecated. "
-                "Please use config.model.recompile_limit instead.",
-            )
-            recompile_limit = getattr(self.config.training, "recompile_limit", None)
-        if recompile_limit is not None:
-            torch._dynamo.config.cache_size_limit = int(recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(recompile_limit), 256)
-            LOGGER.info(
-                "Recompile limit set to %d per kernel, %d accumulated",
-                torch._dynamo.config.cache_size_limit,
-                torch._dynamo.config.accumulated_cache_size_limit,
-            )
-
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
@@ -754,7 +734,7 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
-        self.prepare_compilation()
+        prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
 
