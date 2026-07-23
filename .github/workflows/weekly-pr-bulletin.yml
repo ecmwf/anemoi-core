@@ -266,7 +266,7 @@ jobs:
               owner,
               repo,
               issue_number: 1262,
-              body: lines.join('\n') + '\n\ncc: @mc4117',
+              body: lines.join('\n'),
             });
 
             console.log(`Bulletin posted to issue #1262 (${opened.length} opened, ${merged.length} merged).`);
