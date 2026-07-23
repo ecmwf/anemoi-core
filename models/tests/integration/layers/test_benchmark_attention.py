@@ -111,7 +111,7 @@ def test_attention_backend_benchmark(window_size, mode):
     context = torch.inference_mode() if mode == "fwd" else contextlib.nullcontext()
     with context:
         for name, backend in backends.items():
-            elapsed, output = _time_backend(backend, query, key, value, window_size)
+            elapsed, output = _time_backend(backend, query, key, value, window_size, mode=mode)
             timings[name] = elapsed
             outputs[name] = output
 
