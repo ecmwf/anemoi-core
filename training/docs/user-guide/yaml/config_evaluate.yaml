@@ -4,7 +4,7 @@
 # raise a RuntimeError before evaluation starts.
 #
 # Usage:
-#   anemoi-training evaluate --config-dir /path/to/overrides --config-name config_evaluate
+#   anemoi-training evaluate --config-path /path/to/overrides --config-name config_evaluate
 #
 # Or pass individual keys as CLI overrides:
 #   anemoi-training evaluate training.run_id=<run_id>

@@ -51,6 +51,7 @@ strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
+  use_local_synchronization: True
 
 # loss functions
 
@@ -121,7 +122,3 @@ max_steps: 150000
 
 
 submodules_to_freeze: []
-
-# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
-# A higher limit can result in better performance but will increase compilation time and disk space
-recompile_limit: 32
