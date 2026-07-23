@@ -19,6 +19,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -135,16 +136,23 @@ class LossVariableMapper(BaseLossWrapper):
         return scaler.index_select(variable_axis, predicted_indices_tensor)
 
     @functools.wraps(ScaleTensor.add_scaler)
-    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
+    def add_scaler(
+        self,
+        dimension: int | tuple[int],
+        scaler: torch.Tensor,
+        *,
+        grid_domain: ScalerDomain | None = None,
+        name: str | None = None,
+    ) -> None:
         scaler = self._filter_variable_axis_scaler(dimension, scaler)
         # Pass scalers to the inner loss so they are actually applied during loss computation
-        self.loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
+        self.loss.add_scaler(dimension=dimension, scaler=scaler, grid_domain=grid_domain, name=name)
 
     @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         # Keep update behavior consistent with add_scaler for VARIABLE-axis scalers.
         if name in self.loss.scaler.tensors:
-            dimension = self.loss.scaler.tensors[name][0]
+            dimension = self.loss.scaler.tensors[name].dimensions
             scaler = self._filter_variable_axis_scaler(dimension, scaler)
         self.loss.update_scaler(name=name, scaler=scaler, override=override)
 

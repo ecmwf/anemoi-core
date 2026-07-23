@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+
 from .base_scaler import TensorDim
 from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
@@ -37,6 +39,7 @@ __all__ = [
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
+    "ScalerDomain",
     "SpectralDimensionScaler",
     "StdevTendencyScaler",
     "TensorDim",

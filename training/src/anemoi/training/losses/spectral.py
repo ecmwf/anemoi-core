@@ -44,6 +44,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.kcrps import CRPS
 from anemoi.training.losses.kcrps import CRPSBackend
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
@@ -56,33 +57,39 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def _assert_spectral_scalers_compatible(scaler_tensor: ScaleTensor, n_spectral: int) -> None:
-    """Assert that all grid-dimension scalers are spectral-compatible.
+def _validate_spectral_scalers(scaler_tensor: ScaleTensor, n_spectral: int) -> None:
+    """Validate that all grid-dimension scalers are spectral-compatible.
 
     In spectral losses the grid dimension holds spectral modes, not grid
-    points.  Any scaler registered on ``TensorDim.GRID`` must therefore
-    originate from a :class:`SpectralDimensionScaler` (i.e. be sized to the
-    flattened spectral dimension) rather than from a spatial scaler (e.g. area
-    weights sized to the number of grid points).
+    points. Any scaler registered on ``TensorDim.GRID`` must therefore declare
+    the spectral grid domain and be sized to the global spectral dimension.
 
     Parameters
     ----------
     scaler_tensor : ScaleTensor
         The ``ScaleTensor`` attached to the loss.
     n_spectral : int
-        Size of the flattened spectral dimension in the loss tensor.
+        Global size of the spectral dimension represented by the loss tensor.
     """
-    for name, (dims, tensor) in scaler_tensor.tensors.items():
-        if TensorDim.GRID not in dims:
+    for name, scaler_spec in scaler_tensor.tensors.items():
+        if TensorDim.GRID not in scaler_spec.dimensions:
             continue
-        grid_idx = list(dims).index(TensorDim.GRID)
-        scaler_grid_size = tensor.shape[grid_idx]
-        assert scaler_grid_size == n_spectral or scaler_grid_size == 1, (
-            f"Scaler '{name}' is registered on the grid dimension with size "
-            f"{scaler_grid_size}, but the spectral loss has a target with spectral "
-            f"dimension of size {n_spectral}. Grid-dimension scalers in "
-            f"spectral losses must be SpectralDimensionScalers with matching size."
-        )
+        if scaler_spec.grid_domain != ScalerDomain.SPECTRAL:
+            msg = (
+                f"Scaler {name!r} uses the {scaler_spec.grid_domain or 'unspecified'} grid domain. "
+                "Spectral losses only accept spectral grid scalers."
+            )
+            raise ValueError(msg)
+        grid_idx = list(scaler_spec.dimensions).index(TensorDim.GRID)
+        scaler_grid_size = scaler_spec.tensor.shape[grid_idx]
+        if scaler_grid_size != n_spectral and scaler_grid_size != 1:
+            msg = (
+                f"Scaler {name!r} is registered on the grid dimension with size "
+                f"{scaler_grid_size}, but the spectral loss has a global spectral "
+                f"dimension of size {n_spectral}. Spectral grid scalers must have "
+                "the global spectral size or be singleton."
+            )
+            raise ValueError(msg)
 
 
 class SpectralLoss(BaseLoss):
@@ -90,6 +97,7 @@ class SpectralLoss(BaseLoss):
 
     transform: SpectralTransform
     needs_graph_data: bool = True
+    grid_scaler_domain = ScalerDomain.SPECTRAL
 
     def __init__(
         self,
@@ -270,17 +278,48 @@ class SpectralLoss(BaseLoss):
         group: ProcessGroup | None,
         channel_shard_sizes: list[int] | None,
         spectral_grid_dim: int,
-    ) -> torch.Tensor:
-        """Move a full-mode, channel-sharded loss tensor back to mode-sharded layout."""
+    ) -> tuple[torch.Tensor, slice | None, int]:
+        """Redistribute a spectral loss so each rank owns a slice of its modes.
+
+        Before this step, each rank has every spectral mode for only its local
+        variables. This moves the variable shards back into the variable
+        dimension and splits the modes across ranks instead. It also reports
+        which part of a global spectral scaler belongs to the local rank.
+
+        Parameters
+        ----------
+        loss_tensor : torch.Tensor
+            Full-mode loss tensor with its variable dimension sharded.
+        group : ProcessGroup | None
+            Distributed group used for the all-to-all transpose.
+        channel_shard_sizes : list[int] | None
+            Number of variables owned by each rank, or ``None`` when unsharded.
+        spectral_grid_dim : int
+            Tensor dimension containing the spectral modes.
+
+        Returns
+        -------
+        tuple[torch.Tensor, slice | None, int]
+            The redistributed loss tensor, this rank's slice of the global
+            spectral dimension (or ``None`` when unsharded), and the total
+            number of spectral modes across all ranks.
+        """
         if channel_shard_sizes is None:
-            return loss_tensor
+            return loss_tensor, None, loss_tensor.size(spectral_grid_dim)
 
         if group is None:
             msg = "Spectral losses require a process group when channel_shard_sizes is provided."
             raise ValueError(msg)
 
         spectral_shard_sizes = get_shard_sizes(loss_tensor, spectral_grid_dim, group)
-        return all_to_all_transpose(
+        rank = torch.distributed.get_rank(group)
+        spectral_shard_start = sum(spectral_shard_sizes[:rank])
+        spectral_shard_slice = slice(
+            spectral_shard_start,
+            spectral_shard_start + spectral_shard_sizes[rank],
+        )
+        global_spectral_size = sum(spectral_shard_sizes)
+        loss_tensor = all_to_all_transpose(
             loss_tensor,
             spectral_grid_dim,
             spectral_shard_sizes,
@@ -288,6 +327,7 @@ class SpectralLoss(BaseLoss):
             channel_shard_sizes,
             group,
         )
+        return loss_tensor, spectral_shard_slice, global_spectral_size
 
 
 class SpectralAMSELoss(SpectralLoss):
@@ -386,13 +426,18 @@ class SpectralAMSELoss(SpectralLoss):
             # per-L AMSE: [B, T, E, L, vars]
             amse_per_l = (amp_pred - amp_target) ** 2 + 2 * torch.maximum(psd_pred, psd_target) * (1 - coherence)
 
-        amse_per_l = self._reshard_spectral_loss(amse_per_l, group, channel_shard_sizes, grid_dim)
-        _assert_spectral_scalers_compatible(self.scaler, amse_per_l.size(TensorDim.GRID))
+        amse_per_l, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
+            amse_per_l,
+            group,
+            channel_shard_sizes,
+            grid_dim,
+        )
+        _validate_spectral_scalers(self.get_active_scalers(without_scalers), global_spectral_size)
         result = self.scale(
             amse_per_l,
             scaler_indices,
             without_scalers=without_scalers,
-            grid_shard_slice=None if is_sharded else grid_shard_slice,
+            grid_shard_slice=spectral_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
@@ -464,13 +509,18 @@ class PowerSpectrumLoss(SpectralLoss):
         target_amp = self.transform.power_spectral_density(sc_target)
         diff = (pred_amp - target_amp) ** 2
 
-        diff = self._reshard_spectral_loss(diff, group, channel_shard_sizes, grid_dim)
-        _assert_spectral_scalers_compatible(self.scaler, diff.size(TensorDim.GRID))
+        diff, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
+            diff,
+            group,
+            channel_shard_sizes,
+            grid_dim,
+        )
+        _validate_spectral_scalers(self.get_active_scalers(without_scalers), global_spectral_size)
         result = self.scale(
             diff,
             scaler_indices,
             without_scalers=without_scalers,
-            grid_shard_slice=None if is_sharded else grid_shard_slice,
+            grid_shard_slice=spectral_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
@@ -512,14 +562,19 @@ class LogSpectralDistance(SpectralLoss):
         power_tgt = torch.abs(target_spectral) ** 2
 
         log_diff = torch.log(power_tgt + eps) - torch.log(power_pred + eps)
-        log_diff = self._reshard_spectral_loss(log_diff, group, channel_shard_sizes, grid_dim)
+        log_diff, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
+            log_diff,
+            group,
+            channel_shard_sizes,
+            grid_dim,
+        )
 
-        _assert_spectral_scalers_compatible(self.scaler, log_diff.size(TensorDim.GRID))
+        _validate_spectral_scalers(self.get_active_scalers(without_scalers), global_spectral_size)
         result = self.scale(
             log_diff**2,
             scaler_indices,
             without_scalers=without_scalers,
-            grid_shard_slice=None if is_sharded else grid_shard_slice,
+            grid_shard_slice=spectral_shard_slice,
         )
         return torch.sqrt(self.reduce(result, squash=squash, group=group, squash_mode=squash_mode) + eps)
 
@@ -566,13 +621,18 @@ class FourierCorrelationLoss(SpectralLoss):
         # compute correlation
         result = 1 - correlation
 
-        result = self._reshard_spectral_loss(result, group, channel_shard_sizes, grid_dim)
-        _assert_spectral_scalers_compatible(self.scaler, result.size(TensorDim.GRID))
+        result, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
+            result,
+            group,
+            channel_shard_sizes,
+            grid_dim,
+        )
+        _validate_spectral_scalers(self.get_active_scalers(without_scalers), global_spectral_size)
         result = self.scale(
             result,
             scaler_indices,
             without_scalers=without_scalers,
-            grid_shard_slice=None if is_sharded else grid_shard_slice,
+            grid_shard_slice=spectral_shard_slice,
         )
         return self.reduce(result, squash=squash, group=group, squash_mode=squash_mode)
 
@@ -676,14 +736,19 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             crps = self._kernel_crps(pred_spec, tgt_spec, alpha=self.alpha)
 
         crps = einops.rearrange(crps, "b t v m -> b t 1 m v")  # consistent with tensordim
-        crps = self._reshard_spectral_loss(crps, group, channel_shard_sizes, grid_dim)
+        crps, spectral_shard_slice, global_spectral_size = self._reshard_spectral_loss(
+            crps,
+            group,
+            channel_shard_sizes,
+            grid_dim,
+        )
 
-        _assert_spectral_scalers_compatible(self.scaler, crps.size(TensorDim.GRID))
+        _validate_spectral_scalers(self.get_active_scalers(without_scalers), global_spectral_size)
         scaled = self.scale(
             crps,
             scaler_indices,
             without_scalers=without_scalers,
-            grid_shard_slice=None if is_sharded else grid_shard_slice,
+            grid_shard_slice=spectral_shard_slice,
         )
         return self.reduce(scaled, squash=squash, group=group, squash_mode=squash_mode)
 

@@ -13,6 +13,7 @@ import logging
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import BaseMask
@@ -25,6 +26,7 @@ class GraphNodeAttributeScaler(BaseScaler):
     """Class for extracting scalers from node attributes."""
 
     scale_dims: TensorDim = TensorDim.GRID
+    grid_domain = ScalerDomain.SPATIAL
 
     def __init__(
         self,

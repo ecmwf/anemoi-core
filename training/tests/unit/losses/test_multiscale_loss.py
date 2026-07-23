@@ -20,6 +20,7 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -215,7 +216,12 @@ def test_multiscale_loss_forwards_scaler_indices() -> None:
     target = torch.zeros((1, 1, 1, 2, 2))
 
     per_scale_loss = MSELoss()
-    per_scale_loss.add_scaler(TensorDim.GRID, torch.ones(2), name="grid_weights")
+    per_scale_loss.add_scaler(
+        TensorDim.GRID,
+        torch.ones(2),
+        grid_domain=ScalerDomain.SPATIAL,
+        name="grid_weights",
+    )
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],

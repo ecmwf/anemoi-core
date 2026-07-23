@@ -25,6 +25,8 @@ from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -50,7 +52,7 @@ def test_combined_loss() -> None:
                 "loss_weights": [1.0, 0.5],
             },
         ),
-        scalers={"test": (-1, torch.ones(2))},
+        scalers={"test": ScalerSpec((-1,), torch.ones(2))},
     )
     assert isinstance(loss.losses[0], MSELoss)
     assert "test" in loss.losses[0].scaler
@@ -73,7 +75,7 @@ def test_combined_loss_invalid_loss_weights() -> None:
                     "loss_weights": [1.0, 0.5, 1],
                 },
             ),
-            scalers={"test": (-1, torch.ones(2))},
+            scalers={"test": ScalerSpec((-1,), torch.ones(2))},
         )
 
 
@@ -107,7 +109,10 @@ def test_combined_loss_seperate_scalers() -> None:
                 "loss_weights": [1.0, 0.5],
             },
         ),
-        scalers={"test": (-1, torch.ones(2)), "test2": (-1, torch.ones(2))},
+        scalers={
+            "test": ScalerSpec((-1,), torch.ones(2)),
+            "test2": ScalerSpec((-1,), torch.ones(2)),
+        },
     )
     assert isinstance(loss, CombinedLoss)
 
@@ -208,9 +213,9 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
             },
         ),
         scalers={
-            "grid_uniform": (3, torch.ones(4)),
+            "grid_uniform": ScalerSpec((3,), torch.ones(4), ScalerDomain.SPATIAL),
             # dynamic has one value per DATA_FULL variable: tp=2, f0=99(ignored), t2m=3, msl=5, imerg=7
-            "dynamic": (4, torch.tensor([2.0, 99.0, 3.0, 5.0, 7.0])),
+            "dynamic": ScalerSpec((4,), torch.tensor([2.0, 99.0, 3.0, 5.0, 7.0])),
         },
         data_indices=data_indices,
     )
@@ -221,12 +226,12 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
 
     # First subloss predicts [tp, t2m, msl] → dynamic scaler filtered to [2.0, 3.0, 5.0]
     torch.testing.assert_close(
-        loss.losses[0].loss.scaler.tensors["dynamic"][1],
+        loss.losses[0].loss.scaler.tensors["dynamic"].tensor,
         torch.tensor([2.0, 3.0, 5.0]),
     )
     # Second subloss predicts [tp] → dynamic scaler filtered to [2.0]
     torch.testing.assert_close(
-        loss.losses[1].loss.scaler.tensors["dynamic"][1],
+        loss.losses[1].loss.scaler.tensors["dynamic"].tensor,
         torch.tensor([2.0]),
     )
 

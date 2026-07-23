@@ -223,8 +223,9 @@ Some loss functions operate in spectral space rather than directly in grid-point
 This is useful when the error characteristics are better expressed by scale (wavenumber)
 than by location, or when the loss should emphasise/regularise specific ranges of scales.
 
-In Anemoi, spectral losses follow the same API as other losses (scalers/node weights, reduction,
-etc.), but they additionally require a *spectral transform* configuration.
+In Anemoi, spectral losses follow the same API as other losses (scalers and reduction),
+but they additionally require a *spectral transform* configuration. Spatial node weights
+cannot be used after the transform; use a spectral-dimension scaler instead.
 
 Spectral transforms
 ===================
@@ -638,12 +639,18 @@ assigned to the default group.
 Spectral Loss Scalers
 =====================
 
-Spectral scalers weight the spectral dimension of spectral losses. They
-are required whenever using a
-spectral loss, because in spectral space that dimension holds spectral
-modes rather than grid points. Anemoi-training checks that every
-grid-dimension scaler attached to a spectral loss is sized to the
-spectral dimension.
+Spectral scalers optionally weight or normalise the spectral dimension of
+spectral losses. Without one, reduction sums over spectral modes. In spectral
+space the grid dimension holds spectral modes rather than grid points, so
+spatial scalers such as ``node_weights`` are not valid even when their length
+happens to equal the number of spectral modes.
+
+Anemoi-training records whether each grid scaler applies to spatial points or
+spectral modes and rejects a scaler from the wrong domain when it is attached
+to a loss. It also checks the scaler length against the global spectral
+dimension at runtime. During distributed execution, the global spectral scaler
+is sliced to the modes owned by each rank after the spectral all-to-all
+transpose.
 
 ``n_spectral_modes`` is the number of spectral modes (for spherical
 harmonic transforms this is the number of total wavenumbers
@@ -655,7 +662,8 @@ harmonic transforms this is the number of total wavenumbers
    loss before configuring these scalers. A mismatch between
    the shape of the scaler and the loss tensor will be caught at
    runtime by the spectral-loss compatibility check, but only after
-   model instantiation.
+   model instantiation. The configured size is always the global spectral
+   size, including when the loss tensor is sharded across ranks.
 
 The following spectral scaler is available:
 
@@ -693,15 +701,20 @@ Custom Scalers
 To create a custom scaler, subclass the ``BaseScaler`` and implement the
 ``get_scaling_values`` method. This method should return an array of the
 scaling values. Set ``scale_dims`` to the dimensions that the scaling
-values should be applied to.
+values should be applied to. A scaler that includes ``TensorDim.GRID`` must
+also set ``grid_domain`` to ``ScalerDomain.SPATIAL`` or
+``ScalerDomain.SPECTRAL``.
 
 .. code:: python
 
-   from anemoi.training.losses.scalers import BaseScaler
+   from anemoi.training.losses.scalers import ScalerDomain
+   from anemoi.training.losses.scalers.base_scaler import BaseScaler
    from anemoi.training.utils.enums import TensorDim
 
    class CustomScaler(BaseScaler):
       scale_dims = [TensorDim.GRID]
+      grid_domain = ScalerDomain.SPATIAL
+
       def get_scaling_values(self):
          # Custom scaling logic here
          return scaling_values

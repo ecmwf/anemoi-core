@@ -21,7 +21,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import LossFactoryContextKey
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -48,7 +48,7 @@ def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs
 class LossFactoryContext:
     """Factory-supplied context that only selected loss classes use."""
 
-    available_scalers: dict[str, TENSOR_SPEC] | None = None
+    available_scalers: dict[str, ScalerSpec] | None = None
     data_indices: IndexCollection | None = None
 
     def for_loss_class(self, loss_class: type[BaseLoss]) -> tuple[dict, bool, bool]:
@@ -81,8 +81,8 @@ def _has_factory_context_key(
 
 def _filter_scalers(
     scalers_to_include: list[str],
-    scalers: dict[str, TENSOR_SPEC],
-) -> dict[str, TENSOR_SPEC]:
+    scalers: dict[str, ScalerSpec],
+) -> dict[str, ScalerSpec]:
     """Return the subset of named scalers requested by the loss config."""
     filtered_scalers = {}
     for name in scalers_to_include:
@@ -120,7 +120,7 @@ def _propagate_combined_scalers(loss_config: dict, scalers_to_include: list) -> 
 def _build_wrapped_loss(
     loss_config: dict,
     scalers_to_include: list,
-    scalers: dict[str, TENSOR_SPEC] | None,
+    scalers: dict[str, ScalerSpec] | None,
     data_indices: "IndexCollection | None",
 ) -> BaseLoss:
     """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
@@ -141,7 +141,7 @@ def _build_wrapped_loss(
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
-    scalers: dict[str, TENSOR_SPEC] | None = None,
+    scalers: dict[str, ScalerSpec] | None = None,
     data_indices: IndexCollection | None = None,
     graph_data: object | None = None,
     data_node_name: str | None = None,
@@ -155,7 +155,7 @@ def get_loss_function(
     ----------
     config : DictConfig
         Loss function configuration, should include `scalers` if scalers are to be added to the loss function.
-    scalers : TENSOR_SPEC, optional,
+    scalers : dict[str, ScalerSpec], optional,
         Scalers which can be added to the loss function. Defaults to None., by default None
         If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
         For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
@@ -271,7 +271,7 @@ def get_loss_function(
 def _apply_scalers(
     loss_function: BaseLoss,
     scalers_to_include: list,
-    scalers: dict[str, TENSOR_SPEC] | None,
+    scalers: dict[str, ScalerSpec] | None,
     data_indices: IndexCollection | None,
 ) -> None:
     """Attach scalers to a loss function and set data indices if needed."""
@@ -284,9 +284,15 @@ def _apply_scalers(
                 if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
                     var_key,
                 ):
-                    scaling = scalers[key][1][idx]
+                    scaling = scalers[key].tensor[idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
-        loss_function.add_scaler(*scalers[key], name=key)
+        scaler_spec = scalers[key]
+        loss_function.add_scaler(
+            scaler_spec.dimensions,
+            scaler_spec.tensor,
+            grid_domain=scaler_spec.grid_domain,
+            name=key,
+        )
 
 
 def get_metric_ranges(

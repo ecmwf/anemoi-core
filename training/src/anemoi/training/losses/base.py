@@ -23,6 +23,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import reduce_tensor
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
@@ -47,6 +48,7 @@ class BaseLoss(nn.Module, ABC):
     factory_context_keys: ClassVar[frozenset[LossFactoryContextKey | str]] = frozenset()
     scaler: ScaleTensor
     needs_graph_data: bool = False
+    grid_scaler_domain: ClassVar[ScalerDomain] = ScalerDomain.SPATIAL
 
     def __init__(
         self,
@@ -79,8 +81,54 @@ class BaseLoss(nn.Module, ABC):
         self.num_scales = 1
 
     @functools.wraps(ScaleTensor.add_scaler)
-    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
-        self.scaler.add_scaler(dimension=dimension, scaler=scaler, name=name)
+    def add_scaler(
+        self,
+        dimension: int | tuple[int],
+        scaler: torch.Tensor,
+        *,
+        grid_domain: ScalerDomain | None = None,
+        name: str | None = None,
+    ) -> None:
+        """Add a scaler after checking that it matches the loss's grid layout.
+
+        A scaler on the grid dimension must say whether it applies to spatial
+        points or spectral modes. This prevents scalers defined for spatial
+        points from being attached to spectral losses, and vice versa.
+
+        Parameters
+        ----------
+        dimension : int | tuple[int]
+            Tensor dimension or dimensions to which the scaler applies.
+        scaler : torch.Tensor
+            Values by which the loss tensor will be multiplied.
+        grid_domain : ScalerDomain | None, optional
+            What the entries along the grid dimension represent. This is
+            required for grid scalers and omitted for all other scalers.
+        name : str | None, optional
+            Name used to identify the scaler when updating or excluding it.
+        """
+        dimensions = (dimension,) if isinstance(dimension, int) else tuple(dimension)
+        if TensorDim.GRID in dimensions:
+            if grid_domain is None:
+                msg = f"Scaler {name!r} applies to TensorDim.GRID but does not declare a grid domain."
+                raise ValueError(msg)
+            grid_domain = ScalerDomain(grid_domain)
+            if grid_domain != self.grid_scaler_domain:
+                msg = (
+                    f"Scaler {name!r} uses the {grid_domain.value} grid domain, but "
+                    f"{self.__class__.__name__} requires {self.grid_scaler_domain.value} grid scalers."
+                )
+                raise ValueError(msg)
+        elif grid_domain is not None:
+            msg = f"Scaler {name!r} declares a grid domain but does not apply to TensorDim.GRID."
+            raise ValueError(msg)
+
+        self.scaler.add_scaler(
+            dimension=dimensions,
+            scaler=scaler,
+            grid_domain=grid_domain,
+            name=name,
+        )
 
     @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
@@ -89,6 +137,26 @@ class BaseLoss(nn.Module, ABC):
     @functools.wraps(ScaleTensor.has_scaler_for_dim)
     def has_scaler_for_dim(self, dim: TensorDim) -> bool:
         return self.scaler.has_scaler_for_dim(dim=dim)
+
+    def get_active_scalers(self, without_scalers: list[str] | list[int] | None = None) -> ScaleTensor:
+        """Choose which registered scalers to use for one loss calculation.
+
+        Parameters
+        ----------
+        without_scalers : list[str] | list[int] | None, optional
+            Scaler names or tensor dimensions to leave out for this call. If
+            omitted or empty, all registered scalers are returned.
+
+        Returns
+        -------
+        ScaleTensor
+            The registered scalers with the requested names or dimensions removed.
+        """
+        if without_scalers is None or len(without_scalers) == 0:
+            return self.scaler
+        if isinstance(without_scalers[0], str):
+            return self.scaler.without(without_scalers)
+        return self.scaler.without_by_dim(without_scalers)
 
     def scale(
         self,
@@ -134,12 +202,7 @@ class BaseLoss(nn.Module, ABC):
             )
             raise RuntimeError(error_msg)
 
-        scale_tensor = self.scaler
-        if without_scalers is not None and len(without_scalers) > 0:
-            if isinstance(without_scalers[0], str):
-                scale_tensor = self.scaler.without(without_scalers)
-            else:
-                scale_tensor = self.scaler.without_by_dim(without_scalers)
+        scale_tensor = self.get_active_scalers(without_scalers)
 
         return scale_tensor.scale_iteratively(
             x,
@@ -297,7 +360,7 @@ class BaseLoss(nn.Module, ABC):
             Distributed group to reduce over, by default None
         squash_mode : {"avg", "sum"}, optional
             Reduction mode for the variable dimension, by default ``"avg"``
-        **kwargs
+        **_kwargs
             Additional keyword arguments
 
         Returns
@@ -335,8 +398,15 @@ class BaseLossWrapper(BaseLoss):
     # -- scaler delegation --------------------------------------------------
 
     @functools.wraps(ScaleTensor.add_scaler)
-    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
-        self.loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
+    def add_scaler(
+        self,
+        dimension: int | tuple[int],
+        scaler: torch.Tensor,
+        *,
+        grid_domain: ScalerDomain | None = None,
+        name: str | None = None,
+    ) -> None:
+        self.loss.add_scaler(dimension=dimension, scaler=scaler, grid_domain=grid_domain, name=name)
 
     @functools.wraps(ScaleTensor.update_scaler)
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
@@ -411,7 +481,7 @@ class FunctionalLoss(BaseLoss):
             Distributed group, by default None
         squash_mode : {"avg", "sum"}, optional
             Reduction mode for the variable dimension, by default ``"avg"``
-        **kwargs
+        **_kwargs
             Additional keyword arguments
 
         Returns

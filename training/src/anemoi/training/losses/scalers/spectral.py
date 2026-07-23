@@ -12,6 +12,7 @@ import logging
 
 import torch
 
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
 
@@ -34,6 +35,7 @@ class SpectralDimensionScaler(BaseScaler):
     """
 
     scale_dims: TensorDim = TensorDim.GRID
+    grid_domain = ScalerDomain.SPECTRAL
 
     def __init__(
         self,
