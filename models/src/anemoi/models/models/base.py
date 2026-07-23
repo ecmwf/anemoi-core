@@ -83,11 +83,11 @@ class BaseGraphModel(nn.Module):
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
+        self._build_dataset_routing(model_config)
+
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
-
-        self._build_dataset_routing(model_config)
 
         # build networks
         self._build_networks(model_config)
