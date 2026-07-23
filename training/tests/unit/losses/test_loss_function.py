@@ -33,6 +33,8 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 
@@ -202,7 +204,12 @@ def test_scale_subset_indices_requires_tuple(
 ) -> None:
     loss = functionalloss()
     if add_grid_scaler:
-        loss.add_scaler(TensorDim.GRID, torch.tensor([1.0, 2.0, 3.0, 4.0]), name="grid_test")
+        loss.add_scaler(
+            TensorDim.GRID,
+            torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="grid_test",
+        )
 
     x = torch.arange(1 * 1 * 1 * 4 * 5, dtype=torch.float32).reshape(1, 1, 1, 4, 5)
     with pytest.raises(TypeError, match="must be a tuple"):
@@ -212,21 +219,26 @@ def test_scale_subset_indices_requires_tuple(
 @pytest.fixture
 def simple_functionalloss(functionalloss: type[FunctionalLoss]) -> FunctionalLoss:
     loss = functionalloss()
-    loss.add_scaler(TensorDim.GRID, torch.ones((4,)), name="unit_scaler")
+    loss.add_scaler(
+        TensorDim.GRID,
+        torch.ones((4,)),
+        grid_domain=ScalerDomain.SPATIAL,
+        name="unit_scaler",
+    )
     return loss
 
 
 @pytest.fixture
 def functionalloss_with_scaler(simple_functionalloss: FunctionalLoss) -> FunctionalLoss:
     loss = simple_functionalloss
-    loss.add_scaler(TensorDim.GRID, torch.rand((4,)), name="test")
+    loss.add_scaler(TensorDim.GRID, torch.rand((4,)), grid_domain=ScalerDomain.SPATIAL, name="test")
     return loss
 
 
 @pytest.fixture
 def functionalloss_with_scaler_fine(functionalloss: FunctionalLoss) -> FunctionalLoss:
     loss = functionalloss()
-    loss.add_scaler(TensorDim.GRID, torch.rand((8,)), name="test")
+    loss.add_scaler(TensorDim.GRID, torch.rand((8,)), grid_domain=ScalerDomain.SPATIAL, name="test")
     return loss
 
 
@@ -380,7 +392,7 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     }
     loss = get_loss_function(
         DictConfig(loss_dic),
-        scalers={"test": ((0, 1), torch.ones((1, 2)))},
+        scalers={"test": ScalerSpec((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
 
@@ -401,7 +413,7 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     }
     loss = get_loss_function(
         DictConfig(loss_dic),
-        scalers={"test": ((0, 1), torch.ones((1, 2)))},
+        scalers={"test": ScalerSpec((0, 1), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
 
@@ -422,7 +434,7 @@ def test_dynamic_init_scaler_not_add(loss_cls: type[BaseLoss]) -> None:
     }
     loss = get_loss_function(
         DictConfig(loss_dic),
-        scalers={"test": (-1, torch.ones(2))},
+        scalers={"test": ScalerSpec((-1,), torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
     assert "test" not in loss.scaler
@@ -441,7 +453,7 @@ def test_dynamic_init_scaler_exclude(loss_cls: type[BaseLoss]) -> None:
     }
     loss = get_loss_function(
         DictConfig(loss_dic),
-        scalers={"test": (-1, torch.ones(2))},
+        scalers={"test": ScalerSpec((-1,), torch.ones(2))},
     )
     assert isinstance(loss, BaseLoss)
     assert "test" not in loss.scaler
@@ -530,6 +542,12 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
     local_grid = grid_shard_sizes[0]
 
     loss = loss_cls(**transform_kwargs)
+    loss.add_scaler(
+        TensorDim.GRID,
+        torch.ones(sum(spectral_shard_sizes)),
+        grid_domain=ScalerDomain.SPECTRAL,
+        name="spectral",
+    )
     pred = torch.randn(1, 1, ensemble_size, local_grid, 2)
     target = torch.randn(1, 1, 1, local_grid, 2)
 
@@ -557,6 +575,7 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
         side_effect=fake_all_to_all,
     )
     mocker.patch("anemoi.training.losses.base.reduce_tensor", side_effect=lambda x, _group: x)
+    mocker.patch("anemoi.training.losses.spectral.torch.distributed.get_rank", return_value=0)
     scale = mocker.spy(loss, "scale")
 
     out = loss(
@@ -596,7 +615,98 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
         channel_shard_sizes,
         group,
     )
-    assert scale.call_args.kwargs["grid_shard_slice"] is None
+    assert scale.call_args.kwargs["grid_shard_slice"] == slice(0, spectral_shard_sizes[0])
+
+
+def test_spectral_loss_rejects_spatial_grid_scaler_even_when_lengths_match() -> None:
+    loss = LogSpectralDistance(transform="fft2d", x_dim=4, y_dim=4)
+
+    with pytest.raises(ValueError, match="uses the spatial grid domain"):
+        loss.add_scaler(
+            TensorDim.GRID,
+            torch.ones(16),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="node_weights",
+        )
+
+
+def test_spatial_loss_rejects_spectral_grid_scaler() -> None:
+    loss = MSELoss()
+
+    with pytest.raises(ValueError, match="requires spatial grid scalers"):
+        loss.add_scaler(
+            TensorDim.GRID,
+            torch.ones(16),
+            grid_domain=ScalerDomain.SPECTRAL,
+            name="spectral",
+        )
+
+
+def test_spectral_loss_applies_matching_spectral_grid_scaler() -> None:
+    loss = LogSpectralDistance(transform="fft2d", x_dim=4, y_dim=4)
+    loss.add_scaler(
+        TensorDim.GRID,
+        torch.linspace(0.5, 1.5, 16),
+        grid_domain=ScalerDomain.SPECTRAL,
+        name="spectral",
+    )
+    pred = torch.rand(1, 1, 1, 16, 1)
+    target = torch.rand_like(pred)
+
+    out = loss(pred, target)
+
+    assert torch.isfinite(out)
+
+
+def test_spectral_loss_validates_only_active_scalers() -> None:
+    loss = LogSpectralDistance(transform="fft2d", x_dim=4, y_dim=4)
+    loss.add_scaler(
+        TensorDim.GRID,
+        torch.ones(15),
+        grid_domain=ScalerDomain.SPECTRAL,
+        name="wrong_size",
+    )
+    pred = torch.ones(1, 1, 1, 16, 1)
+    target = torch.ones_like(pred)
+
+    with pytest.raises(ValueError, match="global spectral dimension of size 16"):
+        loss(pred, target)
+
+    out = loss(pred, target, without_scalers=["wrong_size"])
+    assert torch.isfinite(out)
+
+
+def test_reshard_spectral_loss_returns_global_slice_for_uneven_shards(mocker: MockerFixture) -> None:
+    loss = LogSpectralDistance(transform="fft2d", x_dim=4, y_dim=4)
+    group = object()
+    spectral_shard_sizes = [9, 7]
+    full_loss = torch.zeros(1, 1, 1, 16, 1)
+    local_loss = torch.zeros(1, 1, 1, 7, 1)
+    mocker.patch("anemoi.training.losses.spectral.get_shard_sizes", return_value=spectral_shard_sizes)
+    mocker.patch("anemoi.training.losses.spectral.torch.distributed.get_rank", return_value=1)
+    transpose = mocker.patch(
+        "anemoi.training.losses.spectral.all_to_all_transpose",
+        return_value=local_loss,
+    )
+
+    result, spectral_slice, global_spectral_size = loss._reshard_spectral_loss(
+        full_loss,
+        group,
+        channel_shard_sizes=[1, 1],
+        spectral_grid_dim=TensorDim.GRID,
+    )
+
+    assert result is local_loss
+    assert spectral_slice == slice(9, 16)
+    assert global_spectral_size == 16
+    transpose.assert_called_once_with(
+        full_loss,
+        TensorDim.GRID,
+        spectral_shard_sizes,
+        TensorDim.VARIABLE,
+        [1, 1],
+        group,
+    )
 
 
 @pytest.mark.parametrize("loss_cls", spectral_losses)

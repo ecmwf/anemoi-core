@@ -15,6 +15,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.kcrps import CRPS
 from anemoi.training.losses.mae import MAELoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.utils.enums import TensorDim
 
 # ---------------------------------------------------------------------------
@@ -25,14 +26,14 @@ from anemoi.training.utils.enums import TensorDim
 def _make_loss() -> MAELoss:
     """Return an MAE loss with a unit grid scaler (4 grid points)."""
     loss = MAELoss()
-    loss.add_scaler(TensorDim.GRID, torch.ones(4), name="unit_grid")
+    loss.add_scaler(TensorDim.GRID, torch.ones(4), grid_domain=ScalerDomain.SPATIAL, name="unit_grid")
     return loss
 
 
 def _make_crps_loss() -> CRPS:
     """Return a CRPS loss with a unit grid scaler (4 grid points)."""
     loss = CRPS(no_autocast=False)
-    loss.add_scaler(TensorDim.GRID, torch.ones(4), name="unit_grid")
+    loss.add_scaler(TensorDim.GRID, torch.ones(4), grid_domain=ScalerDomain.SPATIAL, name="unit_grid")
     return loss
 
 
@@ -386,7 +387,7 @@ def test_nested_add_scaler_reaches_leaf() -> None:
     leaf = MAELoss()
     ms = _make_multiscale_wrapper(leaf)
     wrapper = TimeAggregateLossWrapper(["mean"], ms)
-    wrapper.add_scaler(TensorDim.GRID, torch.ones(4), name="grid_w")
+    wrapper.add_scaler(TensorDim.GRID, torch.ones(4), grid_domain=ScalerDomain.SPATIAL, name="grid_w")
     assert leaf.scaler.has_scaler_for_dim(TensorDim.GRID)
 
 
@@ -413,8 +414,18 @@ def test_combined_loss_scaler_reaches_wrapped_inner() -> None:
 
     # Verify that add_scaler on the wrapper propagates to the inner loss
     grid_scaler = torch.ones(4)
-    wrapper.add_scaler(TensorDim.GRID, grid_scaler, name="node_weights")
-    inner1.add_scaler(TensorDim.GRID, grid_scaler, name="node_weights")
+    wrapper.add_scaler(
+        TensorDim.GRID,
+        grid_scaler,
+        grid_domain=ScalerDomain.SPATIAL,
+        name="node_weights",
+    )
+    inner1.add_scaler(
+        TensorDim.GRID,
+        grid_scaler,
+        grid_domain=ScalerDomain.SPATIAL,
+        name="node_weights",
+    )
 
     # Both leaf losses should have the scaler
     assert inner1.scaler.has_scaler_for_dim(TensorDim.GRID)

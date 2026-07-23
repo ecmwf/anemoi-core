@@ -21,6 +21,8 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.train.step_output import TrainingStepOutput
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
@@ -211,7 +213,13 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
                 "scalers": ["*"],
             },
         ),
-        scalers={"nan_mask_weights": ((0, 3, 4), torch.ones(1, 3, 2))},
+        scalers={
+            "nan_mask_weights": ScalerSpec(
+                (0, 3, 4),
+                torch.ones(1, 3, 2),
+                ScalerDomain.SPATIAL,
+            ),
+        },
         data_indices=data_indices,
     )
 

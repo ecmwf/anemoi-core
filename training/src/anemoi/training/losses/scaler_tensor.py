@@ -12,6 +12,8 @@ import logging
 import uuid
 from collections.abc import Callable
 from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Self
 
 import torch
@@ -59,13 +61,20 @@ def grad_scaler(
     return new_grad_in, grad_in[1]
 
 
-TENSOR_SPEC = tuple[int | tuple[int, ...], torch.Tensor]
-"""Scale Tensor specification type.
+class ScalerDomain(StrEnum):
+    """Indicate whether a grid-dimension scaler applies to spatial points or spectral modes."""
 
-A tuple of (dimension, tensor) where:
-- dimension can be a single int or a tuple of ints specifying the dimensions the tensor should be applied to.
-- tensor is a torch.Tensor that will be applied to the specified dimensions.
-"""
+    SPATIAL = "spatial"
+    SPECTRAL = "spectral"
+
+
+@dataclass(frozen=True)
+class ScalerSpec:
+    """Describe where a scaler applies, its values, and the meaning of its grid entries."""
+
+    dimensions: tuple[int, ...]
+    tensor: torch.Tensor
+    grid_domain: ScalerDomain | None = None
 
 
 class Shape:
@@ -93,7 +102,7 @@ class ScaleTensor(nn.Module):
     Examples
     --------
     >>> tensor = torch.randn(3, 4, 5)
-    >>> scalers = ScaleTensor((0, torch.randn(3)), (1, torch.randn(4)))
+    >>> scalers = ScaleTensor(ScalerSpec((0,), torch.randn(3)), ScalerSpec((1,), torch.randn(4)))
     >>> scaled_tensor = scalers.scale(tensor)
     >>> scalers.get_scaler(tensor.ndim).shape
     torch.Size([3, 4, 1])
@@ -102,47 +111,51 @@ class ScaleTensor(nn.Module):
     torch.Size([3, 4, 5])
     """
 
-    _tensors: dict[str, TENSOR_SPEC]
+    _tensors: dict[str, tuple[tuple[int, ...], ScalerDomain | None]]
 
     def __init__(
         self,
-        scalers: dict[str, TENSOR_SPEC] | TENSOR_SPEC | None = None,
-        *tensors: TENSOR_SPEC,
-        **named_tensors: dict[str, TENSOR_SPEC],
+        scalers: dict[str, ScalerSpec] | None = None,
+        *scaler_specs: ScalerSpec,
+        **named_scalers: ScalerSpec,
     ):
         """ScaleTensor constructor.
 
         Parameters
         ----------
-        scalers : dict[str, TENSOR_SPEC] | TENSOR_SPEC | None, optional
+        scalers : dict[str, ScalerSpec] | None, optional
             Scalers to initalise with, by default None
-        tensors : TENSOR_SPEC
-            Args form of (dimension, tensor) to add to the scalers
+        scaler_specs : ScalerSpec
+            Scaler specifications to add to the scalers
             Will be given a random uuid name
-        named_tensors : dict[str, TENSOR_SPEC]
-            Kwargs form of {name: (dimension, tensor)} to add to the scalers
+        named_scalers : ScalerSpec
+            Kwargs form of {name: ScalerSpec(...)} to add to the scalers
         """
         super().__init__()
 
         self._tensors = {}
 
-        named_tensors.update(scalers or {})
-        self.add(named_tensors)
+        named_scalers.update(scalers or {})
+        self.add(named_scalers)
 
-        for tensor_spec in tensors:
-            self.add_scaler(*tensor_spec)
+        for scaler_spec in scaler_specs:
+            self.add_scaler(
+                scaler_spec.dimensions,
+                scaler_spec.tensor,
+                grid_domain=scaler_spec.grid_domain,
+            )
 
     @property
-    def tensors(self) -> dict[str, TENSOR_SPEC]:
-        """Get the scalers as a dictionary of name to (dimension, tensor) pairs."""
+    def tensors(self) -> dict[str, ScalerSpec]:
+        """Get the scalers as a dictionary of names to scaler specifications."""
         tensors = {}
-        for name, (dimension, _) in self._tensors.items():
-            tensors[name] = (dimension, self._buffers[name])
+        for name, (dimension, grid_domain) in self._tensors.items():
+            tensors[name] = ScalerSpec(dimension, self._buffers[name], grid_domain)
 
         return tensors
 
     @property
-    def specified_dimensions(self) -> dict[str, tuple[int]]:
+    def specified_dimensions(self) -> dict[str, tuple[int, ...]]:
         """Get the specified dimensions for each scaler."""
         return {key: dim for key, (dim, _) in self._tensors.items()}
 
@@ -155,9 +168,9 @@ class ScaleTensor(nn.Module):
         """
 
         def get_dim_shape(dimension: int) -> int:
-            for dim_assign, tensor in self.tensors.values():
-                if isinstance(dim_assign, tuple) and dimension in dim_assign:
-                    return tensor.shape[list(dim_assign).index(dimension)]
+            for scaler_spec in self.tensors.values():
+                if dimension in scaler_spec.dimensions:
+                    return scaler_spec.tensor.shape[list(scaler_spec.dimensions).index(dimension)]
 
             unique_dims = {dim for dim_assign in self.specified_dimensions.values() for dim in dim_assign}
             error_msg = (
@@ -206,6 +219,7 @@ class ScaleTensor(nn.Module):
         dimension: int | tuple[int],
         scaler: torch.Tensor,
         *,
+        grid_domain: ScalerDomain | None = None,
         name: str | None = None,
     ) -> Self:
         """Add new scaler to be applied along `dimension`.
@@ -220,6 +234,8 @@ class ScaleTensor(nn.Module):
             Dimension/s to apply the scaler to
         scaler : torch.Tensor
             Scaler tensor to apply
+        grid_domain : ScalerDomain | None, optional
+            Whether the scaler applies to spatial points or spectral modes along the grid dimension
         name : str | None, optional
             Name of the scaler, by default None
 
@@ -255,7 +271,7 @@ class ScaleTensor(nn.Module):
             error_msg = f"Validating tensor {name!r} raised an error."
             raise ValueError(error_msg) from e
 
-        self._tensors[name] = (dimension, None)
+        self._tensors[name] = (dimension, grid_domain)
         self.register_buffer(name, scaler, persistent=False)
 
         return self
@@ -308,7 +324,13 @@ class ScaleTensor(nn.Module):
 
                 for key in record_of_scalers:
                     if key not in self:
-                        self.add_scaler(*record_of_scalers[key], name=key)
+                        scaler_spec = record_of_scalers[key]
+                        self.add_scaler(
+                            scaler_spec.dimensions,
+                            scaler_spec.tensor,
+                            grid_domain=scaler_spec.grid_domain,
+                            name=key,
+                        )
 
         return FrozenStateRecord()
 
@@ -334,7 +356,7 @@ class ScaleTensor(nn.Module):
             msg = f"scaler {name!r} not found in scalers."
             raise ValueError(msg)
 
-        dimension = self._tensors[name][0]
+        dimension, grid_domain = self._tensors[name]
 
         original_scaler = self._tensors.pop(name)
         original_scaler_buffer = self._buffers.get(name)
@@ -343,29 +365,38 @@ class ScaleTensor(nn.Module):
             self.validate_scaler(dimension, scaler)
 
         try:
-            self.add_scaler(dimension, scaler, name=name)
+            self.add_scaler(dimension, scaler, grid_domain=grid_domain, name=name)
         except ValueError:
             self._tensors[name] = original_scaler
             self.register_buffer(name, original_scaler_buffer, persistent=False)
             raise
 
-    def add(self, new_scalers: dict[str, TENSOR_SPEC] | list[TENSOR_SPEC] | None = None, **kwargs) -> None:
+    def add(self, new_scalers: dict[str, ScalerSpec] | list[ScalerSpec] | None = None, **kwargs) -> None:
         """Add multiple scalers to the existing scalers.
 
         Parameters
         ----------
-        new_scalers : dict[str, TENSOR_SPEC] | list[TENSOR_SPEC] | None, optional
+        new_scalers : dict[str, ScalerSpec] | list[ScalerSpec] | None, optional
             Scalers to add, see `add_scaler` for more info, by default None
         **kwargs:
-            Kwargs form of {name: (dimension, tensor)} to add to the scalers
+            Kwargs form of {name: ScalerSpec(...)} to add to the scalers
         """
         if isinstance(new_scalers, list):
-            for tensor_spec in new_scalers:
-                self.add_scaler(*tensor_spec)
+            for scaler_spec in new_scalers:
+                self.add_scaler(
+                    scaler_spec.dimensions,
+                    scaler_spec.tensor,
+                    grid_domain=scaler_spec.grid_domain,
+                )
         else:
             kwargs.update(new_scalers or {})
-        for name, tensor_spec in kwargs.items():
-            self.add_scaler(*tensor_spec, name=name)
+        for name, scaler_spec in kwargs.items():
+            self.add_scaler(
+                scaler_spec.dimensions,
+                scaler_spec.tensor,
+                grid_domain=scaler_spec.grid_domain,
+                name=name,
+            )
 
     def update(self, updated_scalers: dict[str, torch.Tensor] | None = None, override: bool = False, **kwargs) -> None:
         """Update multiple scalers in the existing scalers.
@@ -422,7 +453,7 @@ class ScaleTensor(nn.Module):
         """
         if isinstance(scalers, str):
             scalers = [scalers]
-        return ScaleTensor(**{name: self.tensors[name] for name in scalers})
+        return ScaleTensor({name: self.tensors[name] for name in scalers})
 
     def subset_by_dim(self, dimensions: int | Sequence[int]) -> Self:
         """Get subset of the scalers, filtering by dimension.
@@ -439,18 +470,17 @@ class ScaleTensor(nn.Module):
         ScaleTensor
             Subset of self
         """
-        subset_scalers: dict[str, TENSOR_SPEC] = {}
-
         if isinstance(dimensions, int):
             dimensions = (dimensions,)
 
-        for name, (dim, scaler) in self.tensors.items():
-            if isinstance(dim, int):
-                dim = (dim,)
-            if len(set(dimensions).intersection(dim)) > 0:
-                subset_scalers[name] = (dim, scaler)
+        dimensions = set(dimensions)
+        subset_scalers = {
+            name: scaler_spec
+            for name, scaler_spec in self.tensors.items()
+            if dimensions.intersection(scaler_spec.dimensions)
+        }
 
-        return ScaleTensor(**subset_scalers)
+        return ScaleTensor(subset_scalers)
 
     def without(self, scaler_identifier: str | Sequence[str] | int | Sequence[int]) -> Self:
         """Get subset of the scalers, filtering out by name or dimension.
@@ -486,7 +516,7 @@ class ScaleTensor(nn.Module):
         """
         if isinstance(scalers, str):
             scalers = [scalers]
-        return ScaleTensor(**{name: tensor for name, tensor in self.tensors.items() if name not in scalers})
+        return ScaleTensor({name: tensor for name, tensor in self.tensors.items() if name not in scalers})
 
     def without_by_dim(self, dimensions: int | Sequence[int]) -> Self:
         """Get subset of the scalers, filtering out by dimension.
@@ -501,18 +531,17 @@ class ScaleTensor(nn.Module):
         ScaleTensor
             Subset of self
         """
-        subset_scalers: dict[str, TENSOR_SPEC] = {}
-
         if isinstance(dimensions, int):
             dimensions = (dimensions,)
 
-        for name, (dim, scaler) in self.tensors.items():
-            if isinstance(dim, int):
-                dim = (dim,)
-            if len(set(dimensions).intersection(dim)) == 0:
-                subset_scalers[name] = (dim, scaler)
+        dimensions = set(dimensions)
+        subset_scalers = {
+            name: scaler_spec
+            for name, scaler_spec in self.tensors.items()
+            if not dimensions.intersection(scaler_spec.dimensions)
+        }
 
-        return ScaleTensor(**subset_scalers)
+        return ScaleTensor(subset_scalers)
 
     def resolve(self, ndim: int) -> Self:
         """Resolve relative indexes in scalers by associating against ndim.
@@ -531,17 +560,17 @@ class ScaleTensor(nn.Module):
         ScaleTensor
             ScaleTensor with all relative indexes resolved
         """
-        resolved_scalers: dict[str, TENSOR_SPEC] = {}
+        resolved_scalers: dict[str, ScalerSpec] = {}
 
-        for name, (dims, scaler) in self.tensors.items():
+        for name, scaler_spec in self.tensors.items():
             # Cast to plain int: dims may hold TensorDim (IntEnum) members, and
             # torch.compile/Dynamo does not support the < / >= operators on enums.
-            int_dims = [int(d) for d in dims]
+            int_dims = tuple(int(d) for d in scaler_spec.dimensions)
             if any(d < 0 for d in int_dims):
-                int_dims = [d if d >= 0 else ndim + d for d in int_dims]
-            resolved_scalers[name] = (int_dims, scaler)
+                int_dims = tuple(d if d >= 0 else ndim + d for d in int_dims)
+            resolved_scalers[name] = ScalerSpec(int_dims, scaler_spec.tensor, scaler_spec.grid_domain)
 
-        return ScaleTensor(**resolved_scalers)
+        return ScaleTensor(resolved_scalers)
 
     def scale_iteratively(
         self,
@@ -570,7 +599,9 @@ class ScaleTensor(nn.Module):
         ndim = x.ndim
         tensors = self.resolve(ndim).tensors
 
-        for dims, scaler in tensors.values():
+        for scaler_spec in tensors.values():
+            dims = scaler_spec.dimensions
+            scaler = scaler_spec.tensor
             if TensorDim.GRID in dims and grid_shard_slice is not None:
                 grid_index = dims.index(TensorDim.GRID)
                 if scaler.shape[grid_index] >= grid_shard_slice.stop:
@@ -600,13 +631,17 @@ class ScaleTensor(nn.Module):
         subset_indices: tuple[int, ...] | None = None,
         *,
         grid_shard_slice: slice | None = None,
-    ) -> None:
+    ) -> torch.Tensor:
         """Scale a given tensor by the scalers.
 
         Parameters
         ----------
-        tensor : torch.Tensor
+        x : torch.Tensor
             Input tensor to scale
+        subset_indices : tuple[int, ...] | None, optional
+            Indices used to subset the input tensor and scaler
+        grid_shard_slice : slice | None, optional
+            Slice of a global grid scaler that belongs to this rank
 
         Returns
         -------
@@ -654,7 +689,9 @@ class ScaleTensor(nn.Module):
 
         tensors = self.resolve(ndim).tensors
 
-        for dims, scaler in tensors.values():
+        for scaler_spec in tensors.values():
+            dims = scaler_spec.dimensions
+            scaler = scaler_spec.tensor
             missing_dims = [d for d in range(ndim) if d not in dims]
             reshape = [1] * len(missing_dims)
             reshape.extend(scaler.shape)

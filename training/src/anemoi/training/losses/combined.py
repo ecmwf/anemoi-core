@@ -20,7 +20,8 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.loss import get_loss_function
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
@@ -41,7 +42,7 @@ class CombinedLoss(BaseLoss):
         *extra_losses: dict[str, Any] | Callable | BaseLoss,
         loss_weights: tuple[int, ...] | None = None,
         losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
-        available_scalers: dict[str, TENSOR_SPEC] | None = None,
+        available_scalers: dict[str, ScalerSpec] | None = None,
         data_indices: IndexCollection | None = None,
         **kwargs,
     ):
@@ -72,7 +73,7 @@ class CombinedLoss(BaseLoss):
             Must be the same length as the number of losses.
             If None, all losses are weighted equally.
             by default None.
-        available_scalers : dict[str, TENSOR_SPEC] | None, optional
+        available_scalers : dict[str, ScalerSpec] | None, optional
             All scaler tensors available. Passed through to child losses.
         data_indices : IndexCollection | None, optional
             Training data indices needed by child losses that perform variable mapping.
@@ -192,9 +193,16 @@ class CombinedLoss(BaseLoss):
         return loss
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
-    def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
+    def add_scaler(
+        self,
+        dimension: int | tuple[int],
+        scaler: torch.Tensor,
+        *,
+        grid_domain: ScalerDomain | None = None,
+        name: str | None = None,
+    ) -> None:
         for loss in self.losses:
-            loss.add_scaler(dimension=dimension, scaler=scaler, name=name)
+            loss.add_scaler(dimension=dimension, scaler=scaler, grid_domain=grid_domain, name=name)
 
     @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:

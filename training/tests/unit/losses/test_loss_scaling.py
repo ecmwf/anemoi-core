@@ -412,7 +412,7 @@ def test_tendency_scaler_uses_configured_timestep(
 
     variable_idx = data_indices.model.output.name_to_index["y_50"]
 
-    assert scalers["additional_scaler"][1][variable_idx] == expected_scaling
+    assert scalers["additional_scaler"].tensor[variable_idx] == expected_scaling
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
@@ -470,17 +470,19 @@ def test_updating_scalars(mock_updating_scalar: type[BaseUpdatingScaler]) -> Non
     assert isinstance(scalar.get_scaling_values(), torch.Tensor)
 
     assert scalar.get_scaling() is not None
-    assert scalar.get_scaling()[1] == torch.Tensor([1.0]), "Scalar values should be from the initial scaling values."
+    assert scalar.get_scaling().tensor == torch.Tensor(
+        [1.0],
+    ), "Scalar values should be from the initial scaling values."
 
     assert scalar.on_training_start(None) == torch.Tensor([2.0])
     updated_scaling = scalar.update_scaling_values(callback="on_training_start", model=None)
-    assert updated_scaling is not None and updated_scaling[1] == torch.Tensor(
+    assert updated_scaling is not None and updated_scaling.tensor == torch.Tensor(
         [2.0],
     ), "Scalar values should be updated after on_training_start."
 
     assert scalar.on_batch_start(None) == torch.Tensor([3.0])
     updated_scaling = scalar.update_scaling_values(callback="on_batch_start", model=None)
-    assert updated_scaling is not None and updated_scaling[1] == torch.Tensor(
+    assert updated_scaling is not None and updated_scaling.tensor == torch.Tensor(
         [3.0],
     ), "Scalar values should be updated after on_batch_start."
 
@@ -507,12 +509,14 @@ def test_variable_masking(
     vars_to_mask = ["z", "other", "q"]
     indices_to_mask = [data_indices.model.output.name_to_index[v] for v in vars_to_mask]
     scaler = scalers["variable_masking"]
-    assert scaler[0][0] == TensorDim.VARIABLE.value, "Expected scaler to be applied along variable dimension"
+    assert scaler.dimensions[0] == TensorDim.VARIABLE.value, "Expected scaler to be applied along variable dimension"
     # masked variables should have scaler of 0, unmasked 1
-    assert int(scaler[1].sum().item()) == scaler[1].shape[0] - len(
+    assert int(scaler.tensor.sum().item()) == scaler.tensor.shape[0] - len(
         vars_to_mask,
     ), "Sum of scaler values should be equal to number of unmasked variables"
-    assert not scalers["variable_masking"][1][indices_to_mask].any(), "Expected scalers for masked variables to be zero"
+    assert (
+        not scalers["variable_masking"].tensor[indices_to_mask].any()
+    ), "Expected scalers for masked variables to be zero"
 
     config.training.scalers.builders["variable_masking"].update(invert=True)
     scalers, _ = create_scalers(
@@ -526,10 +530,10 @@ def test_variable_masking(
     )
     inverted_scaler = scalers["variable_masking"]
     # dimension where scaler is applied is variable
-    assert inverted_scaler[0][0] == TensorDim.VARIABLE.value
+    assert inverted_scaler.dimensions[0] == TensorDim.VARIABLE.value
     # masked variables with inverted = True should have scaler of 1, unmasked 0
-    assert int(inverted_scaler[1].sum().item()) == len(vars_to_mask)
-    assert inverted_scaler[1][indices_to_mask].all(), "Expected scalers for unmasked variables to be one"
+    assert int(inverted_scaler.tensor.sum().item()) == len(vars_to_mask)
+    assert inverted_scaler.tensor[indices_to_mask].all(), "Expected scalers for unmasked variables to be one"
 
 
 def test_variable_loss_scaling_val_complex_variable_groups(

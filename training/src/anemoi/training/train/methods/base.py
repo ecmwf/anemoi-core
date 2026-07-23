@@ -90,6 +90,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ----------
     config : BaseSchema
         Configuration object defining all parameters.
+    task : BaseTask
+        Training task that defines the input and output timesteps.
     graph_data : HeteroData
         Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
@@ -163,10 +165,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
+        task : BaseTask
+            Training task definition
         graph_data : HeteroData
             Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
+        statistics_tendencies : dict
+            Statistics of the training-data tendencies
         data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
@@ -504,11 +510,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             return
 
         if self._can_update_scaler(loss_obj, name):
-            loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+            loss_obj.update_scaler(scaler=scaler.tensor, name=name)  # Only update the values
 
         for metric in metrics_dict.values():  # If scalar in metrics, update it
             if self._can_update_scaler(metric, name):
-                metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+                metric.update_scaler(scaler=scaler.tensor, name=name)  # Only update the values
 
     @staticmethod
     def _can_update_scaler(loss_or_metric: torch.nn.Module, scaler_name: str) -> bool:
@@ -582,6 +588,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
+        dataset_name : str
+            Dataset whose shard layout should be used
         validation_mode : bool
             Whether in validation mode
 
@@ -632,6 +640,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Grid shard slice for distributed training
         dataset_name : str
             Dataset name for multi-dataset scenarios
+        pred_layout : IndexSpace | str | None
+            Index layout of the prediction tensor
+        target_layout : IndexSpace | str | None
+            Index layout of the target tensor
         **_kwargs
             Additional arguments
 
@@ -681,8 +693,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        dataset_name : str
+            Dataset name for multi-dataset scenarios
+        pred_layout : IndexSpace | str | None
+            Index layout of the prediction tensor
+        target_layout : IndexSpace | str | None
+            Index layout of the target tensor
         rollout_step : int | None
             Current rollout step index, used to produce per-step metric key suffixes.
+        **_kwargs
+            Additional arguments
 
         Returns
         -------
@@ -715,10 +735,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        step : int, optional
-            Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
+        dataset_name : str | None, optional
+            Dataset for which to compute the loss and metrics
         **kwargs
             Additional arguments to pass to loss computation
 
@@ -771,8 +791,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted values
         y : dict[str, torch.Tensor]
             Target values
-        step : int, optional
-            Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
         **kwargs
@@ -971,8 +989,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted ensemble
         y: torch.Tensor
             Ground truth (target).
+        grid_shard_slice : slice | None, optional
+            Slice of the grid owned by this rank.
+        dataset_name : str | None, optional
+            Dataset for which to calculate metrics.
         step: int, optional
             Step number
+        pred_layout : IndexSpace | str | None, optional
+            Index layout of the prediction tensor.
+        target_layout : IndexSpace | str | None, optional
+            Index layout of the target tensor.
+        without_scalers : list[str] | list[int] | None, optional
+            Scalers to exclude from this calculation.
+        **_kwargs
+            Additional arguments.
 
         Returns
         -------

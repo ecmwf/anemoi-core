@@ -14,6 +14,7 @@ import torch
 
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.losses.scaler_tensor import ScalerDomain
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.utils.enums import TensorDim
 
@@ -23,6 +24,7 @@ LOGGER = logging.getLogger(__name__)
 class NaNMaskScaler(BaseUpdatingScaler):
 
     scale_dims: tuple[TensorDim] = (TensorDim.BATCH_SIZE, TensorDim.GRID, TensorDim.VARIABLE)
+    grid_domain = ScalerDomain.SPATIAL
 
     def __init__(self, norm: str | None = None, use_processors_tendencies: bool = False, **kwargs) -> None:
         """Initialise NanMaskScaler.
@@ -50,6 +52,11 @@ class NaNMaskScaler(BaseUpdatingScaler):
             The model.
         dataset_name : str, optional
             The dataset name for multi-dataset scenarios.
+
+        Returns
+        -------
+        torch.Tensor | None
+            Combined loss mask, or ``None`` when no processor provides one.
         """
         loss_weights_mask = None
         processors = []

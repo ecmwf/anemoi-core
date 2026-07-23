@@ -15,7 +15,8 @@ from enum import StrEnum
 import torch
 
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.utils.enums import TensorDim
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class BaseScaler(ABC):
     """Base class for all loss scalers."""
 
     scale_dims: tuple[TensorDim, ...]
+    grid_domain: ScalerDomain | None = None
 
     def __init__(self, norm: str | None = None) -> None:
         """Initialise BaseScaler.
@@ -44,6 +46,9 @@ class BaseScaler(ABC):
         assert self.scale_dims is not None, f"Class {self.__class__.__name__} must define 'scale_dims'"
         if isinstance(self.scale_dims, TensorDim):
             self.scale_dims = (self.scale_dims,)
+        if TensorDim.GRID in self.scale_dims and self.grid_domain is None:
+            msg = f"Class {self.__class__.__name__} must define 'grid_domain' because it scales TensorDim.GRID"
+            raise ValueError(msg)
 
     @abstractmethod
     def get_scaling_values(self, **kwargs) -> torch.Tensor:
@@ -64,7 +69,7 @@ class BaseScaler(ABC):
         error_msg = f"{self.norm} must be one of: None, unit-sum, l1, unit-mean."
         raise ValueError(error_msg)
 
-    def get_scaling(self) -> TENSOR_SPEC:
+    def get_scaling(self) -> ScalerSpec:
         """Get scaler.
 
         Returns
@@ -77,7 +82,7 @@ class BaseScaler(ABC):
         scaler_values = self.get_scaling_values()
         scaler_values = self.normalise(scaler_values)
         scale_dims = tuple(x.value for x in self.scale_dims)
-        return scale_dims, scaler_values
+        return ScalerSpec(scale_dims, scaler_values, self.grid_domain)
 
 
 class AvailableCallbacks(StrEnum):
@@ -117,14 +122,14 @@ class BaseUpdatingScaler(BaseScaler):
         """
         return torch.ones(tuple([1] * len(self.scale_dims)))
 
-    def get_scaling(self) -> TENSOR_SPEC:
+    def get_scaling(self) -> ScalerSpec:
         """Get scaling values based on the initial scaling values callback."""
         scalar_values = self.get_scaling_values()
 
         scale_dims = tuple(x.value for x in self.scale_dims)
-        return scale_dims, scalar_values
+        return ScalerSpec(scale_dims, scalar_values, self.grid_domain)
 
-    def update_scaling_values(self, callback: AvailableCallbacks, **kwargs) -> TENSOR_SPEC | None:
+    def update_scaling_values(self, callback: AvailableCallbacks, **kwargs) -> ScalerSpec | None:
         """Get scaling values based on the callback.
 
         Can return None if no scaling updates are available.
@@ -139,8 +144,8 @@ class BaseUpdatingScaler(BaseScaler):
 
         Returns
         -------
-        TENSOR_SPEC | None
-            A tuple containing the scale dimensions and the scaler values.
+        ScalerSpec | None
+            The dimensions, values, and grid-entry meaning of the scaler.
         """
         if not hasattr(self, callback):
             error_msg = f"{self.__class__.__name__} does not have a method {callback}."
@@ -152,4 +157,4 @@ class BaseUpdatingScaler(BaseScaler):
 
         scalar_values = self.normalise(scalar_values)
         scale_dims = tuple(x.value for x in self.scale_dims)
-        return scale_dims, scalar_values
+        return ScalerSpec(scale_dims, scalar_values, self.grid_domain)

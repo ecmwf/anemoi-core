@@ -76,6 +76,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             Distributed group for reduction, by default ``None``.
         squash_mode : str | None, optional
             Variable-dimension reduction mode. If omitted, the wrapped loss default is used.
+        **kwargs
+            Additional keyword arguments forwarded to the wrapped loss.
 
         Returns
         -------
@@ -95,11 +97,9 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
 
         # Extract time weights from the shared scaler (if present)
         time_weights = None
-        for dims, scaler in self.loss.scaler.tensors.values():
-            if isinstance(dims, int):
-                dims = (dims,)
-            if TensorDim.TIME.value in dims or TensorDim.TIME in dims:
-                time_weights = scaler
+        for scaler_spec in self.loss.scaler.tensors.values():
+            if TensorDim.TIME.value in scaler_spec.dimensions or TensorDim.TIME in scaler_spec.dimensions:
+                time_weights = scaler_spec.tensor
                 break
 
         shared_kwargs = dict(

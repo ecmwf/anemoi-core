@@ -18,6 +18,8 @@ from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.scaler_tensor import ScalerDomain
+from anemoi.training.losses.scaler_tensor import ScalerSpec
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -39,8 +41,8 @@ def test_instantiation_with_filtering() -> None:
             },
         ),
         scalers={
-            "grid_uniform": (3, torch.ones(4)),
-            "dynamic": (4, torch.tensor([2.0, 7.0, 11.0])),
+            "grid_uniform": ScalerSpec((3,), torch.ones(4), ScalerDomain.SPATIAL),
+            "dynamic": ScalerSpec((4,), torch.tensor([2.0, 7.0, 11.0])),
         },
         data_indices=data_indices,
     )
@@ -49,7 +51,7 @@ def test_instantiation_with_filtering() -> None:
     assert IndexSpace.MODEL_OUTPUT in loss.predicted_indices_by_layout
     assert loss.predicted_indices_by_layout[IndexSpace.MODEL_OUTPUT] == [0]
     assert loss.target_indices_by_layout[IndexSpace.DATA_FULL] == [2]
-    torch.testing.assert_close(loss.loss.scaler.tensors["dynamic"][1], torch.tensor([2.0]))
+    torch.testing.assert_close(loss.loss.scaler.tensors["dynamic"].tensor, torch.tensor([2.0]))
 
     pred = torch.ones((1, 1, 1, 4, 1))
     target = torch.zeros((1, 1, 1, 4, len(name_to_index)))
@@ -65,7 +67,7 @@ def test_instantiation_with_filtering() -> None:
     torch.testing.assert_close(loss_total, torch.tensor(32.0))
 
     loss.update_scaler("dynamic", torch.tensor([13.0, 17.0, 19.0]), override=True)
-    torch.testing.assert_close(loss.loss.scaler.tensors["dynamic"][1], torch.tensor([13.0]))
+    torch.testing.assert_close(loss.loss.scaler.tensors["dynamic"].tensor, torch.tensor([13.0]))
 
 
 def test_instantiation_with_filtering_requires_layout_kwargs() -> None:
@@ -251,16 +253,26 @@ class TestVariableAxisScalerFiltering:
         """Multi-dim (BATCH, GRID, VARIABLE) scaler is sliced on the VARIABLE axis."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
         n_model_vars = len(data_indices_forcing_gaps.model.output.full)
-        w.add_scaler(dimension=(0, 3, 4), scaler=torch.ones(2, 8, n_model_vars), name="mixed")
+        w.add_scaler(
+            dimension=(0, 3, 4),
+            scaler=torch.ones(2, 8, n_model_vars),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="mixed",
+        )
 
-        assert w.loss.scaler.tensors["mixed"][1].shape == (2, 8, 1)
+        assert w.loss.scaler.tensors["mixed"].tensor.shape == (2, 8, 1)
 
     def test_broadcast_variable_axis_untouched(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Broadcast VARIABLE axis (size 1) must not be index-selected."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
-        w.add_scaler(dimension=(0, 3, 4), scaler=torch.ones(2, 8, 1), name="bc")
+        w.add_scaler(
+            dimension=(0, 3, 4),
+            scaler=torch.ones(2, 8, 1),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="bc",
+        )
 
-        assert w.loss.scaler.tensors["bc"][1].shape == (2, 8, 1)
+        assert w.loss.scaler.tensors["bc"].tensor.shape == (2, 8, 1)
 
     def test_data_full_scaler_with_forcing_gap(self) -> None:
         """DATA_FULL-sized scaler correctly resolves through forcing gaps."""
@@ -272,16 +284,16 @@ class TestVariableAxisScalerFiltering:
         w.add_scaler(dimension=4, scaler=torch.tensor([10.0, 20.0, 30.0]), name="full")
 
         # var_1 is at data-full index 2 → value 30.0
-        torch.testing.assert_close(w.loss.scaler.tensors["full"][1], torch.tensor([30.0]))
+        torch.testing.assert_close(w.loss.scaler.tensors["full"].tensor, torch.tensor([30.0]))
 
     def test_update_scaler_refilters(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """update_scaler with override re-applies VARIABLE-axis filtering."""
         w = _mapper(data_indices_forcing_gaps, ["var_2"])
         w.add_scaler(dimension=4, scaler=torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0]), name="vw")
-        torch.testing.assert_close(w.loss.scaler.tensors["vw"][1], torch.tensor([3.0]))
+        torch.testing.assert_close(w.loss.scaler.tensors["vw"].tensor, torch.tensor([3.0]))
 
         w.update_scaler("vw", torch.tensor([10.0, 20.0, 30.0, 40.0, 50.0]), override=True)
-        torch.testing.assert_close(w.loss.scaler.tensors["vw"][1], torch.tensor([30.0]))
+        torch.testing.assert_close(w.loss.scaler.tensors["vw"].tensor, torch.tensor([30.0]))
 
 
 # --- variable ordering and defaults ------------------------------------------
@@ -303,12 +315,12 @@ def test_scaler_preserves_reversed_variable_order() -> None:
                 "scalers": ["pl"],
             },
         ),
-        scalers={"pl": (4, torch.tensor([0.1 * (i + 1) for i in range(11)]))},
+        scalers={"pl": ScalerSpec((4,), torch.tensor([0.1 * (i + 1) for i in range(11)]))},
         data_indices=di,
     )
 
     expected = torch.tensor([0.1 * (i + 1) for i in range(9, -1, -1)])
-    torch.testing.assert_close(loss.loss.scaler.tensors["pl"][1], expected)
+    torch.testing.assert_close(loss.loss.scaler.tensors["pl"].tensor, expected)
 
 
 def test_default_target_inherits_predicted_order(data_indices_forcing_gaps: IndexCollection) -> None:
@@ -367,7 +379,12 @@ class TestScalerIndicesRemapping:
     def test_global_to_local_remap(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Global scaler_indices are translated to filtered-tensor-local positions."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(
+            dimension=3,
+            scaler=torch.ones(8),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="grid",
+        )
         w.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
@@ -449,7 +466,12 @@ class TestScalerIndicesRemapping:
     def test_empty_remap_returns_zero(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """scaler_indices selecting no filtered variables → zero tensor."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(
+            dimension=3,
+            scaler=torch.ones(8),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="grid",
+        )
         w.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
@@ -473,7 +495,12 @@ class TestScalerIndicesRemapping:
     ) -> None:
         """Partially dropped scaler indices should be visible at DEBUG level."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(
+            dimension=3,
+            scaler=torch.ones(8),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="grid",
+        )
         w.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
@@ -499,7 +526,12 @@ class TestScalerIndicesRemapping:
     ) -> None:
         """Fully dropped scaler indices should warn because forward returns zeros."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
+        w.add_scaler(
+            dimension=3,
+            scaler=torch.ones(8),
+            grid_domain=ScalerDomain.SPATIAL,
+            name="grid",
+        )
         w.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
