@@ -431,6 +431,40 @@ class FlexAttentionWrapper(nn.Module):
                     "Please install triton (or flash-attn-4) or select a different attention backend."
                 )
 
+    def _get_block_mask(self, query, key, window_size):
+        """Create and cache a sliding-window block mask."""
+        if window_size is None or window_size == -1:
+            return None
+
+        if window_size < -1:
+            raise ValueError(f"window_size must be -1 or non-negative, got {window_size}")
+
+        query_length = query.shape[-2]
+        key_length = key.shape[-2]
+        block_mask_key = (query_length, key_length, window_size, query.device)
+
+        if self._block_mask_key != block_mask_key:
+
+            def sliding_window_mask(b, h, q_idx, kv_idx):
+                return torch.abs(q_idx - kv_idx) <= window_size
+
+            if not hasattr(self, "_compiled_create_block_mask"):
+                self._compiled_create_block_mask = torch.compile(
+                    self.create_block_mask
+                )  # REQUIRED, otherwise entire seq_len^2 array will be materialised
+
+            self.block_mask = self._compiled_create_block_mask(
+                sliding_window_mask,
+                1,
+                1,
+                query_length,
+                key_length,
+                query.device,
+            )
+            self._block_mask_key = block_mask_key
+
+        return self.block_mask
+
     def forward(
         self,
         query,
@@ -460,20 +494,7 @@ class FlexAttentionWrapper(nn.Module):
         if causal:
             raise NotImplementedError("Causal masking is not supported.")
 
-        def sliding_window_mask(b, h, q_idx, kv_idx):
-            return torch.abs(q_idx - kv_idx) <= window_size
-
-        block_mask = None
-        if window_size is not None:
-            mask_mod = sliding_window_mask
-            N_CTX = query.shape[2]
-            mask_shape = (1, 1, N_CTX, N_CTX)
-            block_mask_kwargs = {}
-            if not hasattr(self, "_compiled_create_block_mask"):
-                self._compiled_create_block_mask = torch.compile(
-                    self.create_block_mask
-                )  # REQUIRED, otherwise entire seq_len^2 array will be materialised
-            block_mask = self._compiled_create_block_mask(mask_mod, *mask_shape, query.device, **block_mask_kwargs)
+        block_mask = self._get_block_mask(query, key, window_size)
 
         if self._compile:
             flex_attn = torch.compile(

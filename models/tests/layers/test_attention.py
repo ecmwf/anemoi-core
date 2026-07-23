@@ -307,8 +307,9 @@ def test_multi_head_self_attention_forward_flex_matches_sdpa(window_size, layer_
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("window_size", [None, 4])
-def test_flex_triton_backend_matches_sdpa_sliding_window(window_size):
+@pytest.mark.parametrize("window_size", [None, -1, 4])
+@pytest.mark.parametrize(("query_length", "key_length"), [(16, 16), (12, 16)], ids=["self", "cross"])
+def test_flex_triton_backend_matches_sdpa_sliding_window(window_size, query_length, key_length):
     """Compare the flex attention Triton backend (uncompiled) against SDPA.
 
     This exercises the flex wrapper directly so we can force the Triton backend
@@ -322,7 +323,6 @@ def test_flex_triton_backend_matches_sdpa_sliding_window(window_size):
 
     batch_size = 1
     num_heads = 4
-    grid = 16
     head_dim = 16  # flex attention requires head_dim >= 16
     device = "cuda"
 
@@ -333,9 +333,9 @@ def test_flex_triton_backend_matches_sdpa_sliding_window(window_size):
     sdpa = SDPAAttentionWrapper()
 
     # shape: batch heads grid vars
-    query = torch.randn(batch_size, num_heads, grid, head_dim, device=device)
-    key = torch.randn(batch_size, num_heads, grid, head_dim, device=device)
-    value = torch.randn(batch_size, num_heads, grid, head_dim, device=device)
+    query = torch.randn(batch_size, num_heads, query_length, head_dim, device=device)
+    key = torch.randn(batch_size, num_heads, key_length, head_dim, device=device)
+    value = torch.randn(batch_size, num_heads, key_length, head_dim, device=device)
 
     flex_out = flex(query, key, value, batch_size, window_size=window_size)
     sdpa_out = sdpa(query, key, value, batch_size, window_size=window_size)
