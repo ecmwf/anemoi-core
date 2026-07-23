@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   bulletin:
@@ -94,6 +93,15 @@ jobs:
               return /!/.test(pr.title);
             }
 
+            // Detect release PRs (created by release-please or similar)
+            function isReleasePR(pr) {
+              const labels = pr.labels.map(l => l.name.toLowerCase());
+              if (labels.some(l => l.includes('autorelease') || l.includes('release'))) return true;
+              if (/^chore\(main\): release/i.test(pr.title)) return true;
+              if (pr.user && pr.user.login === 'release-please[bot]') return true;
+              return false;
+            }
+
             // ── fetch PRs opened in the last 7 days ──────────────────────────────
             const allPRs = await paginate(
               github.rest.pulls.list,
@@ -105,6 +113,11 @@ jobs:
             const merged = allPRs.filter(
               pr => pr.merged_at && new Date(pr.merged_at) >= weekAgo
             );
+
+            // ── separate release PRs ──────────────────────────────────────────
+            const releasePRs = merged.filter(pr => isReleasePR(pr));
+            const nonReleaseOpened = opened.filter(pr => !isReleasePR(pr));
+            const nonReleaseMerged = merged.filter(pr => !isReleasePR(pr));
 
             // ── classify each PR by component ────────────────────────────────────
             async function withComponents(prs) {
@@ -123,8 +136,8 @@ jobs:
             }
 
             const [openedWithComp, mergedWithComp] = await Promise.all([
-              withComponents(opened),
-              withComponents(merged),
+              withComponents(nonReleaseOpened),
+              withComponents(nonReleaseMerged),
             ]);
 
             // ── group by component ───────────────────────────────────────────────
@@ -185,6 +198,7 @@ jobs:
             lines.push(`|--------|-------|`);
             lines.push(`| PRs opened | ${opened.length} |`);
             lines.push(`| PRs merged | ${merged.length} |`);
+            lines.push(`| 🚀 Releases | ${releasePRs.length} |`);
             lines.push(`| ⚠️ Breaking / config | ${breakingPRs.length} |`);
             lines.push(`| Contributors | ${contributorLogins.size} |`);
 
@@ -197,6 +211,12 @@ jobs:
               lines.push('');
               lines.push(`### ⚠️ Breaking / Config-Schema Changes`);
               for (const { pr, files } of breakingPRs) lines.push(prLine(pr, files));
+            }
+
+            if (releasePRs.length > 0) {
+              lines.push('');
+              lines.push(`### 🚀 Releases`);
+              for (const pr of releasePRs) lines.push(prLine(pr, null));
             }
 
             for (const comp of allComponents) {
@@ -235,10 +255,32 @@ jobs:
     needs: bulletin
     runs-on: ubuntu-latest
     steps:
+      - name: Find or create bulletin issue
+        id: issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const title = 'Weekly Bulletin';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'bulletin',
+            });
+            const existing = issues.find(i => i.title === title);
+            if (existing) {
+              core.setOutput('number', existing.number);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner, repo, title, labels: ['bulletin'],
+                body: 'This issue collects the weekly PR bulletin reports.',
+              });
+              core.setOutput('number', created.number);
+            }
+
       - name: Post weekly bulletin
         uses: peter-evans/create-or-update-comment@v3
         with:
-          issue-number: 294
+          issue-number: ${{ steps.issue.outputs.number }}
           body: |
             ${{ needs.bulletin.outputs.body }}
 
