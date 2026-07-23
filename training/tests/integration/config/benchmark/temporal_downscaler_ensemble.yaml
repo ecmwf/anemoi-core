@@ -1,0 +1,126 @@
+# Modifications for the basic template "temporal_downscaler.yaml"
+system:
+  hardware:
+    num_gpus_per_model: 1
+    num_gpus_per_ensemble: 2
+  input:
+    dataset: /ec/ai/project/ai-ml/datasets/aifs-od-fc-oper-0001-mars-o96-2016-2025-6h-1h-v5.zarr
+    graph: ./temporal-downscaler-bm-graph.pt
+
+data:
+  frequency: null
+  datasets:
+    data:
+      diagnostic:
+      - tp
+      - cp
+      - ro
+      - tcc
+      - hcc
+      - lcc
+      - mcc
+      - ssrd
+      - strd
+      - ssr
+      - 10fg
+      - 100u
+      - 100v
+      - fdir
+      processors:
+        normalizer:
+          config:
+            std: []
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.ConstantImputer
+          config:
+            default: "none"
+            0:
+            - swvl1
+            - swvl2
+            - sd
+            - ro
+            - snowc
+        conditional_nan:
+          _target_: anemoi.models.preprocessing.postprocessor.ConditionalNaNPostprocessor
+          config:
+            remap: sd
+            nan:
+              - snowc
+              - ro
+
+training:
+  num_sanity_val_steps: 0
+  scalers:
+    datasets:
+      data:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            w: 0.1
+            cp: 0.1
+  optimization:
+    lr: 5.0e-5
+    lr_scheduler:
+      warmup_t: 1000
+      t_initial: 150000
+      lr_min: 3e-7
+  ensemble_size_per_device: 1
+  training_loss:
+    datasets:
+      data:
+        _target_: anemoi.training.losses.combined.CombinedLoss
+        ignore_nans: False
+        loss_weights: [0.6, 0.4]
+        losses:
+        - _target_: anemoi.training.losses.MultiscaleLossWrapper
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2}  # null = single scale, no smoothing
+          weights: [1.0, 1.0, 1.0, 4.0]
+          per_scale_loss:
+            _target_: anemoi.training.losses.CRPS
+            scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps', 'stdev_tendency']
+            ignore_nans: False
+            no_autocast: True
+            alpha: 0.95
+        - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'stdev_tendency']
+          time_aggregation_types: [mean, max, min, diff]
+          loss_fn:
+            _target_: anemoi.training.losses.CRPS
+            ignore_nans: False
+            no_autocast: True
+            alpha: 0.95
+
+
+task:
+  _target_: anemoi.training.tasks.TemporalDownscaler
+  input_timestep: 6h
+  output_timestep: 1h
+  output_right_boundary: True
+
+dataloader:
+  training:
+    datasets:
+      data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
+        end: 2020-11-30
+  validation:
+    datasets:
+      data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
+        start: 2020-12-31
+
+model:
+  num_channels: 512
+
+graph:
+  nodes:
+    hidden:
+      node_builder:
+        resolution: 6

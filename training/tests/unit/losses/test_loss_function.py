@@ -690,7 +690,7 @@ def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
     target = torch.randn(bs, 1, 1, grid, nvars)
 
     sparse_mat = eye(grid, format="csr")
-    mocker.patch("scipy.sparse.load_npz", return_value=sparse_mat)
+    mocker.patch("anemoi.models.layers.graph_provider.load_npz", return_value=sparse_mat)
 
     loss = get_loss_function(
         DictConfig(
@@ -724,7 +724,7 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
 
     # Simple non-square projection: first n_dst rows of identity (drop last 4 nodes)
     proj = csr_matrix(np.eye(n_dst, n_src, dtype=np.float32))
-    mocker.patch("scipy.sparse.load_npz", return_value=proj)
+    mocker.patch("anemoi.models.layers.graph_provider.load_npz", return_value=proj)
 
     loss = LogSpectralDistance(
         transform="fft2d",
@@ -778,7 +778,7 @@ def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture
     n_src, x_dim, y_dim = 12, 4, 2  # FFT2D expects 8 nodes
     n_wrong = 10  # projection outputs 10 nodes, not 8
     proj = csr_matrix(np.eye(n_wrong, n_src, dtype=np.float32))
-    mocker.patch("scipy.sparse.load_npz", return_value=proj)
+    mocker.patch("anemoi.models.layers.graph_provider.load_npz", return_value=proj)
 
     loss = LogSpectralDistance(
         transform="fft2d",
@@ -835,7 +835,7 @@ def test_spectral_crps_projection_applies_subgrid_before_projection(mocker: Mock
     pred = torch.randn(bs, 1, ens, source_grid, nvars)
     target = torch.randn(bs, 1, 1, source_grid, nvars)
 
-    mocker.patch("scipy.sparse.load_npz", return_value=eye(projected_grid, format="csr"))
+    mocker.patch("anemoi.models.layers.graph_provider.load_npz", return_value=eye(projected_grid, format="csr"))
 
     loss = get_loss_function(
         DictConfig(
