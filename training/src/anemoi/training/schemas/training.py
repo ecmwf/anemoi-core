@@ -638,6 +638,8 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
     "Number of GPUs per reader group. Defaults to number of GPUs."
+    use_local_synchronization: bool = Field(default=True, example=True)
+    "Use synchronization local to the group when creating process groups."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):

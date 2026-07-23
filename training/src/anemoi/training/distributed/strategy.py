@@ -88,7 +88,13 @@ def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
 class BaseDDPStrategy(DDPStrategy):
     """Base DDP strategy with common functionality for group communication strategies."""
 
-    def __init__(self, num_gpus_per_model: int, read_group_size: int, **kwargs: dict) -> None:
+    def __init__(
+        self,
+        num_gpus_per_model: int,
+        read_group_size: int,
+        use_local_synchronization: bool = True,
+        **kwargs: dict,
+    ) -> None:
         """Initialise the distributed strategy.
 
         Parameters
@@ -97,12 +103,15 @@ class BaseDDPStrategy(DDPStrategy):
             Number of GPUs per model to shard over.
         read_group_size : int
             Number of GPUs per reader group.
+        use_local_synchronization : bool, optional
+            Use synchronization local to the group when creating process groups.
         **kwargs : dict
             Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
+        self.use_local_synchronization = use_local_synchronization
         self.shard_sizes: dict | None = None
 
     @abstractmethod
@@ -177,8 +186,14 @@ class DDPGroupStrategy(BaseDDPStrategy):
             model_comm_group_rank=model_layout.model_comm_group_rank,
             global_rank=self.global_rank,
         )
-        model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
-        reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+        model_comm_groups = create_model_process_groups(
+            model_layout.model_comm_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
+        reader_groups = create_reader_process_groups(
+            reader_layout.reader_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
         model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
         model_reader_groups = reader_groups[model_layout.model_comm_group_id]
 
@@ -255,7 +270,14 @@ class DDPGroupStrategy(BaseDDPStrategy):
 class DDPEnsGroupStrategy(BaseDDPStrategy):
     """Distributed Data Parallel strategy with group communication for ensembles."""
 
-    def __init__(self, num_gpus_per_model: int, num_gpus_per_ensemble: int, read_group_size: int, **kwargs) -> None:
+    def __init__(
+        self,
+        num_gpus_per_model: int,
+        num_gpus_per_ensemble: int,
+        read_group_size: int,
+        use_local_synchronization: bool = True,
+        **kwargs,
+    ) -> None:
         """Initialize the distributed strategy.
 
         Parameters
@@ -264,11 +286,18 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             Number of GPUs per model to shard over.
         read_group_size : int
             Number of GPUs per reader group.
+        use_local_synchronization : bool, optional
+            Use synchronization local to the group when creating process groups.
         **kwargs : dict
             Additional keyword arguments.
 
         """
-        super().__init__(num_gpus_per_model=num_gpus_per_model, read_group_size=read_group_size, **kwargs)
+        super().__init__(
+            num_gpus_per_model=num_gpus_per_model,
+            read_group_size=read_group_size,
+            use_local_synchronization=use_local_synchronization,
+            **kwargs,
+        )
         self.ens_comm_group_size = num_gpus_per_ensemble
 
     def _setup_communication_groups(self) -> int:
@@ -291,8 +320,14 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_group_rank=model_layout.model_comm_group_rank,
             global_rank=self.global_rank,
         )
-        model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
-        reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+        model_comm_groups = create_model_process_groups(
+            model_layout.model_comm_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
+        reader_groups = create_reader_process_groups(
+            reader_layout.reader_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
         model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
         model_reader_groups = reader_groups[model_layout.model_comm_group_id]
 
@@ -336,7 +371,10 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_group_size=self.model_comm_group_size,
             model_comm_group_rank=model_layout.model_comm_group_rank,
         )
-        ensemble_groups = create_ensemble_process_groups(ensemble_layout)
+        ensemble_groups = create_ensemble_process_groups(
+            ensemble_layout,
+            use_local_synchronization=self.use_local_synchronization,
+        )
 
         self.model.set_ens_comm_group(
             ensemble_groups.ens_comm_group,
