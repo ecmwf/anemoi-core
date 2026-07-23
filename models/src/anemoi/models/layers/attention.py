@@ -386,6 +386,18 @@ class FlexAttentionWrapper(nn.Module):
         """
         super().__init__()
 
+        # torch 2.10 has a bug that corrupts the CUDA context when using flex attention, which surfaces
+        # later as a spurious `CUBLAS_STATUS_INVALID_VALUE` in an unrelated GEMM. Fixed in torch 2.11.
+
+        # Strip the local version segment (e.g. "2.10.0+cu128" -> "2.10.0") before parsing, since the
+        # default CUDA-enabled wheels always carry a "+cuXXX" suffix that must not affect the comparison.
+        torch_version = version.parse(torch.__version__.split("+")[0])
+        if torch_version < version.parse("2.11"):
+            raise RuntimeError(
+                "Flex attention is only supported on torch 2.11 and above. "
+                "Please upgrade PyTorch or select a different attention backend."
+            )
+
         if find_spec("torch.nn.attention.flex_attention") is None:
             raise ImportError(
                 "Flex attention is not available in this PyTorch installation. "
