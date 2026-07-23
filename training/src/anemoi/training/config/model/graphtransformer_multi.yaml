@@ -79,7 +79,7 @@ encoders:
       edge_pre_mlp: False
 
 latent_aggregator:
-  _target_: anemoi.models.layers.aggregator.ConcatAggregator
+  _target_: anemoi.models.layers.aggregator.SumAggregator
 
 decoders:
   global: # user-defined key. It will appear in the state-dict
