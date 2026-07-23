@@ -78,7 +78,9 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return pred, target, loss_result
 
 
-def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
+def test_multi_scale_instantiation(
+    loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
     """Test multiscale loss instantiation with single scale."""
     per_scale_loss = CRPS()
     multiscale_loss = MultiscaleLossWrapper(
@@ -135,6 +137,8 @@ def test_multi_scale(
         weights=weights,
     )
 
+    assert smoothing_provider.projection_matrix.layout == torch.sparse_csr
+
     pred, target, _ = loss_inputs_multiscale
     loss = multiscale_loss(pred, target, squash=True)
 
@@ -144,7 +148,10 @@ def test_multi_scale(
 
     assert isinstance(loss, torch.Tensor)
     # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
-    assert loss.shape == (2, pred.shape[-1]), "Loss should have shape (num_scales, num_variables) when squash=False"
+    assert loss.shape == (
+        2,
+        pred.shape[-1],
+    ), "Loss should have shape (num_scales, num_variables) when squash=False"
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
@@ -251,7 +258,9 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     ]
 
 
-def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(mocker: MockerFixture) -> None:
+def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(
+    mocker: MockerFixture,
+) -> None:
     per_scale_loss = TrackingLoss()
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
@@ -312,3 +321,27 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
             "kwargs": {"custom_kwarg": sentinel},
         },
     ]
+
+
+def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
+    """deepcopy(MultiscaleLossWrapper) must not raise with CSR smoothing matrices."""
+    import copy
+
+    graph = HeteroData()
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(4)
+
+    provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
+        row_normalize=False,
+    )
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[provider],
+    )
+    loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
+    copy.deepcopy(loss)  # must not raise NotImplementedError on CSR tensors
