@@ -79,10 +79,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         tendency_delta = getattr(self.task, "tendency_delta", None)
         tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
 
+        # When no tendency_delta is set, use the output step frequency (first lead
+        # time) for all offsets so tendencies represent step-to-step differences.
+        step_freq = lead_times[0]
+
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.data_readers.items():
             stats_by_lead = {
-                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
+                lead_time: dataset.statistics_tendencies(tendency_delta_str or step_freq) for lead_time in lead_times
             }
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
