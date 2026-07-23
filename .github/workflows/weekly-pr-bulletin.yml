@@ -219,7 +219,7 @@ jobs:
               }
               if (breakingOpen.length > 0) {
                 lines.push('');
-                lines.push(`**Open (${breakingOpen.length})**`);
+                lines.push(`**Opened (${breakingOpen.length})**`);
                 for (const { pr, files } of breakingOpen) lines.push(prLine(pr, files));
               }
             }
