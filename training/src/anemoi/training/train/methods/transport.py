@@ -297,8 +297,10 @@ class TendencyPredictionMode(PredictionMode):
 class ResidualPredictionMode(PredictionMode):
     """Prediction mode for spatial downscaling: model predicts y - interp(x_lres).
 
-    Expects ``batch["in_lres"]`` to already be reprojected onto the hres grid by
-    ``DownscalerTransportTraining.on_after_batch_transfer`` (via ``spatial_pre_processors``).
+    The lres dataset is identified as the single entry in
+    ``model.spatial_pre_processors`` (i.e. the dataset registered via
+    ``config.data.spatial_processors``), which projects the lres input onto the hres grid.
+
     Uses ``pre_processors_tendencies`` / ``post_processors_tendencies`` for residual
     normalization, falling back to state processors when tendency stats are absent.
 
@@ -312,9 +314,8 @@ class ResidualPredictionMode(PredictionMode):
     def _validate_objective(self) -> None:
         objective_kind = getattr(self.module.config.training, "transport", {}).get("objective", "")
         if objective_kind == "stochastic_interpolant":
-            raise NotImplementedError(
-                "ResidualPredictionMode does not yet support the stochastic_interpolant objective."
-            )
+            error_msg = "ResidualPredictionMode does not yet support the stochastic_interpolant objective."
+            raise NotImplementedError(error_msg)
 
     def _residual_pre_processors(self) -> dict:
         """Return tendency pre-processors if available, else state pre-processors."""
@@ -336,8 +337,18 @@ class ResidualPredictionMode(PredictionMode):
         x: dict[str, torch.Tensor],
     ) -> PreparedPredictionTarget:
         del x
-        # x_lres_on_hres is already reprojected onto the hres grid.
-        x_lres_on_hres = batch["in_lres"]
+        # Identify the lres dataset as the one with a registered spatial pre-processor.
+        # This avoids hard-coding the dataset name (e.g. "in_lres").
+        lres_names = list(self.module.model.spatial_pre_processors.keys())
+        if len(lres_names) != 1:
+            msg = (
+                "ResidualPredictionMode expects exactly one spatial pre-processor "
+                f"(the lres dataset); got: {lres_names}."
+            )
+            raise ValueError(msg)
+        lres_name = lres_names[0]
+        # x_lres_on_hres is already reprojected onto the hres grid by CrossGridProjector.
+        x_lres_on_hres = batch[lres_name]
 
         target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         target_data_output = self.module.get_data_output_target(target_full)
@@ -369,9 +380,13 @@ class ResidualPredictionMode(PredictionMode):
         )
 
     def _reference_state_target_space(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # Only process target (output) datasets.  Input-only datasets (e.g. in_lres, in_hres)
+        # have no model-output variables and must not be passed to
+        # reduce_data_output_target_to_model_output, which would produce wrong shapes.
+        target_names = set(self.module.task.target_datasets)
         reference: dict[str, torch.Tensor] = {}
         for dataset_name, batch_dataset in batch.items():
-            if dataset_name == "in_lres":
+            if dataset_name not in target_names:
                 continue
             var_idx = self.module.data_indices[dataset_name].data.output.full.to(device=batch_dataset.device)
             reference_step = batch_dataset.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, var_idx)
