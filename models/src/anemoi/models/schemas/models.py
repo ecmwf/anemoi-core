@@ -322,9 +322,9 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "Model processor schema."
-    encoders: dict[str, EncodersSchema]
+    encoders: dict[str | int, EncodersSchema]
     "Model encoders schemas."
-    decoders: dict[str, DecodersSchema]
+    decoders: dict[str | int, DecodersSchema]
     "Model decoders schemas."
     residual: ResidualConnectionSchema = Field(
         ...,
