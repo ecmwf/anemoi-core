@@ -457,10 +457,11 @@ class FlexAttentionWrapper(nn.Module):
             N_CTX = query.shape[2]
             mask_shape = (1, 1, N_CTX, N_CTX)
             block_mask_kwargs = {}
-            compiled_block_mask = torch.compile(
-                self.create_block_mask
-            )  # REQUIRED, otherwise entire seq_len^2 array will be materialised
-            block_mask = compiled_block_mask(mask_mod, *mask_shape, query.device, **block_mask_kwargs)
+            if not hasattr(self, "_compiled_create_block_mask"):
+                self._compiled_create_block_mask = torch.compile(
+                    self.create_block_mask
+                )  # REQUIRED, otherwise entire seq_len^2 array will be materialised
+            block_mask = self._compiled_create_block_mask(mask_mod, *mask_shape, query.device, **block_mask_kwargs)
 
         if self._compile:
             flex_attn = torch.compile(
