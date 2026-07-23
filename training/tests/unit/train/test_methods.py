@@ -2254,6 +2254,8 @@ def _make_residual_module(
     tend_post_offset: float,
     lres_name: str = "in_lres",
     target_name: str = "out",
+    name_to_index: dict[str, int] | None = None,
+    diagnostic: list[str] | None = None,
 ) -> tuple[SimpleNamespace, dict[str, _AdditiveProcessor]]:
     """Build a minimal fake module exposing the surface used by ResidualPredictionMode.
 
@@ -2262,7 +2264,12 @@ def _make_residual_module(
     - ``pre_processors`` / ``post_processors`` are keyed per dataset (state).
     - ``pre_processors_tendencies`` / ``post_processors_tendencies`` provide the
       residual normalization statistics.
+    - ``model.model`` is a real ``AnemoiTransportSpatialDownscalerModelEncProcDec``
+      built via ``__new__`` — only ``data_indices`` is wired, because that is
+      all ``compute_residual`` / ``add_residual_to_state`` need.
     """
+    from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
+
     processors = {
         "state_pre": {name: _AdditiveProcessor(pre_offset) for name in (lres_name, target_name)},
         "state_post": {name: _AdditiveProcessor(post_offset) for name in (lres_name, target_name)},
@@ -2270,11 +2277,10 @@ def _make_residual_module(
         "tend_post": {target_name: _AdditiveProcessor(tend_post_offset)},
     }
 
-    # Full name-to-index has 2 vars: both are model output vars (no split).
-    name_to_index = {"v0": 0, "v1": 1}
+    name_to_index = name_to_index or {"v0": 0, "v1": 1}
     data_indices = {
         lres_name: _make_minimal_index_collection(name_to_index),
-        target_name: _make_minimal_index_collection(name_to_index),
+        target_name: _make_minimal_index_collection(name_to_index, diagnostic=diagnostic),
     }
 
     task = SimpleNamespace(
@@ -2294,8 +2300,17 @@ def _make_residual_module(
         # In these tests, model output = data output, so this is an identity map.
         return dict(y)
 
+    # Build a real ``AnemoiTransportSpatialDownscalerModelEncProcDec`` shell so
+    # ``ResidualPredictionMode`` can delegate ``compute_residual`` /
+    # ``add_residual_to_state`` to the actual implementation.
+    downscaler_model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    downscaler_model.data_indices = data_indices
+
     module = SimpleNamespace(
         model=SimpleNamespace(
+            model=downscaler_model,
             spatial_pre_processors={lres_name: object()},
             pre_processors=processors["state_pre"],
             post_processors=processors["state_post"],

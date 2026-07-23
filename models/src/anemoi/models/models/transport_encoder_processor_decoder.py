@@ -1085,7 +1085,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         # ``_build_networks`` (invoked in the base ``__init__``) restricts the
         # encoder/decoder loops to the target dataset only.
         self.data_indices = data_indices
-        self._resolve_roles()
+        self._resolve_roles(model_config=DotDict(model_config))
 
         super().__init__(
             model_config=model_config,
@@ -1096,21 +1096,36 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             graph_data=graph_data,
         )
 
-    # ── role inference ────────────────────────────────────────────────────────
+    # TODO we might want to pass these roles explicitly in the config when initializing the model,
+    # rather than inferring them from the data indices.
+    def _resolve_roles(self, model_config: DotDict | None = None) -> None:
+        """Identify the target dataset and the input datasets.
 
-    def _resolve_roles(self) -> None:
-        """Identify the target dataset and the input datasets from ``data_indices``.
+        A dataset is treated as an *input* if it is registered as the source of a
+        spatial pre-processor in ``config.data.spatial_processors`` — this is
+        authoritative and lets the low-resolution dataset carry variables that
+        would otherwise look like model outputs (e.g. prognostic variables
+        shared with the target).  The remaining dataset with non-empty
+        ``model.output.full`` is the *target*.  Exactly one target is required.
 
-        A dataset is considered a *target* when its ``model.output.full`` index is
-        non-empty; every other dataset is an *input*.  The downscaler requires
-        exactly one target dataset.
+        When ``model_config`` is ``None`` (used by lightweight unit tests) the
+        method falls back to the pure ``model.output`` heuristic.
         """
-        # TODO reconsider this logic if we classify residual variables in in_lowres as prognostics
-        target_names = [name for name, indices in self.data_indices.items() if len(indices.model.output.full) > 0]
+        spatial_source_names: set[str] = set()
+        if model_config is not None:
+            spatial_configs = model_config.get("data", {}).get("spatial_processors", {}) or {}
+            spatial_source_names = set(spatial_configs.keys())
+
+        target_names = [
+            name
+            for name, indices in self.data_indices.items()
+            if len(indices.model.output.full) > 0 and name not in spatial_source_names
+        ]
         if len(target_names) != 1:
             msg = (
                 "AnemoiTransportSpatialDownscalerModelEncProcDec requires exactly one target "
-                f"dataset (a dataset with non-empty model.output); got {target_names}."
+                f"dataset (a dataset with non-empty model.output that is not a spatial-processor "
+                f"source); got {target_names}."
             )
             raise ValueError(msg)
         self.target_dataset_name: str = target_names[0]
@@ -1154,6 +1169,174 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             super()._build_networks(model_config)
         finally:
             self.dataset_names = original_dataset_names
+
+    # ── residual math (mirror of tendency model's compute_tendency pair) ─────
+
+    def compute_residual(
+        self,
+        y: dict[str, torch.Tensor],
+        x_lres_denorm: dict[str, torch.Tensor],
+        pre_processors_state: dict[str, Callable],
+        pre_processors_residual: dict[str, Callable],
+        input_post_processor: dict[str, Callable | None] | None = None,
+        skip_imputation: bool = False,
+    ) -> dict[str, torch.Tensor]:
+        """Compute the normalized model target for spatial downscaling.
+
+        Mirrors :meth:`AnemoiTransportTendModelEncProcDec.compute_tendency` but
+        splits the target channels between residual (for prognostic output
+        variables) and direct state (for diagnostic output variables) rather
+        than between tendency and diagnostic.
+
+        Parameters
+        ----------
+        y : dict[str, torch.Tensor]
+            Normalized state target in the target dataset's DATA_OUTPUT layout.
+        x_lres_denorm : dict[str, torch.Tensor]
+            De-normalized low-resolution input already projected onto the
+            target grid.  Channels aligned with the target dataset's DATA_FULL
+            variable layout so that
+            ``x_lres_denorm[..., data.output.prognostic]`` picks the low-res
+            counterparts of the target's prognostic output variables.
+        pre_processors_state : dict[str, Callable]
+            State pre-processor applied to diagnostic output channels.
+        pre_processors_residual : dict[str, Callable]
+            Residual (typically tendency-space) pre-processor applied to
+            prognostic output channels.
+        input_post_processor : Optional[Callable], optional
+            State post-processor used to de-normalize ``y`` before computing the
+            residual.  If ``None``, ``y`` is treated as already de-normalized.
+        skip_imputation : bool, optional
+            Forwarded to processors that support it.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Normalized model target in the target dataset's DATA_OUTPUT layout.
+            Prognostic channels contain the normalized residual; diagnostic
+            channels contain the normalized state target.
+        """
+        assert set(y.keys()) == set(x_lres_denorm.keys()), "y and x_lres_denorm must share dataset keys."
+
+        residuals: dict[str, torch.Tensor] = {}
+        for dataset_name in y.keys():
+            indices = self.data_indices[dataset_name]
+            prog_model_idx = indices.model.output.prognostic
+            diag_model_idx = indices.model.output.diagnostic
+            # Channel-match: positions in the target's DATA namespace where the
+            # target's prognostic output variables live.  We assume the low-res
+            # tensor uses the same variable positions for those variables.
+            lres_prog_idx = indices.data.output.prognostic
+
+            input_post_proc = input_post_processor[dataset_name] if input_post_processor is not None else None
+            y_denorm = y[dataset_name]
+            if input_post_proc is not None:
+                y_denorm = input_post_proc(
+                    y_denorm,
+                    in_place=False,
+                    data_index=indices.data.output.full,
+                    skip_imputation=skip_imputation,
+                )
+
+            residual = y_denorm.clone()
+            # Prognostic channels: normalized residual against the low-res source.
+            residual[..., prog_model_idx] = pre_processors_residual[dataset_name](
+                y_denorm[..., prog_model_idx]
+                - x_lres_denorm[dataset_name].index_select(-1, lres_prog_idx.to(device=y_denorm.device)),
+                in_place=False,
+                data_index=indices.data.output.prognostic,
+                skip_imputation=skip_imputation,
+            )
+            # Diagnostic channels: kept as normalized state (no residual subtraction).
+            residual[..., diag_model_idx] = pre_processors_state[dataset_name](
+                y_denorm[..., diag_model_idx],
+                in_place=False,
+                data_index=indices.data.output.diagnostic,
+                skip_imputation=skip_imputation,
+            )
+            residuals[dataset_name] = residual
+
+        return residuals
+
+    def add_residual_to_state(
+        self,
+        x_lres_denorm: dict[str, torch.Tensor],
+        residual: dict[str, torch.Tensor],
+        post_processors_state: dict[str, Callable],
+        post_processors_residual: dict[str, Callable],
+        output_pre_processor: dict[str, Callable | None] | None = None,
+        skip_imputation: bool = False,
+    ) -> dict[str, torch.Tensor]:
+        """Convert a predicted residual back to a state field.
+
+        Mirrors :meth:`AnemoiTransportTendModelEncProcDec.add_tendency_to_state`
+        but adds the projected low-resolution field to the prognostic channels
+        instead of the previous state.  Diagnostic channels are recovered via
+        the state post-processor.
+
+        Parameters
+        ----------
+        x_lres_denorm : dict[str, torch.Tensor]
+            De-normalized low-resolution input, projected onto the target grid.
+        residual : dict[str, torch.Tensor]
+            Normalized model prediction in the target's DATA_OUTPUT layout.
+        post_processors_state : dict[str, Callable]
+            State post-processor used to de-normalize diagnostic channels.
+        post_processors_residual : dict[str, Callable]
+            Residual post-processor used to de-normalize prognostic channels.
+        output_pre_processor : Optional[Callable], optional
+            State pre-processor applied to the full recovered state before
+            returning.  Used by training's ``reconstruct_prediction`` to hand a
+            normalized state back to the metric code; left ``None`` at
+            inference where callers expect a de-normalized state.
+        skip_imputation : bool, optional
+            Forwarded to processors that support it.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            De-normalized (or re-normalized when ``output_pre_processor`` is
+            supplied) state fields in the target's DATA_OUTPUT layout.
+        """
+        state_outp: dict[str, torch.Tensor] = {}
+        for dataset_name in residual.keys():
+            indices = self.data_indices[dataset_name]
+            prog_model_idx = indices.model.output.prognostic
+            diag_model_idx = indices.model.output.diagnostic
+            lres_prog_idx = indices.data.output.prognostic
+
+            # De-normalize the whole tensor with the residual post-processor,
+            # then overwrite diagnostic channels with the state post-processed
+            # values (they were normalized as state, not as residual).
+            outp = post_processors_residual[dataset_name](
+                residual[dataset_name],
+                in_place=False,
+                data_index=indices.data.output.full,
+                skip_imputation=skip_imputation,
+            )
+            outp[..., diag_model_idx] = post_processors_state[dataset_name](
+                residual[dataset_name][..., diag_model_idx],
+                in_place=False,
+                data_index=indices.data.output.diagnostic,
+                skip_imputation=skip_imputation,
+            )
+            # Add the low-res source back into the prognostic channels only.
+            outp[..., prog_model_idx] = outp[..., prog_model_idx] + x_lres_denorm[dataset_name].index_select(
+                -1,
+                lres_prog_idx.to(device=outp.device),
+            )
+
+            output_pre_proc = output_pre_processor[dataset_name] if output_pre_processor is not None else None
+            if output_pre_proc is not None:
+                outp = output_pre_proc(
+                    outp,
+                    in_place=False,
+                    data_index=indices.data.output.full,
+                    skip_imputation=skip_imputation,
+                )
+            state_outp[dataset_name] = outp
+
+        return state_outp
 
     # ── encoder input assembly ───────────────────────────────────────────────
 
@@ -1425,10 +1608,10 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     ) -> dict[str, torch.Tensor]:
         """Turn the sampled normalized residual into a denormalized state prediction.
 
-        Mirrors :meth:`ResidualPredictionMode.reconstruct_prediction`: denormalize
-        the residual with the tendency-space post-processor, add the cached
-        denormalized projected lres (channel-matched to the target's
-        ``data.output.full``), and gather shards.
+        Delegates the per-channel arithmetic to :meth:`add_residual_to_state`
+        (mirror of :meth:`AnemoiTransportTendModelEncProcDec._after_sampling`).
+        Prognostic channels receive the low-res source added back; diagnostic
+        channels are recovered via the state post-processor.
         """
         del kwargs
 
@@ -1445,21 +1628,30 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             else post_processors
         )
 
-        for dataset_name in out.keys():
-            output_full = self.data_indices[dataset_name].data.output.full
-            # Denormalize the residual prediction.
-            residual = residual_post[dataset_name](
-                out[dataset_name],
-                in_place=False,
-                data_index=output_full,
+        if x_lres_denorm is not None:
+            # Delegate to the residual/state split; returns de-normalized state
+            # (no output_pre_processor at inference time — callers expect the
+            # de-normalized field).
+            state = self.add_residual_to_state(
+                x_lres_denorm={name: x_lres_denorm for name in out},
+                residual=out,
+                post_processors_state=post_processors,
+                post_processors_residual=residual_post,
+                output_pre_processor=None,
+                skip_imputation=True,
             )
-            if x_lres_denorm is not None:
-                lres_idx = output_full.to(device=residual.device)
-                x_interp = x_lres_denorm.index_select(-1, lres_idx)
-                out[dataset_name] = residual + x_interp
-            else:
-                out[dataset_name] = residual
+            out = dict(state)
+        else:
+            # No spatial pre-processor was applied — fall back to a plain
+            # de-normalization of the sampled tensor.
+            for dataset_name in list(out.keys()):
+                out[dataset_name] = residual_post[dataset_name](
+                    out[dataset_name],
+                    in_place=False,
+                    data_index=self.data_indices[dataset_name].data.output.full,
+                )
 
+        for dataset_name in list(out.keys()):
             if gather_out and model_comm_group is not None:
                 assert grid_shard_sizes is not None
                 out[dataset_name] = gather_tensor(
