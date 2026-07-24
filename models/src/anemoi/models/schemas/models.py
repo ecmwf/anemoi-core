@@ -17,6 +17,8 @@ from typing import Literal
 from typing import Optional
 from typing import Union
 
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -30,7 +32,6 @@ from anemoi.models.transport.settings import NoiseConditioningSettings
 from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
-from omegaconf import OmegaConf, DictConfig
 
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
