@@ -212,8 +212,6 @@ def test_reduce_sums_same_shape_rank_local_tensors(
 def test_reduce_fp32_accumulation_supports_low_precision_inputs(
     shape: tuple[int, ...], dtype: torch.dtype, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    if distributed_backend != "nccl":
-        pytest.skip("Low-precision fp32 accumulation is only validated on the NCCL/CUDA path.")
     run_distributed_test(
         _test_reduce_rank,
         backend=distributed_backend,
