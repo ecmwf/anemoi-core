@@ -54,6 +54,18 @@ class TrackingLoss(BaseLoss):
         return torch.tensor(1.0)
 
 
+class FixedLoss(BaseLoss):
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        **kwargs: object,
+    ) -> torch.Tensor:
+        del target, kwargs
+        return pred.new_tensor(2.0) if squash else pred.new_tensor([2.0, 3.0])
+
+
 class FakeGroup:
     def __init__(self, size: int) -> None:
         self._size = size
@@ -74,7 +86,7 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # With only one "grid point" differing by 1 in all
     # variables, the loss should be 1.0
 
-    loss_result = torch.tensor([1.0])
+    loss_result = torch.tensor(1.0)
     return pred, target, loss_result
 
 
@@ -103,6 +115,22 @@ def test_multiscale_weights_length_mismatch_raises() -> None:
             weights=[1.0],  # 1 weight but multiscale_config gives 2 scales
             multiscale_config={"loss_matrices": [None, None]},
         )
+
+
+def test_multiscale_sums_weighted_scale_losses() -> None:
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=FixedLoss(),
+        weights=[0.5, 2.0],
+        multiscale_config={"loss_matrices": [None, None]},
+    )
+    pred = torch.zeros((1, 1, 1, 2, 2))
+    target = torch.zeros_like(pred)
+
+    scalar_loss = multiscale_loss(pred, target)
+    per_variable_loss = multiscale_loss(pred, target, squash=False)
+
+    torch.testing.assert_close(scalar_loss, torch.tensor(5.0))
+    torch.testing.assert_close(per_variable_loss, torch.tensor([5.0, 7.5]))
 
 
 @pytest.mark.parametrize("per_scale_loss", [CRPS(), MSELoss()])
@@ -143,15 +171,11 @@ def test_multi_scale(
     loss = multiscale_loss(pred, target, squash=True)
 
     assert isinstance(loss, torch.Tensor)
-    assert loss.shape == (2,), "Loss should have shape (num_scales,) when squash=True"
+    assert loss.shape == (), "squash=True should return one aggregated loss"
     loss = multiscale_loss(pred, target, squash=False)
 
     assert isinstance(loss, torch.Tensor)
-    # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
-    assert loss.shape == (
-        2,
-        pred.shape[-1],
-    ), "Loss should have shape (num_scales, num_variables) when squash=False"
+    assert loss.shape == (pred.shape[-1],), "squash=False should return one loss per variable"
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
@@ -205,6 +229,20 @@ def test_multiscale_forwards_layout_kwargs_to_filtered_per_scale_loss() -> None:
     )
 
     assert isinstance(loss, torch.Tensor)
+    assert loss.shape == ()
+
+
+def test_multiscale_loss_preserves_single_variable_dimension() -> None:
+    pred = torch.ones((1, 1, 1, 4, 1))
+    target = torch.zeros_like(pred)
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[0.25, 0.75],
+        multiscale_config={"loss_matrices": [None, None]},
+    )
+
+    loss = multiscale_loss(pred, target, squash=False)
+
     assert loss.shape == (1,)
 
 

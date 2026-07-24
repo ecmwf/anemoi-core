@@ -72,6 +72,15 @@ def _assert_variable_and_scalar_shapes(
     assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
 
 
+def test_unsquashed_loss_preserves_single_variable_dimension() -> None:
+    pred = torch.ones((1, 1, 1, 4, 1))
+    target = torch.zeros_like(pred)
+
+    loss = MSELoss()(pred, target, squash=False)
+
+    assert loss.shape == (1,)
+
+
 @pytest.mark.parametrize(
     "loss_cls",
     losses,
