@@ -207,6 +207,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded)
         """
+        torch.set_num_threads(1)  # try avoid thread count changing and triggering needless recompilation
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets

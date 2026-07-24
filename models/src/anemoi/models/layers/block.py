@@ -659,6 +659,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         return query, key
 
+    # Doesnt compile with triton
+    @torch.compile(dynamic=False, fullgraph=True, mode="max-autotune")
     def _forward_edges_sharded_attention(
         self,
         query: Tensor,
@@ -960,6 +962,9 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     def run_node_src_mlp(self, x, **layer_kwargs):
         return self.node_src_mlp(self.layer_norm_mlp_src(x, **layer_kwargs))
 
+    # error when using cuda graphs and checkpointing
+    # RuntimeError: Expected curr_block->size == block_state.size to be true, but got false.
+    @torch.compile(dynamic=False, fullgraph=True, mode="max-autotune")
     def forward(
         self,
         x: OptPairTensor,
@@ -1003,6 +1008,11 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                 edges_are_dst_sorted=edges_are_dst_sorted,
             )
         else:
+
+            # torch._dynamo.mark_dynamic(key, 0)
+            # torch.fx.experimental.symbolic_shapes.ConstraintViolationError: Constraints violated (L['key'].size()[0])! For more information, run with TORCH_LOGS="+dynamic".
+            # - You marked L['key'].size()[0] as dynamic but your code specialized it to be a constant (138077). If you're using mark_dynamic, either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO.
+            # torch._dynamo.maybe_mark_dynamic(key,0) # doesnt help, hit recompile limit
             out = self._forward_edges_sharded_attention(
                 query,
                 key,

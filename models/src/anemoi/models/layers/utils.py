@@ -79,8 +79,8 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     -------
     The result of calling func with the provided arguments
     """
-    if enabled:
-        return checkpoint(func, *args, **kwargs, use_reentrant=False)
+    # if enabled and not torch.compiler.is_compiling():
+    # return checkpoint(func, *args, **kwargs, use_reentrant=False)
     return func(*args, **kwargs)
 
 
