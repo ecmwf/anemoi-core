@@ -96,6 +96,8 @@ deterministic:
 Neighbour graph for graph scores
 --------------------------------
 
+For score definitions, see https://arxiv.org/html/2607.19161v1.
+
 Graph scores use edges from the model graph; they do not construct a separate
 graph. Add a ``data``-to-``data`` edge set to the graph configuration alongside
 the edges used by the model. For example:
