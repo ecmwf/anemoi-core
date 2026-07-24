@@ -61,7 +61,7 @@ def restore_base_seed(original_seed: str | None) -> None:
 
 @pytest.mark.multigpu
 @pytest.mark.slow
-def benchmark_dataloader(
+def test_benchmark_training_dataloader(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase,
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
