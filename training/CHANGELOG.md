@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/training-0.15.0...training-0.16.0) (2026-07-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* refactor callback interface to introduce pluggable system and evaluation module ([#1241](https://github.com/ecmwf/anemoi-core/issues/1241))
+
+### Features
+
+* Create and ship py.typed ([#1249](https://github.com/ecmwf/anemoi-core/issues/1249)) ([d0cfe4c](https://github.com/ecmwf/anemoi-core/commit/d0cfe4c88198d0aa9f9acf47009e4822734731b0))
+* Refactor callback interface to introduce pluggable system and evaluation module ([#1241](https://github.com/ecmwf/anemoi-core/issues/1241)) ([d456f98](https://github.com/ecmwf/anemoi-core/commit/d456f989dd8161f1c1aec988b150412c62327e6b))
+
+
+### Bug Fixes
+
+* **training:** Expandable segments warning ([#1259](https://github.com/ecmwf/anemoi-core/issues/1259)) ([abcaf9b](https://github.com/ecmwf/anemoi-core/commit/abcaf9b5b4ae9b3b6bfc4e5b7fca9e0354dbfd88))
+* **training:** Protect against seed overflow ([#1228](https://github.com/ecmwf/anemoi-core/issues/1228)) ([eb0f6e1](https://github.com/ecmwf/anemoi-core/commit/eb0f6e15e13f6a0d9ad5a7f6afdc7c268818595a))
+* **training:** Update accuracy test after fix to seed overflow ([#1228](https://github.com/ecmwf/anemoi-core/issues/1228)) ([#1263](https://github.com/ecmwf/anemoi-core/issues/1263)) ([d8b4feb](https://github.com/ecmwf/anemoi-core/commit/d8b4feb97f57e2783d4235b692a9fa0e98c43d53))
+
 ## [0.15.0](https://github.com/ecmwf/anemoi-core/compare/training-0.14.0...training-0.15.0) (2026-07-23)
 
 
