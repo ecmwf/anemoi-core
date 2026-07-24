@@ -36,6 +36,8 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
+from anemoi.training.losses.loss_tree import loss_components
+from anemoi.training.losses.loss_tree import sum_loss
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
@@ -45,6 +47,9 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+if TYPE_CHECKING:
+    from anemoi.training.losses.loss_tree import LossTree
 
 _chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 _trainable_edge_perm_fix_migration = importlib.import_module(
@@ -619,7 +624,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | LossTree:
         """Compute the loss function.
 
         Parameters
@@ -637,7 +642,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        torch.Tensor
+        torch.Tensor or LossTree
             Computed loss
         """
         loss = self.loss[dataset_name]
@@ -706,7 +711,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         validation_mode: bool = False,
         dataset_name: str | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | LossTree | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
@@ -724,8 +729,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]
-            Loss, metrics dictionary (if validation_mode), and full predictions
+        tuple
+            Computed loss, validation metrics, and full predictions. The loss is
+            a tensor, a LossTree, or None.
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -797,13 +803,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             )
 
             if dataset_loss is not None:
-                dataset_loss_sum = dataset_loss.sum()  # collapse potential multi-scale loss
+                dataset_loss_sum = sum_loss(dataset_loss)
                 total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
 
                 if validation_mode:
                     loss_obj = self.loss[dataset_name]
                     loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
-                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
+                    for component_name, component_value in loss_components(dataset_loss).items():
+                        component_name = component_name or loss_name
+                        metrics_next[f"{dataset_name}_{component_name}_loss"] = component_value
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():
@@ -1031,11 +1039,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                         grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
                     )
 
-                metric_value = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
-                # Detach and clone the metric value to avoid in-place modifications affecting the original tensor
-                # This was impacting cuda graphs
-                # TODO(cathal): double check now that everything compiles
-                metrics[metric_step_name] = metric_value.detach().clone()
+                metric_result = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                for component_name, metric_value in loss_components(metric_result).items():
+                    component_metric_name = metric_step_name
+                    if component_name:
+                        component_metric_name = f"{metric_step_name}/{component_name}"
+
+                    # Detach and clone the metric value to avoid in-place modifications affecting the original tensor
+                    # This was impacting cuda graphs
+                    # TODO(cathal): double check now that everything compiles
+                    metrics[component_metric_name] = metric_value.detach().clone()
 
         return metrics
 
@@ -1119,13 +1132,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 )
 
         for mname, mvalue in metrics.items():
-            for scale in range(mvalue.numel()):
+            # Log scalar metrics under their base name and multiscale metrics separately for each scale.
+            metric_values = mvalue.reshape(-1)
+            if metric_values.numel() == 1:
+                self.log(
+                    "val_" + mname,
+                    metric_values[0],
+                    on_epoch=True,
+                    on_step=False,
+                    prog_bar=False,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
+                continue
 
-                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
-
+            for scale, metric_value in enumerate(metric_values):
                 self.log(
                     "val_" + mname + "_scale_" + str(scale),
-                    log_val,
+                    metric_value,
                     on_epoch=True,
                     on_step=False,
                     prog_bar=False,

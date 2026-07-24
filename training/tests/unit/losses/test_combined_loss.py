@@ -24,6 +24,10 @@ from anemoi.training.losses import SpectralCRPSLoss
 from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.loss_tree import LossTree
+from anemoi.training.losses.loss_tree import loss_components
+from anemoi.training.losses.loss_tree import sum_loss
+from anemoi.training.losses.loss_tree import sum_loss_per_variable
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace
@@ -244,12 +248,14 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
     target[..., 3] = 4.0  # msl: (2-4)²=4
     target[..., 4] = 5.0  # imerg: (2-5)²=9 for second subloss
 
-    out = loss(
-        pred,
-        target,
-        squash_mode="sum",
-        pred_layout=IndexSpace.MODEL_OUTPUT,
-        target_layout=IndexSpace.DATA_FULL,
+    out = sum_loss(
+        loss(
+            pred,
+            target,
+            squash_mode="sum",
+            pred_layout=IndexSpace.MODEL_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        ),
     )
 
     # First subloss (weight=1): grid=4, per-var MSE*dynamic=[1*2, 0*3, 4*5]=[2,0,20] -> sum=22*4=88
@@ -294,8 +300,110 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
 
     result = loss(pred, target, weights=weights, group=group, grid_shard_sizes=grid_shard_sizes, grid_dim=-2)
 
-    assert result.shape == (1,)
+    assert isinstance(result, LossTree)
+    assert {name: value.shape for name, value in loss_components(result).items()} == {
+        "0_MultiscaleLossWrapper": torch.Size([1]),
+        "1_weighted_mse": torch.Size([]),
+    }
+    assert sum_loss(result).ndim == 0
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
+
+
+def test_combined_loss_sums_scalar_and_multiscale_children_once_in_any_order() -> None:
+    pred = torch.full((1, 1, 1, 2, 1), 2.0, requires_grad=True)
+    target = torch.zeros_like(pred)
+
+    direct_loss = MAELoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[0.5, 1.0, 2.0],
+        multiscale_config={"loss_matrices": [None, None, None]},
+    )
+    direct_result = direct_loss(pred, target)
+    multiscale_result = multiscale_loss(pred, target)
+    assert multiscale_result.shape == (3,)
+    expected = 2.0 * direct_result + 0.25 * multiscale_result.sum()
+
+    direct_first = CombinedLoss(
+        direct_loss,
+        multiscale_loss,
+        loss_weights=[2.0, 0.25],
+    )
+    multiscale_first = CombinedLoss(
+        MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[0.5, 1.0, 2.0],
+            multiscale_config={"loss_matrices": [None, None, None]},
+        ),
+        MAELoss(),
+        loss_weights=[0.25, 2.0],
+    )
+
+    direct_first_result = direct_first(pred, target)
+    multiscale_first_result = multiscale_first(pred, target)
+
+    assert isinstance(direct_first_result, LossTree)
+    assert {name: value.shape for name, value in loss_components(direct_first_result).items()} == {
+        "0_mae": torch.Size([]),
+        "1_MultiscaleLossWrapper": torch.Size([3]),
+    }
+    torch.testing.assert_close(sum_loss(direct_first_result), expected)
+    torch.testing.assert_close(sum_loss(multiscale_first_result), expected)
+
+    sum_loss(direct_first_result).backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_combined_multiscale_filtered_loss_keeps_variable_diagnostics_aligned() -> None:
+    """Exercise CombinedLoss -> MultiscaleLossWrapper -> LossVariableMapper."""
+    from anemoi.models.data_indices.collection import IndexCollection
+
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+        {"a": 0, "b": 1, "c": 2},
+    )
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.CombinedLoss",
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.MSELoss",
+                        "predicted_variables": ["a"],
+                        "scalers": [],
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                        "weights": [0.5, 1.0],
+                        "multiscale_config": {"loss_matrices": [None, None]},
+                        "per_scale_loss": {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "predicted_variables": ["b", "c"],
+                            "scalers": [],
+                        },
+                    },
+                ],
+                "loss_weights": [2.0, 0.25],
+            },
+        ),
+        scalers={},
+        data_indices=data_indices,
+    )
+    pred = torch.tensor([1.0, 2.0, 3.0]).reshape(1, 1, 1, 1, 3).expand(1, 1, 1, 2, 3)
+    target = torch.zeros_like(pred)
+    kwargs = {
+        "pred_layout": IndexSpace.MODEL_OUTPUT,
+        "target_layout": IndexSpace.DATA_FULL,
+    }
+
+    structured = loss(pred, target, squash=False, **kwargs)
+    per_variable = sum_loss_per_variable(structured, num_variables=3)
+    total = sum_loss(loss(pred, target, squash_mode="sum", **kwargs))
+
+    assert per_variable is not None
+    torch.testing.assert_close(per_variable, torch.tensor([4.0, 1.0, 2.25]))
+    torch.testing.assert_close(per_variable.sum(), total)
 
 
 def test_iter_leaf_losses_combined() -> None:
@@ -334,7 +442,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
         loss_weights=[1.0, 0.25],
     )
 
-    out = loss(pred, target)
+    out = sum_loss(loss(pred, target))
     assert out.ndim == 0
     assert torch.isfinite(out).all()
 
@@ -368,7 +476,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
         loss_weights=[1.0, 0.25],
     )
 
-    out = loss(pred, target)
+    out = sum_loss(loss(pred, target))
     assert out.ndim == 0
     assert torch.isfinite(out).all()
 

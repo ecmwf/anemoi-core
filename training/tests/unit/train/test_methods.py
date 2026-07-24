@@ -30,6 +30,8 @@ from anemoi.models.transport import TransportSourceSettings
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.loss_tree import LossTree
+from anemoi.training.losses.loss_tree import loss_components
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
@@ -74,6 +76,20 @@ class ShardingAwareCaptureLoss(CaptureLoss):
     @property
     def needs_shard_layout_info(self) -> bool:
         return True
+
+
+class StructuredCaptureLoss(CaptureLoss):
+    """Metric fixture with separate scalar and multiscale results."""
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs: Any) -> LossTree:
+        self.calls.append({"pred": pred, "target": target, "kwargs": kwargs})
+        return LossTree(
+            name="combined",
+            children=(
+                LossTree(name="direct", value=torch.tensor(1.0)),
+                LossTree(name="multiscale", value=torch.tensor([2.0, 3.0])),
+            ),
+        )
 
 
 def assert_metric_kwargs(
@@ -436,8 +452,71 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
         dataset_name="data",
     )
 
-    assert result.shape == (1,)
+    assert isinstance(result, LossTree)
+    assert {name: value.shape for name, value in loss_components(result).items()} == {
+        "0_MultiscaleLossWrapper": torch.Size([1]),
+    }
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
+
+
+def test_base_compute_loss_metrics_sums_structured_loss_once() -> None:
+    """Check that direct and multiscale losses are each added only once."""
+    module = MagicMock(spec=BaseTrainingModule)
+    module.target_dataset_names = ["data"]
+    module.loss = {"data": SimpleNamespace(name="combined")}
+
+    direct_score = torch.tensor(3.0, requires_grad=True)
+    multiscale_scores = torch.tensor([4.0, 8.0], requires_grad=True)
+    structured_loss = LossTree(
+        name="combined",
+        children=(
+            LossTree(name="direct", weight=1.0, value=direct_score),
+            LossTree(name="multiscale", weight=0.5, value=multiscale_scores),
+        ),
+    )
+    prediction = torch.zeros(1)
+    module.compute_dataset_loss_metrics.return_value = structured_loss, {}, prediction
+
+    total, metrics, predictions = BaseTrainingModule.compute_loss_metrics(
+        module,
+        y_pred={"data": prediction},
+        y={"data": prediction},
+        validation_mode=True,
+    )
+
+    torch.testing.assert_close(total, torch.tensor(9.0))
+    assert set(metrics) == {"data_direct_loss", "data_multiscale_loss"}
+    torch.testing.assert_close(metrics["data_direct_loss"], torch.tensor(3.0))
+    torch.testing.assert_close(metrics["data_multiscale_loss"], torch.tensor([2.0, 4.0]))
+    assert predictions == {"data": prediction}
+
+    total.backward()
+    torch.testing.assert_close(direct_score.grad, torch.tensor(1.0))
+    torch.testing.assert_close(multiscale_scores.grad, torch.tensor([0.5, 0.5]))
+
+
+def test_validation_step_logs_scalar_and_multiscale_components_separately() -> None:
+    module = MagicMock(spec=BaseTrainingModule)
+    module.logger_enabled = True
+    module._get_loss_name.return_value = "combined"
+    module._step.return_value = SimpleNamespace(
+        loss=torch.tensor(9.0),
+        metrics={
+            "data_direct_loss": torch.tensor(3.0),
+            "data_multiscale_loss": torch.tensor([2.0, 4.0, 8.0]),
+        },
+    )
+
+    BaseTrainingModule.validation_step(module, {"data": torch.zeros(2, 1)}, batch_idx=0)
+
+    logged_names = [call.args[0] for call in module.log.call_args_list]
+    assert logged_names == [
+        "val_combined_loss",
+        "val_data_direct_loss",
+        "val_data_multiscale_loss_scale_0",
+        "val_data_multiscale_loss_scale_1",
+        "val_data_multiscale_loss_scale_2",
+    ]
 
 
 # ── EDMDiffusionTransportObjective: compute_loss ─────────────────────────────────
@@ -683,6 +762,36 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
         grid_shard_slice=grid_shard_slice,
         group=group,
     )
+
+
+def test_calculate_val_metrics_keeps_structured_metric_names() -> None:
+    module = MagicMock(spec=BaseTrainingModule)
+    metric = StructuredCaptureLoss()
+    module.model = MagicMock()
+    module.model.post_processors = {"data": MagicMock(side_effect=lambda x, **_: x)}
+    module.metrics = {"data": {"combined": metric}}
+    module.val_metric_ranges = {"data": {"all": [0, 1]}}
+    module.model_comm_group = None
+    module.grid_dim = -2
+    module.grid_shard_sizes = {"data": None}
+
+    y_pred = torch.randn(1, 1, 1, 2, 2)
+    y = torch.randn(1, 1, 1, 2, 2)
+
+    metrics = BaseTrainingModule.calculate_val_metrics(
+        module,
+        y_pred=y_pred,
+        y=y,
+        dataset_name="data",
+        step=0,
+    )
+
+    assert set(metrics) == {
+        "combined_metric/data/all/1/direct",
+        "combined_metric/data/all/1/multiscale",
+    }
+    torch.testing.assert_close(metrics["combined_metric/data/all/1/direct"], torch.tensor(1.0))
+    torch.testing.assert_close(metrics["combined_metric/data/all/1/multiscale"], torch.tensor([2.0, 3.0]))
 
 
 def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> None:

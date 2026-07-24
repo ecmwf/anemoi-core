@@ -19,6 +19,7 @@ from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.loss_tree import sum_loss_per_variable
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -147,11 +148,28 @@ def test_multi_scale(
     loss = multiscale_loss(pred, target, squash=False)
 
     assert isinstance(loss, torch.Tensor)
-    # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
     assert loss.shape == (
         2,
         pred.shape[-1],
     ), "Loss should have shape (num_scales, num_variables) when squash=False"
+
+
+def test_multiscale_loss_preserves_single_variable_dimension() -> None:
+    pred = torch.ones((1, 1, 1, 2, 1))
+    target = torch.zeros_like(pred)
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[1.0, 1.0],
+        multiscale_config={"loss_matrices": [None, None]},
+    )
+
+    loss = multiscale_loss(pred, target, squash=False)
+    per_variable = sum_loss_per_variable(loss, num_variables=1)
+
+    assert loss.shape == (2, 1)
+    assert per_variable is not None
+    assert per_variable.shape == (1,)
+    torch.testing.assert_close(per_variable, loss.sum(dim=0))
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:

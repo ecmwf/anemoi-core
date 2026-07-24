@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -24,6 +25,9 @@ from anemoi.training.train.methods.transport_base import PreparedPredictionTarge
 from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    from anemoi.training.losses.loss_tree import LossTree
 
 LOGGER = logging.getLogger(__name__)
 
@@ -385,7 +389,7 @@ class BaseTransportTraining(BaseTrainingModule):
         metric_prediction: dict[str, torch.Tensor] | None = None,
         metric_target: dict[str, torch.Tensor] | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | LossTree | None, dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss according to the objective and validation metrics in clean-state space."""
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,

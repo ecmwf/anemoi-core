@@ -23,6 +23,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import reduce_tensor
+from anemoi.training.losses.loss_tree import LossTree
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
@@ -240,7 +241,12 @@ class BaseLoss(nn.Module, ABC):
                 TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
-        ).squeeze()
+        )
+        # Remove the grid dimension but preserve the variable
+        # dimension for diagnostics per variable.
+        out = out.squeeze(0)
+        if squash:
+            out = out.squeeze(-1)
 
         return out if group is None else reduce_tensor(out, group)
 
@@ -275,7 +281,7 @@ class BaseLoss(nn.Module, ABC):
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "avg",
         **_kwargs,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | LossTree:
         """Calculates the area-weighted scaled loss.
 
         Parameters
@@ -302,8 +308,8 @@ class BaseLoss(nn.Module, ABC):
 
         Returns
         -------
-        torch.Tensor
-            Weighted loss
+        torch.Tensor or LossTree
+            Calculated loss
         """
 
 

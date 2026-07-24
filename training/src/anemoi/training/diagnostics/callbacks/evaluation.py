@@ -109,13 +109,25 @@ class RolloutEval(Callback):
                 )
 
         for mname, mvalue in metrics.items():
-            for scale in range(mvalue.numel()):
+            # Log scalar metrics under their base name and multiscale metrics separately for each scale.
+            metric_values = mvalue.reshape(-1)
+            if metric_values.numel() == 1:
+                pl_module.log(
+                    f"val_r{self.max_rollout}_" + mname,
+                    metric_values[0],
+                    on_epoch=True,
+                    on_step=False,
+                    prog_bar=False,
+                    logger=pl_module.logger_enabled,
+                    batch_size=bs,
+                    sync_dist=True,
+                )
+                continue
 
-                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
-
+            for scale, metric_value in enumerate(metric_values):
                 pl_module.log(
                     f"val_r{self.max_rollout}_" + mname + "_scale_" + str(scale),
-                    log_val,
+                    metric_value,
                     on_epoch=True,
                     on_step=False,
                     prog_bar=False,

@@ -26,6 +26,8 @@ from anemoi.training.diagnostics.callbacks.plot import PlotSample
 from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
+from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.loss_tree import LossTree
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -630,6 +632,117 @@ def test_plot_loss_temporal_downscaler():
         )
         # Non-forecaster forces output_times=1, so only one rollout step -> one figure
         assert mock_output_figure.call_count == 1
+
+
+def test_plot_loss_ignores_scalar_component_and_plots_per_variable_values(caplog):
+    """A global score must not be broadcast into the variable diagnostic."""
+    from unittest.mock import patch
+
+    class MixedLoss(BaseLoss):
+        def forward(self, pred: torch.Tensor, target: torch.Tensor, **kwargs: Any) -> LossTree:
+            del pred, target, kwargs
+            return LossTree(
+                name="combined",
+                children=(
+                    LossTree(name="global_scalar_score", value=torch.tensor(10.0)),
+                    LossTree(
+                        name="multiscale",
+                        weight=0.5,
+                        value=torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+                    ),
+                ),
+            )
+
+    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback.latlons = {}
+    callback.loss = {"data": MixedLoss()}
+
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+    pl_module = MagicMock()
+    pl_module.local_rank = 0
+    pl_module.data_indices = {"data": MagicMock()}
+    pl_module.data_indices["data"].model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
+    pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
+    pl_module.task.steps.return_value = [{}]
+    pl_module.task.get_targets.return_value = {"data": torch.zeros(1, 1, 1, 2, 3)}
+    pl_module.task.get_metric_name.return_value = ""
+
+    outputs = _step_output([{"data": torch.zeros(1, 1, 1, 2, 3)}])
+    batch = {"data": torch.zeros(1, 2, 1, 2, 3)}
+
+    with (
+        patch.object(callback, "_output_figure"),
+        patch(
+            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            return_value=np.arange(3),
+        ),
+        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()) as mock_plot_loss,
+    ):
+        callback._plot(
+            trainer,
+            pl_module,
+            ["data"],
+            outputs,
+            batch,
+            batch_idx=0,
+            epoch=0,
+        )
+
+    np.testing.assert_allclose(mock_plot_loss.call_args.args[0], np.array([2.5, 3.5, 4.5]))
+    assert "global_scalar_score" in caplog.text
+
+
+def test_plot_loss_handles_single_variable_multiscale_loss() -> None:
+    from unittest.mock import patch
+
+    from anemoi.training.losses.mse import MSELoss
+    from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+
+    callback = PlotLoss(parameter_groups={}, dataset_names=["data"])
+    callback.latlons = {}
+    callback.loss = {
+        "data": MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0, 1.0],
+            multiscale_config={"loss_matrices": [None, None]},
+        ),
+    }
+
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+    pl_module = MagicMock()
+    pl_module.local_rank = 0
+    pl_module.data_indices = {"data": MagicMock()}
+    pl_module.data_indices["data"].model.output.name_to_index = {"a": 0}
+    pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
+    pl_module.task.steps.return_value = [{}]
+    pl_module.task.get_targets.return_value = {"data": torch.zeros(1, 1, 1, 2, 1)}
+    pl_module.task.get_metric_name.return_value = ""
+
+    outputs = _step_output([{"data": torch.ones(1, 1, 1, 2, 1)}])
+    batch = {"data": torch.zeros(1, 2, 1, 2, 1)}
+
+    with (
+        patch.object(callback, "_output_figure") as mock_output_figure,
+        patch(
+            "anemoi.training.diagnostics.callbacks.plot.argsort_variablename_variablelevel",
+            return_value=np.arange(1),
+        ),
+        patch("anemoi.training.diagnostics.callbacks.plot.plot_loss", return_value=MagicMock()) as mock_plot_loss,
+    ):
+        callback._plot(
+            trainer,
+            pl_module,
+            ["data"],
+            outputs,
+            batch,
+            batch_idx=0,
+            epoch=0,
+        )
+
+    np.testing.assert_allclose(mock_plot_loss.call_args.args[0], np.array([2.0]))
+    mock_output_figure.assert_called_once()
 
 
 def test_plot_loss_single_step_transport():

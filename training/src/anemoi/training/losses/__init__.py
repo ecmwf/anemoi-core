@@ -13,6 +13,11 @@ from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
 from .loss import get_loss_function
+from .loss_tree import LossTree
+from .loss_tree import loss_components
+from .loss_tree import loss_per_variable
+from .loss_tree import sum_loss
+from .loss_tree import sum_loss_per_variable
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
@@ -34,6 +39,7 @@ __all__ = [
     "LogCoshLoss",
     "LogFFT2Distance",
     "LogSpectralDistance",
+    "LossTree",
     "LossVariableMapper",
     "MAELoss",
     "MSELoss",
@@ -45,4 +51,8 @@ __all__ = [
     "TimeAggregateLossWrapper",
     "WeightedMSELoss",
     "get_loss_function",
+    "loss_components",
+    "loss_per_variable",
+    "sum_loss",
+    "sum_loss_per_variable",
 ]

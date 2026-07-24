@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.training.losses.loss_tree import LossTree
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ class EnsembleTraining(BaseTrainingModule):
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | LossTree | None, dict[str, torch.Tensor], torch.Tensor]:
 
         y_pred_ens = gather_tensor(
             y_pred.clone(),  # for bwd because we checkpoint this region

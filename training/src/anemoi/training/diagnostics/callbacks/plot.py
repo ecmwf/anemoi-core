@@ -44,7 +44,7 @@ from anemoi.training.diagnostics.plots import plot_loss
 from anemoi.training.diagnostics.plots import plot_power_spectrum
 from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample
 from anemoi.training.losses.base import BaseLoss
-from anemoi.training.losses.utils import reduce_to_last_dim
+from anemoi.training.losses.loss_tree import sum_loss_per_variable
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -783,18 +783,23 @@ class PlotLoss(BasePerBatchPlotCallback):
                     data_indices=pl_module.data_indices,
                     **task_kwargs,
                 )[dataset_name]
-                loss = reduce_to_last_dim(
+                loss = sum_loss_per_variable(
                     self.loss[dataset_name](
                         y_hat,
                         y_true,
                         pred_layout=IndexSpace.MODEL_OUTPUT,
                         target_layout=IndexSpace.DATA_FULL,
                         squash=False,
-                    )
-                    .detach()
-                    .cpu()
-                    .numpy(),
+                    ),
+                    num_variables=len(parameter_names),
                 )
+                if loss is None:
+                    LOGGER.warning(
+                        "Skipping the loss plot for dataset %s because the loss has no per-variable values.",
+                        dataset_name,
+                    )
+                    continue
+                loss = loss.detach().cpu().numpy()
 
                 loss = loss[argsort_indices]
                 fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)

@@ -81,6 +81,15 @@ def test_manual_init(loss_cls: type[BaseLoss]) -> None:
     assert isinstance(loss, BaseLoss)
 
 
+def test_unsquashed_loss_preserves_single_variable_dimension() -> None:
+    pred = torch.ones((1, 1, 1, 4, 1))
+    target = torch.zeros_like(pred)
+
+    loss = MSELoss()(pred, target, squash=False)
+
+    assert loss.shape == (1,)
+
+
 def _expected_crps(preds: torch.Tensor, targets: torch.Tensor, alpha: float) -> torch.Tensor:
     ens_size = preds.shape[-1]
     mae = torch.mean(torch.abs(targets[..., None] - preds), dim=-1)

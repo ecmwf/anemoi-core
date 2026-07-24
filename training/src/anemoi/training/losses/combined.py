@@ -20,13 +20,19 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.loss import get_loss_function
+from anemoi.training.losses.loss_tree import LossTree
+from anemoi.training.losses.loss_tree import as_loss_tree
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 
 
 class CombinedLoss(BaseLoss):
-    """Combined Loss function."""
+    """Combine multiple child losses into one structured loss.
+
+    ``CombinedLoss`` is intended to be the outermost loss because it returns a
+    :class:`LossTree` rather than a tensor.
+    """
 
     needs_graph_data: bool = True
     # CombinedLoss builds child losses itself, so it needs the full scaler
@@ -39,7 +45,7 @@ class CombinedLoss(BaseLoss):
     def __init__(
         self,
         *extra_losses: dict[str, Any] | Callable | BaseLoss,
-        loss_weights: tuple[int, ...] | None = None,
+        loss_weights: tuple[int | float, ...] | None = None,
         losses: tuple[dict[str, Any] | Callable | BaseLoss] | None = None,
         available_scalers: dict[str, TENSOR_SPEC] | None = None,
         data_indices: IndexCollection | None = None,
@@ -107,7 +113,7 @@ class CombinedLoss(BaseLoss):
         """
         super().__init__()
 
-        self.losses: list[type[BaseLoss]] = []
+        self.losses: list[BaseLoss] = []
 
         losses = (*(losses or []), *extra_losses)
         if loss_weights is None:
@@ -164,8 +170,8 @@ class CombinedLoss(BaseLoss):
         pred: torch.Tensor,
         target: torch.Tensor,
         **kwargs,
-    ) -> torch.Tensor:
-        """Calculates the combined loss.
+    ) -> LossTree:
+        """Return the weighted child losses without reducing them together.
 
         Parameters
         ----------
@@ -179,17 +185,20 @@ class CombinedLoss(BaseLoss):
 
         Returns
         -------
-        torch.Tensor
-            Combined loss
+        LossTree
+            A loss container.
         """
-        loss = None
-        for i, loss_fn in enumerate(self.losses):
+        children = []
+        for i, (weight, loss_fn) in enumerate(zip(self.loss_weights, self.losses, strict=True)):
             loss_kwargs = self._forward_kwargs_for_loss(loss_fn, kwargs)
-            if loss is not None:
-                loss += self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
-            else:
-                loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
-        return loss
+            children.append(
+                as_loss_tree(
+                    loss_fn(pred, target, **loss_kwargs),
+                    name=f"{i}_{loss_fn.name}",
+                    weight=weight,
+                ),
+            )
+        return LossTree(name=self.name, children=tuple(children))
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))
     def add_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor, *, name: str | None = None) -> None:
