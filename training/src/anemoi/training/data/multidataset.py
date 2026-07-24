@@ -25,8 +25,6 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_anchors
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
@@ -315,7 +313,7 @@ class MultiDataset(IterableDataset):
         )
 
         base_seed = get_base_seed()
-        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
+        seed = base_seed + self.epoch
 
         torch.manual_seed(seed)
         random.seed(seed)
