@@ -137,14 +137,14 @@ def test_add_plotting_callback(monkeypatch):
     # Add plotting callback
     import anemoi.training.diagnostics.callbacks.plot as plot
 
-    class PlotLoss:
+    class LossCurvePlot:
         def __init__(self, plotting_settings=None):
             pass
 
-    monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
+    monkeypatch.setattr(plot, "LossCurvePlot", LossCurvePlot)
 
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
+    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.LossCurvePlot"}]
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
@@ -191,7 +191,7 @@ def test_rollout_eval_handles_dict_batch(n_ensemble):
         assert args[3] == 2  # batch size
 
 
-def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
+def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
     from omegaconf import DictConfig
 
     import anemoi.training.diagnostics.callbacks.plot as plot_mod
@@ -215,35 +215,21 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
         data_indices=data_indices,
     )
 
-    callback = plot_mod.PlotLoss.__new__(plot_mod.PlotLoss)
+    callback = plot_mod.LossCurvePlot.__new__(plot_mod.LossCurvePlot)
     callback.every_n_batches = 1
     callback.dataset_names = ["data"]
     callback.parameter_groups = {}
 
-    trainer = MagicMock()
     pl_module = MagicMock()
     pl_module.loss = {"data": combined_loss}
     pl_module.grid_dim = -2
     pl_module.grid_indices = {"data": MagicMock()}
     pl_module.allgather_batch.side_effect = lambda tensor, *_args: tensor + 1.0
 
-    super_called = []
+    # _prepare_batch is overridden in LossCurvePlot to snapshot and gather nan_mask_weights
+    # before delegating batch preparation to the plot adapter. Call it directly.
+    callback._prepare_batch(pl_module, batch={"data": torch.zeros((1, 1, 1, 3, 2))})
 
-    def _stub_super(self, *_args, **_kwargs) -> None:
-        del self
-        super_called.append(True)
-
-    monkeypatch.setattr(plot_mod.BasePerBatchPlotCallback, "on_validation_batch_end", _stub_super, raising=True)
-
-    callback.on_validation_batch_end(
-        trainer=trainer,
-        pl_module=pl_module,
-        output=TrainingStepOutput(loss=torch.tensor(0.0), metrics={}, predictions=[]),
-        batch={"data": torch.zeros((1, 1, 1, 3, 2))},
-        batch_idx=0,
-    )
-
-    assert super_called == [True]
     assert pl_module.allgather_batch.call_count == 2
     for child_loss in callback.loss["data"].losses:
         torch.testing.assert_close(child_loss.loss.scaler.nan_mask_weights, torch.full((1, 3, 2), 2.0))
