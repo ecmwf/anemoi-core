@@ -20,6 +20,7 @@ from abc import abstractmethod
 from collections.abc import Callable
 from datetime import UTC
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 from typing import Final
@@ -744,11 +745,13 @@ def track_dataloader_benchmark_results(
 
 
 @rank_zero_only
-def track_accuracy_results(
+def track_accuracy_result(
     test_case: str,
-    final_loss: float,
+    value: float,
+    *,
+    name: str,
 ) -> None:
-    """Track accuracy test metrics by updating the remote benchmark server on main."""
+    """Track a single accuracy metric by updating the remote benchmark server on main."""
     if not _is_repo_on_branch("main"):
         LOGGER.info("Skipping accuracy benchmark tracking: not on main branch")
         return
@@ -762,21 +765,21 @@ def track_accuracy_results(
 
     commit = get_git_revision_hash()
     today = datetime.now(tz=UTC).date()
-    accuracy_benchmark_results = [
-        BenchmarkValue(
-            name="accuracyFinalLoss",
-            value=final_loss,
-            unit="",
-            date=today,
-            commit=commit,
-            op=operator.le,
-            tolerance=0,
-        ),
-    ]
+    benchmark_value = BenchmarkValue(
+        name=name,
+        value=value,
+        unit="",
+        date=today,
+        commit=commit,
+        op=operator.le,
+        tolerance=0,
+    )
 
     LOGGER.info("Updating accuracy benchmark metrics on server")
-    for accuracy_benchmark_value in accuracy_benchmark_results:
-        benchmark_server.set_value(accuracy_benchmark_value)
+    benchmark_server.set_value(benchmark_value)
+
+
+track_accuracy_final_loss = partial(track_accuracy_result, name="accuracyFinalLoss")
 
 
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:

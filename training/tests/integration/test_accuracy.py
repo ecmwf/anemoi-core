@@ -26,7 +26,7 @@ from hydra import initialize
 from omegaconf import OmegaConf
 from torch.testing import assert_close
 
-from anemoi.training.diagnostics.benchmark_server import track_accuracy_results
+from anemoi.training.diagnostics.benchmark_server import track_accuracy_final_loss
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
@@ -120,4 +120,4 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
         msg = f"Run {trainer.run_id} has no '{epoch_metric}' history on {mlflow_server}"
         raise ValueError(msg)
     final_loss = float(epoch_history[-1].value)
-    track_accuracy_results(test_case="global", final_loss=final_loss)
+    track_accuracy_final_loss(test_case="global", value=final_loss)
