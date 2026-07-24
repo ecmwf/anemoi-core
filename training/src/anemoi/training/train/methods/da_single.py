@@ -189,7 +189,9 @@ class DASingleTraining(SingleTraining):
             rollout_step = task_kwargs["rollout_step"]
             weight = self.task.da_loss_weight if is_da else 1.0
 
-            y_pred = self(x)
+            decoder_forcings = self.task.build_decoder_forcings(batch, data_indices=self.data_indices, **task_kwargs)
+            forward_kwargs = {} if decoder_forcings is None else {"decoder_forcings": decoder_forcings}
+            y_pred = self(x, **forward_kwargs)
             y = self.task.get_targets(batch, **task_kwargs)
 
             if weight > 0:

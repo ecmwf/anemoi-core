@@ -102,6 +102,10 @@ class BaseGraphModel(nn.Module):
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
         self.num_input_channels_decoding_forcings = {}
+        # Number of dedicated "decoder_forcing" role variables per dataset, injected
+        # into the decoder at target time. Distinct from num_input_channels_decoding_forcings
+        # above (positions of the regular encoder forcings, used by the autoencoder path).
+        self.num_decoder_forcing_channels = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
         self._decoding_forcing_input_idx = {}
@@ -121,6 +125,10 @@ class BaseGraphModel(nn.Module):
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_input_channels_decoding_forcings[dataset_name] = len(
                 self._decoding_forcing_input_idx[dataset_name]
+            )
+            # `getattr` guards checkpoints whose IndexCollection predates the role.
+            self.num_decoder_forcing_channels[dataset_name] = len(
+                getattr(dataset_indices.data.input, "decoder_forcing", torch.tensor([], dtype=torch.int))
             )
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
@@ -157,9 +165,13 @@ class BaseGraphModel(nn.Module):
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
-        return self._calculate_input_dim(dataset_name)
+        # Same width as the encoder input, plus the decoder-forcing channels that
+        # are concatenated onto the decoder destination features at each output
+        # step (0 extra channels when no decoder_forcing variables are configured).
+        return (
+            self._calculate_input_dim(dataset_name)
+            + self.n_step_output * self.num_decoder_forcing_channels[dataset_name]
+        )
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]
@@ -304,6 +316,52 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
+    def _normalize_decoder_forcings(
+        self,
+        decoder_forcings: dict[str, torch.Tensor],
+        pre_processors: nn.ModuleDict,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> dict[str, torch.Tensor]:
+        """Normalize and (if needed) shard raw decoder-forcing tensors for inference.
+
+        Training extracts decoder forcings from the already-preprocessed batch, so
+        they arrive normalized; inference loads them raw and must match that
+        convention. Each raw tensor is scattered into a full-width data tensor,
+        passed through the same pre-processors as the input, re-sliced at the
+        ``decoder_forcing`` positions, and sharded on the grid dimension to line
+        up with the sharded decoder destination features.
+
+        Parameters
+        ----------
+        decoder_forcings : dict[str, torch.Tensor]
+            Raw decoder-forcing tensors per dataset, shape
+            ``(batch, n_step_output, ensemble, grid, num_decoder_forcing_channels)``.
+        pre_processors : nn.ModuleDict
+            Pre-processing modules keyed by dataset name.
+        grid_shard_sizes : DatasetShardSizes, optional
+            Per-dataset grid shard sizes; ``None`` means replicated.
+        model_comm_group : ProcessGroup, optional
+            Model communication group used when sharding.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Normalized (and sharded) decoder-forcing tensors per dataset.
+        """
+        normalized_df = {}
+        for ds_name, df_tensor in decoder_forcings.items():
+            df_idx = self.data_indices[ds_name].data.input.decoder_forcing.to(device=df_tensor.device, dtype=torch.long)
+            total_vars = len(self.data_indices[ds_name].name_to_index)
+            full = torch.zeros(*df_tensor.shape[:-1], total_vars, dtype=df_tensor.dtype, device=df_tensor.device)
+            full.index_copy_(-1, df_idx, df_tensor)
+            full = pre_processors[ds_name](full, in_place=False)
+            df = full.index_select(-1, df_idx)
+            if grid_shard_sizes is not None and grid_shard_sizes.get(ds_name) is not None:
+                df = shard_tensor(df, -2, grid_shard_sizes[ds_name], model_comm_group)
+            normalized_df[ds_name] = df
+        return normalized_df
+
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
@@ -370,6 +428,19 @@ class BaseGraphModel(nn.Module):
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
+
+            # Normalize any raw decoder forcings the same way as the inputs, and
+            # shard them to match x. Training passes already-normalized/sharded
+            # decoder forcings, so this branch only runs at inference time.
+            decoder_forcings = kwargs.pop("decoder_forcings", None)
+            if decoder_forcings is not None:
+                decoder_forcings = self._normalize_decoder_forcings(
+                    decoder_forcings,
+                    pre_processors,
+                    grid_shard_sizes=grid_shard_sizes,
+                    model_comm_group=model_comm_group,
+                )
+                kwargs["decoder_forcings"] = decoder_forcings
 
             # Perform forward pass
             y_hat = self.forward(

@@ -137,3 +137,56 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
+
+
+def _make_data_indices_with_decoder_forcing(n_df: int = 2) -> dict:
+    dataset_indices = SimpleNamespace(
+        model=SimpleNamespace(
+            input=_IndexGroup(prognostic=[0]),
+            output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
+            _forcing=[],
+        ),
+        data=SimpleNamespace(
+            input=SimpleNamespace(
+                name_to_index={"var": 0},
+                decoder_forcing=torch.arange(n_df, dtype=torch.int),
+            ),
+        ),
+        name_to_index={"var": 0},
+    )
+    return {"data": dataset_indices}
+
+
+def _build_dummy_model(data_indices: dict, n_step_output: int = 1) -> DummyGraphModel:
+    model_config = OmegaConf.create(
+        {
+            "model": {
+                "num_channels": 8,
+                "trainable_parameters": {"data": 0, "hidden": 0},
+                "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+                "residual": {"_target_": "anemoi.models.layers.residual.SkipConnection"},
+                "bounding": [],
+            },
+        },
+    )
+    return DummyGraphModel(
+        model_config=model_config,
+        data_indices=data_indices,
+        statistics={"data": None},
+        n_step_input=1,
+        n_step_output=n_step_output,
+        graph_data=_make_graph(),
+    )
+
+
+def test_target_dim_without_decoder_forcing_equals_input_dim() -> None:
+    model = _build_dummy_model(_make_data_indices())
+    assert model.num_decoder_forcing_channels["data"] == 0
+    assert model.target_dim["data"] == model.input_dim["data"]
+
+
+def test_target_dim_includes_decoder_forcing_channels() -> None:
+    n_df, n_step_output = 2, 3
+    model = _build_dummy_model(_make_data_indices_with_decoder_forcing(n_df), n_step_output=n_step_output)
+    assert model.num_decoder_forcing_channels["data"] == n_df
+    assert model.target_dim["data"] == model.input_dim["data"] + n_step_output * n_df

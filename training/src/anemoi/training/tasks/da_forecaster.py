@@ -84,6 +84,51 @@ class DAForecaster(Forecaster):
             return f"_dacycle{rollout_step}"
         return f"_rstep{rollout_step - self.da_cycles}"
 
+    def build_decoder_forcings(
+        self,
+        batch: dict[str, torch.Tensor],
+        data_indices: dict[str, IndexCollection],
+        **step_kwargs,
+    ) -> dict[str, torch.Tensor] | None:
+        """Extract decoder-forcing tensors from the (preprocessed) batch for one step.
+
+        Returns per-dataset tensors of shape
+        ``(batch, n_step_output, ensemble, grid, num_decoder_forcing_channels)``
+        sliced at the current step's target times, ready to be passed to the model
+        as ``decoder_forcings=...``. Returns ``None`` when no dataset declares any
+        ``decoder_forcing`` variables (the common case), so the forward call is
+        unaffected.
+
+        Parameters
+        ----------
+        batch : dict[str, torch.Tensor]
+            Full preprocessed batch keyed by dataset name.
+        data_indices : dict[str, IndexCollection]
+            Data indices per dataset.
+        **step_kwargs
+            Forwarded to ``get_batch_output_indices`` (e.g. ``rollout_step``).
+
+        Returns
+        -------
+        dict[str, torch.Tensor] | None
+            Decoder-forcing tensors per dataset, or ``None`` if unused.
+        """
+        step_kwargs.pop("is_da", None)
+        output_batch_indices = self.get_batch_output_indices(**step_kwargs)
+
+        decoder_forcings = {}
+        any_present = False
+        for dataset_name, dataset_batch in batch.items():
+            df_idx = data_indices[dataset_name].data.input.decoder_forcing
+            if len(df_idx) == 0:
+                continue
+            any_present = True
+            df_idx = df_idx.to(device=dataset_batch.device)
+            df = dataset_batch[:, output_batch_indices][..., df_idx]
+            decoder_forcings[dataset_name] = df
+
+        return decoder_forcings if any_present else None
+
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
         """Return the offsets covering the DA cycles plus the forecast rollout.
 

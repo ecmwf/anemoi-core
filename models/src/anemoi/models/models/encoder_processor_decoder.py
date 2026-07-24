@@ -188,6 +188,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        decoder_forcings: Optional[dict[str, Tensor]] = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward pass of the model.
@@ -195,17 +196,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Parameters
         ----------
         x : dict[str, Tensor]
-            Input data
+            Input data.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        decoder_forcings : Optional[dict[str, Tensor]], optional
+            Per-dataset decoder-forcing tensors of shape
+            ``(batch, n_step_output, ensemble, grid, num_decoder_forcing_channels)``
+            concatenated onto the decoder destination features. Already normalized
+            and, under grid sharding, sharded consistently with ``x``.
+        **kwargs
+            Additional keyword arguments (unused).
 
         Returns
         -------
         dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+            Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(x.keys())
 
@@ -313,8 +321,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edges=dec_edge_shard_sizes,
             )
 
+            x_dst = x_data_latent_dict[dataset_name]
+            if decoder_forcings is not None and dataset_name in decoder_forcings:
+                df = decoder_forcings[dataset_name]
+                assert (
+                    df.shape[1] == self.n_step_output
+                ), f"decoder_forcings time dim ({df.shape[1]}) must match n_step_output ({self.n_step_output})."
+                assert df.shape[-1] == self.num_decoder_forcing_channels[dataset_name], (
+                    f"decoder_forcings channels ({df.shape[-1]}) must match "
+                    f"num_decoder_forcing_channels ({self.num_decoder_forcing_channels[dataset_name]})."
+                )
+                df = einops.rearrange(
+                    df,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                )
+                x_dst = torch.cat((x_dst, df), dim=-1)
+
             x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, x_dst),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
