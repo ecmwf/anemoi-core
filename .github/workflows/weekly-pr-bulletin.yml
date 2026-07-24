@@ -81,20 +81,15 @@ jobs:
               return components.size > 0 ? [...components].sort() : ['core'];
             }
 
-            // Extract a short readable summary from the PR description
+            // Return full cleaned body for Copilot to summarise
             function summarizePR(pr) {
-              if (!pr.body) return null;
-              const cleaned = pr.body
+              if (!pr.body) return '';
+              return pr.body
                 .replace(/<!--[\s\S]*?-->/g, '')          // strip HTML comments
                 .replace(/^\s*[-*]\s*\[[ x]\].*/gm, '')  // strip checkboxes
-                .replace(/^\s*#{1,6}\s+.*/gm, '')        // strip headings
-                .replace(/^\s*[-*]{3,}\s*$/gm, '')       // strip horizontal rules
-                .replace(/\r/g, '');
-              const paragraphs = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-              const first = paragraphs.find(p => p.length > 15);
-              if (!first) return null;
-              const plain = first.replace(/\*+([^*]+)\*+/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
-              return plain.length > 200 ? plain.slice(0, 197) + '\u2026' : plain;
+                .replace(/^\s*[-*]{3,}\s*$/gm, '')        // strip horizontal rules
+                .replace(/\r/g, '')
+                .trim();
             }
 
             // Detect PRs carrying breaking changes (! in title per conventional commits)
