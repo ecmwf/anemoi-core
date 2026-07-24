@@ -859,7 +859,41 @@ The server location is read from a file
 
    user: ...
    hostname: ...
-   path: ...
+   path: ...   # base directory on the remote host
+
+The base ``path`` is used as the parent directory for the different
+kinds of integration tests: results land under ``<path>/<kind>``, where
+``kind`` is chosen by each test (currently ``benchmarks`` for the
+performance benchmarks in ``test_benchmark.py`` and ``accuracy`` for the
+loss-curve regression check in ``test_accuracy.py``). For example, with
+
+.. code:: yaml
+
+   user: data
+   hostname: ecmwf.int
+   path: /home/data/public/anemoi-integration-tests/training
+
+results will be written to
+``/home/data/public/anemoi-integration-tests/training/benchmarks/<test_case>/``
+and
+``/home/data/public/anemoi-integration-tests/training/accuracy/<test_case>/``
+respectively.
+
+If you need to override the location for a specific kind (for example to
+point one of them at a different tree), add a ``paths`` mapping which
+takes precedence over ``<path>/<kind>``:
+
+.. code:: yaml
+
+   user: data
+   hostname: ecmwf.int
+   path: /home/data/public/anemoi-integration-tests/training
+   paths:
+     benchmarks: /home/data/public/anemoi-integration-tests/training/benchmarks
+     accuracy:   /home/data/public/anemoi-integration-tests/training/accuracy
+
+The resolution is performed by ``get_benchmark_store(kind)`` in
+``src/anemoi/training/diagnostics/benchmark_server.py``.
 
 Alternatively you can edit the code in
 ``tests/integration/test_benchmark.py`` to pass a local folder. The

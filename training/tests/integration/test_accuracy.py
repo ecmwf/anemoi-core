@@ -26,6 +26,9 @@ from hydra import initialize
 from omegaconf import OmegaConf
 from torch.testing import assert_close
 
+from anemoi.training.diagnostics.benchmark_server import _is_repo_on_branch
+from anemoi.training.diagnostics.benchmark_server import prune_mlflow_runs
+from anemoi.training.diagnostics.benchmark_server import track_accuracy_final_loss
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
 
@@ -104,3 +107,34 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
         )
 
     assert_similar(trainer.run_id, reference_id)
+
+    # Additionally push a scalar summary of the run to the anemoi benchmark
+    # server (data@ecmwf.int), mirroring the pattern used by test_benchmark.py.
+    # Only takes effect when the branch is 'main' (guarded inside the helper).
+    # test_case names the sub-directory on the server; use the config name
+    # (currently "global", matching test_global.yaml) so future accuracy cases
+    # (e.g. limited-area) can push into sibling directories.
+    # Use the epoch-averaged training loss (more stable than the per-step
+    # metric compared against MLflow above).
+    epoch_metric = "train_multi_dataset_loss_epoch"
+    epoch_history = client.get_metric_history(trainer.run_id, epoch_metric)
+    if not epoch_history:
+        msg = f"Run {trainer.run_id} has no '{epoch_metric}' history on {mlflow_server}"
+        raise ValueError(msg)
+    final_loss = float(epoch_history[-1].value)
+    track_accuracy_final_loss(test_case="global", value=final_loss)
+
+    # I would like to point out a race condition in the pruning.  If there are two feature
+    # branches which both change the reference id and they are repeatedly run,
+    # they might exceed the last n runs and start deleting each others
+    # references.
+    # This will show up as a loud explicit failure.
+    # Preventing this makes the code much more complicated, so I would leave it
+    # as is, perhaps increase n and only if it turns out to be a problem fix it.
+    if _is_repo_on_branch("main"):
+        prune_mlflow_runs(
+            client=client,
+            experiment_name=config.diagnostics.log.mlflow.experiment_name,
+            run_name=config.diagnostics.log.mlflow.run_name,
+            protected_run_ids=[reference_id],
+        )
