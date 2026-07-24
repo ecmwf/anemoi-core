@@ -16,11 +16,11 @@ from typing import Iterable
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
+from anemoi.models.utils import instantiate
 
 
 class BaseBounding(nn.Module, ABC):
@@ -316,7 +316,7 @@ def _build_dataset_boundings(
 ) -> nn.ModuleList:
     """Build the list of model-output bounding modules from configuration.
 
-    This is a thin factory over Hydra's ``instantiate`` that reads the iterable
+    This is a thin factory over ``anemoi.models.utils.instantiate`` that reads the iterable
     ``model_config.model.bounding`` and instantiates each entry while injecting
     the common keyword arguments required by bounding modules:
     ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
