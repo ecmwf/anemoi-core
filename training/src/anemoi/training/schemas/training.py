@@ -234,6 +234,17 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     "Normalisation method applied to the node attribute."
 
 
+class SpectralDimensionScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.SpectralDimensionScaler"] = Field(..., alias="_target_")
+    n_spectral_modes: PositiveInt = Field(example=193)
+    "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
+    spectral_dims: PositiveInt | None = Field(default=None, example=193)
+    "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``. "
+    "Set explicitly for losses that keep the full (L, M) dimension flattened."
+    norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
+    "Normalisation method applied to the scaler values."
+
+
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
@@ -245,6 +256,7 @@ ScalerSchema = (
     | UniformTimeStepScalerSchema
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
+    | SpectralDimensionScalerSchema
 )
 
 
@@ -260,7 +272,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     lsd = "anemoi.training.losses.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.SpectralL2Loss"
+    power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
 
 
@@ -534,7 +546,7 @@ def _loss_discriminator(v: Any) -> str:
         "anemoi.training.losses.LogSpectralDistance",
         "anemoi.training.losses.LogFFT2Distance",
         "anemoi.training.losses.SpectralCRPSLoss",
-        "anemoi.training.losses.SpectralL2Loss",
+        "anemoi.training.losses.PowerSpectrumLoss",
         "anemoi.training.losses.SpectralAMSELoss",
     }:
         return "spectral"

@@ -21,6 +21,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -592,3 +593,24 @@ def test_lead_time_decay_loss_scaling(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
     assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
+
+
+# ---------------------------------------------------------------------------
+# Spectral dimension scaler tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("n_spectral_modes", "spectral_dims"),
+    [(4, 4), (16, 16), (64, 64 * 64), (193, 193)],
+)
+def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> None:
+    """SpectralDimensionScaler: scaler values should all be identical (uniform)."""
+    scaler = SpectralDimensionScaler(n_spectral_modes=n_spectral_modes, spectral_dims=spectral_dims)
+    values = scaler.get_scaling_values()
+
+    assert values.shape == (spectral_dims,), f"Expected scaler to have shape ({spectral_dims},), got {values.shape}"
+    assert torch.allclose(values, values[0].expand_as(values)), f"Values are not uniform: {values}"
+    assert values[0].item() == pytest.approx(
+        1.0 / n_spectral_modes,
+    ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
