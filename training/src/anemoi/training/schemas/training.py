@@ -761,6 +761,35 @@ class TransportTrainingMethodSchema(BaseModel):
     "Hydra target for the transport training method."
 
 
+class DASingleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.DASingleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the DA single training method."
+
+
+class CorrectorGroupSchema(BaseModel):
+    """One instrument group for the training-time corrector."""
+
+    corrector_variables: list[str] = Field(..., min_length=1)
+    "Corrector variable names routed to this group's network."
+    channels: list[str] | None = None
+    "Explicit output channels to correct; if unset, output variables prefixed by the group name are used."
+
+
+class CorrectorSchema(BaseModel):
+    """Configuration for the training-time corrector networks."""
+
+    type: Literal["mlp", "gnn"] = "mlp"
+    "Corrector backend: pointwise MLP or spatially-aware GNN."
+    hidden_dim: PositiveInt = 64
+    "Hidden layer dimension for all group networks."
+    num_gnn_layers: PositiveInt = 1
+    "Number of message-passing rounds (GNN backend only)."
+    edge_attributes: list[str] = Field(default_factory=lambda: ["edge_length", "edge_dirs"])
+    "Data-to-data edge attributes concatenated as GNN edge features."
+    instrument_groups: dict[str, CorrectorGroupSchema]
+    "Mapping of instrument-group name to its corrector configuration."
+
+
 def _training_method_discriminator(v: Any) -> str:
     method = v.get("method", {}) if hasattr(v, "get") else getattr(v, "method", None)
     return method.get("_target_", "") if hasattr(method, "get") else getattr(method, "target_", "")
@@ -790,9 +819,17 @@ class TransportTrainingSchema(BaseTrainingSchema):
     "Transport training configuration."
 
 
+class DASingleTrainingSchema(BaseTrainingSchema):
+    method: DASingleTrainingMethodSchema
+    "Training method."
+    corrector: CorrectorSchema | None = None
+    "Optional training-time corrector networks applied to predictions for the loss."
+
+
 TrainingSchema = Annotated[
     Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
     | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
-    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
+    | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")]
+    | Annotated[DASingleTrainingSchema, Tag("anemoi.training.train.methods.DASingleTraining")],
     Discriminator(_training_method_discriminator),
 ]

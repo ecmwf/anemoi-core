@@ -1,0 +1,20 @@
+_target_: anemoi.training.tasks.DAForecaster
+multistep_input: 2
+multistep_output: 1
+timestep: "6H"
+
+# Rollout configuration for autoregressive forecasting
+rollout:
+  start: 1
+  # increase rollout every n epochs
+  epoch_increment: 0
+  # maximum rollout to use
+  maximum: 1
+
+# number of rollout steps to use for validation, or null to use the training rollout
+validation_rollout: null
+
+# number of data-assimilation cycles run before the forecast rollout
+da_cycles: 0
+# weight applied to the loss computed during DA cycles (0 disables the DA loss)
+da_loss_weight: 0.0

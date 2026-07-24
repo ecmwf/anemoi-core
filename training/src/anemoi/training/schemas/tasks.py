@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import Discriminator
 from pydantic import Field
+from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 
@@ -46,6 +47,27 @@ class ForecasterSchema(BaseModel):
     "Number of rollouts to use for validation. If unset, validation uses the training rollout."
 
 
+class DAForecasterSchema(BaseModel):
+    """Configuration for data-assimilation forecasting tasks."""
+
+    target_: Literal["anemoi.training.tasks.DAForecaster"] = Field(..., alias="_target_")
+    "Task class path for the DA forecasting task."
+    multistep_input: PositiveInt = Field(example=2)
+    "Number of input timesteps provided to the model."
+    multistep_output: PositiveInt = Field(example=1)
+    "Number of output timesteps the model should predict."
+    timestep: str = Field(example="6H")
+    "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
+    rollout: RolloutSchema = Field(...)
+    "Rollout configuration for autoregressive training."
+    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
+    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
+    da_cycles: NonNegativeInt = Field(default=0, example=4)
+    "Number of data-assimilation cycles run before the forecast rollout."
+    da_loss_weight: NonNegativeFloat = Field(default=0.0, example=0.1)
+    "Weight applied to the loss computed during DA cycles (0 disables the DA loss)."
+
+
 class AutoencoderTaskSchema(BaseModel):
     """Configuration for autoencoding tasks."""
 
@@ -69,6 +91,6 @@ class TemporalDownscalerSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema | DAForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
     Discriminator("target_"),
 ]

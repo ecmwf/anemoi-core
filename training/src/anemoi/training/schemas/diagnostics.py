@@ -63,6 +63,17 @@ class PlotLossSchema(BaseModel):
     "Batch frequency to plot at."
 
 
+class PlotLossCorrectedSchema(BaseModel):
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLossCorrected"] = Field(alias="_target_")
+    "PlotLossCorrected object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(examples=["data"])
+    "List of dataset names to plot."
+    parameter_groups: dict[str, list[str]]
+    "Dictionary with parameter groups with parameter names as key."
+    every_n_batches: int | None = Field(default=None)
+    "Batch frequency to plot at."
+
+
 class MatplotlibColormapSchema(BaseModel):
     target_: Literal["anemoi.training.utils.custom_colormaps.MatplotlibColormap"] = Field(..., alias="_target_")
     "CustomColormap object from anemoi training utils."
@@ -185,6 +196,7 @@ class PlotEnsSampleSchema(BaseModel):
 PlotCallbacks = Annotated[
     GraphTrainableFeaturesPlotSchema
     | PlotLossSchema
+    | PlotLossCorrectedSchema
     | PlotSampleSchema
     | PlotSpectrumSchema
     | PlotHistogramSchema

@@ -843,6 +843,97 @@ class PlotLoss(BasePerBatchPlotCallback):
             )
 
 
+class PlotLossCorrected(PlotLoss):
+    """Per-variable loss plot with the training-time corrector applied to predictions.
+
+    Identical to :class:`PlotLoss` but, for datasets that have a corrector
+    network on the training method (``pl_module.corrector_mlp``), the raw
+    prediction is corrected before the per-variable loss is computed — matching
+    the corrected loss the model is actually trained against. Falls back to the
+    raw prediction (i.e. behaves like :class:`PlotLoss`) when no corrector is
+    present.
+    """
+
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_names: list[str],
+        outputs: TrainingStepOutput,
+        batch: dict[str, torch.Tensor],
+        batch_idx: int,
+        epoch: int,
+        processed_cache: dict | None = None,
+    ) -> None:
+        logger = trainer.logger
+        _ = batch_idx, processed_cache
+
+        if self.latlons is None:
+            self.latlons = {}
+
+        corrector_mlp = getattr(pl_module, "corrector_mlp", {})
+
+        for dataset_name in dataset_names:
+            data_indices = pl_module.data_indices[dataset_name]
+            parameter_names = list[str](data_indices.model.output.name_to_index.keys())
+            parameter_positions = list[int](data_indices.model.output.name_to_index.values())
+            parameter_names = [parameter_names[i] for i in np.argsort(parameter_positions)]
+            metadata = pl_module.model.metadata
+            metadata_variables = metadata["dataset"].get("variables_metadata") if metadata is not None else None
+
+            argsort_indices = argsort_variablename_variablelevel(
+                parameter_names,
+                metadata_variables=metadata_variables,
+            )
+            parameter_names = [parameter_names[i] for i in argsort_indices]
+
+            sort_by_parameter_group, colors, xticks, legend_patches = self.sort_and_color_by_parameter_group(
+                parameter_names,
+            )
+
+            for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+                y_hat = outputs.predictions[i][dataset_name]
+                y_true = pl_module.task.get_targets(
+                    batch={dataset_name: batch[dataset_name]},
+                    data_indices=pl_module.data_indices,
+                    **task_kwargs,
+                )[dataset_name]
+
+                # Apply the corrector for this dataset (if any) before scoring.
+                corrector = corrector_mlp.get(dataset_name) if dataset_name in corrector_mlp else None
+                if corrector is not None:
+                    corrector_idx = data_indices.data.input.corrector.to(device=y_true.device)
+                    corrector_vars = y_true.index_select(-1, corrector_idx)
+                    # Callback runs on gathered full-grid tensors on rank 0, so no
+                    # comm group / shard sizes are needed.
+                    y_hat = corrector(y_hat, corrector_vars)
+
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](
+                        y_hat,
+                        y_true,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_FULL,
+                        squash=False,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                )
+
+                loss = loss[argsort_indices]
+                fig = plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
+
+                metric_name = pl_module.task.get_metric_name(**task_kwargs)
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=f"loss_corrected_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=f"loss_corrected_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                )
+
+
 class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     """Base processing class for additional metrics."""
 

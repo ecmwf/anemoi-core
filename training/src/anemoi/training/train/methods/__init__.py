@@ -7,11 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .da_single import DASingleTraining
 from .ensemble import EnsembleTraining
 from .single import SingleTraining
 from .transport import TransportTraining
 
 __all__ = [
+    "DASingleTraining",
     "EnsembleTraining",
     "SingleTraining",
     "TransportTraining",
