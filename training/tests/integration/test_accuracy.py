@@ -26,6 +26,7 @@ from hydra import initialize
 from omegaconf import OmegaConf
 from torch.testing import assert_close
 
+from anemoi.training.diagnostics.benchmark_server import prune_mlflow_runs
 from anemoi.training.diagnostics.benchmark_server import track_accuracy_final_loss
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.mlflow.client import AnemoiMlflowClient
@@ -121,3 +122,17 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
         raise ValueError(msg)
     final_loss = float(epoch_history[-1].value)
     track_accuracy_final_loss(test_case="global", value=final_loss)
+
+    # I would like to point out a race condition in the pruning.  If there are two feature
+    # branches which both change the reference id and they are repeatedly run,
+    # they might exceed the last n runs and start deleting each others
+    # references.
+    # This will show up as a loud explicit failure.
+    # Preventing this makes the code much more complicated, so I would leave it
+    # as is, perhaps increase n and only if it turns out to be a problem fix it.
+    prune_mlflow_runs(
+        client=client,
+        experiment_name=config.diagnostics.log.mlflow.experiment_name,
+        run_name=config.diagnostics.log.mlflow.run_name,
+        protected_run_ids=[reference_id],
+    )
