@@ -123,6 +123,13 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
     final_loss = float(epoch_history[-1].value)
     track_accuracy_results(test_case="global", final_loss=final_loss)
 
+    # I would like to point out a race condition in the pruning.  If there are two feature
+    # branches which both change the reference id and they are repeatedly run,
+    # they might exceed the last n runs and start deleting each others
+    # references.
+    # This will show up as a loud explicit failure.
+    # Preventing this makes the code much more complicated, so I would leave it
+    # as is, perhaps increase n and only if it turns out to be a problem fix it.
     prune_mlflow_runs(
         client=client,
         experiment_name=config.diagnostics.log.mlflow.experiment_name,
