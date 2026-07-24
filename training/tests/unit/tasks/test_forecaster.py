@@ -14,6 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data import Batch
+from anemoi.models.data import SourceView
 from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
@@ -199,19 +200,28 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [-6h, 0h, +6h] → 3 time steps in batch
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = Batch(data={"data": torch.randn(b, 3, e, g, v)}, layouts={"data": layout})
+    batch = Batch(
+        data={"data": torch.randn(b, 3, e, g, v)},
+        layouts={"data": layout},
+        variables={"data": list(_NAME_TO_INDEX)},
+    )
     x = task.get_inputs(batch, data_indices)
-    assert x["data"].shape[1] == 2  # multistep_input=2
+    assert x["data"].data.shape[1] == 2  # multistep_input=2
 
 
 def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     """get_targets extracts multistep_output time steps from the batch."""
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = Batch(data={"data": torch.randn(b, 3, e, g, v)}, layouts={"data": layout})
-    y = task.get_targets(batch)
-    assert y["data"].shape[1] == 1  # multistep_output=1
+    batch = Batch(
+        data={"data": torch.randn(b, 3, e, g, v)},
+        layouts={"data": layout},
+        variables={"data": list(_NAME_TO_INDEX)},
+    )
+    y, _target = task.get_targets(batch, data_indices)
+    assert y["data"].data.shape[1] == 1  # multistep_output=1
 
 
 def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
@@ -254,13 +264,12 @@ def test_rollout_advance_input_keeps_latest_steps(
         ],
         dim=1,
     )
-    batch = torch.zeros((b, n_step_input + n_step_output, e, g, v), dtype=torch.float32)
+    output_values = torch.zeros((b, n_step_output, e, g, v), dtype=torch.float32)
 
     updated = task._advance_dataset_input(
         x,
         y_pred,
-        batch,
-        rollout_step=0,
+        output_values,
         output_mask=NoOutputMask(),
         data_indices=data_indices,
     )
@@ -283,22 +292,43 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     # tensor dims: (batch, time, ens, grid, variable)
     x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
-    batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
-    batch[:, 2, 0, :, 0] = torch.tensor([100.0, 200.0])
-    batch[:, 2, 0, :, 1] = torch.tensor([1000.0, 2000.0])
+    output_values = torch.zeros((1, 1, 1, 2, 2), dtype=torch.float32)
+    output_values[:, 0, 0, :, 0] = torch.tensor([100.0, 200.0])
+    output_values[:, 0, 0, :, 1] = torch.tensor([1000.0, 2000.0])
 
     updated = task._advance_dataset_input(
         x,
         y_pred,
-        batch,
-        rollout_step=0,
+        output_values,
         data_indices=data_indices,
         output_mask=output_mask,
-        grid_shard_slice=slice(None),
     )
 
     # prognostic variable, 1st grid point (cutout_mask=True) should be from y_pred,
-    # 2nd grid point (cutout_mask=False) should be from batch
+    # 2nd grid point (cutout_mask=False) should be from the output-time truth
     torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
-    # forcing variable should be refreshed from batch for both grid points
+    # forcing variable should be refreshed from the output-time values for both grid points
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
+
+
+def test_advance_input_preserves_sparse_batch_data_payload() -> None:
+    """Sparse pass-through keeps raw payloads in Batch.data and views at Batch[name]."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    data = [torch.zeros(2, 1), torch.ones(3, 1)]
+    coordinates = [torch.zeros(2, 2), torch.ones(3, 2)]
+    batch = Batch(
+        data={"obs": data},
+        coordinates={"obs": coordinates},
+        metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 3),)]}},
+        layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        variables={"obs": ["a"]},
+        statistics={"obs": {}},
+    )
+
+    advanced = task.advance_input(batch, y_pred=batch, output_values=batch, data_indices={})
+
+    assert isinstance(advanced.data["obs"], list)
+    assert not isinstance(advanced.data["obs"], SourceView)
+    assert advanced.data["obs"] is data
+    assert isinstance(advanced["obs"], SourceView)
+    assert advanced["obs"].data is data

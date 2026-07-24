@@ -866,20 +866,6 @@ class PlotLoss(BasePerBatchPlotCallback):
 
             self.loss = copy.deepcopy(pl_module.loss)
 
-            # # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
-            # for dataset in self.loss:
-            #     for leaf_loss in self.loss[dataset].iter_leaf_losses():
-            #         if (
-            #             hasattr(leaf_loss, "scaler")
-            #             and hasattr(leaf_loss.scaler, "nan_mask_weights")
-            #             and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-            #         ):
-            #             leaf_loss.scaler.nan_mask_weights = _allgather_dataset_tensor(
-            #                 pl_module,
-            #                 leaf_loss.scaler.nan_mask_weights,
-            #                 dataset,
-            #             )
-
             super().on_validation_batch_end(
                 trainer,
                 pl_module,
@@ -1052,15 +1038,30 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: TrainingStepOutput,
         batch: Batch,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Build the plotting fields and coordinates for a tabular observation dataset.
+        auxiliary_output: dict[str, SourceView] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+        """Build the plotting fields and coordinates for a sparse/observation dataset.
 
         We extract the fields directly from the per-dataset SourceView using select_time.
 
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            The training module holding task, data indices and post-processors.
+        dataset_name : str
+            Name of the sparse/observation dataset to plot.
+        outputs : TrainingStepOutput
+            Validation step output holding the predictions.
+        batch : Batch
+            Full batch the sample is extracted from.
+        auxiliary_output : dict[str, SourceView] | None, optional
+            Optional per-dataset auxiliary views (e.g. the conditioned transport
+            target) to plot alongside the prediction, by default None.
+
         Returns
         -------
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-            Shape: (input_latlons, output_latlons, x, y_true, y_pred).
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]
+            ``(input_latlons, output_latlons, x, y_true, y_pred, auxiliary)``.
         """
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         task = pl_module.task
@@ -1075,6 +1076,14 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             coords = sub_view.coordinates[self.sample_idx]
             return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
 
+        def _output_field(output_view: SourceView) -> np.ndarray:
+            output_view = self._align_output_metadata(output_view, feature_indices)
+            output_view = self.post_processors[dataset_name](
+                output_view.apply_func(lambda t, **_: t.detach().cpu()),
+                in_place=False,
+            )
+            return output_view.data[self.sample_idx].numpy()
+
         # Input panel: observations at the analysis (last input) timestep.
         input_batch = batch.select(time={dataset_name: input_indices[-1]}, variables={dataset_name: feature_indices})
         input_view = input_batch[dataset_name]
@@ -1086,14 +1095,13 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         y_true, output_latlons = _field_and_coords(target_view)
 
         # Prediction (already at the output/target observation locations).
-        prediction = self._align_output_metadata(outputs.predictions[0][dataset_name], feature_indices)
-        prediction = self.post_processors[dataset_name](
-            prediction.apply_func(lambda t, **_: t.detach().cpu()),
-            in_place=False,
-        )
-        y_pred = prediction.data[self.sample_idx].numpy()
+        y_pred = _output_field(outputs.predictions[0][dataset_name])
 
-        return input_latlons, output_latlons, x, y_true, y_pred
+        auxiliary = None
+        if auxiliary_output is not None and dataset_name in auxiliary_output:
+            auxiliary = _output_field(auxiliary_output[dataset_name])
+
+        return input_latlons, output_latlons, x, y_true, y_pred, auxiliary
 
 
 class PlotSample(BasePlotAdditionalMetrics):
@@ -1219,7 +1227,7 @@ class PlotSample(BasePlotAdditionalMetrics):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        auxiliary_output: dict[str, torch.Tensor] | None = None,
+        auxiliary_output: dict[str, SourceView] | None = None,
     ) -> None:
         logger = trainer.logger
 
@@ -1239,11 +1247,12 @@ class PlotSample(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             if _is_sparse_dataset(batch, dataset_name):
-                input_latlons, output_latlons, x, y_true, y_pred = self._sparse_sample(
+                input_latlons, output_latlons, x, y_true, y_pred, auxiliary = self._sparse_sample(
                     pl_module,
                     dataset_name,
                     outputs,
                     batch,
+                    auxiliary_output=auxiliary_output,
                 )
                 fig = self._make_figure(
                     plot_parameters_dict,
@@ -1251,7 +1260,7 @@ class PlotSample(BasePlotAdditionalMetrics):
                     x,
                     y_true,
                     y_pred,
-                    auxiliary=None,
+                    auxiliary=auxiliary,
                     sparse=True,
                     output_latlons=output_latlons,
                 )

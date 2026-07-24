@@ -188,7 +188,8 @@ actual model (see :ref:`overview`).
    -  ``y_norm = model_interface.forward(x_norm)`` with ``x_in`` and
       ``y_pred`` are normalized.
    -  ``y = model_interface.predict_step(x)`` with ``x`` and ``y`` are
-      absolute values.
+      absolute values. Transport models additionally require a
+      ``target_template`` batch so sampling knows the output geometry.
 
 *******************
  The PyTorch Model

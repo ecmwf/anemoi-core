@@ -224,7 +224,8 @@ class AnemoiModelInterface(torch.nn.Module):
         gather_out : bool, optional
             Whether to gather the output, by default True.
         **kwargs
-            Additional prediction keyword arguments.
+            Additional prediction keyword arguments. Transport models require
+            ``target_template`` here so sampling knows the output geometry.
 
         Returns
         -------

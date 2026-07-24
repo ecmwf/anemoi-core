@@ -657,8 +657,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
-        """
-        Returns the distributed training strategy.
+        """Returns the distributed training strategy.
 
         Runs with at least one tabular observation dataset build a dynamic graph per batch
         and route each sample through per-dataset encoders/decoders that may be unused when a

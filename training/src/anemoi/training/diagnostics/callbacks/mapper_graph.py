@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 import torch
 from pytorch_lightning.callbacks import Callback

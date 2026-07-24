@@ -76,7 +76,7 @@ class Batch:
         Per-dataset input. For gridded datasets a single stacked tensor of
         shape ``(batch, time, ensemble, grid, vars)``; for sparse
         observation datasets a ``list[torch.Tensor]`` of length ``batch``,
-        one entry per sample with shape ``(ensemble=1, grid_i, vars)``.
+        one entry per sample with shape ``(grid_i, vars)``.
     coordinates : dict[str, torch.Tensor | list[torch.Tensor]]
         Per-dataset ``(N, 2)`` coordinate tensor stacking
         ``(latitudes, longitudes)`` in **radians**. For static-grid
@@ -215,8 +215,8 @@ class Batch:
         return create_source_view(
             name=dataset_name,
             data=self.data[dataset_name],
-            variables=self.variables.get(dataset_name),
-            statistics=self.statistics[dataset_name],
+            variables=self.variables.get(dataset_name, []),
+            statistics=self.statistics.get(dataset_name, {}),
             coordinates=self.coordinates.get(dataset_name),
             is_static=self.is_static_coords(dataset_name),
             timedeltas=self.timedeltas.get(dataset_name),
@@ -343,19 +343,24 @@ class Batch:
             )
 
         new_data_keys = set(new_data.keys())
+        unknown_keys = new_data_keys - set(self.data.keys())
+        if unknown_keys:
+            msg = f"Replacement data contains unknown dataset names: {sorted(unknown_keys)}."
+            raise ValueError(msg)
+
         metadata_static_coords = self.metadata.get(STATIC_COORDS_META_KEY, frozenset())
         metadata_static_coords &= new_data_keys
         return Batch(
             new_data,
-            coordinates={name: self.coordinates[name] for name in new_data_keys},
+            coordinates={name: self.coordinates[name] for name in new_data_keys if name in self.coordinates},
             metadata={STATIC_COORDS_META_KEY: metadata_static_coords}
             | {name: self.metadata[name] for name in new_data_keys if name in self.metadata},
-            grid_sizes={name: self.grid_sizes[name] for name in new_data_keys},
+            grid_sizes={name: self.grid_sizes[name] for name in new_data_keys if name in self.grid_sizes},
             timedeltas={name: self.timedeltas[name] for name in new_data_keys if name in self.timedeltas},
             shard_sizes={name: self.shard_sizes[name] for name in new_data_keys if name in self.shard_sizes},
-            layouts={name: self.layouts[name] for name in new_data_keys},
-            variables={name: self.variables[name] for name in new_data_keys},
-            statistics=self.statistics,
+            layouts={name: self.layouts[name] for name in new_data_keys if name in self.layouts},
+            variables={name: self.variables[name] for name in new_data_keys if name in self.variables},
+            statistics={name: self.statistics[name] for name in new_data_keys if name in self.statistics},
         )
 
     def update_source(self, source_name: str, source_view: SourceView) -> "Batch":
@@ -448,7 +453,7 @@ class Batch:
         * **Sparse** — ``payload["metadata"]["boundaries"]`` is present (set
           by :meth:`anemoi.training.data.data_reader.ObservationDataReader._unpack_sample`).
           ``payload["data"]`` is a per-sample :class:`torch.Tensor` of
-          shape ``(E=1, N_i, V)`` whose ``N_i`` varies between samples.
+          shape ``(N_i, V)`` whose ``N_i`` varies between samples.
           ``data[name]``, ``coordinates[name]`` and ``timedeltas[name]``
           each become a ``list[torch.Tensor]`` of length ``B``;
           per-sample ``payload["metadata"]`` is collected into

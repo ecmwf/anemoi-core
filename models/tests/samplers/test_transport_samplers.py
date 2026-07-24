@@ -12,6 +12,8 @@ from collections.abc import Callable
 import pytest
 import torch
 
+from anemoi.models.data import Batch
+from anemoi.models.data import TensorLayout
 from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
 from anemoi.models.samplers.transport_samplers import EDMHeunSampler
 from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
@@ -57,22 +59,33 @@ class RecordingZeroDenoiser:
 
     def __call__(
         self,
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        x: Batch,
+        y: Batch,
         sigma: dict[str, torch.Tensor],
         model_comm_group=None,
         grid_shard_sizes=None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del model_comm_group, grid_shard_sizes
         self.call_count += 1
         if self.validator is not None:
             self.validator(x, y, sigma)
-        return {dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.items()}
+        return y.with_data({dataset_name: torch.zeros_like(y_data) for dataset_name, y_data in y.data.items()})
 
 
-def make_inputs(dtype: torch.dtype = torch.float32) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-    x = {DATASET_NAME: torch.randn(2, 3, 1, 5, 4, dtype=dtype)}
-    y = {DATASET_NAME: torch.randn(2, 3, 1, 5, 4, dtype=dtype)}
+def _batch(data: dict[str, torch.Tensor]) -> Batch:
+    return Batch(
+        data=data,
+        coordinates={DATASET_NAME: torch.zeros(data[DATASET_NAME].shape[-2], 2)},
+        metadata={"static_coords": frozenset({DATASET_NAME})},
+        layouts={DATASET_NAME: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={DATASET_NAME: [f"var_{idx}" for idx in range(data[DATASET_NAME].shape[-1])]},
+        statistics={DATASET_NAME: {}},
+    )
+
+
+def make_inputs(dtype: torch.dtype = torch.float32) -> tuple[Batch, Batch]:
+    x = _batch({DATASET_NAME: torch.randn(2, 3, 1, 5, 4, dtype=dtype)})
+    y = _batch({DATASET_NAME: torch.randn(2, 3, 1, 5, 4, dtype=dtype)})
     return x, y
 
 
@@ -196,17 +209,17 @@ def test_samplers_expand_sigma_to_model_dtype_and_return_model_dtype(
     sigmas = torch.tensor([1.0, 0.0], dtype=torch.float64)
 
     def _validate_sigma(
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        x: Batch,
+        y: Batch,
         sigma: dict[str, torch.Tensor],
     ) -> None:
         assert set(sigma.keys()) == set(y.keys())
         sigma_expanded = sigma[DATASET_NAME]
-        assert sigma_expanded.dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
+        assert sigma_expanded.dtype == x.data[DATASET_NAME].dtype == y.data[DATASET_NAME].dtype
         assert sigma_expanded.shape == (
-            y[DATASET_NAME].shape[0],
+            y.data[DATASET_NAME].shape[0],
             1,
-            y[DATASET_NAME].shape[2],
+            y.data[DATASET_NAME].shape[2],
             1,
             1,
         )
@@ -217,9 +230,9 @@ def test_samplers_expand_sigma_to_model_dtype_and_return_model_dtype(
     result = sampler.sample(x=x, y=y, sigmas=sigmas, denoising_fn=denoiser)
 
     assert denoiser.call_count == 1
-    assert result[DATASET_NAME].shape == y[DATASET_NAME].shape
-    assert result[DATASET_NAME].dtype == x[DATASET_NAME].dtype
-    assert torch.allclose(result[DATASET_NAME], torch.zeros_like(result[DATASET_NAME]))
+    assert result.data[DATASET_NAME].shape == y.data[DATASET_NAME].shape
+    assert result.data[DATASET_NAME].dtype == x.data[DATASET_NAME].dtype
+    assert torch.allclose(result.data[DATASET_NAME], torch.zeros_like(result.data[DATASET_NAME]))
 
 
 def test_heun_uses_corrector_before_final_step() -> None:
@@ -241,52 +254,52 @@ def test_vector_field_samplers_integrate_constant_velocity(
     times = torch.linspace(0.0, 1.0, 5, dtype=torch.float64)
 
     def velocity_fn(
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        x: Batch,
+        y: Batch,
         time: dict[str, torch.Tensor],
         model_comm_group=None,
         grid_shard_sizes=None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del model_comm_group, grid_shard_sizes
         time_expanded = time[DATASET_NAME]
-        assert time_expanded.dtype == x[DATASET_NAME].dtype == y[DATASET_NAME].dtype
+        assert time_expanded.dtype == x.data[DATASET_NAME].dtype == y.data[DATASET_NAME].dtype
         assert time_expanded.shape == (
-            y[DATASET_NAME].shape[0],
+            y.data[DATASET_NAME].shape[0],
             1,
-            y[DATASET_NAME].shape[2],
+            y.data[DATASET_NAME].shape[2],
             1,
             1,
         )
-        return {dataset_name: torch.ones_like(y_data) for dataset_name, y_data in y.items()}
+        return y.with_data({dataset_name: torch.ones_like(y_data) for dataset_name, y_data in y.data.items()})
 
     sampler = sampler_cls(dtype=torch.float64)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=velocity_fn)
 
-    assert result[DATASET_NAME].dtype == x[DATASET_NAME].dtype
-    assert torch.allclose(result[DATASET_NAME], y[DATASET_NAME] + 1.0)
+    assert result.data[DATASET_NAME].dtype == x.data[DATASET_NAME].dtype
+    assert torch.allclose(result.data[DATASET_NAME], y.data[DATASET_NAME] + 1.0)
 
 
 def test_vector_field_heun_matches_linear_ode_predictor_corrector_step() -> None:
-    x = {DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float64)}
-    y = {DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float64)}
+    x = _batch({DATASET_NAME: torch.zeros(1, 1, 1, 1, 1, dtype=torch.float64)})
+    y = _batch({DATASET_NAME: torch.full((1, 1, 1, 1, 1), 2.0, dtype=torch.float64)})
     times = torch.tensor([0.0, 0.25], dtype=torch.float64)
 
     def vector_field_fn(
-        x: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        x: Batch,
+        y: Batch,
         time: dict[str, torch.Tensor],
         model_comm_group=None,
         grid_shard_sizes=None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del x, model_comm_group, grid_shard_sizes
-        return {DATASET_NAME: 2.0 * y[DATASET_NAME] + time[DATASET_NAME]}
+        return y.with_data({DATASET_NAME: 2.0 * y.data[DATASET_NAME] + time[DATASET_NAME]})
 
     sampler = VectorFieldHeunSampler(dtype=torch.float64)
     result = sampler.sample(x=x, y=y, times=times, vector_field_fn=vector_field_fn)
 
     dt = times[1] - times[0]
-    f1 = 2.0 * y[DATASET_NAME] + times[0]
-    y_predictor = y[DATASET_NAME] + dt * f1
+    f1 = 2.0 * y.data[DATASET_NAME] + times[0]
+    y_predictor = y.data[DATASET_NAME] + dt * f1
     f2 = 2.0 * y_predictor + times[1]
-    expected = y[DATASET_NAME] + dt * (f1 + f2) / 2.0
-    torch.testing.assert_close(result[DATASET_NAME], expected)
+    expected = y.data[DATASET_NAME] + dt * (f1 + f2) / 2.0
+    torch.testing.assert_close(result.data[DATASET_NAME], expected)
