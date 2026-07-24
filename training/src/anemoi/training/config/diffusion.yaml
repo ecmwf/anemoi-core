@@ -7,6 +7,7 @@ defaults:
 - model: graphtransformer_diffusion
 - task: forecaster
 - training: diffusion
+- version
 - _self_
 
 

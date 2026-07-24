@@ -8,6 +8,7 @@ defaults:
 - model: graphtransformer
 - task: autoencoder
 - training: single
+- version
 - _self_
 
 model:
