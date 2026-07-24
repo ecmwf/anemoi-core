@@ -900,7 +900,8 @@ class PlotLossCorrected(PlotLoss):
                 )[dataset_name]
 
                 # Apply the corrector for this dataset (if any) before scoring.
-                corrector = corrector_mlp.get(dataset_name) if dataset_name in corrector_mlp else None
+                # corrector_mlp may be an nn.ModuleDict (no .get()), so SIM401 does not apply here.
+                corrector = corrector_mlp[dataset_name] if dataset_name in corrector_mlp else None  # noqa: SIM401
                 if corrector is not None:
                     corrector_idx = data_indices.data.input.corrector.to(device=y_true.device)
                     corrector_vars = y_true.index_select(-1, corrector_idx)

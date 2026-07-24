@@ -155,7 +155,8 @@ class DASingleTraining(SingleTraining):
 
         y_for_loss = {}
         for dataset_name, pred in y_pred.items():
-            corrector = self.corrector_mlp.get(dataset_name) if dataset_name in self.corrector_mlp else None
+            # nn.ModuleDict has no .get(), so SIM401's suggestion does not apply here.
+            corrector = self.corrector_mlp[dataset_name] if dataset_name in self.corrector_mlp else None  # noqa: SIM401
             if corrector is None:
                 y_for_loss[dataset_name] = pred
                 continue
