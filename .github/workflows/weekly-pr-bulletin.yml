@@ -1,0 +1,338 @@
+name: Weekly PR Bulletin
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Every Monday at 08:00 UTC
+  workflow_dispatch:      # Allow manual trigger
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  issues: write
+  copilot-requests: write
+
+jobs:
+  bulletin:
+    name: Generate Weekly PR Bulletin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Collect PR data
+        id: collect
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+            const { owner, repo } = context.repo;
+
+            // ── helpers ──────────────────────────────────────────────────────────
+
+            // Fetch all pages for a paginated GitHub REST call
+            async function paginate(method, params) {
+              const items = [];
+              let page = 1;
+              while (true) {
+                const { data } = await method({ ...params, per_page: 100, page });
+                items.push(...data);
+                if (data.length < 100) break;
+                page++;
+              }
+              return items;
+            }
+
+            // Determine which anemoi-core component a PR touches based on labels /
+            // changed files path prefixes
+            function classifyPR(pr, files) {
+              const labelNames = pr.labels.map(l => l.name.toLowerCase());
+              const components = new Set();
+
+              const labelMap = {
+                graphs:   ['graphs', 'anemoi-graphs'],
+                models:   ['models', 'anemoi-models'],
+                training: ['training', 'anemoi-training'],
+              };
+              for (const [comp, keywords] of Object.entries(labelMap)) {
+                if (keywords.some(k => labelNames.some(l => l.includes(k)))) {
+                  components.add(comp);
+                }
+              }
+
+              if (files) {
+                for (const f of files) {
+                  if (f.startsWith('graphs/'))   components.add('graphs');
+                  if (f.startsWith('models/'))   components.add('models');
+                  if (f.startsWith('training/')) components.add('training');
+                }
+              }
+
+              return components.size > 0 ? [...components].sort() : ['core'];
+            }
+
+            // Return full cleaned body for Copilot to summarise
+            function summarizePR(pr) {
+              if (!pr.body) return '';
+              return pr.body
+                .replace(/<!--[\s\S]*?-->/g, '')          // strip HTML comments
+                .replace(/^\s*[-*]\s*\[[ x]\].*/gm, '')  // strip checkboxes
+                .replace(/^\s*[-*]{3,}\s*$/gm, '')        // strip horizontal rules
+                .replace(/\r/g, '')
+                .trim();
+            }
+
+            // Detect PRs carrying breaking changes (! in title per conventional commits)
+            function isBreakingConfigPR(pr, files) {
+              return /!/.test(pr.title);
+            }
+
+            // Detect release PRs (created by release-please or similar)
+            function isReleasePR(pr) {
+              const labels = pr.labels.map(l => l.name.toLowerCase());
+              if (labels.some(l => l.includes('autorelease') || l.includes('release'))) return true;
+              if (/^chore\(main\): release/i.test(pr.title)) return true;
+              if (pr.user && pr.user.login === 'release-please[bot]') return true;
+              return false;
+            }
+
+            // ── fetch PRs opened in the last 7 days ──────────────────────────────
+            const allPRs = await paginate(
+              github.rest.pulls.list,
+              { owner, repo, state: 'all', sort: 'created', direction: 'desc' }
+            );
+
+            const opened = allPRs.filter(pr => new Date(pr.created_at) >= weekAgo);
+
+            const merged = allPRs.filter(
+              pr => pr.merged_at && new Date(pr.merged_at) >= weekAgo
+            );
+
+            // ── separate release PRs ──────────────────────────────────────────
+            const releasePRs = merged.filter(pr => isReleasePR(pr));
+            const nonReleaseOpened = opened.filter(pr => !isReleasePR(pr));
+            const nonReleaseMerged = merged.filter(pr => !isReleasePR(pr));
+
+            // ── classify each PR by component ────────────────────────────────────
+            async function withComponents(prs) {
+              const result = [];
+              for (const pr of prs) {
+                let files = null;
+                try {
+                  const { data } = await github.rest.pulls.listFiles({
+                    owner, repo, pull_number: pr.number, per_page: 100,
+                  });
+                  files = data.map(f => f.filename);
+                } catch (_) {}
+                result.push({ pr, components: classifyPR(pr, files), files });
+              }
+              return result;
+            }
+
+            const [openedWithComp, mergedWithComp] = await Promise.all([
+              withComponents(nonReleaseOpened),
+              withComponents(nonReleaseMerged),
+            ]);
+
+            // ── group by component ───────────────────────────────────────────────
+            function groupByComponent(items) {
+              const groups = {};
+              for (const { pr, components, files } of items) {
+                for (const comp of components) {
+                  (groups[comp] = groups[comp] || []).push({ pr, files });
+                }
+              }
+              return groups;
+            }
+
+            const openedByComp = groupByComponent(openedWithComp);
+            const mergedByComp = groupByComponent(mergedWithComp);
+
+            const allComponents = [
+              ...new Set([
+                ...Object.keys(openedByComp),
+                ...Object.keys(mergedByComp),
+              ]),
+            ].sort();
+
+            // ── breaking config PRs ───────────────────────────────────────────────
+            const breakingMerged = mergedWithComp.filter(({ pr, files }) => isBreakingConfigPR(pr, files));
+            const breakingOpen   = openedWithComp.filter(({ pr, files }) =>
+              isBreakingConfigPR(pr, files) && !mergedWithComp.some(m => m.pr.number === pr.number)
+            );
+
+            const compOrder = ['core', 'training', 'models', 'graphs'];
+            const allComponentsSorted = [
+              ...compOrder.filter(c => allComponents.includes(c)),
+              ...allComponents.filter(c => !compOrder.includes(c)).sort(),
+            ];
+
+            // ── contributors ──────────────────────────────────────────────────────
+            const contributorLogins = new Set();
+            for (const pr of [...opened, ...merged]) {
+              if (pr.user) contributorLogins.add(pr.user.login);
+            }
+
+            // ── date range ────────────────────────────────────────────────────────
+            const fmt = d => d.toISOString().slice(0, 10);
+
+            // ── write PR data to file for Copilot CLI ──────────────────────────
+            const fs = require('fs');
+            const allItems = [...openedWithComp, ...mergedWithComp];
+            const seenPR = new Set();
+            const prDataForCopilot = [];
+            for (const { pr, files } of allItems) {
+              if (seenPR.has(pr.number)) continue;
+              seenPR.add(pr.number);
+              prDataForCopilot.push({
+                number: pr.number,
+                title: pr.title,
+                body_excerpt: summarizePR(pr),
+                files: (files || []).slice(0, 20),
+                labels: pr.labels.map(l => l.name),
+                merged: !!pr.merged_at,
+              });
+            }
+            for (const pr of releasePRs) {
+              if (seenPR.has(pr.number)) continue;
+              seenPR.add(pr.number);
+              prDataForCopilot.push({
+                number: pr.number,
+                title: pr.title,
+                body_excerpt: summarizePR(pr),
+                files: [],
+                labels: pr.labels.map(l => l.name),
+                merged: true,
+              });
+            }
+            fs.writeFileSync('pr_data.json', JSON.stringify(prDataForCopilot, null, 2));
+
+            // ── save structured data for the bulletin step ────────────────────────
+            const bulletinData = {
+              dateRange: { from: fmt(weekAgo), to: fmt(now) },
+              counts: { opened: opened.length, merged: merged.length, releases: releasePRs.length,
+                        breakingMerged: breakingMerged.length, breakingOpen: breakingOpen.length,
+                        contributors: contributorLogins.size },
+              breakingMerged: breakingMerged.map(({ pr, files }) => ({ number: pr.number, title: pr.title, url: pr.html_url, author: pr.user?.login || 'unknown', files })),
+              breakingOpen:   breakingOpen.map(({ pr, files }) => ({ number: pr.number, title: pr.title, url: pr.html_url, author: pr.user?.login || 'unknown', files })),
+              releasePRs: releasePRs.map(pr => ({ number: pr.number, title: pr.title, url: pr.html_url, author: pr.user?.login || 'unknown' })),
+              components: allComponentsSorted.map(comp => ({
+                name: comp,
+                merged: (mergedByComp[comp] || []).map(({ pr, files }) => ({ number: pr.number, title: pr.title, url: pr.html_url, author: pr.user?.login || 'unknown', breaking: isBreakingConfigPR(pr, files) })),
+                opened: (openedByComp[comp] || []).map(({ pr, files }) => ({ number: pr.number, title: pr.title, url: pr.html_url, author: pr.user?.login || 'unknown', breaking: isBreakingConfigPR(pr, files) })),
+              })),
+            };
+            fs.writeFileSync('bulletin_data.json', JSON.stringify(bulletinData, null, 2));
+            console.log(`Collected ${prDataForCopilot.length} PRs for summarisation.`);
+
+      - name: Generate AI summaries with Copilot CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          copilot --yolo -p "Read the file pr_data.json. For each PR, write a concise one-sentence summary (max 30 words) of what the PR does based on its title, body excerpt, changed files, and labels. Output a JSON file called pr_summaries.json with the format: { \"<pr_number>\": \"<summary>\" }. Only output the JSON file, nothing else." --allow-tool='shell(cat:*)' --allow-tool=write --no-ask-user
+
+      - name: Build bulletin and post
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+
+            const data = JSON.parse(fs.readFileSync('bulletin_data.json', 'utf8'));
+
+            // Load AI summaries (fall back to empty if Copilot CLI failed)
+            let summaries = {};
+            try {
+              summaries = JSON.parse(fs.readFileSync('pr_summaries.json', 'utf8'));
+            } catch (_) {
+              console.log('No AI summaries found, continuing without them.');
+            }
+
+            const compEmoji = { core: '\u2699\ufe0f', training: '\ud83c\udfcb\ufe0f', models: '\ud83e\udde0', graphs: '\ud83d\udd78\ufe0f' };
+
+            function prLine(pr) {
+              const flag = pr.breaking ? ' \u26a0\ufe0f' : '';
+              const summary = summaries[String(pr.number)];
+              const line = `- [#${pr.number}](${pr.url})${flag} **${pr.title.trim()}** \u2014 ${pr.author}`;
+              return summary ? `${line}\n  > ${summary}` : line;
+            }
+
+            const lines = [];
+            lines.push(`## \ud83d\udccb anemoi-core Weekly PR Bulletin`);
+            lines.push(`**Period:** ${data.dateRange.from} \u2013 ${data.dateRange.to}`);
+            lines.push('');
+            lines.push(`| Metric | Count |`);
+            lines.push(`|--------|-------|`);
+            lines.push(`| PRs opened | ${data.counts.opened} |`);
+            lines.push(`| PRs merged | ${data.counts.merged} |`);
+            lines.push(`| \ud83d\ude80 Releases | ${data.counts.releases} |`);
+            lines.push(`| \u26a0\ufe0f Breaking / config | ${data.counts.breakingMerged + data.counts.breakingOpen} |`);
+            lines.push(`| Contributors | ${data.counts.contributors} |`);
+
+            if (data.breakingMerged.length > 0 || data.breakingOpen.length > 0) {
+              lines.push('');
+              lines.push(`### \u26a0\ufe0f Breaking / Config-Schema Changes`);
+              if (data.breakingMerged.length > 0) {
+                lines.push('');
+                lines.push(`**Merged (${data.breakingMerged.length})**`);
+                for (const pr of data.breakingMerged) lines.push(prLine({ ...pr, breaking: true }));
+              }
+              if (data.breakingOpen.length > 0) {
+                lines.push('');
+                lines.push(`**Opened (${data.breakingOpen.length})**`);
+                for (const pr of data.breakingOpen) lines.push(prLine({ ...pr, breaking: true }));
+              }
+            }
+
+            if (data.releasePRs.length > 0) {
+              lines.push('');
+              lines.push(`### \ud83d\ude80 Releases`);
+              for (const pr of data.releasePRs) lines.push(prLine({ ...pr, breaking: false }));
+            }
+
+            for (const comp of data.components) {
+              const emoji = compEmoji[comp.name] || '\ud83d\udce6';
+              lines.push('');
+              lines.push(`### ${emoji} ${comp.name.charAt(0).toUpperCase() + comp.name.slice(1)}`);
+
+              if (comp.merged.length > 0) {
+                lines.push('');
+                lines.push(`**Merged (${comp.merged.length})**`);
+                for (const pr of comp.merged) lines.push(prLine(pr));
+              }
+              if (comp.opened.length > 0) {
+                lines.push('');
+                lines.push(`**Opened (${comp.opened.length})**`);
+                for (const pr of comp.opened) lines.push(prLine(pr));
+              }
+            }
+
+            if (data.components.length === 0) {
+              lines.push('');
+              lines.push('_No pull request activity this week._');
+            }
+
+            lines.push('');
+            lines.push('---');
+            lines.push(`_Generated by the [Weekly PR Bulletin](https://github.com/${owner}/${repo}/actions/workflows/weekly-pr-bulletin.yml) workflow. Summaries by GitHub Copilot._`);
+
+            // \u2500\u2500 post comment on issue #1262 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: 1262,
+              body: lines.join('\n'),
+            });
+
+            console.log(`Bulletin posted to issue #1262.`);
