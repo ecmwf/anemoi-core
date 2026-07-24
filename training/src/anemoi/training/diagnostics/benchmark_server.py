@@ -22,6 +22,7 @@ from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from typing import Final
 
 import pandas as pd
 import yaml
@@ -49,7 +50,7 @@ def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
     return user, hostname, path
 
 
-DEFAULT_BENCHMARK_CONFIG_PATH = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+DEFAULT_BENCHMARK_CONFIG_PATH: Final[Path] = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
 
 
 def get_benchmark_store(kind: str, config_path: Path = DEFAULT_BENCHMARK_CONFIG_PATH) -> str:
