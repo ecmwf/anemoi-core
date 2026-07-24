@@ -14,6 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import ClassVar
 from typing import Literal
@@ -26,6 +27,9 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -243,8 +247,8 @@ class BaseLoss(nn.Module, ABC):
                 keepdim=True,
             )
 
-        dims = [layout.batch, layout.time, layout.ensemble]
-        out = torch.mean(space_time_reduced, dim=tuple([f for f in dims if f is not None])).squeeze()
+        dims = tuple(f for f in (layout.batch, layout.time, layout.ensemble) if f is not None)
+        out = torch.mean(space_time_reduced, dim=dims).squeeze() if dims else space_time_reduced.squeeze()
 
         return out if group is None else reduce_tensor(out, group)
 
@@ -301,8 +305,6 @@ class BaseLoss(nn.Module, ABC):
             Distributed group to reduce over, by default None
         squash_mode : {"avg", "sum"}, optional
             Reduction mode for the variable dimension, by default ``"avg"``
-        **kwargs
-            Additional keyword arguments
 
         Returns
         -------
@@ -430,6 +432,7 @@ class FunctionalLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
+
         Dispatches to the tensor-level _forward_impl via the source view's layout.
 
         Parameters

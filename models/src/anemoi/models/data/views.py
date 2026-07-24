@@ -32,10 +32,11 @@ LOGGER = logging.getLogger(__name__)
 
 def create_source_view(**kwargs) -> "SourceView":
     """Factory function to create a SourceView for a source dataset."""
-    if kwargs.pop("is_static"):
-        return GriddedSourceView(**kwargs)
+    kwargs.pop("is_static")
+    if kwargs["layout"].time_in_grid:
+        return TabularSourceView(**kwargs)
 
-    return TabularSourceView(**kwargs)
+    return GriddedSourceView(**kwargs)
 
 
 def _fancy_variable_index(
@@ -232,8 +233,34 @@ class GriddedSourceView(SourceView):
         flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
         device = self.data.device
 
-        batch_size = self.data.shape[self.layout.batch]
-        coordinates = einops.repeat(self.coordinates, "grid latlon -> (batch grid) latlon", batch=batch_size)
+        if self.coordinates is None:
+            msg = f"{self.__class__.__name__} requires coordinates for flattening."
+            raise ValueError(msg)
+        if isinstance(self.coordinates, list):
+            msg = f"{self.__class__.__name__} coordinates must be a tensor, not a list."
+            raise TypeError(msg)
+
+        batch_size = self.data.shape[self.layout.axis("batch", ndim=self.data.ndim)]
+        ensemble_size = self.data.shape[self.layout.axis("ensemble", ndim=self.data.ndim)]
+        if self.coordinates.ndim == 2:
+            coordinates = einops.repeat(
+                self.coordinates,
+                "grid latlon -> (batch ensemble grid) latlon",
+                batch=batch_size,
+                ensemble=ensemble_size,
+            )
+        elif self.coordinates.ndim == 3:
+            coordinates = einops.repeat(
+                self.coordinates,
+                "batch grid latlon -> (batch ensemble grid) latlon",
+                ensemble=ensemble_size,
+            )
+        else:
+            msg = (
+                f"{self.__class__.__name__} coordinates must have shape (grid, 2) "
+                f"or (batch, grid, 2), got {tuple(self.coordinates.shape)}."
+            )
+            raise ValueError(msg)
 
         return FlatView(
             data=flattened_data,
@@ -482,6 +509,18 @@ class TabularSourceView(SourceView):
             assert torch.all(
                 self.coordinates[i] == other.coordinates[i]
             ), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."
+            sample_kwargs = {
+                key: (
+                    value[i]
+                    if (
+                        isinstance(value, list)
+                        and len(value) == len(self.data)
+                        and all(isinstance(item, torch.Tensor) for item in value)
+                    )
+                    else value
+                )
+                for key, value in kwargs.items()
+            }
 
             losses.append(
                 loss_func(
@@ -490,18 +529,22 @@ class TabularSourceView(SourceView):
                     layout=self.layout,
                     statistics=self.statistics,
                     name_to_index=self.name_to_index,
-                    **kwargs,
+                    **sample_kwargs,
                 )
             )
             # Handle empty batches: a fully-empty worker returns a graph-connected 0
             non_empty.append(pred.shape[self.layout.grid] > 0)
+
+        if not losses:
+            msg = "Cannot apply a loss to an empty sparse source view."
+            raise ValueError(msg)
 
         stacked = torch.stack(losses)
         num_non_empty = sum(non_empty)
         # Divide by the number of non-empty samples (>= 1) rather than the batch size.
         # When every sample is empty, the stacked tensor is all-zero and graph-connected,
         # so summing and dividing by 1 preserves the zero gradient path.
-        return stacked.sum() / max(num_non_empty, 1)
+        return stacked.sum(dim=0) / max(num_non_empty, 1)
 
     def allgather(self, group: ProcessGroup | None) -> "TabularSourceView":
         """Allgather this view across the given process group.

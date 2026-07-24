@@ -19,6 +19,7 @@ import pytest
 import torch
 
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
@@ -289,6 +290,34 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     )
 
 
+def _make_sparse_batch(
+    *,
+    dataset_name: str = "obs",
+    input_nodes: int = 2,
+    output_nodes: int = 3,
+    num_vars: int = 2,
+) -> Batch:
+    """Wrap one sparse sample with one input and one output observation time."""
+    data = torch.arange((input_nodes + output_nodes) * num_vars, dtype=torch.float32).reshape(-1, num_vars)
+    coordinates = torch.stack(
+        [
+            torch.linspace(0.0, 0.4, input_nodes + output_nodes),
+            torch.linspace(1.0, 1.4, input_nodes + output_nodes),
+        ],
+        dim=-1,
+    )
+    boundaries = [(slice(0, input_nodes), slice(input_nodes, input_nodes + output_nodes))]
+    return Batch(
+        data={dataset_name: [data]},
+        coordinates={dataset_name: [coordinates]},
+        metadata={dataset_name: {BOUNDARIES_META_KEY: boundaries}},
+        timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
+        layouts={dataset_name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
+        statistics={dataset_name: {}},
+    )
+
+
 # ---- BasePlotAdditionalMetrics.process: input/output shapes ----
 
 
@@ -341,9 +370,12 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
 
     batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
     pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
-    pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
+    pl_module.allgather_batch = lambda tensor, *_args: tensor
     pl_module.model.post_processors = {"data": _IdentityProcessor()}
-    conditioned_target = {"data": torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0)}
+    conditioned_target_batch = _make_gridded_batch(
+        torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0),
+    )
+    conditioned_target = {"data": conditioned_target_batch["data"]}
 
     batch = {"data": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
     output = _step_output(
@@ -359,8 +391,55 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
     plotted_output = callback.plot.call_args.args[3]
     plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
     torch.testing.assert_close(plotted_output.predictions[0]["data"], output.predictions[0]["data"])
-    torch.testing.assert_close(plotted_auxiliary["data"], conditioned_target["data"])
+    torch.testing.assert_close(plotted_auxiliary["data"].data, conditioned_target["data"].data)
     assert plotted_output.plot_kwargs == {}
+
+
+def test_plot_sample_sparse_uses_auxiliary_output_from_validation_output():
+    """Sparse PlotSample forwards corrupted targets to the auxiliary panel."""
+    callback = PlotSample(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["obs"],
+    )
+    callback.post_processors = {"obs": _IdentityProcessor()}
+    callback._make_figure = MagicMock(return_value=MagicMock())
+    callback._output_figure = MagicMock()
+
+    pl_module = _make_pl_module_forecaster(validation_rollout=1)
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    data_indices.data.input.todict.return_value = {"name_to_index": {"a": 0, "b": 1}, "diagnostic": []}
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    pl_module.data_indices = {"obs": data_indices}
+
+    batch = _make_sparse_batch()
+    output_view = batch["obs"].select_time(1)
+    prediction = output_view.clone(data=[torch.full_like(output_view.data[0], 2.0)])
+    auxiliary = output_view.clone(data=[torch.full_like(output_view.data[0], 3.0)])
+    output = _step_output([{"obs": prediction}])
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+
+    callback._plot(
+        trainer,
+        pl_module,
+        ["obs"],
+        output,
+        batch,
+        batch_idx=0,
+        epoch=0,
+        auxiliary_output={"obs": auxiliary},
+    )
+
+    callback._make_figure.assert_called_once()
+    args = callback._make_figure.call_args.args
+    kwargs = callback._make_figure.call_args.kwargs
+    torch.testing.assert_close(torch.as_tensor(args[4]), torch.full((3, 2), 2.0))
+    torch.testing.assert_close(torch.as_tensor(kwargs["auxiliary"]), torch.full((3, 2), 3.0))
+    assert kwargs["sparse"] is True
+    assert kwargs["output_latlons"].shape == (3, 2)
 
 
 def test_process_time_interpolator_output_shapes():

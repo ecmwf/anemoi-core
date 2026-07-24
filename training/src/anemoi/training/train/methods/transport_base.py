@@ -14,11 +14,15 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from anemoi.models.transport import TransportSourceRequest
+from anemoi.models.transport.data_helpers import Data
+from anemoi.models.transport.data_helpers import is_sparse_data
 from anemoi.training.train.methods.base import BaseTrainingModule
 
 if TYPE_CHECKING:
     import torch
 
+    from anemoi.models.data import Batch
+    from anemoi.models.data.views import SourceView
     from anemoi.training.train.methods.transport import TransportTraining
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -54,10 +58,10 @@ class PreparedPredictionTarget:
         for tendency reconstruction or a reference-state source for transport.
     """
 
-    model_target: dict[str, torch.Tensor]
-    loss_target: dict[str, torch.Tensor]
+    model_target: Batch
+    loss_target: Batch
     loss_target_layout: IndexSpace
-    metric_target: dict[str, torch.Tensor]
+    metric_target: Batch
     aux: dict[str, Any]
 
 
@@ -100,12 +104,12 @@ class PreparedTransportObjective:
         bridge state, and bridge time for validation reconstruction.
     """
 
-    conditioned_target: dict[str, torch.Tensor]
+    conditioned_target: Batch
     condition: dict[str, torch.Tensor]
-    loss_target: dict[str, torch.Tensor]
+    loss_target: Batch
     loss_target_layout: IndexSpace
     pred_layout: IndexSpace
-    weights: dict[str, torch.Tensor] | None
+    weights: dict[str, Data] | None
     aux: dict[str, Any]
 
 
@@ -123,32 +127,33 @@ class TransportObjective:
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
+        x: Batch,
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
+        target_forcing: Batch | None = None,
+    ) -> Batch:
         raise NotImplementedError
 
     def reconstruct_endpoint(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         objective: PreparedTransportObjective,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del objective
         return prediction
 
     def prepare_loss_prediction(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         objective: PreparedTransportObjective,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del objective
         return prediction
 
     def compute_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -170,23 +175,36 @@ class TransportObjective:
         self,
         prepared: PreparedPredictionTarget,
         default_kind: str = "gaussian",
-    ) -> dict[str, torch.Tensor]:
-        def reference_source_factory() -> dict[str, torch.Tensor]:
+    ) -> dict[str, Data]:
+        transport_source = self.module.model.model.transport_source
+        kind = transport_source.resolve_kind(default_kind)
+        if kind == "reference_state":
+            sparse_datasets = [
+                dataset_name for dataset_name, data in prepared.model_target.data.items() if is_sparse_data(data)
+            ]
+            if sparse_datasets:
+                msg = (
+                    "reference_state transport sources are not implemented for sparse datasets. "
+                    f"Use a non-reference source for: {sparse_datasets}."
+                )
+                raise NotImplementedError(msg)
+
+        def reference_source_factory() -> dict[str, Data]:
             reference = prepared.aux.get("transport_reference_source")
             if reference is None:
                 msg = "Transport source kind 'reference_state' requires a reference source in the prediction mode."
                 raise ValueError(msg)
             if callable(reference):
                 # Materialise lazily built references only when reference_state is selected.
-                return reference()
-            return reference
+                reference = reference()
+            return reference.data if hasattr(reference, "data") else reference
 
-        request = TransportSourceRequest.from_tensors(
-            prepared.model_target,
+        request = TransportSourceRequest.from_data(
+            prepared.model_target.data,
             default_kind=default_kind,
             custom_source_factories={"reference_state": reference_source_factory},
             model_comm_group=getattr(self.module, "model_comm_group", None),
             grid_shard_sizes=self.module._grid_shard_sizes(prepared.model_target),
             error_context="training",
         )
-        return self.module.model.model.transport_source.build(request)
+        return transport_source.build(request)

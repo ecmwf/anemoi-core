@@ -276,13 +276,17 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             tensors used by dynamic graph providers / node attributes. Per-dataset
             grid sharding is carried by the batch and read through the source
             views (``view.flatten().shard_sizes``).
+        target : Optional[Batch], optional
+            Output-time batch used to refresh decoder-side conditioning, by default None.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
+        **kwargs
+            Additional keyword arguments forwarded to the mappers and processor.
 
         Returns
         -------
         dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+            Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(batch.keys())
 
@@ -340,7 +344,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 **graph_batch_kwargs,
             )
-            encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)
+            encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)  # todo SL: remove device movement
             encoder_edge_index = encoder_edge_index.to(x_data_latent.device)
 
             enc_shard_info = BipartiteGraphShardInfo(
@@ -372,7 +376,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
-        processor_edge_attr = processor_edge_attr.to(x_latent.device)
+        processor_edge_attr = processor_edge_attr.to(x_latent.device)  # todo SL: remove device movement
         processor_edge_index = processor_edge_index.to(x_latent.device)
 
         x_latent_proc = self.processor(
@@ -422,7 +426,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 **graph_batch_kwargs,
             )
-            decoder_edge_attr = decoder_edge_attr.to(x_latent.device)
+            decoder_edge_attr = decoder_edge_attr.to(x_latent.device)  # todo SL: remove device movement
             decoder_edge_index = decoder_edge_index.to(x_latent.device)
 
             dec_shard_info = BipartiteGraphShardInfo(

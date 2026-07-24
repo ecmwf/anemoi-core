@@ -40,9 +40,9 @@ class TensorLayout:
     Notes
     -----
     For sparse observation datasets (``time_in_grid=True``) the per-sample
-    inner tensor has shape ``(ensemble, grid, variables)`` and the batch
-    dimension is represented by the outer Python list (one tensor per
-    sample). ``batch`` therefore stays ``None`` even after collation.
+    inner tensor has shape ``(grid, variables)`` and the batch dimension is
+    represented by the outer Python list (one tensor per sample). ``batch``
+    therefore stays ``None`` even after collation.
     """
 
     batch: int | None = None

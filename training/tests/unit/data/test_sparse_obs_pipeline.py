@@ -101,14 +101,14 @@ def _unpack_payload(payload) -> dict:
     starts from a pre-built ``x`` (the ``payload``) so the tests don't
     need a fully-instantiated reader / open dataset.
     """
-    data = torch.from_numpy(np.asarray(payload.data)[None, ...])
+    data = torch.from_numpy(np.asarray(payload.data))
     latitudes = np.deg2rad(np.asarray(payload.latitudes))
     longitudes = np.deg2rad(np.asarray(payload.longitudes))
     coordinates = torch.from_numpy(np.stack([latitudes, longitudes], axis=-1))
     timedeltas = torch.from_numpy(np.asarray(payload.timedeltas, dtype=np.float32))
     return {
         "data": data,
-        "layout": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+        "layout": TensorLayout(grid=0, variables=1, time_in_grid=True),
         "coordinates": coordinates,
         "timedeltas": timedeltas,
         "metadata": {BOUNDARIES_META_KEY: payload.boundaries},
@@ -142,10 +142,10 @@ def test_unpack_sample_returns_unified_contract() -> None:
     sample = _unpack_payload(payload)
 
     assert {"data", "layout", "coordinates", "timedeltas", "metadata"}.issubset(sample)
-    # Data: dummy ensemble dim, no time axis, original (N, V) preserved.
-    assert sample["data"].shape == (1, n, v)
+    # Data: no explicit time or ensemble axis, original (N, V) preserved.
+    assert sample["data"].shape == (n, v)
     assert sample["data"].dtype == torch.float32
-    np.testing.assert_allclose(sample["data"][0].numpy(), payload.data)
+    np.testing.assert_allclose(sample["data"].numpy(), payload.data)
 
     # Coordinates: single (N, 2) tensor stacking lat/lon (in radians).
     assert sample["coordinates"].shape == (n, 2)
@@ -198,8 +198,8 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
     # Sparse path: list[Tensor] of length B with varying N_i.
     assert isinstance(batch.data["obs"], list)
     assert len(batch.data["obs"]) == 2
-    assert batch.data["obs"][0].shape[1] == 5
-    assert batch.data["obs"][1].shape[1] == 7
+    assert batch.data["obs"][0].shape[0] == 5
+    assert batch.data["obs"][1].shape[0] == 7
 
     # Sparse coordinates are list[(N_i, 2)] tensors per sample.
     assert isinstance(batch.coordinates["obs"], list)

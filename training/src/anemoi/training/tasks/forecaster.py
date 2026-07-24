@@ -20,6 +20,9 @@ from anemoi.training.tasks.base import BaseTask
 from anemoi.utils.dates import frequency_to_string
 from anemoi.utils.dates import frequency_to_timedelta
 
+if TYPE_CHECKING:
+    from anemoi.models.data.batch import Batch
+
 LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:

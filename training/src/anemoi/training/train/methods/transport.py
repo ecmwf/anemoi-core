@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.data import Batch
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import reference_state_sampling_source
+from anemoi.models.transport.data_helpers import is_sparse_data
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
@@ -27,7 +29,7 @@ from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
-    from anemoi.models.data import Batch
+    from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,62 +49,80 @@ class PredictionMode:
 
     def reconstruct_prediction(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         prepared: PreparedPredictionTarget,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         raise NotImplementedError
 
-    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
+    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> Batch:
         return prepared.metric_target
 
 
 class StatePredictionMode(PredictionMode):
     """Prediction mode where the model learns the future state directly."""
 
-    def _reference_state_target_space(self, x: Batch) -> dict[str, torch.Tensor]:
+    def _reference_state_target_space(self, batch: Batch) -> Batch:
         # Use the latest input state as a source field, selecting the same
-        # variables that the model predicts for the future state.
-        reference: dict[str, torch.Tensor] = {}
-        for dataset_name, input_view in x.items():
-            output_names = self.module.data_indices[dataset_name].model.output.ordered_names
-            positions = torch.as_tensor(
-                [input_view.name_to_index[name] for name in output_names],
-                device=input_view.data.device,
-            )
-            reference_step = input_view.data.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, positions)
+        # variables that the model predicts for the future state. The state is
+        # taken from the full batch rather than the model inputs because
+        # diagnostic output variables are not part of the model input, and it
+        # is normalized (with imputation) like the model inputs.
+        reference_state = self.module.preprocess_inputs(batch.select(time=self.module.n_step_input - 1))
+        reference_data: dict[str, torch.Tensor] = {}
+        for dataset_name, state_view in reference_state.items():
+            var_idx = self.module.data_indices[dataset_name].data.output.full.tolist()
+            reference_step = state_view.select(variables=var_idx).data
             if self.module.n_step_output > 1:
+                if isinstance(reference_step, list):
+                    msg = "Multi-step reference-state transport sources are not supported for sparse datasets."
+                    raise NotImplementedError(msg)
                 reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
-            reference[dataset_name] = reference_step
-        return reference
+            reference_data[dataset_name] = reference_step
+        return self.module.reduce_data_output_target_to_model_output(reference_state.with_data(reference_data))
 
     def prepare_target(
         self,
         batch: Batch,
         x: Batch,
     ) -> PreparedPredictionTarget:
-        raw_target, _ = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
-        target_batch = self.module.preprocess_targets(raw_target)
-        target_full = target_batch.data
-        target_data_output = self.module.get_data_output_target(target_full)
-        model_target = self.module.reduce_data_output_target_to_model_output(target_data_output)
+        del x
+        raw_target, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        # Loss and metric targets keep their NaNs so missing observations are
+        # masked in the loss (imputation skipped).
+        target_full = self.module.preprocess_targets(raw_target)
+        # The model target is corrupted and fed through the network, so it must
+        # be imputed like the model inputs: NaNs would spread through message
+        # passing and poison the whole prediction.
+        model_state = self.module.preprocess_inputs(raw_target)
+        model_target = self.module.reduce_data_output_target_to_model_output(
+            self.module.get_data_output_target(model_state),
+        )
+        # NaN-preserving counterpart of model_target, used by objectives that
+        # derive their loss target from model_target (e.g. the SI drift) to
+        # re-mask missing observations.
+        model_target_missing = self.module.reduce_data_output_target_to_model_output(
+            self.module.get_data_output_target(target_full),
+        )
         return PreparedPredictionTarget(
             model_target=model_target,
             loss_target=target_full,
             loss_target_layout=IndexSpace.DATA_FULL,
             metric_target=target_full,
             aux={
-                # For state prediction, the reference source is already in the
-                # same state space as the target, so store it directly.
-                "transport_reference_source": self._reference_state_target_space(x),
-                "target_batch": target_batch,
+                # Build the reference-state source lazily so gaussian and zero
+                # sources never pay for (or crash on) this projection.
+                "transport_reference_source": lambda: self._reference_state_target_space(batch),
+                # Output-time decoding forcings, normalized like the model inputs.
+                "target_forcing": self.module.preprocess_inputs(target_forcing),
+                "model_target_missing": model_target_missing,
             },
         )
 
     def reconstruct_prediction(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         prepared: PreparedPredictionTarget,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         del prepared
         return prediction
 
@@ -247,9 +267,16 @@ class TendencyPredictionMode(PredictionMode):
         x: Batch,
     ) -> PreparedPredictionTarget:
         """Build tendency targets for training and state targets for validation metrics."""
-        raw_state_target, _ = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
-        state_target_batch = self.module.preprocess_targets(raw_state_target)
-        state_target = state_target_batch.data
+        if any(is_sparse_data(dataset_data) for dataset_data in batch.data.values()):
+            msg = "Tendency prediction mode is not implemented for sparse observation datasets."
+            raise NotImplementedError(msg)
+
+        raw_state_target, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        # Tendency targets are fed through the network (as the corrupted target)
+        # and converted back to states for metrics, so they are imputed like the
+        # model inputs; prepare_metric_target re-inserts the missing values via
+        # the imputer inverse.
+        state_target = self.module.preprocess_inputs(raw_state_target)
         y_data_output = self.module.get_data_output_target(state_target)
 
         pre_processors_tendencies = getattr(self.module.model, "pre_processors_tendencies", None)
@@ -267,7 +294,7 @@ class TendencyPredictionMode(PredictionMode):
         )
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
-        tendency_target_data_output = self._compute_tendency_target(y_data_output, x_ref)
+        tendency_target_data_output = y_data_output.with_data(self._compute_tendency_target(y_data_output.data, x_ref))
         tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)
         return PreparedPredictionTarget(
             model_target=tendency_target,
@@ -285,26 +312,29 @@ class TendencyPredictionMode(PredictionMode):
                     data_indices=self.module.data_indices,
                     n_step_output=self.module.n_step_output,
                 ),
-                "target_batch": state_target_batch,
+                # Output-time decoding forcings, normalized like the model inputs.
+                "target_forcing": self.module.preprocess_inputs(target_forcing),
             },
         )
 
     def reconstruct_prediction(
         self,
-        prediction: dict[str, torch.Tensor],
+        prediction: Batch,
         prepared: PreparedPredictionTarget,
-    ) -> dict[str, torch.Tensor]:
-        return self._reconstruct_state(prepared.aux["x_ref"], prediction)
+    ) -> Batch:
+        reconstructed = self._reconstruct_state(prepared.aux["x_ref"], prediction.data)
+        return prepared.metric_target.with_data(reconstructed)
 
-    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
-        return {
+    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> Batch:
+        metric_data = {
             dataset_name: self.module.model.model._apply_imputer_inverse(
                 self.module.model.post_processors,
                 dataset_name,
-                target,
+                target.data,
             )
             for dataset_name, target in prepared.metric_target.items()
         }
+        return prepared.metric_target.with_data(metric_data)
 
 
 PREDICTION_MODE_CLASSES = {
@@ -346,59 +376,58 @@ class BaseTransportTraining(BaseTrainingModule):
             self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
         return self._ensemble_plot_adapter
 
-    def get_data_output_target(self, target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def get_data_output_target(self, target_full: Batch) -> Batch:
         """Select the target variables that are present in the dataset output."""
         y = {}
         for dataset_name, target_dataset in target_full.items():
-            var_idx = self.data_indices[dataset_name].data.output.full.to(device=target_dataset.device)
-            y[dataset_name] = target_dataset.index_select(-1, var_idx)
+            var_idx = self.data_indices[dataset_name].data.output.full.tolist()
+            y[dataset_name] = target_dataset.select(variables=var_idx).data
             LOGGER.debug(
                 "SHAPE: y_data_output[%s].shape = %s",
                 dataset_name,
-                list(y[dataset_name].shape),
+                y[dataset_name].shape if hasattr(y[dataset_name], "shape") else [t.shape for t in y[dataset_name]],
             )
-        return y
+        return target_full.with_data(y)
 
     def reduce_data_output_target_to_model_output(
         self,
-        y_data_output: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
+        y_data_output: Batch,
+    ) -> Batch:
         """Select only the variables that the model predicts."""
         y_reduced = {}
         for dataset_name, y_dataset in y_data_output.items():
             dataset_indices = self.data_indices[dataset_name]
             if dataset_indices.model_output_in_data_output_is_identity:
-                y_reduced[dataset_name] = y_dataset
+                y_reduced[dataset_name] = y_dataset.data
             elif dataset_indices.model_output_in_data_output_is_contiguous:
-                y_reduced[dataset_name] = y_dataset.narrow(
-                    -1,
-                    dataset_indices.model_output_in_data_output_contiguous_start,
-                    dataset_indices.model_output_in_data_output_contiguous_length,
-                )
+                start = dataset_indices.model_output_in_data_output_contiguous_start
+                length = dataset_indices.model_output_in_data_output_contiguous_length
+                y_reduced[dataset_name] = y_dataset.select(variables=slice(start, start + length)).data
             else:
-                var_idx = torch.as_tensor(
-                    dataset_indices.model_output_positions_in_data_output,
-                    device=y_dataset.device,
-                    dtype=torch.long,
-                )
-                y_reduced[dataset_name] = y_dataset.index_select(-1, var_idx)
+                y_reduced[dataset_name] = y_dataset.select(
+                    variables=dataset_indices.model_output_positions_in_data_output,
+                ).data
             LOGGER.debug(
                 "SHAPE: y_model_output[%s].shape = %s",
                 dataset_name,
-                list(y_reduced[dataset_name].shape),
+                (
+                    y_reduced[dataset_name].shape
+                    if hasattr(y_reduced[dataset_name], "shape")
+                    else [t.shape for t in y_reduced[dataset_name]]
+                ),
             )
-        return y_reduced
+        return y_data_output.with_data(y_reduced)
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         dataset_name: str,
         validation_mode: bool = False,
-        metric_prediction: dict[str, torch.Tensor] | None = None,
-        metric_target: dict[str, torch.Tensor] | None = None,
+        metric_prediction: Batch | None = None,
+        metric_target: Batch | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
         """Compute loss according to the objective and validation metrics in clean-state space."""
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
@@ -483,10 +512,11 @@ class TransportTraining(BaseTransportTraining):
     def forward(
         self,
         x: Batch,
-        conditioned_target: dict[str, torch.Tensor],
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        return self.transport_objective.forward(x, conditioned_target, condition)
+        target_forcing: Batch | None = None,
+    ) -> Batch:
+        return self.transport_objective.forward(x, conditioned_target, condition, target_forcing=target_forcing)
 
     def _compute_loss(
         self,
@@ -508,6 +538,33 @@ class TransportTraining(BaseTransportTraining):
             **kwargs,
         )
 
+    def sample(
+        self,
+        batch: Batch,
+        *,
+        task_kwargs: dict | None = None,
+        schedule_params: dict | None = None,
+        sampler_params: dict | None = None,
+        **kwargs,
+    ) -> Batch:
+        """Sample from a full task batch using the deterministic target-template pattern."""
+        assert isinstance(batch, Batch), "batch must be a Batch instance"
+        task_kwargs = {} if task_kwargs is None else task_kwargs
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        _, target_template = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+        # The template carries the output-time decoding forcings in the same
+        # normalization state as the caller-provided batch (matching x).
+        return self.model.model.sample(
+            x,
+            target_template=target_template,
+            model_comm_group=self.model_comm_group,
+            grid_shard_sizes=self.grid_shard_sizes,
+            schedule_params=schedule_params,
+            sampler_params=sampler_params,
+            target_forcing=target_template,
+            **kwargs,
+        )
+
     def _step(
         self,
         batch: Batch,
@@ -518,36 +575,36 @@ class TransportTraining(BaseTransportTraining):
         prepared_target = self.prediction_mode.prepare_target(batch, x)
         prepared_objective = self.transport_objective.prepare(prepared_target)
 
-        prediction = self(x, prepared_objective.conditioned_target, prepared_objective.condition)
+        prediction = self(
+            x,
+            prepared_objective.conditioned_target,
+            prepared_objective.condition,
+            target_forcing=prepared_target.aux.get("target_forcing"),
+        )
         loss_prediction = self.transport_objective.prepare_loss_prediction(prediction, prepared_objective)
 
         metric_prediction = None
         metric_target = None
-        plot_kwargs: dict[str, dict[str, torch.Tensor]] = {}
+        plot_kwargs: dict[str, dict[str, SourceView]] = {}
         if validation_mode:
             conditioned_endpoint = self.prediction_mode.reconstruct_prediction(
                 prepared_objective.conditioned_target,
                 prepared_target,
             )
             plot_kwargs["auxiliary_output"] = {
-                dataset_name: target.detach() for dataset_name, target in conditioned_endpoint.items()
+                dataset_name: target.apply_func(lambda data, **_: data.detach())
+                for dataset_name, target in conditioned_endpoint.items()
             }
             endpoint_prediction = self.transport_objective.reconstruct_endpoint(prediction, prepared_objective)
             metric_prediction = self.prediction_mode.reconstruct_prediction(endpoint_prediction, prepared_target)
             metric_target = self.prediction_mode.prepare_metric_target(prepared_target)
 
-        target_batch = prepared_target.aux["target_batch"]
-        loss_prediction_batch = target_batch.with_data(loss_prediction)
-        loss_target_batch = target_batch.with_data(prepared_objective.loss_target)
-        metric_prediction_batch = None if metric_prediction is None else target_batch.with_data(metric_prediction)
-        metric_target_batch = None if metric_target is None else target_batch.with_data(metric_target)
-
         loss, metrics, y_pred = checkpoint(
             self.compute_loss_metrics,
-            loss_prediction_batch,
-            loss_target_batch,
-            metric_prediction=metric_prediction_batch,
-            metric_target=metric_target_batch,
+            loss_prediction,
+            prepared_objective.loss_target,
+            metric_prediction=metric_prediction,
+            metric_target=metric_target,
             weights=prepared_objective.weights,
             validation_mode=validation_mode,
             pred_layout=prepared_objective.pred_layout,
