@@ -14,29 +14,25 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
-    """Fair energy score over signed graph edge-difference neighbourhoods.
+    """Fair energy score over graph edge differences.
 
-    For each graph edge ``src -> dst`` this loss forms signed differences
-    ``x[src] - x[dst]``. For each destination node, the incoming edge
-    differences are scored jointly with an energy score. The resulting score is
-    node-shaped, so it remains compatible with the usual scalers, reductions,
-    sharding path, and multiscale wrapper.
+    For each graph edge ``src -> dst``, the difference is
+    ``x[src] - x[dst]``. The incoming edge differences at each node are scored
+    together, giving one score for each node and variable.
 
-    The edge-difference vector norm mirrors ``GraphEnergyScoreLoss``: when
-    ``loss_graph.row_normalize=True`` it is a weighted RMS-style norm over
-    incoming edges, so neighbourhood size does not change the scale by itself.
+    With ``loss_graph.row_normalize=True``, the distance is
+    ``sqrt(sum_e w_e d_e**2)`` with edge weights that sum to one.
 
-    When ``ignore_nans=True``, invalid nodes remove every edge that touches
-    them. The remaining valid edges are only re-normalized when
-    ``row_normalize=True``; otherwise they keep their original raw edge
-    weights.
+    When ``ignore_nans=True``, edges containing missing values are left out. If
+    ``row_normalize=True``, the weights of the remaining edges are scaled to
+    sum to one; otherwise their original weights are kept.
     """
 
     def __init__(
         self,
+        loss_graph: dict,
+        graph_data: HeteroData,
         fair: bool = True,
-        loss_graph: dict | None = None,
-        graph_data: HeteroData | None = None,
         no_autocast: bool = True,
         ignore_nans: bool = False,
     ) -> None:
@@ -44,19 +40,18 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
 
         Parameters
         ----------
+        loss_graph : dict
+            Graph-based edge definition.
+        graph_data : HeteroData
+            Graph data used to build the edge graph.
         fair : bool
             Whether to use the fair ensemble correction.
-        loss_graph : dict | None
-            Graph-based edge definition.
-        graph_data : HeteroData | None
-            Graph data used to build the edge graph.
         no_autocast : bool
-            Whether to disable autocast for the full edge energy score
-            calculation.
+            Whether to keep the original numerical precision throughout.
         ignore_nans : bool
-            Whether to drop invalid nodes before graph aggregation. Remaining
-            edge weights are only re-normalized when
-            ``loss_graph.row_normalize=True``.
+            Whether to leave out edges containing missing values. With
+            ``loss_graph.row_normalize=True``, the remaining weights are
+            scaled to sum to one.
         """
         graph = GraphScoreGraph.from_definition(
             loss_graph,
@@ -78,14 +73,14 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute the edge-difference energy score with shape ``(B, T, N, V)``."""
+        """Return one edge energy score per batch, output step, node, and variable."""
         ensemble_size = y_pred_ens.shape[2]
         edge_valid = self._valid_edges(y_pred_ens, y)
 
         obs_edge_difference = self._edge_difference(y)
 
-        # First term: mean member-to-observation distance between the vectors
-        # of incoming signed edge differences at each destination node.
+        # Mean distance between each member and the observation, measured over
+        # the incoming edge differences of each node.
         obs_term_sum = torch.zeros(
             (*y.shape[:2], self.num_nodes, y.shape[-1]),
             dtype=y_pred_ens.dtype,
@@ -99,7 +94,7 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
             )
         obs_term = obs_term_sum / ensemble_size
 
-        # Second term: distance between every unordered pair of members.
+        # Sum of distances over unordered pairs of ensemble members.
         pair_distance_sum = torch.zeros_like(obs_term)
         for i in range(ensemble_size):
             member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])

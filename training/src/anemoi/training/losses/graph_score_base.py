@@ -7,18 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Common execution lifecycle for graph score losses.
+"""Common shapes, weights, and sums used by graph scores.
 
-Tensor shapes use ``B`` for batch, ``T`` for time, ``M`` for ensemble
-members, ``N`` for nodes, and ``V`` for variables:
+Shapes use ``B`` for batch, ``T`` for forecast output steps, ``M`` for
+ensemble members, ``N`` for nodes, and ``V`` for variables:
 
 - ensemble predictions: ``(B, T, M, N, V)``
 - targets: ``(B, T, 1, N, V)``
-- local score fields: ``(B, T, N, V)``
+- scores for each output step, node, and variable: ``(B, T, N, V)``
 
-Concrete losses implement only the local score kernel. This base class handles
-input validation, precision control, distributed layout changes, scaling, and
-the final reduction around that kernel.
+Each forecast output step is scored independently. The configured weights are
+then applied, the values are summed over output steps and nodes, and variables
+are averaged unless a summation is requested.
 """
 
 from abc import abstractmethod
@@ -37,7 +37,7 @@ from anemoi.training.utils.enums import TensorDim
 
 
 class BaseGraphScoreLoss(BaseLoss):
-    """Run a local graph score kernel within the standard loss lifecycle."""
+    """Evaluate a graph score and apply its weights and sums."""
 
     needs_graph_data: bool = True
     graph: GraphScoreGraph | None
@@ -59,7 +59,7 @@ class BaseGraphScoreLoss(BaseLoss):
         return self.graph.row_normalize if self.graph is not None else False
 
     def compile_for_training(self, **options) -> None:
-        """Compile only the local graph score kernel."""
+        """Compile the score calculation used during training."""
         self._compute_local_score_tensor = torch.compile(
             self._compute_local_score_tensor,
             **options,
@@ -67,7 +67,7 @@ class BaseGraphScoreLoss(BaseLoss):
 
     @property
     def needs_shard_layout_info(self) -> bool:
-        """Whether this loss needs shard layout metadata from the task."""
+        """Return whether a graph is used."""
         return self.graph is not None
 
     def _prepare_for_aggregation(
@@ -78,7 +78,7 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int,
         grid_shard_sizes: ShardSizes,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
-        """Move grid-sharded inputs to a full-grid, variable-sharded layout."""
+        """Bring values from all nodes together."""
         channel_shard_sizes_pred = get_shard_sizes(
             y_pred_ens,
             TensorDim.VARIABLE,
@@ -118,7 +118,7 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_shard_sizes: list[int],
         channel_shard_sizes: list[int],
     ) -> torch.Tensor:
-        """Move a full-grid, variable-sharded score back to grid-sharded layout."""
+        """Return each score to the node on which it originated."""
         return all_to_all_transpose(
             score,
             -2,
@@ -173,11 +173,11 @@ class BaseGraphScoreLoss(BaseLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute a ``(B, T, N, V)`` score from predictions and squeezed targets.
+        """Return the score ``S[B, T, N, V]`` before weights and sums.
 
         ``y_pred_ens`` has shape ``(B, T, M, N, V)`` and ``y`` has shape
-        ``(B, T, N, V)``. Implementations must not perform collectives,
-        scaling, or final time/grid reduction.
+        ``(B, T, N, V)``. No weights or sums over ``T`` and ``N`` are applied
+        at this stage.
         """
 
     def _format_and_scale_score(
@@ -208,15 +208,16 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int | None = None,
         grid_shard_sizes: ShardSizes = None,
     ) -> tuple[torch.Tensor, bool]:
-        # 1. Validate the public five-dimensional prediction/target contract.
+        # Predictions and observations must cover the same output steps, nodes,
+        # and variables. At least two ensemble members are needed.
         self._validate_input_shapes(y_pred_ens, y)
         assert y_pred_ens.shape[2] > 1, "Ensemble size must be greater than 1."
 
         is_sharded = grid_shard_slice is not None
         is_model_sharded = self.graph is not None and is_sharded
 
-        # 2. Graph aggregation needs the complete node dimension. For a
-        # sharded model, transpose grid shards into variable shards first.
+        # Bring neighbouring node values together before measuring graph
+        # distances.
         pred_for_score, target_for_score = y_pred_ens, y
         channel_shard_sizes = None
         if is_model_sharded:
@@ -237,8 +238,8 @@ class BaseGraphScoreLoss(BaseLoss):
                 grid_shard_sizes,
             )
 
-        # 3. Remove the target's singleton ensemble dimension and evaluate the
-        # concrete score formula on the full graph node space.
+        # Remove the observation's length-one ensemble axis and calculate the
+        # score.
         self._validate_graph_grid_size(pred_for_score)
         target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
         score = self._compute_local_score_tensor_with_precision_control(
@@ -246,8 +247,8 @@ class BaseGraphScoreLoss(BaseLoss):
             target_for_score,
         )
 
-        # 4. Restore the original grid-sharded layout before applying the
-        # standard node/variable scalers.
+        # Return scores to their original nodes, then apply node and variable
+        # weights.
         if is_model_sharded:
             assert grid_shard_sizes is not None
             assert channel_shard_sizes is not None
@@ -266,30 +267,6 @@ class BaseGraphScoreLoss(BaseLoss):
         )
         return score, is_sharded
 
-    def local_score_field(
-        self,
-        y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
-        squash: bool = True,
-        *,
-        scaler_indices: tuple[int, ...] | None = None,
-        without_scalers: list[str] | list[int] | None = None,
-    ) -> torch.Tensor:
-        """Return the local graph score field before time/grid reduction."""
-        self._validate_input_shapes(y_pred_ens, y)
-        self._validate_graph_grid_size(y_pred_ens)
-        y = y.squeeze(TensorDim.ENSEMBLE_DIM)
-        score = self._compute_local_score_tensor_with_precision_control(y_pred_ens, y)
-        score = self._format_and_scale_score(
-            score,
-            scaler_indices=scaler_indices,
-            without_scalers=without_scalers,
-        )
-        if squash:
-            score = torch.nansum(score, dim=-1) if self.ignore_nans else torch.sum(score, dim=-1)
-        avg_function = torch.nanmean if self.ignore_nans else torch.mean
-        return avg_function(score, dim=(0, 2))
-
     def forward(
         self,
         y_pred_ens: torch.Tensor,
@@ -302,7 +279,7 @@ class BaseGraphScoreLoss(BaseLoss):
         group: ProcessGroup | None = None,
         grid_dim: int | None = None,
         grid_shard_sizes: ShardSizes = None,
-        squash_mode: Squash_mode = "sum",
+        squash_mode: Squash_mode = "avg",
         **kwargs,  # noqa: ARG002
     ) -> torch.Tensor:
         score, is_sharded = self._score_tensor(
@@ -315,8 +292,8 @@ class BaseGraphScoreLoss(BaseLoss):
             grid_dim=grid_dim,
             grid_shard_sizes=grid_shard_sizes,
         )
-        # Unsupported rows stay NaN through local scoring and scaling. They are
-        # neutralized only for the final distributed reduction.
+        # Neighbourhoods with no available values contribute zero to the final
+        # sums.
         if self.ignore_nans:
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
         return self.reduce(

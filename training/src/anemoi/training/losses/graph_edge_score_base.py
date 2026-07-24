@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Shared edge transformations for graph score losses.
+"""Edge differences and weighted node sums for graph scores.
 
-Tensor shapes use ``B`` for batch, ``T`` for time, ``M`` for ensemble
-members, ``N`` for nodes, ``E`` for edges, and ``V`` for variables.
+Shapes use ``B`` for batch, ``T`` for forecast output steps, ``M`` for
+ensemble members, ``N`` for nodes, ``E`` for edges, and ``V`` for variables.
 """
 
 import torch
@@ -20,7 +20,7 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
-    """Shared graph access, validity, and aggregation for edge-based scores."""
+    """Form edge differences and sum edge scores at each node."""
 
     graph: GraphScoreGraph
 
@@ -54,7 +54,7 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         return self.graph.num_nodes
 
     def _edge_difference(self, node_values: torch.Tensor) -> torch.Tensor:
-        """Return signed ``source - destination`` values with shape ``(..., E, V)``."""
+        """Return ``source - destination`` for every edge."""
         return node_values[..., self.edge_src_index, :] - node_values[..., self.edge_dst_index, :]
 
     def _valid_edges(
@@ -62,11 +62,10 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor | None:
-        """Return the complete-case edge mask with shape ``(B, T, E, V)``.
+        """Return ``True`` for edges whose values are available.
 
-        A node is valid only when its target and every ensemble member are
-        finite. Requiring complete cases keeps the effective ensemble size
-        fixed within each score calculation.
+        Both end nodes need an observation and values for every ensemble
+        member. This keeps the ensemble size unchanged.
         """
         if not self.ignore_nans:
             return None
@@ -78,7 +77,7 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         edge_values: torch.Tensor,
         valid_edges: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Aggregate ``(B, T, E, V)`` edge scores to ``(B, T, N, V)`` nodes."""
+        """Sum weighted edge scores at each destination node."""
         weights = self.edge_weights.to(dtype=edge_values.dtype).view(1, 1, -1, 1)
         if valid_edges is not None:
             safe_edge_values = torch.where(
@@ -95,8 +94,8 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
             )
             valid_row_weight_sum.index_add_(2, self.edge_dst_index, valid_weights)
 
-            # Re-normalize only graphs configured for row normalization. Raw
-            # weighted graphs retain their original scale after masking.
+            # Normalized neighbourhoods keep unit total weight after missing
+            # edges are removed. Otherwise the original weights are retained.
             if self.row_normalize:
                 edge_weight_sums = valid_row_weight_sum[:, :, self.edge_dst_index, :]
                 safe_weight_sums = torch.where(

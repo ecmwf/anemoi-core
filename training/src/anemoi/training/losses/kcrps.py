@@ -168,7 +168,7 @@ class CRPS(BaseLoss):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "sum",
+        squash_mode: Squash_mode = "avg",
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
 

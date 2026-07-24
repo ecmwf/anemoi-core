@@ -16,6 +16,7 @@ from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import GraphEdgeCRPSLoss
@@ -25,8 +26,10 @@ from anemoi.training.losses import GraphVariogramScoreLoss
 from anemoi.training.losses import MultiscaleLossWrapper
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
+from anemoi.training.utils.index_space import IndexSpace
 
 
 @pytest.fixture
@@ -288,24 +291,81 @@ def test_graph_scores_follow_standard_output_shape_contract(
 
     scalar_loss = loss(pred, target)
     per_variable_loss = loss(pred, target, squash=False)
+    summed_loss = loss(pred, target, squash_mode="sum")
 
     assert scalar_loss.shape == ()
     assert per_variable_loss.shape == (num_variables,)
-    torch.testing.assert_close(scalar_loss, per_variable_loss.sum())
+    torch.testing.assert_close(scalar_loss, per_variable_loss.mean())
+    torch.testing.assert_close(summed_loss, per_variable_loss.sum())
 
 
 @pytest.mark.parametrize(("fair", "alpha"), [(True, 1.0), (False, 0.0)])
+@pytest.mark.parametrize("squash", [True, False])
 def test_pointwise_graph_energy_matches_crps(
     score_inputs: tuple[torch.Tensor, torch.Tensor],
     fair: bool,
     alpha: float,
+    squash: bool,
 ) -> None:
     pred, target = score_inputs
 
-    actual = GraphEnergyScoreLoss(fair=fair)(pred, target, squash=False)
-    expected = CRPS(alpha=alpha)(pred, target, squash=False)
+    actual = GraphEnergyScoreLoss(fair=fair)(pred, target, squash=squash)
+    expected = CRPS(alpha=alpha)(pred, target, squash=squash)
 
     torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.7, 1.0])
+def test_graph_edge_crps_matches_crps_in_edge_space(alpha: float) -> None:
+    graph = HeteroData()
+    graph["data"].num_nodes = 2
+    graph["data", "to", "data"].edge_index = torch.tensor([[0, 1], [1, 0]])
+    definition = {
+        "edges_name": ["data", "to", "data"],
+        "row_normalize": True,
+    }
+    pred = torch.tensor(
+        [[[[[0.0], [1.0]], [[2.0], [0.0]], [[1.0], [4.0]]]]],
+        dtype=torch.float64,
+    )
+    target = torch.tensor([[[[[1.0], [2.0]]]]], dtype=torch.float64)
+    src, dst = graph["data", "to", "data"].edge_index
+
+    actual = GraphEdgeCRPSLoss(
+        loss_graph=definition,
+        graph_data=graph,
+        alpha=alpha,
+    )(pred, target)
+    edge_pred = pred[..., src, :] - pred[..., dst, :]
+    edge_target = target[..., src, :] - target[..., dst, :]
+    expected = CRPS(alpha=alpha)(edge_pred, edge_target)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_fair_graph_variogram_matches_hand_calculation() -> None:
+    graph = HeteroData()
+    graph["data"].num_nodes = 2
+    graph["data", "to", "data"].edge_index = torch.tensor([[0, 1], [1, 0]])
+    pred = torch.tensor(
+        [[[[[0.0], [1.0]], [[0.0], [3.0]]]]],
+        dtype=torch.float64,
+    )
+    target = torch.tensor([[[[[0.0], [2.0]]]]], dtype=torch.float64)
+    loss = GraphVariogramScoreLoss(
+        loss_graph={
+            "edges_name": ["data", "to", "data"],
+            "row_normalize": True,
+        },
+        graph_data=graph,
+        p=1.0,
+        fair=True,
+    )
+
+    # Each directed edge has observed variogram 2 and member variograms 1 and
+    # 3. Its fair score is 2**2 - 2*2*((1+3)/2) + 1*3 = -1. Two reciprocal
+    # edges therefore give a total score of -2.
+    torch.testing.assert_close(loss(pred, target), torch.tensor(-2.0, dtype=torch.float64))
 
 
 @pytest.mark.parametrize(
@@ -321,6 +381,7 @@ def test_graph_scores_ignore_invalid_edges(
     pred, target = score_inputs
     pred = pred.clone()
     pred[:, :, 0, 0, 0] = torch.nan
+    pred.requires_grad_()
     loss = loss_cls(
         graph_data=graph_data,
         loss_graph=loss_graph,
@@ -328,8 +389,11 @@ def test_graph_scores_ignore_invalid_edges(
     )
 
     result = loss(pred, target)
+    result.backward()
 
     assert torch.isfinite(result)
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
 
 
 def test_graph_definition_applies_and_normalizes_weights(graph_data: HeteroData) -> None:
@@ -538,6 +602,47 @@ def test_graph_score_factory_and_nested_losses(
     assert torch.isfinite(multiscale(pred, target)).all()
 
 
+def test_filtered_graph_score_preserves_its_reduction_default(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+        {"a": 0, "b": 1, "c": 2},
+    )
+    pred, target = score_inputs
+    pred = torch.cat((pred, pred[..., :1] + 0.5), dim=-1)
+    target = torch.cat((target, target[..., :1] - 0.5), dim=-1)
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.GraphEnergyScoreLoss",
+                "scalers": [],
+                "loss_graph": loss_graph,
+                "predicted_variables": ["a", "c"],
+                "target_variables": ["a", "c"],
+            },
+        ),
+        data_indices=data_indices,
+        graph_data=graph_data,
+    )
+    loss_kwargs = {
+        "pred_layout": IndexSpace.MODEL_OUTPUT,
+        "target_layout": IndexSpace.DATA_OUTPUT,
+    }
+
+    assert isinstance(loss, LossVariableMapper)
+    scalar_loss = loss(pred, target, **loss_kwargs)
+    per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
+    summed_loss = loss(pred, target, squash_mode="sum", **loss_kwargs)
+
+    assert per_variable_loss.shape == (3,)
+    torch.testing.assert_close(per_variable_loss[1], torch.tensor(0.0, dtype=pred.dtype))
+    torch.testing.assert_close(scalar_loss, per_variable_loss[[0, 2]].mean())
+    torch.testing.assert_close(summed_loss, per_variable_loss.sum())
+
+
 def test_combined_loss_with_direct_and_multiscale_graph_scores(
     graph_data: HeteroData,
     loss_graph: dict[str, object],
@@ -560,7 +665,72 @@ def test_combined_loss_with_direct_and_multiscale_graph_scores(
 
     assert scalar_loss.shape == ()
     assert per_variable_loss.shape == (pred.shape[-1],)
-    torch.testing.assert_close(scalar_loss, per_variable_loss.sum())
+    torch.testing.assert_close(scalar_loss, per_variable_loss.mean())
+    assert torch.isfinite(scalar_loss)
+    assert torch.isfinite(per_variable_loss).all()
+
+    scalar_loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_filtered_combined_loss_with_direct_and_multiscale_graph_scores(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+        {"a": 0, "b": 1, "c": 2},
+    )
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "scalers": [],
+                "loss_weights": [0.25, 0.75],
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.GraphEnergyScoreLoss",
+                        "scalers": [],
+                        "loss_graph": loss_graph,
+                        "predicted_variables": ["a", "c"],
+                        "target_variables": ["a", "c"],
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                        "weights": [0.4, 0.6],
+                        "multiscale_config": {"loss_matrices": [None, None]},
+                        "per_scale_loss": {
+                            "_target_": "anemoi.training.losses.GraphEdgeCRPSLoss",
+                            "scalers": [],
+                            "loss_graph": loss_graph,
+                            "predicted_variables": ["a", "c"],
+                            "target_variables": ["a", "c"],
+                        },
+                    },
+                ],
+            },
+        ),
+        data_indices=data_indices,
+        graph_data=graph_data,
+        data_node_name="data",
+    )
+    pred, target = score_inputs
+    pred = torch.cat((pred, pred[..., :1] + 0.5), dim=-1).requires_grad_()
+    target = torch.cat((target, target[..., :1] - 0.5), dim=-1)
+    loss_kwargs = {
+        "pred_layout": IndexSpace.MODEL_OUTPUT,
+        "target_layout": IndexSpace.DATA_OUTPUT,
+    }
+
+    scalar_loss = loss(pred, target, **loss_kwargs)
+    per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
+
+    assert scalar_loss.shape == ()
+    assert per_variable_loss.shape == (3,)
+    torch.testing.assert_close(per_variable_loss[1], torch.tensor(0.0, dtype=pred.dtype))
+    torch.testing.assert_close(scalar_loss, per_variable_loss[[0, 2]].mean())
     assert torch.isfinite(scalar_loss)
     assert torch.isfinite(per_variable_loss).all()
 

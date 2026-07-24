@@ -16,13 +16,17 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 class GraphEnergyScoreLoss(BaseGraphScoreLoss):
     """Fair energy score over graph neighbourhoods.
 
+    Without ``loss_graph``, this reduces to the pointwise CRPS-equivalent
+    energy score. With a graph, the absolute pointwise difference is replaced
+    by ``sqrt(sum_j w_j (x_j - y_j)**2)`` over the incoming neighbours of each
+    node.
+
     ``loss_graph.row_normalize`` controls whether each target node uses
     a weighted neighbourhood average or a raw weighted sum.
 
-    When ``ignore_nans=True``, invalid source and destination nodes are dropped
-    before graph aggregation. The remaining support is only re-normalized when
-    ``row_normalize=True``; otherwise the valid nodes keep their original raw
-    edge weights.
+    When ``ignore_nans=True``, edges containing missing values are left out. If
+    ``row_normalize=True``, the weights of the remaining edges are scaled to
+    sum to one; otherwise their original weights are kept.
     """
 
     def __init__(
@@ -40,16 +44,16 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
         fair : bool
             Whether to use the fair ensemble correction.
         loss_graph : dict | None
-            Graph-based neighbourhood definition.
+            Graph-based neighbourhood definition. If ``None``, use the
+            pointwise CRPS-equivalent energy score.
         graph_data : HeteroData | None
             Graph data used to build the neighbourhood graph.
         no_autocast : bool
-            Whether to disable autocast for the full graph energy score
-            calculation.
+            Whether to keep the original numerical precision throughout.
         ignore_nans : bool
-            Whether to drop invalid nodes before graph aggregation. Remaining
-            neighbourhood weights are only re-normalized when
-            ``loss_graph.row_normalize=True``.
+            Whether to leave out edges containing missing values. With
+            ``loss_graph.row_normalize=True``, the remaining weights are
+            scaled to sum to one.
         """
         graph = GraphScoreGraph.from_definition(
             loss_graph,
@@ -71,7 +75,7 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
         node_differences: torch.Tensor,
         node_valid: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Reduce ``(..., N, V)`` differences to weighted neighbourhood norms."""
+        """Return the weighted distance over each incoming neighbourhood."""
         if self.graph is None:
             neighbourhood_norms = torch.abs(node_differences)
             if node_valid is not None:
@@ -108,23 +112,23 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute the graph energy score field with shape ``(B, T, N, V)``."""
+        """Return one graph energy score per batch, output step, node, and variable."""
         ensemble_size = y_pred_ens.shape[2]
 
-        # Use complete cases across the target and every member, keeping the
-        # ensemble size fixed for both terms of the score.
+        # Leave out a node if its observation or any ensemble value is missing.
+        # Both parts of the score then use the same ensemble members.
         node_valid = None
         if self.ignore_nans:
             node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
 
-        # First term: mean member-to-observation neighbourhood distance.
+        # Mean distance from each ensemble member to the observation.
         obs_distance = y_pred_ens - y.unsqueeze(2)
         obs_term = self._stable_neighbourhood_norm(
             obs_distance,
             node_valid=node_valid,
         ).mean(dim=2)
 
-        # Second term: sum distances over unordered ensemble-member pairs.
+        # Sum of distances over unordered pairs of ensemble members.
         pair_distance_sum = torch.zeros_like(obs_term)
         for i in range(ensemble_size):
             pair_distance = y_pred_ens[:, :, i].unsqueeze(2) - y_pred_ens[:, :, i + 1 :]

@@ -14,25 +14,21 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
-    """Almost-fair CRPS over signed graph edge differences.
+    """Almost-fair CRPS over graph edge differences.
 
-    For each graph edge ``src -> dst`` this loss scores the ensemble of signed
-    differences ``x[src] - x[dst]`` against the observed signed difference. Edge
-    scores are then aggregated back to destination nodes so the result remains a
-    node-shaped score tensor compatible with the usual scalers and multiscale
-    wrapper.
+    For each graph edge ``src -> dst``, the difference is
+    ``x[src] - x[dst]``. The ensemble edge differences are compared with the
+    observed edge difference, then summed at each destination node.
 
-    ``alpha`` controls the finite-ensemble correction: ``1.0`` is the fair CRPS,
-    ``0.0`` is the standard empirical CRPS, and intermediate values reproduce
-    the almost-fair interpolation used by :class:`anemoi.training.losses.CRPS`.
+    ``alpha=1`` gives fair CRPS, ``alpha=0`` gives empirical CRPS, and values
+    between zero and one blend the two.
 
     ``loss_graph.row_normalize`` controls whether each destination node uses a
     weighted average or a raw weighted sum over incoming edges.
 
-    When ``ignore_nans=True``, invalid nodes remove every edge that touches
-    them. The remaining valid edges are only re-normalized when
-    ``row_normalize=True``; otherwise they keep their original raw edge
-    weights.
+    When ``ignore_nans=True``, edges containing missing values are left out. If
+    ``row_normalize=True``, the weights of the remaining edges are scaled to
+    sum to one; otherwise their original weights are kept.
     """
 
     def __init__(
@@ -55,11 +51,11 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
             Factor for the linear combination of fair and empirical CRPS. A
             value of 1.0 is fully fair; 0.0 is empirical CRPS.
         no_autocast : bool
-            Whether to disable autocast for the full edge CRPS calculation.
+            Whether to keep the original numerical precision throughout.
         ignore_nans : bool
-            Whether to drop invalid nodes before graph aggregation. Remaining
-            edge weights are only re-normalized when
-            ``loss_graph.row_normalize=True``.
+            Whether to leave out edges containing missing values. With
+            ``loss_graph.row_normalize=True``, the remaining weights are
+            scaled to sum to one.
         """
         assert 0.0 <= alpha <= 1.0, "alpha must be in the interval [0, 1]."
 
@@ -82,7 +78,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         return f"afgraph_edge_crps{self.alpha:.2f}"
 
     def _pair_coefficient(self, ensemble_size: int) -> float:
-        """Return the almost-fair coefficient for unordered member pairs."""
+        """Return the coefficient of the unordered member-pair distances."""
         return (1.0 - (1.0 - self.alpha) / ensemble_size) / (ensemble_size * (ensemble_size - 1))
 
     def _compute_local_score_tensor(
@@ -90,7 +86,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute edge CRPS and aggregate it to shape ``(B, T, N, V)``."""
+        """Return one edge CRPS value per batch, output step, node, and variable."""
         ensemble_size = y_pred_ens.shape[2]
         edge_valid = self._valid_edges(y_pred_ens, y)
 
@@ -98,8 +94,8 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         obs_term = torch.zeros_like(obs_edge_difference)
         pair_term = torch.zeros_like(obs_edge_difference)
 
-        # Accumulate member-to-observation errors and unordered member-pair
-        # distances in edge space before aggregating once to destination nodes.
+        # The CRPS is the mean member-to-observation distance minus a weighted
+        # sum of distances over unordered member pairs.
         for i in range(ensemble_size):
             member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
 

@@ -7,10 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Graph construction, validation, and aggregation for graph score losses.
+"""Graph edges, weights, and neighbourhood distances.
 
-Tensor shapes use ``N`` for nodes, ``E`` for edges, and ``V`` for variables.
-Any dimensions before ``N`` or ``E`` are preserved as batch-like dimensions.
+Shapes use ``N`` for nodes, ``E`` for edges, and ``V`` for variables. Any
+leading dimensions are left unchanged.
 """
 
 import logging
@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GraphScoreGraph(nn.Module):
-    """Static graph metadata and weighted row reductions shared by graph scores."""
+    """Hold graph edges and weights and calculate neighbourhood distances."""
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class GraphScoreGraph(nn.Module):
 
     @property
     def num_nodes(self) -> int:
-        """Return the number of destination nodes produced by graph reductions."""
+        """Return the number of destination nodes."""
         return self.num_dst_nodes
 
     def weighted_row_l2_norm(
@@ -59,28 +59,27 @@ class GraphScoreGraph(nn.Module):
         edge_values: torch.Tensor,
         valid_edges: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute a stable weighted L2 norm for every destination node.
+        """Compute ``sqrt(sum_e w_e x_e**2)`` for edges entering each node.
 
         Parameters
         ----------
         edge_values : torch.Tensor
             Edge values with shape ``(..., E, V)``.
         valid_edges : torch.Tensor | None
-            Complete-case validity mask with shape broadcastable to
-            ``edge_values``. Invalid edges do not contribute to the norm.
+            ``True`` where an edge value is available. It has the same shape
+            as ``edge_values``. Missing edge values are left out.
 
         Returns
         -------
         torch.Tensor
-            Destination-node values with shape ``(..., N, V)``. Rows without
-            valid positive-weight support are ``NaN`` when a mask is supplied.
+            One value per destination node with shape ``(..., N, V)``. A node
+            with no available incoming edges has value ``NaN``.
 
         Notes
         -----
-        Values are scaled by the largest absolute incoming value before
-        squaring. This preserves the weighted L2 norm while avoiding overflow
-        for large values. When configured, row normalization is recomputed
-        after invalid edges have been removed.
+        Values are divided by the largest incoming magnitude before squaring
+        and multiplied by it again afterwards. This leaves the distance
+        unchanged while keeping the intermediate squares representable.
         """
         input_shape = edge_values.shape
         flat_edge_values = edge_values.reshape(-1, *input_shape[-2:])
@@ -102,16 +101,16 @@ class GraphScoreGraph(nn.Module):
             device=flat_edge_values.device,
         )
 
-        # Apply complete-case masking before row normalization, so invalid
-        # edges cannot influence either effective weights or numerical scaling.
+        # Edges with missing values are left out. If requested, the remaining
+        # weights are scaled to sum to one.
         if valid_edges is not None:
-            extra_prefix_dims = edge_values.ndim - valid_edges.ndim
-            expanded_valid = valid_edges.reshape(
-                *valid_edges.shape[:-2],
-                *((1,) * extra_prefix_dims),
-                *valid_edges.shape[-2:],
-            ).expand(input_shape)
-            flat_valid = expanded_valid.reshape(-1, *valid_edges.shape[-2:])
+            if valid_edges.shape != edge_values.shape:
+                msg = (
+                    f"valid_edges shape {tuple(valid_edges.shape)} must match "
+                    f"edge_values shape {tuple(edge_values.shape)}."
+                )
+                raise ValueError(msg)
+            flat_valid = valid_edges.reshape(-1, *input_shape[-2:])
             safe_gathered_abs = torch.where(
                 flat_valid,
                 gathered_abs,
@@ -146,8 +145,7 @@ class GraphScoreGraph(nn.Module):
             safe_gathered_abs = gathered_abs
             effective_weights = weight_view
 
-        # Zero-weight edges are excluded from the row maximum as well as from
-        # the norm, ensuring that they cannot affect the stable rescaling.
+        # Edges with zero weight are left out of both the maximum and the sum.
         active_edges = (effective_weights > 0).expand_as(safe_gathered_abs)
         active_edge_count.index_add_(
             1,
@@ -184,8 +182,8 @@ class GraphScoreGraph(nn.Module):
         norm_sq = torch.zeros_like(active_edge_count)
         norm_sq.index_add_(1, row_index, effective_weights * scaled_abs.square())
         positive_norm = norm_sq > 0
-        # Avoid evaluating sqrt at zero: its derivative is undefined and can
-        # otherwise introduce NaN gradients for zero-valued neighbourhoods.
+        # For q = 0, use sqrt(q) = 0 directly because the derivative of the
+        # square root is singular at the origin.
         safe_norm_sq = torch.where(positive_norm, norm_sq, torch.ones_like(norm_sq))
         sqrt_norm_sq = torch.where(
             positive_norm,
@@ -209,7 +207,7 @@ class GraphScoreGraph(nn.Module):
         allow_none: bool = False,
         require_square: bool = True,
     ) -> "GraphScoreGraph | None":
-        """Build graph score metadata from a configured graph edge store."""
+        """Read the graph edges and their weights."""
         if graph_definition is None:
             if allow_none:
                 LOGGER.info("%s: %s", graph_name, None)
@@ -223,8 +221,8 @@ class GraphScoreGraph(nn.Module):
 
         assert graph_data is not None, "graph_data must be provided when using a graph score loss graph."
 
-        # Resolve the configured edge store and compose its optional edge and
-        # source-node weights into one scalar weight per edge.
+        # Each edge weight is multiplied by its source-node weight when both
+        # are provided.
         edges_name = graph_definition.get("edges_name")
         assert edges_name is not None, "Graph score definition must include 'edges_name'."
         edges_name = tuple(edges_name)
@@ -249,7 +247,7 @@ class GraphScoreGraph(nn.Module):
             )
             edge_weights = edge_weights * src_weights[edge_index[0]]
 
-        # Graph score fields must preserve the forecast grid's node space.
+        # Source and destination nodes must describe the same forecast grid.
         num_src_nodes = graph_data[edges_name[0]].num_nodes
         num_dst_nodes = graph_data[edges_name[2]].num_nodes
         cls._validate_node_space(

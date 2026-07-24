@@ -16,29 +16,17 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
     """Variogram score over graph neighbourhood pairs.
 
-    Notes
-    -----
-    The fair ensemble estimator used here is derived by combining three facts:
-
-    - Scheuerer and Hamill (2015) define the variogram score.
-    - Ferro (2014) defines a fair ensemble score as an unbiased estimator of
-      the score of the underlying forecast distribution when the ensemble is a
-      random sample.
-    - Allen, Ginsbourger, and Ziegel (2024) show that the variogram score is a
-      kernel score.
-
-    Applying Ferro's unbiased ensemble correction to the variogram kernel gives
-    the off-diagonal ``M (M - 1)`` normalization used below for ``fair=True``.
-    The expanded finite-ensemble expression matches the formulation documented
-    in the ``scoringrules`` reference implementation.
+    For each edge ``src -> dst``, the variogram is
+    ``|x[src] - x[dst]|**p``. The score compares the ensemble variograms with
+    the observed variogram. With ``fair=True``, products use two different
+    ensemble members and are divided by ``M (M - 1)``.
 
     ``loss_graph.row_normalize`` controls whether each destination node uses a
     weighted average or a raw weighted sum over incoming edges.
 
-    When ``ignore_nans=True``, invalid nodes remove every edge that touches
-    them. The remaining valid edges are only re-normalized when
-    ``row_normalize=True``; otherwise they keep their original raw edge
-    weights.
+    When ``ignore_nans=True``, edges containing missing values are left out. If
+    ``row_normalize=True``, the weights of the remaining edges are scaled to
+    sum to one; otherwise their original weights are kept.
     """
 
     def __init__(
@@ -63,12 +51,11 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         fair : bool
             Whether to use the fair ensemble correction.
         no_autocast : bool
-            Whether to disable autocast for the full variogram score
-            calculation.
+            Whether to keep the original numerical precision throughout.
         ignore_nans : bool
-            Whether to drop invalid nodes before graph aggregation. Remaining
-            edge weights are only re-normalized when
-            ``loss_graph.row_normalize=True``.
+            Whether to leave out edges containing missing values. With
+            ``loss_graph.row_normalize=True``, the remaining weights are
+            scaled to sum to one.
         """
         assert p > 0.0, "p must be strictly positive."
 
@@ -88,42 +75,43 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         prefix = "f" if self.fair else ""
         return f"{prefix}graph_variogram_score_p{self.p:g}"
 
-    def _edge_variogram(self, x: torch.Tensor) -> torch.Tensor:
+    def _edge_variogram(
+        self,
+        x: torch.Tensor,
+        valid_edges: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Return ``|x[src] - x[dst]|**p`` with shape ``(..., E, V)``."""
-        return torch.abs(self._edge_difference(x)).pow(self.p)
+        edge_difference = self._edge_difference(x)
+        if valid_edges is not None:
+            # Set missing edge differences to zero before raising them to the
+            # variogram power.
+            edge_difference = torch.where(
+                valid_edges,
+                edge_difference,
+                torch.zeros_like(edge_difference),
+            )
+        return torch.abs(edge_difference).pow(self.p)
 
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute edge variograms and aggregate them to ``(B, T, N, V)``."""
+        """Return one variogram score per batch, output step, node, and variable."""
         ensemble_size = y_pred_ens.shape[2]
         edge_valid = self._valid_edges(y_pred_ens, y)
 
-        obs_variogram = self._edge_variogram(y)
-        if edge_valid is not None:
-            obs_variogram = torch.where(
-                edge_valid,
-                obs_variogram,
-                torch.zeros_like(obs_variogram),
-            )
+        obs_variogram = self._edge_variogram(y, edge_valid)
 
         member_sum = torch.zeros_like(obs_variogram)
         if self.fair:
             member_cross_sum = torch.zeros_like(obs_variogram)
             running_sum = torch.zeros_like(obs_variogram)
 
-        # The running sum forms every unordered cross-product without storing
-        # all member-pair tensors at once.
+        # Before member i, running_sum equals sum(v_j, j < i). Their product
+        # therefore adds every unordered term v_i * v_j exactly once.
         for i in range(ensemble_size):
-            member_variogram = self._edge_variogram(y_pred_ens[:, :, i])
-            if edge_valid is not None:
-                member_variogram = torch.where(
-                    edge_valid,
-                    member_variogram,
-                    torch.zeros_like(member_variogram),
-                )
+            member_variogram = self._edge_variogram(y_pred_ens[:, :, i], edge_valid)
             member_sum = member_sum + member_variogram
             if self.fair:
                 member_cross_sum = member_cross_sum + member_variogram * running_sum
