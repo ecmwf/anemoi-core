@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2026 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -24,15 +24,15 @@ from .common_components import TransformerModelComponent
 class GNNDecoderSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GNNBackwardMapper"] = Field(..., alias="_target_")
     "GNN decoder object from anemoi.models.layers.mapper."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the GNN decoder. Default to 512."
 
 
 class GraphTransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.GraphTransformerBackwardMapper"] = Field(..., alias="_target_")
     "Graph Transformer Decoder object from anemoi.models.layers.mapper."
-    trainable_size: NonNegativeInt = Field(example=8)
-    "Size of trainable parameters vector. Default to 8."
-    sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dirs"])
-    "Edge attributes to consider in the decoder features. Default to [edge_length, edge_dirs]"
+    num_channels: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the Graph Transformer decoder. Default to 512."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
     initialise_data_extractor_zero: bool = Field(example=False)
@@ -61,7 +61,9 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
 
 class TransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.TransformerBackwardMapper"] = Field(..., alias="_target_")
-    "Transformer Encoder object from anemoi.models.layers.mapper."
+    "Transformer Decoder object from anemoi.models.layers.mapper."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the Transformer decoder. Default to 512."
     window_size: Union[NonNegativeInt, None] = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
@@ -79,5 +81,7 @@ class TransformerDecoderSchema(TransformerModelComponent):
 class PointWiseBackwardMapperSchema(PointWiseMapperComponent):
     target_: Literal["anemoi.models.layers.mapper.PointWiseBackwardMapper"] = Field(..., alias="_target_")
     "Point-wise decoder object from anemoi.models.layers.mapper."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Hidden dimension of the Point-wise decoder. Default to 512."
     initialise_data_extractor_zero: bool = Field(default=False)
     "Initialise the data extractor with zeros. Default to False."

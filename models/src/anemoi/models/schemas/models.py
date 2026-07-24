@@ -17,6 +17,8 @@ from typing import Literal
 from typing import Optional
 from typing import Union
 
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -31,6 +33,7 @@ from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
+from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -247,6 +250,50 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class EncodersSchema(BaseModel):
+    """Encoder schema"""
+
+    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the encoder is applicable."
+    trainable_size: NonNegativeInt = Field(example=8)
+    "Size of trainable parameters vector. Default to 8."
+    sub_graph_edge_attributes: list[str] = Field(default_factory=list)
+    "Edge attributes to consider in the model component features."
+    mapper: Union[
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
+class DecodersSchema(BaseModel):
+    """Decoder schema"""
+
+    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the decoder is applicable."
+    trainable_size: NonNegativeInt = Field(example=8)
+    "Size of trainable parameters vector. Default to 8."
+    sub_graph_edge_attributes: list[str] = Field(default_factory=list)
+    "List of edge attributes for the sub-graph."
+    input_target_features: list[
+        Literal["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]
+    ] = Field(default_factory=lambda: ["encoded_data"])
+    "Whether to use the encoded latents from the encoder."
+    mapper: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
@@ -264,6 +311,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    latent_aggregator: AggregatorSchema
+    "Latent aggregator schema."
     processor: Union[
         NoOpProcessorSchema,
         GNNProcessorSchema,
@@ -274,27 +323,11 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
+    "Model processor schema."
+    encoders: dict[str, EncodersSchema]
+    "Model encoders schemas."
+    decoders: dict[str, DecodersSchema]
+    "Model decoders schemas."
     residual: ResidualConnectionSchema = Field(
         ...,
         discriminator="target_",
@@ -304,6 +337,18 @@ class BaseModelSchema(PydanticBaseModel):
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+
+    @model_validator(mode="before")
+    @classmethod
+    def cast_encoder_decoder_keys_to_str(cls, data: Any) -> Any:
+        """Cast encoder/decoder dict keys to str (YAML may parse them as int)."""
+        for field in ("encoders", "decoders"):
+            if field in data:
+                if isinstance(data[field], dict):
+                    data[field] = {str(k): v for k, v in data[field].items()}
+                elif isinstance(data[field], DictConfig):
+                    data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
+        return data
 
 
 class NoOpNoiseInjectorSchema(BaseModel):

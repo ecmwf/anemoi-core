@@ -34,6 +34,8 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
+valid_target_decoder_features = ["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]
+
 
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
@@ -81,6 +83,8 @@ class BaseGraphModel(nn.Module):
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
+        self._build_dataset_routing(model_config)
+
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
@@ -96,11 +100,40 @@ class BaseGraphModel(nn.Module):
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
 
+    def _build_dataset_routing(self, model_config: DotDict) -> None:
+        """Builds the dataset routing for encoders and decoders."""
+        self.dataset2encoder: dict[str, str] = {}
+        self.encoder2datasets: dict[str, list[str]] = {}
+        for encoder_name, encoder_config in model_config.model.encoders.items():
+            datasets_to_encode = encoder_config["datasets"]
+            self.encoder2datasets[encoder_name] = datasets_to_encode
+            assert len(datasets_to_encode) == 1, "Each encoder must be associated with exactly one dataset for now."
+            for d in datasets_to_encode:
+                self.dataset2encoder[d] = encoder_name
+
+        self.dataset2decoder: dict[str, str] = {}
+        self.decoder2datasets: dict[str, list[str]] = {}
+        self.decoders_target_input: dict[str, list[str]] = {}
+        for decoder_name, decoder_config in model_config.model.decoders.items():
+            datasets_to_decode = decoder_config["datasets"]
+            self.decoder2datasets[decoder_name] = datasets_to_decode
+            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
+            for d in datasets_to_decode:
+                self.dataset2decoder[d] = decoder_name
+
+            decoder_target_features = decoder_config.input_target_features
+            assert all([f in valid_target_decoder_features for f in decoder_target_features])
+            self.decoders_target_input[decoder_name] = decoder_config.input_target_features
+
+        self.input_datasets = list(self.dataset2encoder.keys())
+        self.target_datasets = list(self.dataset2decoder.keys())
+
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
+        self.num_input_channels_forcings = {}
         self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
@@ -118,6 +151,7 @@ class BaseGraphModel(nn.Module):
             ]
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_input_channels_decoding_forcings[dataset_name] = len(
                 self._decoding_forcing_input_idx[dataset_name]
@@ -127,14 +161,6 @@ class BaseGraphModel(nn.Module):
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
-
-    def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
 
     @staticmethod
     def _as_hidden_node_names(
@@ -156,10 +182,39 @@ class BaseGraphModel(nn.Module):
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+
+    def _calculate_input_dim_latent(self) -> int:
+        """Calculate the latent input dimension."""
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        return self.node_attributes.attr_ndims[nodes_name]
+
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
-        return self._calculate_input_dim(dataset_name)
+        num_features = 0
+        if dataset_name not in self.dataset2decoder:
+            LOGGER.warning(
+                f"Dataset '{dataset_name}' does not have a decoder associated with it. "
+                f"Target dimension will be calculated as 0.",
+            )
+            return num_features
+
+        for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
+            if target_feature == "coordinates":
+                num_features += 4
+            elif target_feature == "forcings":
+                num_features += self.n_step_output * self.num_input_channels_forcings[dataset_name]
+            elif target_feature == "prognostics":
+                num_features += self.n_step_input * self.num_input_channels_prognostic[dataset_name]
+            elif target_feature == "trainable_parameters":
+                num_features += self.node_attributes.num_trainable_parameters[dataset_name]
+            elif target_feature == "encoded_data":
+                # TODO: Get this from self.encoder[self.dataset2decoder[dataset_name]].???
+                num_features += self._calculate_input_dim(dataset_name)
+            else:
+                raise ValueError(f"The key {target_feature} is not valid.")
+
+        return num_features
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         return self.n_step_output * self.num_output_channels[dataset_name]

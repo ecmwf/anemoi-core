@@ -25,9 +25,9 @@ layer_kernels:
 
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
-  num_channels: ${model.num_channels}
   trainable_size: ${model.trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
+  num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -37,13 +37,30 @@ processor:
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
 
 encoders:
-  0: # user-defined key. It will appear in the state-dict
-    datasets: [ "data" ]
+  global: # user-defined key. It will appear in the state-dict
+    datasets: [ "era5" ]
+    trainable_size: ${model.trainable_parameters.data2hidden}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
+  regional: # user-defined key. It will appear in the state-dict
+    datasets: [ "cerra" ]
     trainable_size: ${model.trainable_parameters.data2hidden}
     sub_graph_edge_attributes: ${model.attributes.edges}
     mapper:
@@ -61,13 +78,32 @@ encoders:
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
       edge_pre_mlp: False
 
-
 latent_aggregator:
   _target_: anemoi.models.layers.aggregator.SumAggregator
 
 decoders:
-  0: # user-defined key. It will appear in the state-dict
-    datasets: [ "data" ]
+  global: # user-defined key. It will appear in the state-dict
+    datasets: [ "era5" ]
+    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs
+    trainable_size: ${model.trainable_parameters.hidden2data}
+    sub_graph_edge_attributes: ${model.attributes.edges}
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      initialise_data_extractor_zero: False
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
+  regional: # user-defined key. It will appear in the state-dict
+    datasets: [ "cerra" ]
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoder_outputs
     trainable_size: ${model.trainable_parameters.hidden2data}
     sub_graph_edge_attributes: ${model.attributes.edges}
