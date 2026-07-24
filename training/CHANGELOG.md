@@ -13,6 +13,7 @@ Keep it human-readable, your future self will thank you!
 
 ### ⚠ BREAKING CHANGES
 
+* **training:** return aggregated multiscale losses and remove per-scale validation metrics
 * **training:** speedup multiscale loss ([#1212](https://github.com/ecmwf/anemoi-core/issues/1212))
 * **training:** make user-specified search path take precedence and simplify Hydra search paths hierarchy ([#1181](https://github.com/ecmwf/anemoi-core/issues/1181))
 * Forecast dataset dataloader ([#1133](https://github.com/ecmwf/anemoi-core/issues/1133))

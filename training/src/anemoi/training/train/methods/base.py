@@ -797,8 +797,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             )
 
             if dataset_loss is not None:
-                dataset_loss_sum = dataset_loss.sum()  # collapse potential multi-scale loss
-                total_loss = dataset_loss_sum if total_loss is None else total_loss + dataset_loss_sum
+                total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
 
                 if validation_mode:
                     loss_obj = self.loss[dataset_name]
@@ -1046,7 +1045,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch_size = next(iter(batch.values())).shape[0]
 
         step_output = self._step(batch)
-        train_loss = step_output.loss.sum()
+        train_loss = step_output.loss
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -1086,9 +1085,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         with torch.no_grad():
             step_output = self._step(batch, validation_mode=True)
-        val_loss_scales = step_output.loss
+        val_loss = step_output.loss
         metrics = step_output.metrics
-        val_loss = val_loss_scales.sum()
 
         self.log(
             "val_" + self._get_loss_name() + "_loss",
@@ -1101,38 +1099,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
-        if val_loss_scales.numel() > 1:
-            loss_name = self._get_loss_name()
-            if len(self.loss) == 1:
-                loss_obj = next(iter(self.loss.values()))
-                loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
-            for scale in range(val_loss_scales.numel()):
-                self.log(
-                    "val_" + loss_name + "_loss" + "_scale_" + str(scale),
-                    val_loss_scales[scale],
-                    on_epoch=True,
-                    on_step=True,
-                    prog_bar=False,
-                    logger=self.logger_enabled,
-                    batch_size=batch_size,
-                    sync_dist=True,
-                )
-
         for mname, mvalue in metrics.items():
-            for scale in range(mvalue.numel()):
-
-                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
-
-                self.log(
-                    "val_" + mname + "_scale_" + str(scale),
-                    log_val,
-                    on_epoch=True,
-                    on_step=False,
-                    prog_bar=False,
-                    logger=self.logger_enabled,
-                    batch_size=batch_size,
-                    sync_dist=True,
-                )
+            self.log(
+                "val_" + mname,
+                mvalue,
+                on_epoch=True,
+                on_step=False,
+                prog_bar=False,
+                logger=self.logger_enabled,
+                batch_size=batch_size,
+                sync_dist=True,
+            )
 
         return step_output
 
