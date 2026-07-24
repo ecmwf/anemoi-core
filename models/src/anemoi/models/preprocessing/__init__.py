@@ -22,6 +22,11 @@ LOGGER = logging.getLogger(__name__)
 class BasePreprocessor(nn.Module):
     """Base class for data pre- and post-processors."""
 
+    # Set True on processors that intentionally leave NaNs in the
+    # forward-processed tensor (e.g. imputers that only impute inputs and leave
+    # target-step NaNs for the loss to ignore). Consulted by Processors._run_checks.
+    allows_output_nans: bool = False
+
     def __init__(
         self,
         config=None,
@@ -95,12 +100,12 @@ class BasePreprocessor(nn.Module):
         Parameters
         ----------
         method_config : dict[str, list[str]]
-            dictionary of the methods with lists of variables
+            dictionary of the methods with lists of variables.
 
         Returns
         -------
         dict[str, str]
-            dictionary of the variables with methods
+            dictionary of the variables with methods.
         """
         return {
             variable: method
@@ -115,18 +120,18 @@ class BasePreprocessor(nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Input tensor
+            Input tensor.
         in_place : bool
-            Whether to process the tensor in place
+            Whether to process the tensor in place.
         inverse : bool
-            Whether to inverse transform the input
+            Whether to inverse transform the input.
         **kwargs
-            Additional keyword arguments to pass to transform/inverse_transform
+            Additional keyword arguments to pass to transform/inverse_transform.
 
         Returns
         -------
         torch.Tensor
-            Processed tensor
+            Processed tensor.
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
@@ -156,7 +161,7 @@ class Processors(nn.Module):
         Parameters
         ----------
         processors : list
-            List of processors
+            List of processors.
         """
         super().__init__()
 
@@ -179,16 +184,16 @@ class Processors(nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Input tensor
+            Input tensor.
         in_place : bool
-            Whether to process the tensor in place
+            Whether to process the tensor in place.
         **kwargs
-            Additional keyword arguments to pass to processors
+            Additional keyword arguments to pass to processors.
 
         Returns
         -------
         torch.Tensor
-            Processed tensor
+            Processed tensor.
         """
         for processor in self.processors.values():
             x = processor(x, in_place=in_place, inverse=self.inverse, **kwargs)
@@ -201,6 +206,10 @@ class Processors(nn.Module):
     def _run_checks(self, x):
         """Run checks on the processed tensor."""
         if not self.inverse:
+            # Processors that only impute inputs (e.g. InputOnlyImputer) leave
+            # target-step NaNs in place by design, for the loss to ignore.
+            if any(getattr(processor, "allows_output_nans", False) for processor in self.processors.values()):
+                return
             # Forward transformation checks:
             assert not torch.isnan(
                 x
