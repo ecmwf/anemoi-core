@@ -80,7 +80,21 @@ class ConfigGenerator(Command):
             description=help_msg,
         )
 
+        help_msg = "Migrate an anemoi config dump."
+        migrate = subparsers.add_parser(
+            "migrate",
+            help=help_msg,
+            description=help_msg,
+        )
+        migrate.add_argument("path", help="Path to the input config dump.")
+        migrate.add_argument("--output", "-o", default="./migrated-config.yaml", type=Path, help="Output file path")
+
     def run(self, args: argparse.Namespace) -> None:
+
+        if args.subcommand == "migrate":
+            LOGGER.info("Migrating config %s to %s", args.path, args.output)
+            self.migrate_config(args.path, args.output)
+            return
 
         self.overwrite = args.overwrite
 
@@ -209,6 +223,14 @@ class ConfigGenerator(Command):
         LOGGER.info("Dumping file in %s.", output)
         with output.open("w") as f:
             f.write(OmegaConf.to_yaml(cfg, sort_keys=sort))
+
+    def migrate_config(self, config_name: str, output: Path) -> None:
+        with initialize(version_base=None, config_path=""):
+            cfg = compose(config_name=config_name)
+            print(OmegaConf.select(cfg, "dataloader.read_group_size"))
+            print("---")
+            # migrated_cfg = Migrator().sync(cfg)
+            # print(migrated_cfg)
 
 
 @contextlib.contextmanager

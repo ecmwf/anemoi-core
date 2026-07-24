@@ -8,6 +8,7 @@ defaults:
 - task: temporal_downscaler
 - training: single
 - override training/training_loss: single_MSE_aggregation
+- version
 - _self_
 
 config_validation: True

@@ -8,6 +8,7 @@ defaults:
 - task: temporal_downscaler
 - training: ensemble
 - override training/training_loss: ensemble_multiscale_aggregation
+- version
 - _self_
 
 config_validation: True
