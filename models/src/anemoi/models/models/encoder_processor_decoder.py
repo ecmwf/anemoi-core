@@ -201,7 +201,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             elif target_feature == "encoded_data":
                 if x_encoded_data is None:
                     raise ValueError(
-                        f"\"encoded_data\" can be used only if dataset {dataset_name} is encoded. "
+                        f'"encoded_data" can be used only if dataset {dataset_name} is encoded. '
                         f"Please update the decoder.{self.dataset2decoder[dataset_name]}.input_target_features configuration."
                     )
                 new_target = x_encoded_data
@@ -431,7 +431,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 batch_size=batch_size,
                 ensemble_size=ensemble_size,
                 dtype=x[dataset_name].dtype,
-                dataset_name=dataset_name
+                dataset_name=dataset_name,
             )
 
         return x_out_dict
