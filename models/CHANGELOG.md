@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.17.1](https://github.com/ecmwf/anemoi-core/compare/models-0.17.0...models-0.17.1) (2026-07-24)
+
+
+### Features
+
+* Create and ship py.typed ([#1249](https://github.com/ecmwf/anemoi-core/issues/1249)) ([d0cfe4c](https://github.com/ecmwf/anemoi-core/commit/d0cfe4c88198d0aa9f9acf47009e4822734731b0))
+
 ## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/models-0.16.0...models-0.17.0) (2026-07-23)
 
 
