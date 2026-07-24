@@ -14,18 +14,20 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import SpatialDownscalerPlotAdapter
 from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.utils.dates import frequency_to_timedelta
 
-from .timeless import BaseTimelessTask
+from .base import BaseSingleStepTask
 
 LOGGER = logging.getLogger(__name__)
 
 
-class SpatialDownscaler(BaseTimelessTask):
+class SpatialDownscaler(BaseSingleStepTask):
     """Spatial downscaling task implementation.
 
     Distinguishes input-only datasets (e.g. ``in_lres``, ``in_hres``) from
     output-only datasets (e.g. ``out_hres``) by explicit name lists rather than
-    by time position (all snapshots share the same single timestep, t=0).
+    by time position. Inputs and outputs share the same timesteps — downscaling
+    is applied to each timestep in the sequence simultaneously.
 
     ``normalize_batch`` is ``False`` because ``ResidualPredictionMode`` needs raw
     (unnormalized) tensors to compute ``y - interp(x_lres)`` in data space before
@@ -34,8 +36,18 @@ class SpatialDownscaler(BaseTimelessTask):
 
     name: str = "spatial_downscaler"
 
-    def __init__(self, input_datasets: list[str], target_datasets: list[str], **_kwargs) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        input_datasets: list[str],
+        target_datasets: list[str],
+        multistep_input: int = 1,
+        multistep_output: int = 1,
+        timestep: str = "1h",
+        **_kwargs,
+    ) -> None:
+        dt = frequency_to_timedelta(timestep)
+        offsets = [i * dt for i in range(max(multistep_input, multistep_output))]
+        super().__init__(input_offsets=offsets, output_offsets=offsets)
         self.input_datasets = input_datasets
         self.target_datasets = target_datasets
         # No-op placeholder; a proper adapter will be added with downscaling diagnostics.
