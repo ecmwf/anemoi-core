@@ -57,7 +57,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"but got {encoder_in_channels_src}."
             )
 
-            self.encoder[str(encoder_name)] = instantiate(
+            self.encoder[encoder_name] = instantiate(
                 encoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
@@ -122,7 +122,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"but got {decoder_output_channels_dst}."
             )
 
-            self.decoder[str(decoder_name)] = instantiate(
+            self.decoder[decoder_name] = instantiate(
                 decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.processor.num_channels,

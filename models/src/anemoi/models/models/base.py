@@ -109,7 +109,7 @@ class BaseGraphModel(nn.Module):
             self.encoder2datasets[encoder_name] = datasets_to_encode
             assert len(datasets_to_encode) == 1, "Each encoder must be associated with exactly one dataset for now."
             for d in datasets_to_encode:
-                self.dataset2encoder[d] = str(encoder_name)
+                self.dataset2encoder[d] = encoder_name
 
         self.dataset2decoder: dict[str, str] = {}
         self.decoder2datasets: dict[str, list[str]] = {}
@@ -119,7 +119,7 @@ class BaseGraphModel(nn.Module):
             self.decoder2datasets[decoder_name] = datasets_to_decode
             assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
             for d in datasets_to_decode:
-                self.dataset2decoder[d] = str(decoder_name)
+                self.dataset2decoder[d] = decoder_name
 
             decoder_target_features = decoder_config.input_target_features
             assert all([f in valid_target_decoder_features for f in decoder_target_features])

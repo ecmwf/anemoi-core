@@ -30,6 +30,7 @@ from anemoi.models.transport.settings import NoiseConditioningSettings
 from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
+from omegaconf import OmegaConf, DictConfig
 
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
@@ -322,9 +323,9 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "Model processor schema."
-    encoders: dict[str | int, EncodersSchema]
+    encoders: dict[str, EncodersSchema]
     "Model encoders schemas."
-    decoders: dict[str | int, DecodersSchema]
+    decoders: dict[str, DecodersSchema]
     "Model decoders schemas."
     residual: ResidualConnectionSchema = Field(
         ...,
@@ -335,6 +336,18 @@ class BaseModelSchema(PydanticBaseModel):
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+
+    @model_validator(mode="before")
+    @classmethod
+    def cast_encoder_decoder_keys_to_str(cls, data: Any) -> Any:
+        """Cast encoder/decoder dict keys to str (YAML may parse them as int)."""
+        for field in ("encoders", "decoders"):
+            if field in data:
+                if isinstance(data[field], dict):
+                    data[field] = {str(k): v for k, v in data[field].items()}
+                elif isinstance(data[field], DictConfig):
+                    data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
+        return data
 
 
 class NoOpNoiseInjectorSchema(BaseModel):
