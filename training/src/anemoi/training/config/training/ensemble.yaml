@@ -53,6 +53,7 @@ strategy:
   num_gpus_per_ensemble: ${system.hardware.num_gpus_per_ensemble}
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
+  use_local_synchronization: True
 
 # loss functions
 
