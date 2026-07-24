@@ -175,9 +175,6 @@ class Forecaster(BaseTask):
 
         for i in range(keep_steps):
             if y_pred is None:
-                assert (
-                    len(data_indices.model.input.prognostic) == 0
-                ), "No prognostic variables in the model input, but y_pred is None."
                 continue
 
             # Get prognostic variables

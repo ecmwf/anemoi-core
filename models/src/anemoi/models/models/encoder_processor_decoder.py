@@ -38,6 +38,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.input_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
+                )
+                continue
+
             encoder_config = model_config.model.encoders[self.dataset2encoder[dataset_name]]
 
             # Create graph providers
@@ -62,7 +68,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
+                edge_dim=self.encoder_graph_provider[encoder_config.datasets[0]].edge_dim,
             )
 
         # Latent aggregator: combines encoder outputs before the processor
@@ -128,7 +134,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.processor.num_channels,
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+                edge_dim=self.decoder_graph_provider[decoder_config.datasets[0]].edge_dim,
             )
 
     def _assemble_input(
@@ -167,7 +173,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def _assemble_targets(
         self,
         x_input_data: Tensor,
-        x_encoded_data: Tensor,
+        x_encoded_data: Tensor | None,
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -180,12 +186,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_targets = []
         for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
             if target_feature == "coordinates":
-                coords = self.node_attributes.get_coordinates(dataset_name)  # (num_points, coords_dim)
+                coords = getattr(self.node_attributes, f"latlons_{dataset_name}")  # (num_points, coords_dim)
                 new_target = einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
             elif target_feature == "forcings":
-                new_target = x_input_data[
-                    self._internal_input_idx[dataset_name]
-                ]  # TODO: this should point to future forcings
+                # TODO: this should point to future forcings
+                new_target = x_input_data[self._internal_input_idx[dataset_name]]
             elif target_feature == "prognostics":
                 new_target = x_input_data[self._internal_input_idx[dataset_name]]
             elif target_feature == "trainable_parameters":
@@ -194,6 +199,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 ].trainable  # (num_points, ?)
                 new_target = einops.repeat(node_trainable_params, "e f -> (repeat e) f", repeat=batch_size)
             elif target_feature == "encoded_data":
+                if x_encoded_data is None:
+                    raise ValueError(
+                        f"\"encoded_data\" can be used only if dataset {dataset_name} is encoded. "
+                        f"Please update the decoder.{self.dataset2decoder[dataset_name]}.input_target_features configuration."
+                    )
                 new_target = x_encoded_data
             else:
                 raise ValueError("")
@@ -211,7 +221,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def _assemble_output(
         self,
         x_out: torch.Tensor,
-        x_skip: torch.Tensor,
+        x_skip: torch.Tensor | None,
         batch_size: int,
         ensemble_size: int,
         dtype: torch.dtype,
@@ -231,11 +241,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        assert (
-            x_skip.shape[1] == x_out.shape[1]
-        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        if x_skip is not None:
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -310,7 +321,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
-        for dataset_name in dataset_names:
+        for dataset_name in self.input_datasets:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 batch_size=batch_size,
@@ -381,7 +392,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in self.target_datasets:
             x_target_latent, shard_sizes_target = self._assemble_targets(
                 x[dataset_name],
-                x_data_latent_dict[dataset_name],
+                x_data_latent_dict.get(dataset_name, None),
                 batch_size,
                 grid_shard_sizes,
                 model_comm_group,
@@ -415,7 +426,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype, dataset_name
+                x_out,
+                x_skip_dict.get(dataset_name, None),
+                batch_size=batch_size,
+                ensemble_size=ensemble_size,
+                dtype=x[dataset_name].dtype,
+                dataset_name=dataset_name
             )
 
         return x_out_dict

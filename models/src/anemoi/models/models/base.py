@@ -125,6 +125,7 @@ class BaseGraphModel(nn.Module):
             assert all([f in valid_target_decoder_features for f in decoder_target_features])
             self.decoders_target_input[decoder_name] = decoder_config.input_target_features
 
+        self.input_datasets = list(self.dataset2encoder.keys())
         self.target_datasets = list(self.dataset2decoder.keys())
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
@@ -191,6 +192,13 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         num_features = 0
+        if dataset_name not in self.dataset2decoder:
+            LOGGER.warning(
+                f"Dataset '{dataset_name}' does not have a decoder associated with it. "
+                f"Target dimension will be calculated as 0.",
+            )
+            return num_features
+
         for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
             if target_feature == "coordinates":
                 num_features += 4
