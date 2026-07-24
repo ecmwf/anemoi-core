@@ -246,5 +246,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 "target": [input_index_to_name[int(index)] for index in input_data_indices["target"]],
                 "prognostic": [input_index_to_name[int(index)] for index in input_data_indices["prognostic"]],
                 "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
+                "corrector": [input_index_to_name[int(index)] for index in input_data_indices["corrector"]],
+                "decoder_forcing": [input_index_to_name[int(index)] for index in input_data_indices["decoder_forcing"]],
             }
             metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
