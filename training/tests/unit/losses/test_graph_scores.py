@@ -269,6 +269,31 @@ def test_graph_scores_have_finite_gradients(
     assert torch.isfinite(pred.grad).all()
 
 
+@pytest.mark.parametrize(
+    "loss_cls",
+    [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],
+)
+@pytest.mark.parametrize("num_variables", [1, 2])
+def test_graph_scores_follow_standard_output_shape_contract(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    loss_cls: type[BaseLoss],
+    num_variables: int,
+) -> None:
+    pred, target = score_inputs
+    pred = pred[..., :num_variables]
+    target = target[..., :num_variables]
+    loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
+
+    scalar_loss = loss(pred, target)
+    per_variable_loss = loss(pred, target, squash=False)
+
+    assert scalar_loss.shape == ()
+    assert per_variable_loss.shape == (num_variables,)
+    torch.testing.assert_close(scalar_loss, per_variable_loss.sum())
+
+
 @pytest.mark.parametrize(("fair", "alpha"), [(True, 1.0), (False, 0.0)])
 def test_pointwise_graph_energy_matches_crps(
     score_inputs: tuple[torch.Tensor, torch.Tensor],
@@ -283,15 +308,20 @@ def test_pointwise_graph_energy_matches_crps(
     torch.testing.assert_close(actual, expected)
 
 
+@pytest.mark.parametrize(
+    "loss_cls",
+    [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],
+)
 def test_graph_scores_ignore_invalid_edges(
     graph_data: HeteroData,
     loss_graph: dict[str, object],
     score_inputs: tuple[torch.Tensor, torch.Tensor],
+    loss_cls: type[BaseLoss],
 ) -> None:
     pred, target = score_inputs
     pred = pred.clone()
     pred[:, :, 0, 0, 0] = torch.nan
-    loss = GraphVariogramScoreLoss(
+    loss = loss_cls(
         graph_data=graph_data,
         loss_graph=loss_graph,
         ignore_nans=True,
@@ -506,6 +536,37 @@ def test_graph_score_factory_and_nested_losses(
     assert isinstance(multiscale, MultiscaleLossWrapper)
     assert multiscale.needs_shard_layout_info
     assert torch.isfinite(multiscale(pred, target)).all()
+
+
+def test_combined_loss_with_direct_and_multiscale_graph_scores(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    pred, target = score_inputs
+    pred = pred.clone().requires_grad_()
+    loss = CombinedLoss(
+        GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph),
+        MultiscaleLossWrapper(
+            per_scale_loss=GraphEdgeCRPSLoss(graph_data=graph_data, loss_graph=loss_graph),
+            weights=[0.4, 0.6],
+            multiscale_config={"loss_matrices": [None, None]},
+        ),
+        loss_weights=(0.25, 0.75),
+    )
+
+    scalar_loss = loss(pred, target)
+    per_variable_loss = loss(pred, target, squash=False)
+
+    assert scalar_loss.shape == ()
+    assert per_variable_loss.shape == (pred.shape[-1],)
+    torch.testing.assert_close(scalar_loss, per_variable_loss.sum())
+    assert torch.isfinite(scalar_loss)
+    assert torch.isfinite(per_variable_loss).all()
+
+    scalar_loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
 
 
 def test_graph_score_schemas_accept_direct_and_combined_configs(loss_graph: dict[str, object]) -> None:

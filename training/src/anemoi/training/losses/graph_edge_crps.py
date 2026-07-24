@@ -9,11 +9,11 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
-from anemoi.training.losses.graph_score_base import GraphScoreGraph
+from anemoi.training.losses.graph_edge_score_base import BaseGraphEdgeScoreLoss
+from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
-class GraphEdgeCRPSLoss(BaseGraphScoreLoss):
+class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
     """Almost-fair CRPS over signed graph edge differences.
 
     For each graph edge ``src -> dst`` this loss scores the ensemble of signed
@@ -74,22 +74,6 @@ class GraphEdgeCRPSLoss(BaseGraphScoreLoss):
         self.alpha = alpha
 
     @property
-    def edge_src_index(self) -> torch.Tensor:
-        return self.graph.edge_src_index
-
-    @property
-    def edge_dst_index(self) -> torch.Tensor:
-        return self.graph.edge_dst_index
-
-    @property
-    def edge_weights(self) -> torch.Tensor:
-        return self.graph.edge_weights
-
-    @property
-    def num_nodes(self) -> int:
-        return self.graph.num_nodes
-
-    @property
     def name(self) -> str:
         if self.alpha == 1.0:
             return "fgraph_edge_crps"
@@ -97,79 +81,49 @@ class GraphEdgeCRPSLoss(BaseGraphScoreLoss):
             return "graph_edge_crps"
         return f"afgraph_edge_crps{self.alpha:.2f}"
 
-    def _edge_difference(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, self.edge_src_index] - x[:, :, self.edge_dst_index]
+    def _pair_coefficient(self, ensemble_size: int) -> float:
+        """Return the almost-fair coefficient for unordered member pairs."""
+        return (1.0 - (1.0 - self.alpha) / ensemble_size) / (ensemble_size * (ensemble_size - 1))
 
-    def _aggregate_edges(self, edge_values: torch.Tensor, valid_edges: torch.Tensor | None = None) -> torch.Tensor:
-        weights = self.edge_weights.to(dtype=edge_values.dtype).view(1, 1, -1, 1)
-        if self.ignore_nans:
-            assert valid_edges is not None, "valid_edges must be provided when ignore_nans=True."
-            safe_edge_values = torch.where(valid_edges, edge_values, torch.zeros_like(edge_values))
-            valid_weights = weights * valid_edges.to(dtype=edge_values.dtype)
-
-            denom = torch.zeros(
-                (*edge_values.shape[:2], self.num_nodes, edge_values.shape[-1]),
-                dtype=edge_values.dtype,
-                device=edge_values.device,
-            )
-            denom.index_add_(2, self.edge_dst_index, valid_weights)
-
-            if self.row_normalize:
-                edge_denoms = denom[:, :, self.edge_dst_index, :]
-                safe_edge_denoms = torch.where(edge_denoms > 0, edge_denoms, torch.ones_like(edge_denoms))
-                effective_weights = torch.where(
-                    valid_edges & (edge_denoms > 0),
-                    weights / safe_edge_denoms,
-                    torch.zeros_like(weights),
-                )
-            else:
-                effective_weights = torch.where(valid_edges, weights, torch.zeros_like(weights))
-
-            weighted_values = safe_edge_values * effective_weights
-
-            out = torch.zeros_like(denom)
-            out.index_add_(2, self.edge_dst_index, weighted_values)
-            return out.masked_fill(denom <= 0, torch.nan)
-
-        weighted_values = edge_values * weights
-        out = torch.zeros(
-            (*weighted_values.shape[:2], self.num_nodes, weighted_values.shape[-1]),
-            dtype=weighted_values.dtype,
-            device=weighted_values.device,
-        )
-        out.index_add_(2, self.edge_dst_index, weighted_values)
-        return out
-
-    def _pair_coefficient(self, ens_size: int) -> float:
-        return (1.0 - (1.0 - self.alpha) / ens_size) / (ens_size * (ens_size - 1))
-
-    def _compute_local_score_tensor(self, y_pred_ens: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        ens_size = y_pred_ens.shape[2]
-        edge_valid = None
-        if self.ignore_nans:
-            node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
-            edge_valid = node_valid[:, :, self.edge_src_index, :] & node_valid[:, :, self.edge_dst_index, :]
+    def _compute_local_score_tensor(
+        self,
+        y_pred_ens: torch.Tensor,
+        y: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute edge CRPS and aggregate it to shape ``(B, T, N, V)``."""
+        ensemble_size = y_pred_ens.shape[2]
+        edge_valid = self._valid_edges(y_pred_ens, y)
 
         obs_edge_difference = self._edge_difference(y)
         obs_term = torch.zeros_like(obs_edge_difference)
         pair_term = torch.zeros_like(obs_edge_difference)
 
-        for i in range(ens_size):
+        # Accumulate member-to-observation errors and unordered member-pair
+        # distances in edge space before aggregating once to destination nodes.
+        for i in range(ensemble_size):
             member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
 
             member_obs_error = torch.abs(member_edge_difference - obs_edge_difference)
             if edge_valid is not None:
-                member_obs_error = torch.where(edge_valid, member_obs_error, torch.zeros_like(member_obs_error))
+                member_obs_error = torch.where(
+                    edge_valid,
+                    member_obs_error,
+                    torch.zeros_like(member_obs_error),
+                )
             obs_term = obs_term + member_obs_error
 
-            for j in range(i + 1, ens_size):
+            for j in range(i + 1, ensemble_size):
                 pair_edge_difference = self._edge_difference(y_pred_ens[:, :, j])
                 pair_distance = torch.abs(member_edge_difference - pair_edge_difference)
                 if edge_valid is not None:
-                    pair_distance = torch.where(edge_valid, pair_distance, torch.zeros_like(pair_distance))
+                    pair_distance = torch.where(
+                        edge_valid,
+                        pair_distance,
+                        torch.zeros_like(pair_distance),
+                    )
                 pair_term = pair_term + pair_distance
 
-        score_edges = obs_term / ens_size - self._pair_coefficient(ens_size) * pair_term
+        score_edges = obs_term / ensemble_size - self._pair_coefficient(ensemble_size) * pair_term
 
         if edge_valid is not None:
             score_edges = score_edges.masked_fill(~edge_valid, torch.nan)

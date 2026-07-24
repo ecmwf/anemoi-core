@@ -9,11 +9,11 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
-from anemoi.training.losses.graph_score_base import GraphScoreGraph
+from anemoi.training.losses.graph_edge_score_base import BaseGraphEdgeScoreLoss
+from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
-class GraphVariogramScoreLoss(BaseGraphScoreLoss):
+class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
     """Variogram score over graph neighbourhood pairs.
 
     Notes
@@ -84,104 +84,57 @@ class GraphVariogramScoreLoss(BaseGraphScoreLoss):
         self.fair = fair
 
     @property
-    def edge_index(self) -> torch.Tensor:
-        return self.graph.edge_index
-
-    @property
-    def edge_src_index(self) -> torch.Tensor:
-        return self.graph.edge_src_index
-
-    @property
-    def edge_dst_index(self) -> torch.Tensor:
-        return self.graph.edge_dst_index
-
-    @property
-    def edge_weights(self) -> torch.Tensor:
-        return self.graph.edge_weights
-
-    @property
-    def num_nodes(self) -> int:
-        return self.graph.num_nodes
-
-    @property
     def name(self) -> str:
         prefix = "f" if self.fair else ""
         return f"{prefix}graph_variogram_score_p{self.p:g}"
 
     def _edge_variogram(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.abs(x[:, :, self.edge_src_index] - x[:, :, self.edge_dst_index]).pow(self.p)
+        """Return ``|x[src] - x[dst]|**p`` with shape ``(..., E, V)``."""
+        return torch.abs(self._edge_difference(x)).pow(self.p)
 
-    def _aggregate_edges(self, edge_values: torch.Tensor, valid_edges: torch.Tensor | None = None) -> torch.Tensor:
-        weights = self.edge_weights.to(dtype=edge_values.dtype).view(1, 1, -1, 1)
-        if self.ignore_nans:
-            assert valid_edges is not None, "valid_edges must be provided when ignore_nans=True."
-            safe_edge_values = torch.where(valid_edges, edge_values, torch.zeros_like(edge_values))
-            valid_weights = weights * valid_edges.to(dtype=edge_values.dtype)
-
-            denom = torch.zeros(
-                (*edge_values.shape[:2], self.num_nodes, edge_values.shape[-1]),
-                dtype=edge_values.dtype,
-                device=edge_values.device,
-            )
-            denom.index_add_(2, self.edge_dst_index, valid_weights)
-
-            if self.row_normalize:
-                edge_denoms = denom[:, :, self.edge_dst_index, :]
-                safe_edge_denoms = torch.where(edge_denoms > 0, edge_denoms, torch.ones_like(edge_denoms))
-                effective_weights = torch.where(
-                    valid_edges & (edge_denoms > 0),
-                    weights / safe_edge_denoms,
-                    torch.zeros_like(weights),
-                )
-            else:
-                effective_weights = torch.where(valid_edges, weights, torch.zeros_like(weights))
-
-            weighted_values = safe_edge_values * effective_weights
-
-            out = torch.zeros_like(denom)
-            out.index_add_(2, self.edge_dst_index, weighted_values)
-            return out.masked_fill(denom <= 0, torch.nan)
-
-        weighted_values = edge_values * weights
-        out = torch.zeros(
-            (*weighted_values.shape[:2], self.num_nodes, weighted_values.shape[-1]),
-            dtype=weighted_values.dtype,
-            device=weighted_values.device,
-        )
-        out.index_add_(2, self.edge_dst_index, weighted_values)
-        return out
-
-    def _compute_local_score_tensor(self, y_pred_ens: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        ens_size = y_pred_ens.shape[2]
-        edge_valid = None
-        if self.ignore_nans:
-            node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
-            edge_valid = node_valid[:, :, self.edge_src_index, :] & node_valid[:, :, self.edge_dst_index, :]
+    def _compute_local_score_tensor(
+        self,
+        y_pred_ens: torch.Tensor,
+        y: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute edge variograms and aggregate them to ``(B, T, N, V)``."""
+        ensemble_size = y_pred_ens.shape[2]
+        edge_valid = self._valid_edges(y_pred_ens, y)
 
         obs_variogram = self._edge_variogram(y)
         if edge_valid is not None:
-            obs_variogram = torch.where(edge_valid, obs_variogram, torch.zeros_like(obs_variogram))
+            obs_variogram = torch.where(
+                edge_valid,
+                obs_variogram,
+                torch.zeros_like(obs_variogram),
+            )
 
         member_sum = torch.zeros_like(obs_variogram)
         if self.fair:
             member_cross_sum = torch.zeros_like(obs_variogram)
             running_sum = torch.zeros_like(obs_variogram)
 
-        for i in range(ens_size):
+        # The running sum forms every unordered cross-product without storing
+        # all member-pair tensors at once.
+        for i in range(ensemble_size):
             member_variogram = self._edge_variogram(y_pred_ens[:, :, i])
             if edge_valid is not None:
-                member_variogram = torch.where(edge_valid, member_variogram, torch.zeros_like(member_variogram))
+                member_variogram = torch.where(
+                    edge_valid,
+                    member_variogram,
+                    torch.zeros_like(member_variogram),
+                )
             member_sum = member_sum + member_variogram
             if self.fair:
                 member_cross_sum = member_cross_sum + member_variogram * running_sum
                 running_sum = running_sum + member_variogram
 
-        member_mean = member_sum / ens_size
+        member_mean = member_sum / ensemble_size
         if self.fair:
             score_edges = (
                 obs_variogram.square()
                 - 2.0 * obs_variogram * member_mean
-                + 2.0 * member_cross_sum / (ens_size * (ens_size - 1))
+                + 2.0 * member_cross_sum / (ensemble_size * (ensemble_size - 1))
             )
         else:
             score_edges = (member_mean - obs_variogram).square()

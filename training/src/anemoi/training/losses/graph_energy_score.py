@@ -10,7 +10,7 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
-from anemoi.training.losses.graph_score_base import GraphScoreGraph
+from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class GraphEnergyScoreLoss(BaseGraphScoreLoss):
@@ -66,124 +66,74 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
         prefix = "f" if self.fair else ""
         return f"{prefix}graph_energy_score"
 
-    def _aggregation_metadata(
-        self,
-        dtype: torch.dtype,
-    ) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor] | None:
-        if self.graph is None:
-            return None
-        return self.graph.aggregation_metadata(dtype)
-
     def _stable_neighbourhood_norm(
         self,
-        batch: torch.Tensor,
-        aggregation_metadata: tuple[int, torch.Tensor, torch.Tensor, torch.Tensor] | None,
+        node_differences: torch.Tensor,
         node_valid: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if aggregation_metadata is None:
-            out = torch.abs(batch)
+        """Reduce ``(..., N, V)`` differences to weighted neighbourhood norms."""
+        if self.graph is None:
+            neighbourhood_norms = torch.abs(node_differences)
             if node_valid is not None:
-                out = out.masked_fill(~node_valid.unsqueeze(2), torch.nan)
-            return out
+                neighbourhood_norms = neighbourhood_norms.masked_fill(
+                    ~node_valid.unsqueeze(2),
+                    torch.nan,
+                )
+            return neighbourhood_norms
 
-        input_shape = batch.shape
-        flat_batch = batch.reshape(-1, *input_shape[-2:])
-        num_rows, row_index, col_index, weights = aggregation_metadata
-        row_indices = row_index.view(1, -1, 1).expand(flat_batch.shape[0], -1, flat_batch.shape[-1])
-        weight_view = weights.view(1, -1, 1)
-
-        gathered_abs = torch.abs(flat_batch[:, col_index, :])
-        support = torch.zeros(
-            flat_batch.shape[0],
-            num_rows,
-            flat_batch.shape[-1],
-            dtype=flat_batch.dtype,
-            device=flat_batch.device,
-        )
-        valid_dest = None
-
+        valid_edges = None
+        expanded_node_valid = None
         if node_valid is not None:
-            expanded_valid = node_valid.unsqueeze(2).expand(
-                *batch.shape[:-2],
+            expanded_node_valid = node_valid.unsqueeze(2).expand(
+                *node_differences.shape[:-2],
                 node_valid.shape[-2],
                 node_valid.shape[-1],
             )
-            flat_valid = expanded_valid.reshape(-1, node_valid.shape[-2], node_valid.shape[-1])
-            valid_dest = flat_valid
-            gathered_valid = flat_valid[:, col_index, :] & torch.isfinite(gathered_abs)
-            safe_gathered_abs = torch.where(gathered_valid, gathered_abs, torch.zeros_like(gathered_abs))
+            valid_edges = expanded_node_valid[..., self.graph.edge_src_index, :]
 
-            if self.row_normalize:
-                weight_sum = torch.zeros_like(support)
-                weight_sum.index_add_(1, row_index, weight_view * gathered_valid.to(dtype=flat_batch.dtype))
-                gathered_weight_sum = weight_sum[:, row_index, :]
-                safe_weight_sum = torch.where(
-                    gathered_weight_sum > 0,
-                    gathered_weight_sum,
-                    torch.ones_like(gathered_weight_sum),
-                )
-                edge_weights = torch.where(
-                    gathered_valid & (gathered_weight_sum > 0),
-                    weight_view / safe_weight_sum,
-                    torch.zeros_like(weight_view),
-                )
-            else:
-                edge_weights = torch.where(gathered_valid, weight_view, torch.zeros_like(weight_view))
-        else:
-            safe_gathered_abs = gathered_abs
-            edge_weights = weight_view
-
-        active_edges = (edge_weights > 0).expand_as(safe_gathered_abs)
-        support.zero_()
-        support.index_add_(1, row_index, active_edges.to(dtype=flat_batch.dtype))
-        active_gathered_abs = torch.where(active_edges, safe_gathered_abs, torch.zeros_like(safe_gathered_abs))
-
-        row_max = torch.zeros_like(support)
-        row_max.scatter_reduce_(1, row_indices, active_gathered_abs, reduce="amax", include_self=False)
-        gathered_row_max = row_max[:, row_index, :]
-        safe_row_max = torch.where(gathered_row_max > 0, gathered_row_max, torch.ones_like(gathered_row_max))
-        scaled_abs = active_gathered_abs / safe_row_max
-        scaled_abs = torch.where(gathered_row_max > 0, scaled_abs, torch.zeros_like(scaled_abs))
-
-        norm_sq = torch.zeros_like(support)
-        norm_sq.index_add_(1, row_index, edge_weights * scaled_abs.square())
-        positive_norm = norm_sq > 0
-        safe_norm_sq = torch.where(positive_norm, norm_sq, torch.ones_like(norm_sq))
-        sqrt_norm_sq = torch.where(positive_norm, torch.sqrt(safe_norm_sq), torch.zeros_like(norm_sq))
-        out = row_max * sqrt_norm_sq
-
-        if valid_dest is not None:
-            out = out.masked_fill((support <= 0) | ~valid_dest, torch.nan)
-
-        return out.reshape(*input_shape[:-2] + out.shape[-2:])
+        edge_values = node_differences[..., self.graph.edge_src_index, :]
+        neighbourhood_norms = self.graph.weighted_row_l2_norm(
+            edge_values,
+            valid_edges=valid_edges,
+        )
+        if expanded_node_valid is not None:
+            neighbourhood_norms = neighbourhood_norms.masked_fill(
+                ~expanded_node_valid,
+                torch.nan,
+            )
+        return neighbourhood_norms
 
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        ens_size = y_pred_ens.shape[2]
-        aggregation_metadata = self._aggregation_metadata(y_pred_ens.dtype)
+        """Compute the graph energy score field with shape ``(B, T, N, V)``."""
+        ensemble_size = y_pred_ens.shape[2]
 
+        # Use complete cases across the target and every member, keeping the
+        # ensemble size fixed for both terms of the score.
         node_valid = None
         if self.ignore_nans:
             node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
 
+        # First term: mean member-to-observation neighbourhood distance.
         obs_distance = y_pred_ens - y.unsqueeze(2)
-        obs_term = self._stable_neighbourhood_norm(obs_distance, aggregation_metadata, node_valid=node_valid).mean(
-            dim=2,
-        )
+        obs_term = self._stable_neighbourhood_norm(
+            obs_distance,
+            node_valid=node_valid,
+        ).mean(dim=2)
 
+        # Second term: sum distances over unordered ensemble-member pairs.
         pair_distance_sum = torch.zeros_like(obs_term)
-        for i in range(ens_size):
+        for i in range(ensemble_size):
             pair_distance = y_pred_ens[:, :, i].unsqueeze(2) - y_pred_ens[:, :, i + 1 :]
             if pair_distance.shape[2] == 0:
                 continue
             pair_distance_sum = pair_distance_sum + self._stable_neighbourhood_norm(
                 pair_distance,
-                aggregation_metadata,
                 node_valid=node_valid,
             ).sum(dim=2)
 
-        coef = 1.0 / (ens_size * (ens_size - 1)) if self.fair else 1.0 / (ens_size**2)
-        return obs_term - coef * pair_distance_sum
+        pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
+        return obs_term - pair_coefficient * pair_distance_sum

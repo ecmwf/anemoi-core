@@ -7,229 +7,37 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
+"""Common execution lifecycle for graph score losses.
+
+Tensor shapes use ``B`` for batch, ``T`` for time, ``M`` for ensemble
+members, ``N`` for nodes, and ``V`` for variables:
+
+- ensemble predictions: ``(B, T, M, N, V)``
+- targets: ``(B, T, 1, N, V)``
+- local score fields: ``(B, T, N, V)``
+
+Concrete losses implement only the local score kernel. This base class handles
+input validation, precision control, distributed layout changes, scaling, and
+the final reduction around that kernel.
+"""
+
 from abc import abstractmethod
-from collections.abc import Mapping
 
 import einops
 import torch
-from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
+from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.utils.enums import TensorDim
-
-LOGGER = logging.getLogger(__name__)
-
-
-class GraphScoreGraph(nn.Module):
-    """Static graph metadata shared by graph score losses."""
-
-    def __init__(
-        self,
-        edge_index: torch.Tensor,
-        edge_weights: torch.Tensor,
-        *,
-        num_src_nodes: int,
-        num_dst_nodes: int,
-        row_normalize: bool,
-    ) -> None:
-        super().__init__()
-        self.register_buffer("edge_index", edge_index.long(), persistent=False)
-        self.register_buffer("edge_src_index", edge_index[0].long(), persistent=False)
-        self.register_buffer("edge_dst_index", edge_index[1].long(), persistent=False)
-        self.register_buffer("edge_weights", edge_weights, persistent=False)
-        self.num_src_nodes = num_src_nodes
-        self.num_dst_nodes = num_dst_nodes
-        self.row_normalize = row_normalize
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        return (self.num_dst_nodes, self.num_src_nodes)
-
-    @property
-    def num_nodes(self) -> int:
-        return self.num_dst_nodes
-
-    def aggregation_metadata(self, dtype: torch.dtype) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor]:
-        return self.num_dst_nodes, self.edge_dst_index, self.edge_src_index, self.edge_weights.to(dtype=dtype)
-
-    @classmethod
-    def from_definition(
-        cls,
-        graph_definition: Mapping[str, object] | None,
-        graph_data: HeteroData | None,
-        *,
-        graph_name: str,
-        allow_none: bool = False,
-        require_square: bool = True,
-    ) -> "GraphScoreGraph | None":
-        if graph_definition is None:
-            if allow_none:
-                LOGGER.info("%s: %s", graph_name, None)
-                return None
-            error_msg = f"{graph_name} must be provided."
-            raise AssertionError(error_msg)
-
-        if not isinstance(graph_definition, Mapping):
-            msg = f"{graph_name} must be a mapping or None, got {type(graph_definition).__name__}."
-            raise TypeError(msg)
-
-        assert graph_data is not None, "graph_data must be provided when using a graph score loss graph."
-
-        edges_name = graph_definition.get("edges_name")
-        assert edges_name is not None, "Graph score definition must include 'edges_name'."
-        edges_name = tuple(edges_name)
-
-        sub_graph = graph_data[edges_name]
-        edge_index = sub_graph.edge_index.long()
-
-        edge_weight_attribute = graph_definition.get("edge_weight_attribute")
-        if edge_weight_attribute is not None:
-            edge_weights = sub_graph[edge_weight_attribute].reshape(-1)
-        else:
-            edge_weights = torch.ones(edge_index.shape[1], dtype=torch.float32, device=edge_index.device)
-
-        src_node_weight_attribute = graph_definition.get("src_node_weight_attribute")
-        if src_node_weight_attribute is not None:
-            src_weights = graph_data[edges_name[0]][src_node_weight_attribute].reshape(-1)
-            edge_weights = edge_weights * src_weights[edge_index[0]]
-
-        num_src_nodes = graph_data[edges_name[0]].num_nodes
-        num_dst_nodes = graph_data[edges_name[2]].num_nodes
-        cls._validate_node_space(
-            edges_name,
-            num_src_nodes,
-            num_dst_nodes,
-            require_square=require_square,
-        )
-
-        cls._validate_weights(
-            edge_index[1].long(),
-            edge_weights,
-            num_dst_nodes,
-            graph_name=graph_name,
-        )
-
-        row_normalize = bool(graph_definition.get("row_normalize", False))
-        if row_normalize:
-            edge_weights = cls._row_normalize_weights(edge_index[1].long(), edge_weights, num_dst_nodes)
-
-        cls._validate_row_sums(
-            edge_index[1].long(),
-            edge_weights,
-            num_dst_nodes,
-            graph_definition.get("validate_row_sums", True),
-            graph_name=graph_name,
-        )
-
-        if require_square and num_src_nodes == num_dst_nodes:
-            LOGGER.info("%s: edges=%s nodes=%s", graph_name, edge_index.shape[1], num_dst_nodes)
-        else:
-            LOGGER.info(
-                "%s: edges=%s src_nodes=%s dst_nodes=%s",
-                graph_name,
-                edge_index.shape[1],
-                num_src_nodes,
-                num_dst_nodes,
-            )
-
-        return cls(
-            edge_index=edge_index,
-            edge_weights=edge_weights,
-            num_src_nodes=num_src_nodes,
-            num_dst_nodes=num_dst_nodes,
-            row_normalize=row_normalize,
-        )
-
-    @staticmethod
-    def _validate_node_space(
-        edges_name: tuple[str, ...],
-        num_src_nodes: int,
-        num_dst_nodes: int,
-        *,
-        require_square: bool,
-    ) -> None:
-        if not require_square:
-            return
-        if edges_name[0] != edges_name[2]:
-            msg = (
-                "Graph score losses require source and destination nodes to use the same node type, "
-                f"got {edges_name[0]!r} and {edges_name[2]!r}."
-            )
-            raise ValueError(msg)
-        if num_src_nodes != num_dst_nodes:
-            msg = (
-                "Graph score losses require a grid-preserving loss graph with the same number "
-                "of source and target nodes."
-            )
-            raise ValueError(msg)
-
-    @staticmethod
-    def _row_normalize_weights(row_index: torch.Tensor, weights: torch.Tensor, num_rows: int) -> torch.Tensor:
-        totals = torch.zeros(num_rows, dtype=weights.dtype, device=weights.device)
-        totals = totals.scatter_add_(0, row_index, weights)
-        return weights / totals[row_index]
-
-    @staticmethod
-    def _validate_weights(
-        row_index: torch.Tensor,
-        weights: torch.Tensor,
-        num_rows: int,
-        *,
-        graph_name: str,
-    ) -> None:
-        if weights.numel() != row_index.numel():
-            msg = (
-                f"{graph_name} must provide exactly one scalar weight per edge, "
-                f"got {weights.numel()} weights for {row_index.numel()} edges."
-            )
-            raise ValueError(msg)
-        if torch.is_complex(weights) or not torch.isfinite(weights).all():
-            msg = f"{graph_name} weights must be finite real values."
-            raise ValueError(msg)
-        if torch.any(weights < 0):
-            msg = f"{graph_name} weights must be non-negative."
-            raise ValueError(msg)
-
-        row_totals = torch.zeros(num_rows, dtype=weights.dtype, device=weights.device)
-        row_totals.scatter_add_(0, row_index, weights)
-        zero_weight_rows = torch.count_nonzero(row_totals <= 0).item()
-        if zero_weight_rows:
-            msg = f"{graph_name} must have positive total weight for every node; found {zero_weight_rows} empty rows."
-            raise ValueError(msg)
-
-    @staticmethod
-    def _validate_row_sums(
-        row_index: torch.Tensor,
-        weights: torch.Tensor,
-        num_rows: int,
-        validate_row_sums: bool,
-        *,
-        graph_name: str,
-    ) -> None:
-        if not validate_row_sums:
-            return
-
-        row_sums = torch.zeros(num_rows, dtype=weights.dtype, device=weights.device).scatter_add_(0, row_index, weights)
-        if not torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5):
-            LOGGER.warning(
-                "%s row weights do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
-                "Consider using row_normalize=True or pre-normalized weights.",
-                graph_name,
-                row_sums.min().item(),
-                row_sums.max().item(),
-                row_sums.mean().item(),
-            )
 
 
 class BaseGraphScoreLoss(BaseLoss):
-    """Shared base for graph score losses."""
+    """Run a local graph score kernel within the standard loss lifecycle."""
 
     needs_graph_data: bool = True
     graph: GraphScoreGraph | None
@@ -252,7 +60,10 @@ class BaseGraphScoreLoss(BaseLoss):
 
     def compile_for_training(self, **options) -> None:
         """Compile only the local graph score kernel."""
-        self._compute_local_score_tensor = torch.compile(self._compute_local_score_tensor, **options)
+        self._compute_local_score_tensor = torch.compile(
+            self._compute_local_score_tensor,
+            **options,
+        )
 
     @property
     def needs_shard_layout_info(self) -> bool:
@@ -268,7 +79,11 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_shard_sizes: ShardSizes,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
         """Move grid-sharded inputs to a full-grid, variable-sharded layout."""
-        channel_shard_sizes_pred = get_shard_sizes(y_pred_ens, TensorDim.VARIABLE, group)
+        channel_shard_sizes_pred = get_shard_sizes(
+            y_pred_ens,
+            TensorDim.VARIABLE,
+            group,
+        )
         channel_shard_sizes_target = get_shard_sizes(y, TensorDim.VARIABLE, group)
         if channel_shard_sizes_pred != channel_shard_sizes_target:
             msg = (
@@ -353,8 +168,17 @@ class BaseGraphScoreLoss(BaseLoss):
             return self._compute_local_score_tensor(y_pred_ens, y)
 
     @abstractmethod
-    def _compute_local_score_tensor(self, y_pred_ens: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Compute the local graph score tensor without collectives or scaling."""
+    def _compute_local_score_tensor(
+        self,
+        y_pred_ens: torch.Tensor,
+        y: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute a ``(B, T, N, V)`` score from predictions and squeezed targets.
+
+        ``y_pred_ens`` has shape ``(B, T, M, N, V)`` and ``y`` has shape
+        ``(B, T, N, V)``. Implementations must not perform collectives,
+        scaling, or final time/grid reduction.
+        """
 
     def _format_and_scale_score(
         self,
@@ -365,7 +189,12 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         score = einops.rearrange(score, "bs t latlon v -> bs t 1 latlon v")
-        return self.scale(score, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
+        return self.scale(
+            score,
+            scaler_indices,
+            without_scalers=without_scalers,
+            grid_shard_slice=grid_shard_slice,
+        )
 
     def _score_tensor(
         self,
@@ -379,12 +208,15 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int | None = None,
         grid_shard_sizes: ShardSizes = None,
     ) -> tuple[torch.Tensor, bool]:
+        # 1. Validate the public five-dimensional prediction/target contract.
         self._validate_input_shapes(y_pred_ens, y)
         assert y_pred_ens.shape[2] > 1, "Ensemble size must be greater than 1."
 
         is_sharded = grid_shard_slice is not None
         is_model_sharded = self.graph is not None and is_sharded
 
+        # 2. Graph aggregation needs the complete node dimension. For a
+        # sharded model, transpose grid shards into variable shards first.
         pred_for_score, target_for_score = y_pred_ens, y
         channel_shard_sizes = None
         if is_model_sharded:
@@ -405,10 +237,17 @@ class BaseGraphScoreLoss(BaseLoss):
                 grid_shard_sizes,
             )
 
+        # 3. Remove the target's singleton ensemble dimension and evaluate the
+        # concrete score formula on the full graph node space.
         self._validate_graph_grid_size(pred_for_score)
         target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
-        score = self._compute_local_score_tensor_with_precision_control(pred_for_score, target_for_score)
+        score = self._compute_local_score_tensor_with_precision_control(
+            pred_for_score,
+            target_for_score,
+        )
 
+        # 4. Restore the original grid-sharded layout before applying the
+        # standard node/variable scalers.
         if is_model_sharded:
             assert grid_shard_sizes is not None
             assert channel_shard_sizes is not None
@@ -476,6 +315,13 @@ class BaseGraphScoreLoss(BaseLoss):
             grid_dim=grid_dim,
             grid_shard_sizes=grid_shard_sizes,
         )
+        # Unsupported rows stay NaN through local scoring and scaling. They are
+        # neutralized only for the final distributed reduction.
         if self.ignore_nans:
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
-        return self.reduce(score, squash=squash, squash_mode=squash_mode, group=group if is_sharded else None)
+        return self.reduce(
+            score,
+            squash=squash,
+            squash_mode=squash_mode,
+            group=group if is_sharded else None,
+        )

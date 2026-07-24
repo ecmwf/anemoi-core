@@ -9,11 +9,11 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
-from anemoi.training.losses.graph_score_base import GraphScoreGraph
+from anemoi.training.losses.graph_edge_score_base import BaseGraphEdgeScoreLoss
+from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
-class GraphEdgeEnergyScoreLoss(BaseGraphScoreLoss):
+class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
     """Fair energy score over signed graph edge-difference neighbourhoods.
 
     For each graph edge ``src -> dst`` this loss forms signed differences
@@ -69,139 +69,46 @@ class GraphEdgeEnergyScoreLoss(BaseGraphScoreLoss):
         self.fair = fair
 
     @property
-    def edge_src_index(self) -> torch.Tensor:
-        return self.graph.edge_src_index
-
-    @property
-    def edge_dst_index(self) -> torch.Tensor:
-        return self.graph.edge_dst_index
-
-    @property
-    def edge_weights(self) -> torch.Tensor:
-        return self.graph.edge_weights
-
-    @property
-    def num_nodes(self) -> int:
-        return self.graph.num_nodes
-
-    @property
     def name(self) -> str:
         prefix = "f" if self.fair else ""
         return f"{prefix}graph_edge_energy_score"
-
-    def _edge_difference(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, self.edge_src_index] - x[:, :, self.edge_dst_index]
-
-    def _stable_edge_neighbourhood_norm(
-        self,
-        edge_values: torch.Tensor,
-        valid_edges: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        input_shape = edge_values.shape
-        flat_edge_values = edge_values.reshape(-1, *input_shape[-2:])
-        row_index = self.edge_dst_index
-        weights = self.edge_weights.to(dtype=edge_values.dtype)
-        row_indices = row_index.view(1, -1, 1).expand(flat_edge_values.shape[0], -1, flat_edge_values.shape[-1])
-        weight_view = weights.view(1, -1, 1)
-
-        gathered_abs = torch.abs(flat_edge_values)
-        support = torch.zeros(
-            flat_edge_values.shape[0],
-            self.num_nodes,
-            flat_edge_values.shape[-1],
-            dtype=flat_edge_values.dtype,
-            device=flat_edge_values.device,
-        )
-
-        if valid_edges is not None:
-            extra_prefix_dims = edge_values.ndim - valid_edges.ndim
-            expanded_valid = valid_edges.reshape(
-                *valid_edges.shape[:-2],
-                *((1,) * extra_prefix_dims),
-                *valid_edges.shape[-2:],
-            ).expand(input_shape)
-            flat_valid = expanded_valid.reshape(-1, *valid_edges.shape[-2:])
-            safe_gathered_abs = torch.where(flat_valid, gathered_abs, torch.zeros_like(gathered_abs))
-
-            if self.row_normalize:
-                weight_sum = torch.zeros_like(support)
-                weight_sum.index_add_(1, row_index, weight_view * flat_valid.to(dtype=flat_edge_values.dtype))
-                gathered_weight_sum = weight_sum[:, row_index, :]
-                safe_weight_sum = torch.where(
-                    gathered_weight_sum > 0,
-                    gathered_weight_sum,
-                    torch.ones_like(gathered_weight_sum),
-                )
-                edge_weights = torch.where(
-                    flat_valid & (gathered_weight_sum > 0),
-                    weight_view / safe_weight_sum,
-                    torch.zeros_like(weight_view),
-                )
-            else:
-                edge_weights = torch.where(flat_valid, weight_view, torch.zeros_like(weight_view))
-        else:
-            safe_gathered_abs = gathered_abs
-            edge_weights = weight_view
-
-        active_edges = (edge_weights > 0).expand_as(safe_gathered_abs)
-        support.zero_()
-        support.index_add_(1, row_index, active_edges.to(dtype=flat_edge_values.dtype))
-        active_gathered_abs = torch.where(active_edges, safe_gathered_abs, torch.zeros_like(safe_gathered_abs))
-
-        row_max = torch.zeros_like(support)
-        row_max.scatter_reduce_(1, row_indices, active_gathered_abs, reduce="amax", include_self=False)
-        gathered_row_max = row_max[:, row_index, :]
-        safe_row_max = torch.where(gathered_row_max > 0, gathered_row_max, torch.ones_like(gathered_row_max))
-        scaled_abs = active_gathered_abs / safe_row_max
-        scaled_abs = torch.where(gathered_row_max > 0, scaled_abs, torch.zeros_like(scaled_abs))
-
-        norm_sq = torch.zeros_like(support)
-        norm_sq.index_add_(1, row_index, edge_weights * scaled_abs.square())
-        positive_norm = norm_sq > 0
-        safe_norm_sq = torch.where(positive_norm, norm_sq, torch.ones_like(norm_sq))
-        sqrt_norm_sq = torch.where(positive_norm, torch.sqrt(safe_norm_sq), torch.zeros_like(norm_sq))
-        out = row_max * sqrt_norm_sq
-
-        if valid_edges is not None:
-            out = out.masked_fill(support <= 0, torch.nan)
-
-        return out.reshape(*input_shape[:-2] + out.shape[-2:])
 
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
-        ens_size = y_pred_ens.shape[2]
-        edge_valid = None
-        if self.ignore_nans:
-            node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
-            edge_valid = node_valid[:, :, self.edge_src_index, :] & node_valid[:, :, self.edge_dst_index, :]
+        """Compute the edge-difference energy score with shape ``(B, T, N, V)``."""
+        ensemble_size = y_pred_ens.shape[2]
+        edge_valid = self._valid_edges(y_pred_ens, y)
 
         obs_edge_difference = self._edge_difference(y)
 
+        # First term: mean member-to-observation distance between the vectors
+        # of incoming signed edge differences at each destination node.
         obs_term_sum = torch.zeros(
             (*y.shape[:2], self.num_nodes, y.shape[-1]),
             dtype=y_pred_ens.dtype,
             device=y_pred_ens.device,
         )
-        for i in range(ens_size):
+        for i in range(ensemble_size):
             member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
-            obs_term_sum = obs_term_sum + self._stable_edge_neighbourhood_norm(
+            obs_term_sum = obs_term_sum + self.graph.weighted_row_l2_norm(
                 member_edge_difference - obs_edge_difference,
                 valid_edges=edge_valid,
             )
-        obs_term = obs_term_sum / ens_size
+        obs_term = obs_term_sum / ensemble_size
 
+        # Second term: distance between every unordered pair of members.
         pair_distance_sum = torch.zeros_like(obs_term)
-        for i in range(ens_size):
+        for i in range(ensemble_size):
             member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
-            for j in range(i + 1, ens_size):
+            for j in range(i + 1, ensemble_size):
                 pair_edge_difference = self._edge_difference(y_pred_ens[:, :, j])
-                pair_distance_sum = pair_distance_sum + self._stable_edge_neighbourhood_norm(
+                pair_distance_sum = pair_distance_sum + self.graph.weighted_row_l2_norm(
                     member_edge_difference - pair_edge_difference,
                     valid_edges=edge_valid,
                 )
 
-        coef = 1.0 / (ens_size * (ens_size - 1)) if self.fair else 1.0 / (ens_size**2)
-        return obs_term - coef * pair_distance_sum
+        pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
+        return obs_term - pair_coefficient * pair_distance_sum

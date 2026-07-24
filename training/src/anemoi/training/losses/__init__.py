@@ -11,9 +11,10 @@ from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
 from .graph_edge_crps import GraphEdgeCRPSLoss
 from .graph_edge_energy_score import GraphEdgeEnergyScoreLoss
+from .graph_edge_score_base import BaseGraphEdgeScoreLoss
 from .graph_energy_score import GraphEnergyScoreLoss
 from .graph_score_base import BaseGraphScoreLoss
-from .graph_score_base import GraphScoreGraph
+from .graph_score_graph import GraphScoreGraph
 from .graph_variogram_score import GraphVariogramScoreLoss
 from .huber import HuberLoss
 from .kcrps import CRPS
@@ -34,6 +35,7 @@ from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "CRPS",
+    "BaseGraphEdgeScoreLoss",
     "BaseGraphScoreLoss",
     "CombinedLoss",
     "FourierCorrelationLoss",
