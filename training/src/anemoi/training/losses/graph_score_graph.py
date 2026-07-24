@@ -276,7 +276,7 @@ class GraphScoreGraph(nn.Module):
             edge_index[1].long(),
             edge_weights,
             num_dst_nodes,
-            graph_definition.get("validate_row_sums", True),
+            graph_definition.get("validate_row_sums", False),
             graph_name=graph_name,
         )
 

@@ -19,6 +19,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import CombinedLoss
+from anemoi.training.losses import GlobalEnergyScoreLoss
 from anemoi.training.losses import GraphEdgeCRPSLoss
 from anemoi.training.losses import GraphEdgeEnergyScoreLoss
 from anemoi.training.losses import GraphEnergyScoreLoss
@@ -410,6 +411,16 @@ def test_graph_definition_applies_and_normalizes_weights(graph_data: HeteroData)
     torch.testing.assert_close(row_sums, torch.ones(3))
 
 
+def test_graph_definition_defaults_to_unnormalized_unit_weights(graph_data: HeteroData) -> None:
+    loss = GraphEnergyScoreLoss(
+        graph_data=graph_data,
+        loss_graph={"edges_name": ["data", "to", "data"]},
+    )
+
+    torch.testing.assert_close(loss.graph.edge_weights, torch.ones(5))
+    assert not loss.graph.row_normalize
+
+
 def test_graph_definition_applies_source_node_weights(graph_data: HeteroData) -> None:
     graph_data["data"].area = torch.tensor([2.0, 3.0, 4.0])
     loss = GraphVariogramScoreLoss(
@@ -418,7 +429,6 @@ def test_graph_definition_applies_source_node_weights(graph_data: HeteroData) ->
             "edges_name": ["data", "to", "data"],
             "edge_weight_attribute": "weight",
             "src_node_weight_attribute": "area",
-            "validate_row_sums": False,
         },
     )
     src = graph_data["data", "to", "data"].edge_index[0]
@@ -674,6 +684,38 @@ def test_combined_loss_with_direct_and_multiscale_graph_scores(
     assert torch.isfinite(pred.grad).all()
 
 
+def test_combined_graph_energy_with_weak_global_anchor(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    pred, target = score_inputs
+    pred = pred.clone().requires_grad_()
+    graph_energy = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
+    global_energy = GlobalEnergyScoreLoss(joint_variables=True)
+    loss = CombinedLoss(
+        graph_energy,
+        global_energy,
+        loss_weights=(1.0, 0.05),
+    )
+
+    scalar_loss = loss(pred, target)
+    per_variable_loss = loss(pred, target, squash=False)
+
+    expected_scalar = graph_energy(pred, target) + 0.05 * global_energy(pred, target)
+    expected_per_variable = graph_energy(pred, target, squash=False) + 0.05 * global_energy(
+        pred,
+        target,
+        squash=False,
+    )
+    torch.testing.assert_close(scalar_loss, expected_scalar)
+    torch.testing.assert_close(per_variable_loss, expected_per_variable)
+
+    scalar_loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
 def test_filtered_combined_loss_with_direct_and_multiscale_graph_scores(
     graph_data: HeteroData,
     loss_graph: dict[str, object],
@@ -739,6 +781,84 @@ def test_filtered_combined_loss_with_direct_and_multiscale_graph_scores(
     assert torch.isfinite(pred.grad).all()
 
 
+def test_combined_multiscale_crps_with_filtered_multiscale_edge_crps(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+        {"tp": 0, "t2m": 1, "msl": 2},
+    )
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                "scalers": [],
+                "loss_weights": [1.0, 0.1],
+                "losses": [
+                    {
+                        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                        "weights": [0.4, 0.6],
+                        "multiscale_config": {"loss_matrices": [None, None]},
+                        "per_scale_loss": {
+                            "_target_": "anemoi.training.losses.CRPS",
+                            "scalers": [],
+                            "alpha": 0.95,
+                        },
+                    },
+                    {
+                        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
+                        "weights": [0.4, 0.6],
+                        "multiscale_config": {"loss_matrices": [None, None]},
+                        "per_scale_loss": {
+                            "_target_": "anemoi.training.losses.GraphEdgeCRPSLoss",
+                            "scalers": [],
+                            "alpha": 1.0,
+                            "loss_graph": loss_graph,
+                            "predicted_variables": ["tp"],
+                            "target_variables": ["tp"],
+                        },
+                    },
+                ],
+            },
+        ),
+        data_indices=data_indices,
+        graph_data=graph_data,
+        data_node_name="data",
+    )
+    pred, target = score_inputs
+    pred = torch.cat((pred, pred[..., :1] + 0.5), dim=-1).requires_grad_()
+    target = torch.cat((target, target[..., :1] - 0.5), dim=-1)
+    loss_kwargs = {
+        "pred_layout": IndexSpace.MODEL_OUTPUT,
+        "target_layout": IndexSpace.DATA_OUTPUT,
+    }
+
+    assert isinstance(loss, CombinedLoss)
+    assert isinstance(loss.losses[0], MultiscaleLossWrapper)
+    assert isinstance(loss.losses[0].loss, LossVariableMapper)
+    assert isinstance(loss.losses[0].loss.loss, CRPS)
+    assert isinstance(loss.losses[1], MultiscaleLossWrapper)
+    assert isinstance(loss.losses[1].loss, LossVariableMapper)
+    assert isinstance(loss.losses[1].loss.loss, GraphEdgeCRPSLoss)
+
+    scalar_loss = loss(pred, target, **loss_kwargs)
+    per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
+    primary_scalar = loss.losses[0](pred, target, **loss_kwargs)
+    edge_scalar = loss.losses[1](pred, target, **loss_kwargs)
+    primary_per_variable = loss.losses[0](pred, target, squash=False, **loss_kwargs)
+    edge_per_variable = loss.losses[1](pred, target, squash=False, **loss_kwargs)
+
+    torch.testing.assert_close(scalar_loss, primary_scalar + 0.1 * edge_scalar)
+    torch.testing.assert_close(per_variable_loss, primary_per_variable + 0.1 * edge_per_variable)
+    torch.testing.assert_close(edge_per_variable[1:], torch.zeros(2, dtype=pred.dtype))
+
+    scalar_loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
 def test_graph_score_schemas_accept_direct_and_combined_configs(loss_graph: dict[str, object]) -> None:
     direct = TypeAdapter(LossSchemas).validate_python(
         {
@@ -763,7 +883,9 @@ def test_graph_score_schemas_accept_direct_and_combined_configs(loss_graph: dict
     )
 
     assert direct.target_ == "anemoi.training.losses.GraphVariogramScoreLoss"
+    assert direct.loss_graph.validate_row_sums is False
     assert combined.losses[0].target_ == "anemoi.training.losses.GraphEdgeEnergyScoreLoss"
+    assert combined.losses[0].loss_graph.validate_row_sums is False
 
 
 def test_graph_score_uses_current_sharding_contract(

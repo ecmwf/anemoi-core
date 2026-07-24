@@ -328,11 +328,11 @@ class GraphScoreGraphSchema(BaseModel):
     edge_weight_attribute: str | None = None
     src_node_weight_attribute: str | None = None
     row_normalize: bool = False
-    validate_row_sums: bool = True
+    validate_row_sums: bool = False
 
 
-class GraphScoreLossSchema(BaseModel):
-    """Configuration shared by graph score losses."""
+class EnsembleScoreLossSchema(BaseModel):
+    """Configuration shared by ensemble score losses."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -346,10 +346,20 @@ class GraphScoreLossSchema(BaseModel):
     no_autocast: bool = True
 
 
+class GraphScoreLossSchema(EnsembleScoreLossSchema):
+    """Configuration shared by graph score losses."""
+
+
 class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
     target_: Literal["anemoi.training.losses.GraphEnergyScoreLoss"] = Field(..., alias="_target_")
     fair: bool = True
     loss_graph: GraphScoreGraphSchema | None = None
+
+
+class GlobalEnergyScoreLossSchema(EnsembleScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GlobalEnergyScoreLoss"] = Field(..., alias="_target_")
+    fair: bool = True
+    joint_variables: bool = False
 
 
 class GraphVariogramScoreLossSchema(GraphScoreLossSchema):
@@ -448,6 +458,7 @@ class MultiScaleLossSchema(BaseModel):
         CRPSSchema
         | TimeAggregateLossWrapperSchema
         | GraphEnergyScoreLossSchema
+        | GlobalEnergyScoreLossSchema
         | GraphVariogramScoreLossSchema
         | GraphEdgeCRPSLossSchema
         | GraphEdgeEnergyScoreLossSchema
@@ -564,6 +575,8 @@ class SpectralLossSchema(BaseLossSchema):
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
+    coefficient_magnitude: bool = False
+    """For spectral CRPS, compare the moduli of the coefficients rather than their complex values."""
 
     @model_validator(mode="after")
     def check_subgrid_transform(self) -> Self:
@@ -586,6 +599,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
     "anemoi.training.losses.CRPS": "crps",
     "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
+    "anemoi.training.losses.GlobalEnergyScoreLoss": "global_energy_score",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -624,6 +638,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
+            | Annotated[GlobalEnergyScoreLossSchema, Tag("global_energy_score")]
             | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
@@ -683,6 +698,7 @@ LossSchemas = Annotated[
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
+    | Annotated[GlobalEnergyScoreLossSchema, Tag("global_energy_score")]
     | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
