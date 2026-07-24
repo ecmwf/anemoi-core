@@ -15,6 +15,9 @@ from typing import Optional
 import einops
 import numpy as np
 import torch
+import torch.distributed as dist
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
@@ -78,6 +81,242 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        return self._expand_time(x_skip, n_step_output)
+
+
+class NoSkipConnection(BaseResidualConnection):
+    """No skip connection module.
+
+    This layer returns zeros, effectively disabling the residual connection
+    so the model output is not biased by the input.
+
+    This is useful when input observations are sparse or contain missing values,
+    as adding them back to the output can create artefacts.
+    """
+
+    def __init__(self, **_) -> None:
+        super().__init__()
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Return zeros with the expected output shape."""
+        x_skip = torch.zeros_like(x[:, -1, ...])  # x shape: (batch, time, ens, nodes, features)
+        return self._expand_time(x_skip, n_step_output)
+
+
+def _parse_normalize_methods(normalize_method) -> tuple[str, dict[str, str]]:
+    """Parse normalize_method config into (default, {var_name: method}).
+
+    Accepts the same dict structure as the preprocessor normalizer config:
+    ``{"default": "mean-std", "min-max": ["var1", "var2"], ...}``.
+    """
+    if not normalize_method:
+        return "mean-std", {}
+    normalize_method = dict(normalize_method)
+    default = normalize_method.get("default", "mean-std")
+    methods: dict[str, str] = {}
+    for key, value in normalize_method.items():
+        if key == "default":
+            continue
+        if isinstance(value, (list, tuple)):
+            for var in value:
+                methods[str(var)] = key
+        elif isinstance(value, str):
+            methods[value] = key
+    return default, methods
+
+
+def _apply_climatology_normalization(
+    climatology: np.ndarray,
+    feature_names: list,
+    statistics: dict,
+    normalize_method,
+    data_name_to_idx: dict,
+) -> None:
+    """Normalize climatology columns in-place using dataset statistics.
+
+    Parameters
+    ----------
+    climatology : np.ndarray
+        Shape ``(num_grid_points, num_features)``, modified in-place.
+    feature_names : list
+        ``feature_names[col]`` gives the variable name for column ``col``,
+        or ``None`` to skip that column.
+    statistics : dict
+        Dataset statistics with keys ``"mean"``, ``"stdev"``, ``"minimum"``,
+        ``"maximum"`` — each a 1-D array indexed by data input index.
+    normalize_method : dict | None
+        Method config with the same structure as the preprocessor normalizer:
+        ``{"default": "mean-std", "min-max": ["var1"], ...}``.
+    data_name_to_idx : dict
+        Mapping from variable name to data input index (used to index statistics).
+    """
+    default_method, var_methods = _parse_normalize_methods(normalize_method)
+    for col, var_name in enumerate(feature_names):
+        if var_name is None or var_name not in data_name_to_idx:
+            continue
+        method = var_methods.get(var_name, default_method)
+        if method == "none":
+            continue
+        d_idx = data_name_to_idx[var_name]
+        col_data = climatology[:, col]
+        if method == "mean-std":
+            climatology[:, col] = (col_data - statistics["mean"][d_idx]) / statistics["stdev"][d_idx]
+        elif method == "std":
+            climatology[:, col] = col_data / statistics["stdev"][d_idx]
+        elif method == "min-max":
+            lo, hi = statistics["minimum"][d_idx], statistics["maximum"][d_idx]
+            climatology[:, col] = (col_data - lo) / (hi - lo)
+        elif method == "max":
+            climatology[:, col] = col_data / statistics["maximum"][d_idx]
+        else:
+            raise ValueError(f"Unknown normalization method {method!r} for variable {var_name!r}.")
+
+
+class ClimatologySkipConnection(BaseResidualConnection):
+    """Skip connection that returns a fixed climatological field as the residual.
+
+    Instead of returning zeros (NoSkipConnection) or the raw input (SkipConnection),
+    this class returns pre-computed climatological values so the model predicts
+    departures from climatology.
+
+    The climatology is loaded from a NumPy ``.npz`` file whose keys are variable
+    names and values are 1-D arrays of shape ``(num_grid_points,)``. Variables
+    present in the file are slotted into the corresponding feature index; variables
+    absent from the file default to zero (equivalent to NoSkipConnection for those
+    channels).
+
+    The loaded climatology is registered as a buffer so it is saved in the model
+    checkpoint and the ``.npz`` file is **not** required at inference time.
+
+    Parameters
+    ----------
+    climatology_path : str
+        Path to a ``.npz`` file. Keys are variable names, values are 1-D numpy
+        arrays of shape ``(num_grid_points,)`` in un-normalized or normalized space
+        depending on ``normalize_climatology``.
+    graph : HeteroData, optional
+        The graph data (unused, accepted for the shared residual factory kwargs).
+    data_indices : object, optional
+        Index collection providing ``model.input.name_to_index``.
+    missing_value : float, optional
+        Sentinel value marking missing points when ``fill_missing_only=True``.
+    fill_missing_only : bool, optional
+        If ``True``, return the latest input with points equal to ``missing_value``
+        replaced by climatology, instead of returning the climatology everywhere.
+    group_variables : list, optional
+        When instantiated inside :class:`PerVariableGroupResidual`, the group's
+        variable names; the buffer is then built for the group's feature dimension.
+    normalize_climatology : bool, optional
+        If ``True``, normalize the loaded climatology using ``statistics`` before
+        storing the buffer. If ``False`` (default), the npz values are used as-is
+        and are assumed to already be in normalized space.
+    normalize_method : dict | None, optional
+        Normalization method config. Uses the same structure as the preprocessor
+        normalizer config: ``{"default": "mean-std", "min-max": ["var1"], ...}``.
+        Only used when ``normalize_climatology=True``. Defaults to ``mean-std``
+        for all variables.
+    statistics : dict | None, optional
+        Dataset statistics dict with keys ``"mean"``, ``"stdev"``, ``"minimum"``,
+        ``"maximum"``. Required when ``normalize_climatology=True``.
+    """
+
+    def __init__(
+        self,
+        climatology_path: str,
+        graph: Optional[HeteroData] = None,
+        data_indices=None,
+        missing_value: float = 0.0,
+        fill_missing_only: bool = False,
+        group_variables: Optional[list] = None,
+        normalize_climatology: bool = False,
+        normalize_method=None,
+        statistics: Optional[dict] = None,
+        **_,
+    ) -> None:
+        super().__init__()
+        assert (
+            data_indices is not None
+        ), "ClimatologySkipConnection requires data_indices to map variable names to feature indices."
+
+        self._missing_value = missing_value
+        self._fill_missing_only = fill_missing_only
+
+        name_to_index = dict(data_indices.model.input.name_to_index)
+
+        # If called from PerVariableGroupResidual, only build buffer for the group's variables
+        if group_variables is not None:
+            feature_names = list(group_variables)
+        else:
+            feature_names = list(name_to_index.keys())
+        num_features = len(feature_names)
+
+        clim_data = np.load(climatology_path)
+
+        # Infer grid size from the first array in the file
+        first_key = next(iter(clim_data.files))
+        num_grid_points = clim_data[first_key].shape[0]
+
+        # Build the climatology tensor: (grid, features)
+        climatology = np.zeros((num_grid_points, num_features), dtype=np.float32)
+
+        for feat_idx, var_name in enumerate(feature_names):
+            if var_name in clim_data:
+                arr = clim_data[var_name]
+                assert arr.shape == (num_grid_points,), (
+                    f"ClimatologySkipConnection: variable {var_name!r} has shape {arr.shape}, "
+                    f"expected ({num_grid_points},)."
+                )
+                climatology[:, feat_idx] = arr.astype(np.float32)
+
+        if normalize_climatology:
+            assert statistics is not None, "ClimatologySkipConnection: normalize_climatology=True requires statistics."
+            _apply_climatology_normalization(
+                climatology,
+                feature_names,
+                statistics,
+                normalize_method,
+                dict(data_indices.data.input.name_to_index),
+            )
+
+        self.register_buffer("_climatology", torch.from_numpy(climatology))
+
+    def _local_climatology(self, grid_shard_sizes, model_comm_group) -> torch.Tensor:
+        """Return the climatology buffer, sliced to this rank's grid partition when sharded."""
+        clim = self._climatology
+        if grid_shard_sizes is None:
+            return clim
+        assert sum(grid_shard_sizes) == clim.shape[0], (
+            f"ClimatologySkipConnection: shard sizes sum to {sum(grid_shard_sizes)} "
+            f"but climatology covers {clim.shape[0]} grid points."
+        )
+        rank = dist.get_rank(group=model_comm_group)
+        offset = sum(grid_shard_sizes[:rank])
+        return clim.narrow(0, offset, grid_shard_sizes[rank])
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        """Return climatology, or input with missing values filled by climatology if fill_missing_only=True."""
+        batch, _time, ensemble, _grid, _features = x.shape
+        clim = self._local_climatology(grid_shard_sizes, model_comm_group)
+        # clim shape: (grid, features) -> broadcast to (batch, ensemble, grid, features)
+        clim = clim.unsqueeze(0).unsqueeze(0).expand(batch, ensemble, -1, -1)
+        if self._fill_missing_only:
+            x_last = x[:, -1, ...]  # (batch, ensemble, grid, features)
+            mask = x_last == self._missing_value
+            x_skip = torch.where(mask, clim, x_last)
+        else:
+            x_skip = clim
         return self._expand_time(x_skip, n_step_output)
 
 
@@ -358,6 +597,14 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         Whether theta is a trainable parameter.
     regressors : list[str] | None
         Variable names to use as regressors.
+    graph : HeteroData, optional
+        Graph data (unused, accepted for the shared residual factory kwargs).
+    statistics : dict, optional
+        Dataset statistics used to auto-initialize theta.
+    data_indices : object
+        The dataset's data indices, used to resolve variable names. Required.
+    dataset_name : str, optional
+        Dataset name (unused, accepted for the shared residual factory kwargs).
     """
 
     def __init__(
@@ -412,6 +659,230 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         return self._expand_time(out, n_step_output)
 
 
+def _instantiate_sub_residual(
+    cfg,
+    graph: Optional[HeteroData] = None,
+    data_indices=None,
+    dataset_name: str | None = None,
+    statistics: dict | None = None,
+    data_node_name: str | None = None,
+    sparse_projector_num_chunks: int = 1,
+    group_variables: Optional[list] = None,
+) -> BaseResidualConnection:
+    """Instantiate a sub-residual from either a config dict or a pre-built module.
+
+    Composite residuals (e.g. PerVariableGroupResidual) are constructed with
+    ``_recursive_=False`` so their nested sub-residual configs arrive here as
+    ``DictConfig`` / ``dict``; we instantiate them explicitly, forwarding the
+    shared kwargs that ``BaseGraphModel._build_residual`` provides.
+
+    Parameters
+    ----------
+    cfg : dict | DictConfig | BaseResidualConnection
+        Sub-residual config or pre-built module.
+    graph : HeteroData, optional
+        Graph data forwarded to the sub-residual.
+    data_indices : object, optional
+        Data indices forwarded to the sub-residual.
+    dataset_name : str, optional
+        Dataset name forwarded to the sub-residual.
+    statistics : dict, optional
+        Dataset statistics forwarded to the sub-residual.
+    data_node_name : str, optional
+        Data node name forwarded to the sub-residual.
+    sparse_projector_num_chunks : int, optional
+        Number of chunks for sparse projections, forwarded to the sub-residual.
+    group_variables : list of str, optional
+        If the sub-residual is being instantiated inside PerVariableGroupResidual,
+        this is the list of variable names for the group. Forwarded to classes
+        that need it (e.g. ClimatologySkipConnection) so they can build buffers
+        matching the group's feature dimension rather than the full model dimension.
+        Classes that don't accept this kwarg will ignore it via **_.
+
+    Returns
+    -------
+    BaseResidualConnection
+        The instantiated sub-residual module.
+    """
+    if isinstance(cfg, BaseResidualConnection):
+        return cfg
+    if isinstance(cfg, (dict, DictConfig)):
+        return instantiate(
+            cfg,
+            _recursive_=False,
+            graph=graph,
+            data_indices=data_indices,
+            dataset_name=dataset_name,
+            statistics=statistics,
+            data_node_name=data_node_name,
+            sparse_projector_num_chunks=sparse_projector_num_chunks,
+            group_variables=group_variables,
+        )
+    raise TypeError(
+        f"Sub-residual must be a dict / DictConfig / BaseResidualConnection, got {type(cfg)!r}.",
+    )
+
+
+class PerVariableGroupResidual(BaseResidualConnection):
+    """Residual that applies different sub-residuals to disjoint variable groups.
+
+    Each group names a set of model-input variables and a residual module. The
+    group's residual is applied to the sliced feature tensor, and results are
+    scattered back into an output tensor whose feature dimension matches the
+    model input. Variable positions not covered by any group are left at zero
+    (they are unused downstream — ``_assemble_output`` only indexes the
+    prognostic slice of ``x_skip``).
+
+    Groups must be disjoint, and every prognostic variable must be covered by
+    exactly one group (diagnostic/forcing variables may be omitted).
+
+    Parameters
+    ----------
+    groups : list of dict
+        Each entry has keys ``name`` (str, for error messages), ``variables``
+        (list of model-input variable names), and ``residual`` (a sub-residual
+        config or pre-built module).
+    graph : HeteroData, optional
+        Forwarded to sub-residuals.
+    data_indices : object
+        The dataset's data indices, used to resolve variable names. Required.
+    dataset_name : str, optional
+        Forwarded to sub-residuals.
+    statistics : dict, optional
+        Forwarded to sub-residuals.
+    data_node_name : str, optional
+        Forwarded to sub-residuals.
+    sparse_projector_num_chunks : int, optional
+        Forwarded to sub-residuals.
+
+    Example
+    -------
+    >>> # yaml config:
+    >>> # residual:
+    >>> #   _target_: anemoi.models.layers.residual.PerVariableGroupResidual
+    >>> #   groups:
+    >>> #     - name: polar_sat
+    >>> #       variables: [sat_ch1, sat_ch2]
+    >>> #       residual:
+    >>> #         _target_: anemoi.models.layers.residual.NoSkipConnection
+    >>> #     - name: gridded_fields
+    >>> #       variables: [z_500, t_850]
+    >>> #       residual:
+    >>> #         _target_: anemoi.models.layers.residual.SkipConnection
+    """
+
+    def __init__(
+        self,
+        groups,
+        graph: Optional[HeteroData] = None,
+        data_indices=None,
+        dataset_name: str | None = None,
+        statistics: dict | None = None,
+        data_node_name: str | None = None,
+        sparse_projector_num_chunks: int = 1,
+        **_,
+    ) -> None:
+        super().__init__()
+        assert data_indices is not None, (
+            "PerVariableGroupResidual requires data_indices — check that _build_residual "
+            "forwards data_indices to the residual instantiation."
+        )
+
+        name_to_index = dict(data_indices.model.input.name_to_index)
+        prognostic_indices = [int(i) for i in data_indices.model.input.prognostic]
+        prognostic_set = set(prognostic_indices)
+
+        self.group_names: list[str] = []
+        self.group_residuals = nn.ModuleList()
+        seen: dict[int, str] = {}
+        covered_prognostic: set[int] = set()
+
+        for i, group in enumerate(groups):
+            group = dict(group)  # tolerate DictConfig
+            name = group.get("name", f"group_{i}")
+            variables = list(group["variables"])
+            sub_cfg = group["residual"]
+
+            indices: list[int] = []
+            for var_name in variables:
+                if var_name not in name_to_index:
+                    msg = (
+                        f"PerVariableGroupResidual group {name!r}: variable {var_name!r} "
+                        f"is not in model.input.name_to_index."
+                    )
+                    raise ValueError(msg)
+                idx = int(name_to_index[var_name])
+                if idx in seen:
+                    msg = (
+                        f"PerVariableGroupResidual: variable {var_name!r} (index {idx}) "
+                        f"appears in groups {seen[idx]!r} and {name!r}; groups must be disjoint."
+                    )
+                    raise ValueError(msg)
+                seen[idx] = name
+                indices.append(idx)
+                if idx in prognostic_set:
+                    covered_prognostic.add(idx)
+
+            sub_residual = _instantiate_sub_residual(
+                sub_cfg,
+                graph=graph,
+                data_indices=data_indices,
+                dataset_name=dataset_name,
+                statistics=statistics,
+                data_node_name=data_node_name,
+                sparse_projector_num_chunks=sparse_projector_num_chunks,
+                group_variables=variables,
+            )
+            self.group_names.append(name)
+            self.group_residuals.append(sub_residual)
+            # Persistent=False: indices are derived from config, not learned state.
+            self.register_buffer(
+                f"_group_indices_{i}",
+                torch.as_tensor(indices, dtype=torch.long),
+                persistent=False,
+            )
+
+        missing = prognostic_set - covered_prognostic
+        if missing:
+            # Reverse-lookup names for a helpful error message.
+            index_to_name = {v: k for k, v in name_to_index.items()}
+            missing_names = sorted(index_to_name.get(i, f"<idx {i}>") for i in missing)
+            msg = (
+                f"PerVariableGroupResidual: prognostic variables not covered by any group: "
+                f"{missing_names}. Every prognostic variable must belong to exactly one group."
+            )
+            raise ValueError(msg)
+
+    def _indices(self, i: int, device: torch.device) -> torch.Tensor:
+        buf: torch.Tensor = getattr(self, f"_group_indices_{i}")
+        return buf.to(device=device, non_blocking=True) if buf.device != device else buf
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        out: Optional[torch.Tensor] = None
+        for i, sub_residual in enumerate(self.group_residuals):
+            idx = self._indices(i, x.device)
+            x_group = x.index_select(-1, idx)
+            skip_group = sub_residual(
+                x_group,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                n_step_output=n_step_output,
+            )
+            if out is None:
+                out_shape = list(skip_group.shape)
+                out_shape[-1] = x.shape[-1]
+                out = torch.zeros(out_shape, dtype=skip_group.dtype, device=skip_group.device)
+            out[..., idx] = skip_group
+        assert out is not None, "PerVariableGroupResidual must have at least one group."
+        return out
+
+
 class SpectralOrnsteinConnection(BaseResidualConnection):
     """Ornstein residual with learnable spatially-varying theta and mu defined via spherical harmonics.
 
@@ -448,6 +919,14 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         ``truncate=True``).
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
+    graph : HeteroData, optional
+        Graph data, used to derive the grid shape (nlat/nlon).
+    statistics : dict, optional
+        Dataset statistics used to auto-initialize theta.
+    data_indices : object
+        The dataset's data indices, used to resolve variable names. Required.
+    dataset_name : str, optional
+        Dataset name, used with ``graph`` to derive the grid shape.
     """
 
     def __init__(

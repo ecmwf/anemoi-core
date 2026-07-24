@@ -142,8 +142,78 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
     )
 
 
+class NoSkipConnectionSchema(BaseModel):
+    """Schema for disabled residual connections (zeros)."""
+
+    target_: Literal["anemoi.models.layers.residual.NoSkipConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
+
+
+class ClimatologySkipConnectionSchema(BaseModel):
+    """Schema for climatology-based skip connections."""
+
+    target_: Literal["anemoi.models.layers.residual.ClimatologySkipConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
+    climatology_path: str = Field(
+        ...,
+        description="Path to a .npz file mapping variable names to 1-D per-grid-point climatology arrays.",
+    )
+    missing_value: float = Field(
+        0.0,
+        description="Sentinel value marking missing points when fill_missing_only is enabled.",
+    )
+    fill_missing_only: bool = Field(
+        False,
+        description="If true, return the latest input with missing points replaced by climatology "
+        "instead of returning the climatology everywhere.",
+    )
+    normalize_climatology: bool = Field(
+        False,
+        description="If true, normalize the loaded climatology with dataset statistics before use.",
+    )
+    normalize_method: dict | None = Field(
+        None,
+        description="Normalization method config, same structure as the preprocessor normalizer "
+        '(e.g. {"default": "mean-std", "min-max": ["tp"]}). Only used when normalize_climatology is true.',
+    )
+
+
+# Leaf residual schemas usable as sub-residuals inside PerVariableGroupResidual.
+SubResidualConnectionSchema = Annotated[
+    SkipConnectionSchema
+    | NoSkipConnectionSchema
+    | ClimatologySkipConnectionSchema
+    | TruncatedConnectionSchema
+    | ScalarOrnsteinConnectionSchema
+    | SpectralOrnsteinConnectionSchema,
+    Field(discriminator="target_"),
+]
+
+
+class ResidualGroupSchema(BaseModel):
+    """Schema for one variable group of a PerVariableGroupResidual."""
+
+    name: str | None = Field(None, description="Group name, used in error messages.")
+    variables: list[str] = Field(..., min_length=1, description="Model-input variable names in this group.")
+    residual: SubResidualConnectionSchema = Field(..., description="Sub-residual applied to this group.")
+
+
+class PerVariableGroupResidualSchema(BaseModel):
+    """Schema for per-variable-group residual connections."""
+
+    target_: Literal["anemoi.models.layers.residual.PerVariableGroupResidual"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
+    groups: list[ResidualGroupSchema] = Field(..., min_length=1)
+
+
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
+    | NoSkipConnectionSchema
+    | ClimatologySkipConnectionSchema
+    | PerVariableGroupResidualSchema
     | TruncatedConnectionSchema
     | ScalarOrnsteinConnectionSchema
     | SpectralOrnsteinConnectionSchema,

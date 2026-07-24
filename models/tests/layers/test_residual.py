@@ -14,6 +14,9 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.residual import ClimatologySkipConnection
+from anemoi.models.layers.residual import NoSkipConnection
+from anemoi.models.layers.residual import PerVariableGroupResidual
 from anemoi.models.layers.residual import ScalarOrnsteinConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.layers.residual import SpectralOrnsteinConnection
@@ -296,3 +299,158 @@ def test_spectral_ornstein_truncation_has_filter():
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
+
+
+# ── NoSkipConnection / ClimatologySkipConnection / PerVariableGroupResidual ──
+
+
+def test_noskipconnection(flat_data):
+    conn = NoSkipConnection()
+    out = conn(flat_data)
+    assert out.shape == flat_data[:, -1, ...].shape
+    assert torch.all(out == 0)
+    out_expanded = conn(flat_data, n_step_output=4)
+    assert out_expanded.shape == (11, 4, 5, 2, 3)
+    assert torch.all(out_expanded == 0)
+
+
+def _write_climatology_npz(path, num_grid_points=2, variables=("var0", "var1")):
+    arrays = {name: np.full(num_grid_points, float(i + 1), dtype=np.float32) for i, name in enumerate(variables)}
+    np.savez(path, **arrays)
+    return arrays
+
+
+def test_climatology_skip_connection(tmp_path, flat_data):
+    npz_path = tmp_path / "clim.npz"
+    _write_climatology_npz(npz_path, num_grid_points=2, variables=("var0", "var2"))
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=_make_data_indices(n_prognostic=3),
+    )
+    out = conn(flat_data)
+    assert out.shape == flat_data[:, -1, ...].shape
+    # var0 -> 1.0, var1 absent from file -> 0.0, var2 -> 2.0, everywhere on the grid
+    assert torch.all(out[..., 0] == 1.0)
+    assert torch.all(out[..., 1] == 0.0)
+    assert torch.all(out[..., 2] == 2.0)
+
+
+def test_climatology_skip_connection_fill_missing_only(tmp_path, flat_data):
+    npz_path = tmp_path / "clim.npz"
+    _write_climatology_npz(npz_path, num_grid_points=2, variables=("var0",))
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=_make_data_indices(n_prognostic=3),
+        missing_value=0.0,
+        fill_missing_only=True,
+    )
+    x = flat_data.clone()
+    x[0, -1, 0, 0, 0] = 0.0  # missing var0 point -> filled with climatology (1.0)
+    x[0, -1, 0, 1, 0] = 5.0  # present point -> kept
+    out = conn(x)
+    assert out[0, 0, 0, 0] == 1.0
+    assert out[0, 0, 1, 0] == 5.0
+
+
+def test_climatology_skip_connection_normalized(tmp_path, flat_data):
+    npz_path = tmp_path / "clim.npz"
+    _write_climatology_npz(npz_path, num_grid_points=2, variables=("var0",))
+    statistics = {
+        "mean": np.array([0.5, 0.0, 0.0]),
+        "stdev": np.array([0.25, 1.0, 1.0]),
+        "minimum": np.zeros(3),
+        "maximum": np.ones(3),
+    }
+    data_indices = _make_data_indices(n_prognostic=3)
+    data_indices.data.input.name_to_index = {"var0": 0, "var1": 1, "var2": 2}
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=data_indices,
+        normalize_climatology=True,
+        statistics=statistics,
+    )
+    out = conn(flat_data)
+    # (1.0 - 0.5) / 0.25 = 2.0
+    assert torch.allclose(out[..., 0], torch.tensor(2.0))
+
+
+def test_climatology_skip_connection_sharded_slice(tmp_path, monkeypatch):
+    npz_path = tmp_path / "clim.npz"
+    num_grid_points = 5
+    arrays = {"var0": np.arange(num_grid_points, dtype=np.float32)}
+    np.savez(npz_path, **arrays)
+    conn = ClimatologySkipConnection(
+        climatology_path=str(npz_path),
+        data_indices=_make_data_indices(n_prognostic=3),
+    )
+    monkeypatch.setattr("anemoi.models.layers.residual.dist.get_rank", lambda group=None: 1)
+    local = conn._local_climatology(grid_shard_sizes=[2, 3], model_comm_group=None)
+    assert local.shape == (3, 3)
+    assert torch.equal(local[:, 0], torch.tensor([2.0, 3.0, 4.0]))
+    # forward on the rank-local shard of x must broadcast against the sliced buffer
+    x_shard = torch.randn(2, 4, 1, 3, 3)
+    out = conn(x_shard, grid_shard_sizes=[2, 3])
+    assert out.shape == (2, 1, 3, 3)
+    assert torch.equal(out[0, 0, :, 0], torch.tensor([2.0, 3.0, 4.0]))
+
+
+def test_per_variable_group_residual_scatter(flat_data):
+    data_indices = _make_data_indices(n_prognostic=3)
+    conn = PerVariableGroupResidual(
+        groups=[
+            {"name": "skipped", "variables": ["var0", "var2"], "residual": SkipConnection()},
+            {"name": "zeroed", "variables": ["var1"], "residual": NoSkipConnection()},
+        ],
+        data_indices=data_indices,
+    )
+    out = conn(flat_data)
+    x_last = flat_data[:, -1, ...]
+    assert torch.equal(out[..., 0], x_last[..., 0])
+    assert torch.all(out[..., 1] == 0)
+    assert torch.equal(out[..., 2], x_last[..., 2])
+
+
+def test_per_variable_group_residual_from_config(flat_data):
+    data_indices = _make_data_indices(n_prognostic=3)
+    conn = PerVariableGroupResidual(
+        groups=[
+            {
+                "name": "all",
+                "variables": ["var0", "var1", "var2"],
+                "residual": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1},
+            },
+        ],
+        data_indices=data_indices,
+    )
+    out = conn(flat_data)
+    assert torch.equal(out, flat_data[:, -1, ...])
+
+
+def test_per_variable_group_residual_missing_prognostic():
+    data_indices = _make_data_indices(n_prognostic=3)
+    with pytest.raises(ValueError, match="not covered by any group"):
+        PerVariableGroupResidual(
+            groups=[{"name": "partial", "variables": ["var0"], "residual": NoSkipConnection()}],
+            data_indices=data_indices,
+        )
+
+
+def test_per_variable_group_residual_overlapping_groups():
+    data_indices = _make_data_indices(n_prognostic=3)
+    with pytest.raises(ValueError, match="must be disjoint"):
+        PerVariableGroupResidual(
+            groups=[
+                {"name": "a", "variables": ["var0", "var1"], "residual": NoSkipConnection()},
+                {"name": "b", "variables": ["var1", "var2"], "residual": NoSkipConnection()},
+            ],
+            data_indices=data_indices,
+        )
+
+
+def test_per_variable_group_residual_unknown_variable():
+    data_indices = _make_data_indices(n_prognostic=3)
+    with pytest.raises(ValueError, match="not in model.input.name_to_index"):
+        PerVariableGroupResidual(
+            groups=[{"name": "bad", "variables": ["var0", "var1", "var2", "nope"], "residual": NoSkipConnection()}],
+            data_indices=data_indices,
+        )
