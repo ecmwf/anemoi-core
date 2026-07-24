@@ -51,7 +51,17 @@ class BaseVariableLossScaler(BaseScaler):
 
 
 class GeneralVariableLossScaler(BaseVariableLossScaler):
-    """Scaling per variable defined in config file."""
+    """Scaling per variable defined in config file.
+
+    Supports per-level and per-channel weight specification for variables.
+    When a variable has levels or channels (e.g., z_500, z_500_ch0), you can specify:
+    - Specific level/channel weights (e.g., z_500: 250, z_500_ch0: 300)
+    - Base variable weight applied to all levels/channels (e.g., z: 150)
+    - Default weight for all unspecified variables
+
+    The lookup follows a fallback chain:
+    variable_name (e.g., z_500) -> base_variable (e.g., z) -> default
+    """
 
     def __init__(
         self,
@@ -68,9 +78,10 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         data_indices : IndexCollection
             Collection of data indices.
         weights : DictConfig
-            Configuration for variable loss scaling.
-        scale_dim : int
-            Dimension to scale
+            Configuration for variable loss scaling. Can specify weights by:
+            - Full variable name with level/channel (e.g., "z_500": 250, "atms_ch04": 300)
+            - Base variable name (e.g., "z": 150) applied to all levels/channels
+            - "default": fallback weight for unspecified variables
         metadata_extractor : ExtractVariableGroupAndLevel
             Metadata extractor for variable groups and levels.
         norm : str, optional
@@ -84,24 +95,29 @@ class GeneralVariableLossScaler(BaseVariableLossScaler):
         """Get loss scaling.
 
         Retrieve the loss scaling for each variable from the config file.
+        Supports per-level and per-channel specification (e.g., z_500, atm_ch04) with fallback
+        to base variable name (e.g., z) and then to default.
+
+        The lookup follows a fallback chain:
+        1. Check for exact variable name match (e.g., "z_500": 250)
+        2. Fall back to base variable name (e.g., "z": 150)
+        3. Fall back to default weight
         """
         variable_loss_scaling = torch.empty((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
-        for variable_name, idx in self.data_indices.model.output.name_to_index.items():
+        # Iterate over the data.output space (loss-tensor layout), not model.output:
+        # variables such as targets are part of the loss tensor but are not
+        # state-decoder outputs, so iterating model.output would leave their
+        # positions uninitialised.
+        index_to_name = {idx: name for name, idx in self.data_indices.data.output.name_to_index.items()}
+        for position, raw_idx in enumerate(self.data_indices.data.output.full.tolist()):
+            variable_name = index_to_name[raw_idx]
             _, variable_ref, _ = self.variable_metadata_extractor.get_group_and_level(variable_name)
-            # Apply variable scaling by variable name
-            # or base variable name (variable_ref: variable name without variable level)
-            variable_loss_scaling[idx] = self.weights.get(
-                variable_ref,
-                self.weights.get("default", 1.0),
+            # Apply variable scaling by specific variable name (e.g. z_500, atm_ch04),
+            # falling back to base variable name (e.g. z), then default
+            variable_loss_scaling[position] = self.weights.get(
+                variable_name,
+                self.weights.get(variable_ref, self.weights.get("default", 1.0)),
             )
-            if variable_ref != variable_name:
-                assert (
-                    self.weights.get(
-                        variable_name,
-                        None,
-                    )
-                    is None
-                ), f"Variable {variable_name} is not allowed to have a separate scaling besides {variable_ref}."
 
         return variable_loss_scaling

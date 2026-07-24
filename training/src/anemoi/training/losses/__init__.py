@@ -9,6 +9,7 @@
 
 from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
+from .graph_smoothness import GraphLaplacianSmoothnessLoss
 from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
@@ -16,6 +17,7 @@ from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
+from .nan_aware_mse import NaNAwareMSELoss
 from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
@@ -30,6 +32,7 @@ __all__ = [
     "CRPS",
     "CombinedLoss",
     "FourierCorrelationLoss",
+    "GraphLaplacianSmoothnessLoss",
     "HuberLoss",
     "LogCoshLoss",
     "LogFFT2Distance",
@@ -38,6 +41,7 @@ __all__ = [
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",
+    "NaNAwareMSELoss",
     "RMSELoss",
     "SpectralAMSELoss",
     "SpectralCRPSLoss",
