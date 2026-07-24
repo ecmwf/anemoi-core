@@ -200,6 +200,34 @@ def test_calculate_input_dim_ignores_non_target_datasets() -> None:
         model._calculate_input_dim("in_lres")
 
 
+def test_calculate_shapes_and_indices_only_sizes_target_but_channels_for_all() -> None:
+    """Base ``_calculate_shapes_and_indices`` iterates over every dataset and
+
+    calls ``_calculate_input_dim`` on each — which raises for input datasets.
+    The downscaler must override this so that ``num_input_channels`` /
+    ``num_output_channels`` are populated for every dataset (they are needed to
+    compute the target's encoder input dim), while ``input_dim``, ``target_dim``
+    and ``output_dim`` are only computed for the target dataset.
+    """
+    model = _make_bare_model(n_step_input=2, n_step_output=1)
+    model._graph_name_hidden = "hidden"
+    # Attribute expected by _calculate_input_dim_latent.
+    model.node_attributes.attr_ndims["hidden"] = 1
+
+    model._calculate_shapes_and_indices(model.data_indices)
+
+    # num_input_channels / num_output_channels populated for every dataset.
+    assert set(model.num_input_channels) == set(model.data_indices)
+    assert set(model.num_output_channels) == set(model.data_indices)
+
+    # But per-dataset input/target/output dims exist only for the target.
+    assert set(model.input_dim) == {"out_hres"}
+    assert set(model.target_dim) == {"out_hres"}
+    # in_lres and in_hres have no output channels, so their output_dim is 0.
+    # Only the target's output_dim is used to construct the decoder.
+    assert set(model.output_dim) == {"out_hres"}
+
+
 # ── input assembly ────────────────────────────────────────────────────────────
 
 
@@ -335,3 +363,251 @@ def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> Non
     # residual_pred is denormalized by post_tend (subtracts 5): 3 - 5 = -2
     # Add cached denormalized lres (50): -2 + 50 = 48
     torch.testing.assert_close(result["out_hres"], torch.full_like(residual_pred, 48.0))
+
+
+# ── mixed-target (prognostic + diagnostic) fixtures ─────────────────────────
+
+
+def _make_mixed_downscaler_indices() -> dict[str, IndexCollection]:
+    """Target with two prognostic and one diagnostic variable.
+
+    The lres dataset has the two prognostic variables at the same variable
+    indices as the target, matching how spatial downscaling typically pairs
+    lres/hres channels.  The diagnostic variable (``precip``) has no lres
+    counterpart — it is predicted directly as a state.
+    """
+    in_lres = _make_index_collection(
+        {"t2m": 0, "u10": 1},
+        forcing=["t2m", "u10"],
+    )
+    in_hres = _make_index_collection({"z": 0}, forcing=["z"])
+    # ``precip`` is diagnostic so it appears in ``model.output.diagnostic``;
+    # ``t2m`` and ``u10`` are prognostic (present in input and output).
+    out_hres = _make_index_collection(
+        {"t2m": 0, "u10": 1, "precip": 2},
+        diagnostic=["precip"],
+    )
+    return {"in_lres": in_lres, "in_hres": in_hres, "out_hres": out_hres}
+
+
+def _make_mixed_bare_model() -> AnemoiTransportSpatialDownscalerModelEncProcDec:
+    """Bare model with the mixed-target fixture (prognostic + diagnostic in the target)."""
+    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    model.data_indices = _make_mixed_downscaler_indices()
+    model.dataset_names = list(model.data_indices.keys())
+    model.n_step_input = 1
+    model.n_step_output = 1
+    model.num_input_channels = {name: len(indices.model.input) for name, indices in model.data_indices.items()}
+    model.num_output_channels = {name: len(indices.model.output) for name, indices in model.data_indices.items()}
+    model.node_attributes = _StaticNodeAttributes(
+        {"in_lres": 2, "in_hres": 2, "out_hres": 3},
+        grid=4,
+    )
+    model._resolve_roles()
+    return model
+
+
+class _IndexAwareProcessor:
+    """Processor stub that adds ``offset`` and records the ``data_index`` it was called with."""
+
+    def __init__(self, offset: float) -> None:
+        self.offset = offset
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        data_index: torch.Tensor | None = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        assert in_place is False, "Downscaler must call processors with in_place=False."
+        self.calls.append(
+            {
+                "shape": tuple(x.shape),
+                "data_index": None if data_index is None else data_index.tolist(),
+                "kwargs": kwargs,
+            },
+        )
+        return x + self.offset
+
+
+# ── compute_residual / add_residual_to_state ────────────────────────────────
+
+
+def test_compute_residual_uses_residual_pre_for_prognostic_and_state_pre_for_diagnostic() -> None:
+    """Prognostic channels are normalized as residuals, diagnostic channels as states.
+
+    ``compute_residual`` accepts the *normalized* target and *denormalized* projected
+    lres, denormalizes the target via ``input_post_processor`` (state post), then
+    fills the output tensor per-channel using the residual pre for prognostics
+    and the state pre for diagnostics.
+    """
+    model = _make_mixed_bare_model()
+    indices = model.data_indices["out_hres"]
+
+    # Denormalization step for the target = state post-processor (identity here so the
+    # input state values pass through unchanged, keeping the arithmetic simple).
+    input_post = _IndexAwareProcessor(offset=0.0)
+    state_pre = _IndexAwareProcessor(offset=100.0)  # for diagnostic channels
+    residual_pre = _IndexAwareProcessor(offset=10.0)  # for prognostic channels
+
+    # (batch, time, ensemble, grid, target_vars=3)
+    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])  # t2m=10, u10=20, precip=30
+    # Denormalized lres has the same variable positions for t2m and u10.
+    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])  # t2m_lres=3, u10_lres=4
+
+    out = model.compute_residual(
+        y={"out_hres": y},
+        x_lres_denorm={"out_hres": x_lres_denorm},
+        pre_processors_state={"out_hres": state_pre},
+        pre_processors_residual={"out_hres": residual_pre},
+        input_post_processor={"out_hres": input_post},
+        skip_imputation=True,
+    )
+
+    # Prognostic channels: residual_pre((y - x_lres) + 0) = (y - x_lres) + 10
+    # t2m: (10 - 3) + 10 = 17, u10: (20 - 4) + 10 = 26
+    # Diagnostic channel: state_pre(precip) = 30 + 100 = 130
+    expected = torch.tensor([[[[[17.0, 26.0, 130.0]]]]])
+    torch.testing.assert_close(out["out_hres"], expected)
+
+    # Check the data_index arguments handed to each processor.
+    assert residual_pre.calls[0]["data_index"] == indices.data.output.prognostic.tolist()
+    assert state_pre.calls[0]["data_index"] == indices.data.output.diagnostic.tolist()
+
+
+def test_add_residual_to_state_denormalizes_prognostic_with_residual_and_diagnostic_with_state() -> None:
+    """Prognostic channels are denormalized with residual post + lres; diagnostics with state post."""
+    model = _make_mixed_bare_model()
+    indices = model.data_indices["out_hres"]
+
+    # Inverse-style post-processors: negative offsets so ``call`` denormalizes.
+    residual_post = _IndexAwareProcessor(offset=-10.0)
+    state_post = _IndexAwareProcessor(offset=-100.0)
+
+    # Normalized residual prediction (batch, time, ensemble, grid, vars=3).
+    residual = torch.tensor([[[[[17.0, 26.0, 130.0]]]]])
+    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])
+
+    state = model.add_residual_to_state(
+        x_lres_denorm={"out_hres": x_lres_denorm},
+        residual={"out_hres": residual},
+        post_processors_state={"out_hres": state_post},
+        post_processors_residual={"out_hres": residual_post},
+        output_pre_processor=None,
+        skip_imputation=True,
+    )
+
+    # Prognostic: residual_post(residual) + x_lres = (17 - 10) + 3 = 10, (26 - 10) + 4 = 20
+    # Diagnostic: state_post(residual) = 130 - 100 = 30
+    expected = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
+    torch.testing.assert_close(state["out_hres"], expected)
+
+    # Both processors are called; state_post is used specifically for the
+    # diagnostic slice (with the corresponding data_index).
+    assert len(residual_post.calls) >= 1
+    assert any(call["data_index"] == indices.data.output.diagnostic.tolist() for call in state_post.calls)
+
+
+def test_compute_residual_and_add_residual_to_state_round_trip() -> None:
+    """Feeding a target through ``compute_residual`` then ``add_residual_to_state`` recovers it."""
+    model = _make_mixed_bare_model()
+
+    # Symmetric pre/post with matching offsets.
+    input_post = _IndexAwareProcessor(offset=0.0)
+    state_pre = _IndexAwareProcessor(offset=100.0)
+    state_post = _IndexAwareProcessor(offset=-100.0)
+    residual_pre = _IndexAwareProcessor(offset=10.0)
+    residual_post = _IndexAwareProcessor(offset=-10.0)
+
+    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
+    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])
+
+    residual = model.compute_residual(
+        y={"out_hres": y},
+        x_lres_denorm={"out_hres": x_lres_denorm},
+        pre_processors_state={"out_hres": state_pre},
+        pre_processors_residual={"out_hres": residual_pre},
+        input_post_processor={"out_hres": input_post},
+        skip_imputation=True,
+    )
+
+    reconstructed = model.add_residual_to_state(
+        x_lres_denorm={"out_hres": x_lres_denorm},
+        residual=residual,
+        post_processors_state={"out_hres": state_post},
+        post_processors_residual={"out_hres": residual_post},
+        output_pre_processor=None,
+        skip_imputation=True,
+    )
+
+    torch.testing.assert_close(reconstructed["out_hres"], y)
+
+
+# ── _after_sampling with mixed target ───────────────────────────────────────
+
+
+def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual_post_for_prognostic() -> None:
+    """With a diagnostic variable in the target, ``_after_sampling`` splits per-channel."""
+    model = _make_mixed_bare_model()
+
+    residual_post = _IndexAwareProcessor(offset=-5.0)
+    state_post = _IndexAwareProcessor(offset=-50.0)
+
+    # (batch, time, ensemble, grid, vars=3)
+    residual_pred = torch.tensor([[[[[7.0, 12.0, 55.0]]]]])  # t2m, u10, precip
+    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])
+
+    result = model._after_sampling(
+        {"out_hres": residual_pred},
+        post_processors={"out_hres": state_post},
+        before_sampling_data=({"in_lres": None, "in_hres": None, "out_hres": None}, x_lres_denorm),
+        model_comm_group=None,
+        grid_shard_sizes=None,
+        gather_out=False,
+        post_processors_tendencies={"out_hres": residual_post},
+    )
+
+    # Prognostic: (residual_pred - 5) + x_lres = (7-5)+3 = 5, (12-5)+4 = 11
+    # Diagnostic: residual_pred - 50 = 55 - 50 = 5
+    expected = torch.tensor([[[[[5.0, 11.0, 5.0]]]]])
+    torch.testing.assert_close(result["out_hres"], expected)
+
+
+# ── _resolve_roles TODO fix: config-aware role inference ────────────────────
+
+
+def test_resolve_roles_treats_spatial_processor_source_as_input_even_when_it_has_output_vars() -> None:
+    """A dataset registered under ``config.data.spatial_processors`` is always an input.
+
+    This makes the role inference robust to configurations where the low-res
+    dataset carries variables classified as prognostic (i.e. non-empty
+    ``model.output``): the spatial-processor registration is authoritative.
+    """
+    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    # in_lres has t2m as prognostic (present in input AND output), so
+    # ``model.output`` is non-empty — but the config marks it as a
+    # spatial-processor source, so it must still be recognised as an input.
+    model.data_indices = {
+        "in_lres": _make_index_collection({"t2m": 0}),
+        "out_hres": _make_index_collection({"t2m": 0, "precip": 1}, diagnostic=["precip"]),
+    }
+    model.dataset_names = list(model.data_indices.keys())
+    model_config = DictConfig(
+        {"data": {"spatial_processors": {"in_lres": {"_target_": "some.CrossGridProjector"}}}},
+    )
+    model._resolve_roles(model_config=model_config)
+    assert model.target_dataset_name == "out_hres"
+    assert model.input_dataset_names == ["in_lres"]
+
+
+def test_resolve_roles_without_config_falls_back_to_output_heuristic() -> None:
+    """Backward-compatible: calling ``_resolve_roles`` without a config still works."""
+    model = _make_bare_model()  # this calls ``_resolve_roles()`` without config
+    assert model.target_dataset_name == "out_hres"
+    assert set(model.input_dataset_names) == {"in_lres", "in_hres"}

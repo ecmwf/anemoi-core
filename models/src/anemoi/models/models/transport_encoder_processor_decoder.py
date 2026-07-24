@@ -1098,6 +1098,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
     # TODO we might want to pass these roles explicitly in the config when initializing the model,
     # rather than inferring them from the data indices.
+    # Or have a "task" at model level to get input, reference, and target tensors.
     def _resolve_roles(self, model_config: DotDict | None = None) -> None:
         """Identify the target dataset and the input datasets.
 
@@ -1156,6 +1157,54 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         noised_dim = self.n_step_output * self.num_output_channels[dataset_name]
         node_attr_dim = self.node_attributes.attr_ndims[dataset_name]
         return history_dim + noised_dim + node_attr_dim
+
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        """Populate per-dataset channel counts for every dataset but per-dataset
+
+        input/target/output dims only for the target.
+
+        Input datasets are never encoded via their own encoder in this model —
+        they are projected onto the target grid and concatenated as extra
+        per-node features before the (single) target-grid encoder.  So computing
+        ``input_dim`` / ``target_dim`` / ``output_dim`` for them is meaningless
+        and would trigger the ``_calculate_input_dim`` guard.  ``num_input_channels``
+        and ``num_output_channels`` still need to be populated for every dataset
+        because the target's encoder input dim sums input channels across all
+        input datasets.
+        """
+        self.num_input_channels = {}
+        self.num_output_channels = {}
+        self.num_input_channels_prognostic = {}
+        self.num_input_channels_decoding_forcings = {}
+        self._internal_input_idx = {}
+        self._internal_output_idx = {}
+        self._decoding_forcing_input_idx = {}
+        self.input_dim = {}
+        self.input_dim_latent = self._calculate_input_dim_latent()
+        self.target_dim = {}
+        self.output_dim = {}
+
+        for dataset_name, dataset_indices in data_indices.items():
+            self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
+            self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
+            self._decoding_forcing_input_idx[dataset_name] = [
+                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
+            ]
+
+            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
+            self.num_input_channels_decoding_forcings[dataset_name] = len(
+                self._decoding_forcing_input_idx[dataset_name]
+            )
+            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
+
+        # ``_calculate_input_dim`` for the target sums ``num_input_channels`` across
+        # every input dataset, so it must run after the loop above has populated
+        # the channel counts for every dataset.
+        target = self.target_dataset_name
+        self.input_dim[target] = self._calculate_input_dim(target)
+        self.target_dim[target] = self._calculate_target_dim(target)
+        self.output_dim[target] = self._calculate_output_dim(target)
 
     # ── network build restricted to the target dataset ───────────────────────
 
