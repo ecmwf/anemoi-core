@@ -15,14 +15,15 @@ training:
   training_loss:
     datasets:
       data:
-        multiscale_config: null
-        weights: [1.0]
+        # benchmark building smoothing matrices on the fly
+        multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2.0}
+        weights: [1.0, 1.0, 1.0, 4.0]
   validation_metrics:
     datasets:
       data:
         multiscale:
-          multiscale_config: null
-          weights: [1.0]
+          multiscale_config: {num_scales: 3, base_num_nearest_neighbours: 16, base_sigma: 0.01570, scale_factor: 2.0}
+          weights: [1.0, 1.0, 1.0, 4.0]
 
 dataloader:
   training:
