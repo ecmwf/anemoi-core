@@ -530,6 +530,11 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
     local_grid = grid_shard_sizes[0]
 
     loss = loss_cls(**transform_kwargs)
+    loss.add_scaler(
+        TensorDim.GRID,
+        torch.ones(sum(spectral_shard_sizes)),
+        name="spectral",
+    )
     pred = torch.randn(1, 1, ensemble_size, local_grid, 2)
     target = torch.randn(1, 1, 1, local_grid, 2)
 
@@ -557,6 +562,7 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
         side_effect=fake_all_to_all,
     )
     mocker.patch("anemoi.training.losses.base.reduce_tensor", side_effect=lambda x, _group: x)
+    mocker.patch("anemoi.training.losses.spectral.torch.distributed.get_rank", return_value=0)
     scale = mocker.spy(loss, "scale")
 
     out = loss(
@@ -596,7 +602,40 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
         channel_shard_sizes,
         group,
     )
-    assert scale.call_args.kwargs["grid_shard_slice"] is None
+    assert scale.call_args.kwargs["grid_shard_slice"] == slice(0, spectral_shard_sizes[0])
+
+
+def test_reshard_spectral_loss_returns_global_slice_for_uneven_shards(mocker: MockerFixture) -> None:
+    loss = LogSpectralDistance(transform="fft2d", x_dim=4, y_dim=4)
+    group = object()
+    spectral_shard_sizes = [9, 7]
+    full_loss = torch.zeros(1, 1, 1, 16, 1)
+    local_loss = torch.zeros(1, 1, 1, 7, 1)
+    mocker.patch("anemoi.training.losses.spectral.get_shard_sizes", return_value=spectral_shard_sizes)
+    mocker.patch("anemoi.training.losses.spectral.torch.distributed.get_rank", return_value=1)
+    transpose = mocker.patch(
+        "anemoi.training.losses.spectral.all_to_all_transpose",
+        return_value=local_loss,
+    )
+
+    result, spectral_slice, global_spectral_size = loss._reshard_spectral_loss(
+        full_loss,
+        group,
+        channel_shard_sizes=[1, 1],
+        spectral_grid_dim=TensorDim.GRID,
+    )
+
+    assert result is local_loss
+    assert spectral_slice == slice(9, 16)
+    assert global_spectral_size == 16
+    transpose.assert_called_once_with(
+        full_loss,
+        TensorDim.GRID,
+        spectral_shard_sizes,
+        TensorDim.VARIABLE,
+        [1, 1],
+        group,
+    )
 
 
 @pytest.mark.parametrize("loss_cls", spectral_losses)
