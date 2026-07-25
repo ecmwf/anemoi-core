@@ -34,7 +34,6 @@ from anemoi.graphs.create import load_graph_from_file
 from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
@@ -48,8 +47,11 @@ from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
@@ -151,13 +153,18 @@ class AnemoiTrainer(ABC):
         return self.datamodule.data_indices
 
     @cached_property
+    def base_seed(self) -> int:
+        """Base seed shared by all ranks."""
+        return get_base_seed()
+
+    @cached_property
     def initial_seed(self) -> int:
         """Initial seed for the RNG.
 
         This sets the same initial seed for all ranks. Ranks are re-seeded in the
         strategy to account for model communication groups.
         """
-        initial_seed = get_base_seed()
+        initial_seed = derive_seed(self.base_seed, SeedContext.TRAINER)
         rnd_seed = pl.seed_everything(initial_seed, workers=True)
         np_rng = np.random.default_rng(rnd_seed)
         (torch.rand(1), np_rng.random())
@@ -483,6 +490,7 @@ class AnemoiTrainer(ABC):
         """Metadata and provenance information."""
         metadata_inference = {
             "seed": self.initial_seed,
+            "base_seed": self.base_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
             "task": None,  # will be populated in BaseTrainingModule
@@ -498,6 +506,7 @@ class AnemoiTrainer(ABC):
             "version": "2.0",
             "config": self.config,
             "seed": self.initial_seed,
+            "base_seed": self.base_seed,
             "run_id": self.run_id,
             "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
@@ -674,26 +683,6 @@ class AnemoiTrainer(ABC):
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
-    def prepare_compilation(self) -> None:
-
-        if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model.compile)
-        recompile_limit = getattr(self.config.model, "recompile_limit", None)
-        if hasattr(self.config.training, "recompile_limit"):
-            LOGGER.warning(
-                "The recompile_limit in config.training is deprecated. "
-                "Please use config.model.recompile_limit instead.",
-            )
-            recompile_limit = getattr(self.config.training, "recompile_limit", None)
-        if recompile_limit is not None:
-            torch._dynamo.config.cache_size_limit = int(recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(recompile_limit), 256)
-            LOGGER.info(
-                "Recompile limit set to %d per kernel, %d accumulated",
-                torch._dynamo.config.cache_size_limit,
-                torch._dynamo.config.accumulated_cache_size_limit,
-            )
-
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
@@ -754,7 +743,7 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
-        self.prepare_compilation()
+        self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
 
