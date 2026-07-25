@@ -271,7 +271,10 @@ class SpectralLoss(BaseLoss):
         channel_shard_sizes: list[int] | None,
         spectral_grid_dim: int,
     ) -> tuple[torch.Tensor, slice | None, int]:
-        """Move a full-mode loss back to mode-sharded layout and report its global slice."""
+        """Move a full-mode, channel-sharded loss back to mode-sharded layout and report its global slice.
+
+        When the input is unsharded, return it unchanged with no global slice.
+        """
         if channel_shard_sizes is None:
             return loss_tensor, None, loss_tensor.size(spectral_grid_dim)
 
