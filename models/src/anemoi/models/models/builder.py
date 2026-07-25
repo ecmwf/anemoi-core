@@ -42,8 +42,10 @@ from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTrans
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.builder import BuilderError
+from anemoi.utils.builder import as_dict
 from anemoi.utils.builder import build
 from anemoi.utils.builder import locate
+from anemoi.utils.config import DotDict
 
 
 def _named_node_attributes_graph(graph_data: HeteroData, node_names: list[str]) -> HeteroData:
@@ -613,8 +615,14 @@ def build_model(
     n_step_input: int,
     n_step_output: int,
 ) -> BaseGraphModel:
-    """Build a model from ``model_config`` by dispatching on its ``_target_``."""
-    target = model_config.model.model["_target_"]
+    """Build a model from ``model_config`` by dispatching on its ``_target_``.
+
+    ``model_config`` may be an OmegaConf ``DictConfig``, a ``DotDict``, or a plain (e.g.
+    JSON-loaded) ``dict`` — it is normalised so a serialised recipe round-trips.
+    """
+    recipe = as_dict(model_config)  # plain, JSON-able containers (interpolations resolved)
+    config = DotDict(recipe)  # attribute access for the builders
+    target = config.model.model["_target_"]
     model_cls = locate(target)
     builder_cls = ModelBuilder.registry.get(model_cls)
     if builder_cls is None:
@@ -622,11 +630,16 @@ def build_model(
             f"No ModelBuilder registered for model {target!r} ({model_cls}). "
             f"Available: {sorted(c.__name__ for c in ModelBuilder.registry)}"
         )
-    return builder_cls(
-        model_config,
+    model = builder_cls(
+        config,
         data_indices=data_indices,
         statistics=statistics,
         graph_data=graph_data,
         n_step_input=n_step_input,
         n_step_output=n_step_output,
     ).build()
+    # Record the architecture recipe so the model can be serialised with
+    # ``anemoi.utils.builder.to_dict`` and rebuilt with ``build_model`` (given the runtime
+    # context: graph, data indices, statistics).
+    model.__anemoi_spec__ = recipe
+    return model

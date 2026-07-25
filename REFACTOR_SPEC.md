@@ -98,6 +98,11 @@ Module: `anemoi-utils/src/anemoi/utils/builder.py` (the live checkout is
   specs, applying the same injected kwargs to every element.
 - `as_dict(config)` — the Hydra boundary shim: OmegaConf `DictConfig`/`ListConfig` →
   plain `dict`/`list` (interpolations resolved); `DotDict`/`dict` pass through unchanged.
+- `to_dict(obj)` / `target_path(obj)` — the **inverse of `build`** (serialisation): turn a
+  built object into a JSON-able `{"_target_": <path>, ...}` spec (recursively), so
+  `build(to_dict(obj))` reconstructs an equivalent object. An object serialises via, in
+  order: a `__anemoi_spec__` mapping recorded at build time; a `to_dict()` method; or
+  introspection (`_target_` + each `__init__` parameter read from the same-named attribute).
 - `Builder` (config-carrying convenience) and `BuilderError`.
 
 Tests: `anemoi-utils/tests/test_builder.py`.
@@ -162,17 +167,49 @@ parents with children injected. Dispatch to the right Builder is by the object's
 - Checkpoints: keep every `self.<name>` attribute name identical → `state_dict` keys
   unchanged.
 
-### 5.3 Training  (TODO)
-Top-level orchestration + leaf builds. Replace `instantiate`/`get_class` with
-`build`/`build_all`/`locate`; delete `utils/hydra.py::instantiate_with_runtime_kwargs`
-(callers use `build(spec, **runtime)`). Sites: `train/train.py` (task, training method/
-model, strategy — `as_dict(self.config)` once), `train/methods/base.py` (output_mask,
-optimizer, scheduler), `losses/loss.py`, `losses/scalers/scalers.py`,
-`checkpoint/pipeline.py`, `diagnostics/callbacks/*`, `diagnostics/logger.py`. A
-`TrainingBuilder` (or the trainer acting as builder) reads config and injects built
-objects into the training module / interface, honouring P1–P3.
+### 5.3 Training  (DONE)
+`AnemoiTrainer` + the LightningModule assembly + the factory functions
+(`get_loss_function`, `create_scalers`, `get_callbacks`, `get_*_logger`, the checkpoint
+pipeline) are the training builder — they read config and build/inject. All Hydra
+*construction* removed: `instantiate`/`get_class` → `build`/`locate`;
+`instantiate_with_runtime_kwargs` is now a thin `build` wrapper. Hydra is kept only as the
+config *loader* (`@hydra.main`, `compose`/`initialize`). Sites converted: `train/train.py`
+(task, training method, strategy), `train/methods/base.py` (output_mask, optimizer,
+scheduler), `losses/loss.py`, `losses/scalers/scalers.py`, `checkpoint/pipeline.py`,
+`diagnostics/callbacks/*`, `diagnostics/logger.py`, `layers`/`utils`. `grep "instantiate("
+training/src` → none (only method names/strings). The relaxed P2 applies: the LightningModule
+receives `config` (parametrisation) and assembles via the factories; the model architecture
+under it is already injected by the ModelBuilder.
+
+Run with the repo `.venv` (uv), not the py312 venv (its `pytorch_lightning` lacks
+`WeightAveraging`). Pre-existing suite failures are unrelated env gaps: `pytest-asyncio`
+missing (async checkpoint tests), network/`obstore` (checkpoint sources), `wandb`/`azure`/
+DCT deps not installed.
 
 ---
+
+## 5.4 Serialisation (round-trip through the builder)
+
+A model/graph can be serialised to a JSON-able dict and rebuilt into the same thing:
+
+- **Model**: `build_model` records the architecture recipe on the model
+  (`model.__anemoi_spec__ = as_dict(model_config)`). `to_dict(model)` returns that recipe;
+  `json.dumps` it; `build_model(spec, data_indices=…, statistics=…, graph_data=…, …)`
+  rebuilds an identical architecture (same `state_dict` keys, same parameter count). The
+  *recipe* (architecture) is serialised, not the weights or the runtime context (graph /
+  indices), which are supplied again at rebuild. `build_model` accepts OmegaConf, `DotDict`
+  or plain/JSON `dict`.
+- **Graph**: the recipe is the graph config (already basic types) — it round-trips through
+  JSON and `GraphCreator(config).create()` yields an identical graph.
+- **Generic objects**: `to_dict`/`build` round-trip any object whose `__init__` params are
+  stored as same-named attributes, or that defines `as_dict()` / `__anemoi_spec__`.
+  `to_dict` serialises `torch.dtype` (→ short string), numpy arrays/scalars (→ lists/
+  scalars) and `os.PathLike` (→ path string) so common *transformed* params round-trip by
+  introspection. A class that transforms a param in a way introspection can't recover
+  should define `as_dict()` — the recommended body is `return introspect(self)`, or a
+  hand-built spec. The graph node/edge builders and node/edge attribute base classes carry
+  such an `as_dict()`. Example: `examples/serialise_roundtrip.py`; e.g.
+  `build(to_dict(EdgeLength(norm="unit-std")))` reconstructs the attribute.
 
 ## 6. Verification
 
@@ -204,8 +241,11 @@ objects into the training module / interface, honouring P1–P3.
 ## 8. Status snapshot (update as work proceeds)
 
 - anemoi-utils `builder`: DONE (build/build_all/as_dict/locate + tests).
-- Graphs: DONE, test suite green. (Follow-up: forward `attributes=` through node/edge
-  builder SUBCLASS constructors so the `graph.md` constructor-kwarg API works end-to-end.)
+- Graphs: DONE, test suite green (313). Node/edge builder subclass constructors now forward
+  `attributes=`, so the `graph.md` constructor-kwarg API works end-to-end
+  (`KNNEdges(source_name=…, target_name=…, num_nearest_neighbours=3, attributes=[EdgeLength(...)])`)
+  and a full `GraphBuilder` object serialises + round-trips via `to_dict`/`build`
+  (`graphs/tests/test_graph_builder_api.py`).
 - Models: DONE. `ModelBuilder` + container base + interface; ALL 6 variants migrated
   (EncProcDec [end-to-end validated], AutoEncoder, Ens, Hierarchical, Transport [+Tend],
   HierarchicalAutoEncoder). `grep hydra models/src` → none. Models suite 521 pass.

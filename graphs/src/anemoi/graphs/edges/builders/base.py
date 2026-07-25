@@ -59,6 +59,12 @@ class BaseEdgeBuilder(ABC):
         """Name of the edge subgraph."""
         return self.source_name, "to", self.target_name
 
+    def as_dict(self) -> dict:
+        """Serialise this edge builder to a ``{_target_, ...}`` spec (inverse of ``build``)."""
+        from anemoi.utils.builder import introspect
+
+        return introspect(self)
+
     @abstractmethod
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor: ...
 

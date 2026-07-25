@@ -32,6 +32,12 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
         self.dtype = getattr(torch, dtype)
         self.device = get_distributed_device()
 
+    def as_dict(self) -> dict:
+        """Serialise this attribute to a ``{_target_, ...}`` spec (inverse of ``build``)."""
+        from anemoi.utils.builder import introspect
+
+        return introspect(self)
+
     @abstractmethod
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor: ...
 

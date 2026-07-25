@@ -44,6 +44,12 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise TypeError(error_msg)
 
+    def as_dict(self) -> dict:
+        """Serialise this edge attribute to a ``{_target_, ...}`` spec (inverse of ``build``)."""
+        from anemoi.utils.builder import introspect
+
+        return introspect(self)
+
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         if self.node_attr_name in source_nodes:
             source_nodes_data = source_nodes[self.node_attr_name].to(self.device)

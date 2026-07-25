@@ -45,6 +45,12 @@ class BaseNodeBuilder(ABC):
         self.area_mask_builder = None
         self.device = get_distributed_device()
 
+    def as_dict(self) -> dict:
+        """Serialise this node builder to a ``{_target_, ...}`` spec (inverse of ``build``)."""
+        from anemoi.utils.builder import introspect
+
+        return introspect(self)
+
     def register_nodes(self, graph: HeteroData) -> HeteroData:
         """Register nodes in the graph.
 
