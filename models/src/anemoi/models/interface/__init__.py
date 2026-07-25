@@ -11,14 +11,15 @@ import uuid
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.models.builder import build_model
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.utils.builder import build
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -131,7 +132,7 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
     ) -> tuple[Processors, Processors]:
         processors = [
-            [name, instantiate(processor, data_indices=data_indices, statistics=statistics)]
+            [name, build(processor, data_indices=data_indices, statistics=statistics)]
             for name, processor in processors_configs.items()
         ]
         return Processors(processors), Processors(processors, inverse=True)
@@ -188,21 +189,16 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.pre_processors_tendencies[dataset_name] = pre_tend
                 self.post_processors_tendencies[dataset_name] = post_tend
 
-        # Instantiate the model
-        # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
-        model_instantiate_config = {
-            "_target_": self.config.model.model._target_,
-            "_convert_": getattr(self.config.model.model, "_convert_", "none"),
-        }
-        self.model = instantiate(
-            model_instantiate_config,
-            model_config=self.config,
+        # Build the model via the ModelBuilder: it constructs every polymorphic sub-object
+        # (encoder/processor/decoder, graph providers, residual, boundings, node attributes)
+        # and injects them into the model constructor.
+        self.model = build_model(
+            self.config,
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
-            _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
         # Use the forward method of the model directly

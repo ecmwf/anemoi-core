@@ -15,12 +15,11 @@ from abc import abstractmethod
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_grid_reference_distance
-from anemoi.utils.config import DotDict
+from anemoi.graphs.utils import normalise_attributes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,8 +39,9 @@ class BaseNodeBuilder(ABC):
 
     hidden_attributes: set[str] = set()
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, attributes: dict | list | None = None) -> None:
         self.name = name
+        self.attributes = normalise_attributes(attributes)
         self.area_mask_builder = None
         self.device = get_distributed_device()
 
@@ -69,26 +69,29 @@ class BaseNodeBuilder(ABC):
 
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict | None = None) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, attributes: dict | list | None = None) -> HeteroData:
         """Register attributes in the nodes of the graph specified.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        config : DotDict
-            The configuration of the attributes.
+        attributes : dict or list, optional
+            Already-built node attribute objects. When ``None`` the attributes passed to
+            the constructor (``self.attributes``) are used.
 
         Returns
         -------
         HeteroData
             The graph with the registered attributes.
         """
+        attributes = self.attributes if attributes is None else normalise_attributes(attributes)
+
         for hidden_attr in self.hidden_attributes:
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
 
-        for attr_name, attr_config in config.items():
-            graph[self.name][attr_name] = instantiate(attr_config).compute(graph, self.name)
+        for attr_name, attr_builder in attributes.items():
+            graph[self.name][attr_name] = attr_builder.compute(graph, self.name)
 
         return graph
 
@@ -121,15 +124,15 @@ class BaseNodeBuilder(ABC):
         coords = torch.stack([latitudes, longitudes], axis=-1).reshape((-1, 2))
         return torch.deg2rad(coords)
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attributes: dict | list | None = None) -> HeteroData:
         """Update the graph with new nodes.
 
         Parameters
         ----------
         graph : HeteroData
             Input graph.
-        attrs_config : DotDict
-            The configuration of the attributes.
+        attributes : dict or list, optional
+            Already-built node attribute objects. Defaults to ``self.attributes``.
 
         Returns
         -------
@@ -142,7 +145,7 @@ class BaseNodeBuilder(ABC):
         LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         t0 = time.time()
-        graph = self.register_attributes(graph, attrs_config or {})
+        graph = self.register_attributes(graph, attributes)
         t1 = time.time()
         LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 

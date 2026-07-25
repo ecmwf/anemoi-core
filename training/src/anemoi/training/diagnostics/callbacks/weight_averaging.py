@@ -14,7 +14,6 @@ from typing import Union
 
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from packaging.version import Version
 from pytorch_lightning.callbacks import Callback
@@ -24,6 +23,8 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_warn
 from torch.optim.swa_utils import AveragedModel as _TorchAveragedModel
 from torch.optim.swa_utils import get_ema_avg_fn
 from torch.optim.swa_utils import get_swa_avg_fn
+
+from anemoi.utils.builder import build
 
 LOGGER = logging.getLogger(__name__)
 
@@ -275,7 +276,7 @@ def _get_weight_averaging_callback(weight_averaging_config: DictConfig | None) -
         )
         raise RuntimeError(msg)
 
-    callback = instantiate(weight_averaging_config)
+    callback = build(weight_averaging_config)
     LOGGER.info("Loaded weight averaging callback: %s", weight_averaging_config["_target_"])
 
     if isinstance(callback, _PLWeightAveraging) and not isinstance(callback, WeightAveraging):

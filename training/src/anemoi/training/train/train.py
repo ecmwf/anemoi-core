@@ -20,8 +20,6 @@ import hydra
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from hydra.utils import get_class
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from packaging import version
@@ -48,11 +46,12 @@ from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
 from anemoi.training.utils.compile import prepare_compilation
-from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.utils.builder import build
+from anemoi.utils.builder import locate
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -130,7 +129,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def task(self) -> BaseTask:
         """Task instance."""
-        return instantiate(self.config.task)
+        return build(self.config.task)
 
     @cached_property
     def datamodule(self) -> Any:
@@ -371,8 +370,8 @@ class AnemoiTrainer(ABC):
         }
 
         training_method_cfg = self.config.training.method
-        training_method_cls = get_class(training_method_cfg._target_)
-        model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
+        training_method_cls = locate(training_method_cfg._target_)
+        model = build(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -685,7 +684,7 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def strategy(self) -> Any:
-        return instantiate(
+        return build(
             self.config.training.strategy,
             static_graph=not self.config.training.accum_grad_batches > 1,
         )

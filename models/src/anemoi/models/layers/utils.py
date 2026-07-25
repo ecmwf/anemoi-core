@@ -10,13 +10,14 @@
 
 import logging
 import math
+from collections.abc import Mapping
 from typing import Optional
 
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.utils.builder import BuilderError
+from anemoi.utils.builder import build
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -127,16 +128,25 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
 
     # Loop through all kernels in the layer_kernels config entry and try import them
     for name, kernel_entry in {**default_kernels, **kernel_config}.items():
-        if instance:
-            try:
-                layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
-            except InstantiationException:
-                LOGGER.info(
-                    f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
-                )
-                raise InstantiationException
-            else:
-                LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
-        else:
+        if not instance:
             layer_kernels[name] = kernel_entry
+            continue
+
+        # Idempotent: an already-built factory (a callable that is not a ``{_target_: ...}``
+        # config mapping) is passed through unchanged. This lets a Builder construct the
+        # registry once and inject the built object, so no settings reach the layer
+        # constructor that receives it.
+        if callable(kernel_entry) and not isinstance(kernel_entry, Mapping):
+            layer_kernels[name] = kernel_entry
+            continue
+
+        try:
+            layer_kernels[name] = build(kernel_entry, _partial_=True)
+        except BuilderError:
+            LOGGER.info(
+                f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
+            )
+            raise
+        else:
+            LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
     return layer_kernels

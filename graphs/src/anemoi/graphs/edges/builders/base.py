@@ -16,14 +16,13 @@ from importlib.util import find_spec
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import get_distributed_device
-from anemoi.utils.config import DotDict
+from anemoi.graphs.utils import normalise_attributes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,11 +45,13 @@ class BaseEdgeBuilder(ABC):
         target_name: str,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        attributes: dict | list | None = None,
     ):
         self.source_name = source_name
         self.target_name = target_name
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
+        self.attributes = normalise_attributes(attributes)
         self.device = get_distributed_device()
 
     @property
@@ -99,38 +100,40 @@ class BaseEdgeBuilder(ABC):
         graph[self.name].edge_type = edge_type
         return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, attributes: dict | list | None = None) -> HeteroData:
         """Register attributes in the edges of the graph specified.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        config : DotDict
-            The configuration of the attributes.
+        attributes : dict or list, optional
+            Already-built edge attribute objects. When ``None`` the attributes passed to
+            the constructor (``self.attributes``) are used.
 
         Returns
         -------
         HeteroData
             The graph with the registered attributes.
         """
-        for attr_name, attr_config in config.items():
+        attributes = self.attributes if attributes is None else normalise_attributes(attributes)
+
+        for attr_name, attr_builder in attributes.items():
             edge_index = graph[self.name].edge_index
-            edge_attribute_builder = instantiate(attr_config)
-            graph[self.name][attr_name] = edge_attribute_builder(
+            graph[self.name][attr_name] = attr_builder(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
         return graph
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
+    def update_graph(self, graph: HeteroData, attributes: dict | list | None = None) -> HeteroData:
         """Update the graph with the edges.
 
         Parameters
         ----------
         graph : HeteroData
             The graph.
-        attrs_config : DotDict
-            The configuration of the edge attributes.
+        attributes : dict or list, optional
+            Already-built edge attribute objects. Defaults to ``self.attributes``.
 
         Returns
         -------
@@ -142,11 +145,10 @@ class BaseEdgeBuilder(ABC):
         t1 = time.time()
         LOGGER.debug("Time to register edge indices (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
-        if attrs_config is not None:
-            t0 = time.time()
-            graph = self.register_attributes(graph, attrs_config)
-            t1 = time.time()
-            LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
+        t0 = time.time()
+        graph = self.register_attributes(graph, attributes)
+        t1 = time.time()
+        LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         return graph
 
