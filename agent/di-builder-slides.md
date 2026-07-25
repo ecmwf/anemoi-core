@@ -14,8 +14,8 @@ style: |
 
 <!-- _class: lead -->
 
-# Hydra-free Anemoi
-## Dependency-Injection **Builder** across graphs · models · training
+# Dependency-Injection in Anemoi
+## A Hydra-free **Builder** across graphs · models · training
 
 Replacing `hydra.utils.instantiate` with explicit object injection
 
@@ -29,8 +29,8 @@ Today, objects build their own polymorphic sub-objects **inside** the constructo
 
 ```python
 class AnemoiModelEncProcDec(BaseGraphModel):
-    def _build_networks(self, model_config):
-        self.encoder[ds] = instantiate(            # <-- config read inside the class
+    def _build_networks(self, model_config):       # config passed in ...
+        self.encoder[ds] = instantiate(            # ... and used to build the encoder, in the class
             model_config.model.encoder,
             _recursive_=False,
             in_channels_src=self.input_dim[ds],
