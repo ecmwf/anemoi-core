@@ -659,7 +659,6 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         return query, key
 
-    # doesn't compile w triton
     def _forward_edges_sharded_attention(
         self,
         query: Tensor,
@@ -961,10 +960,6 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     def run_node_src_mlp(self, x, **layer_kwargs):
         return self.node_src_mlp(self.layer_norm_mlp_src(x, **layer_kwargs))
 
-    # error when using cuda graphs and checkpointing
-    # RuntimeError: Expected curr_block->size == block_state.size to be true, but got false.
-    # removing max-autotune to ry reduce compilation memory usage
-    @torch.compile(dynamic=False, fullgraph=True, mode="max-autotune-no-cudagraphs")
     def forward(
         self,
         x: OptPairTensor,

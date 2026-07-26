@@ -471,6 +471,9 @@ def _sort_edges_1hop_chunks_fast(
     return edge_attr_list, edge_index_list
 
 
+# connected_src_nodes and therefore x_src_subset is a data-dependent quantity,
+# therefore we cannot use torch.compile on this function.
+@torch._dynamo.disable()
 def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, in_place: bool = True) -> tuple[Tensor, Adj, Tensor]:
     """Drop src nodes with no edges and relabel src indices to be contiguous.
 

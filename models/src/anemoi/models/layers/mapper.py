@@ -332,6 +332,13 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         return self.post_process(x_dst_out)
 
+    # '_drop_unconnected_src_nodes' does data-dependent indexing, which prevents compilation.
+    # therefore we must allow graph breaks (fullgraph=False)
+    # There are a total of 18 graph breaks
+    #  6 from _drop_unconnected_src_nodes
+    # 10 from https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html (workaround doesnt help perf)
+    # 2 unknown errors
+    @torch.compile(dynamic=False, fullgraph=False, mode="max-autotune")
     def mapper_forward_with_edge_sharding(
         self,
         x: PairTensor,
