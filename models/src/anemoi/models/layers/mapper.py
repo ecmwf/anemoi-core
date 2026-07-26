@@ -352,6 +352,16 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+
+        if self.gradient_checkpointing and torch.compiler.is_compiling():
+            LOGGER.warning(
+                "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
+                "Disabling explicit gradient checkpointing for this function."
+                "Note: torch.compile will apply its own implicit checkpointing, determined by "
+                "'torch._dynamo.config.activation_memory_budget'"
+            )
+            self.gradient_checkpointing = False
+
         x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
