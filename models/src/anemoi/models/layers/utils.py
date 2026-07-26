@@ -12,6 +12,7 @@ import logging
 import math
 from typing import Optional
 
+import torch
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from torch import nn
@@ -79,8 +80,11 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     -------
     The result of calling func with the provided arguments
     """
-    # if enabled and not torch.compiler.is_compiling():
-    # return checkpoint(func, *args, **kwargs, use_reentrant=False)
+    # Disable checkpointing inside a compiled region
+    # Compiled code can checkpoint automatically according to
+    # dynamo.config._activation_memory_budget
+    if enabled and not torch.compiler.is_compiling():
+        return checkpoint(func, *args, **kwargs, use_reentrant=False)
     return func(*args, **kwargs)
 
 
