@@ -179,6 +179,9 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
     degree_per_dst = degree(edge_index[1], num_nodes=n_dst, dtype=torch.long)
     # use torch.split with dst_splits to match the balanced partitioning exactly
     edge_splits = [chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)]
+    # note, the above function causes graph breaks when compiled.
+    # see: https://meta-pytorch.org/compile-graph-break-site/gb/gb0124.html
+    # torch.compiler.config.capture_scalar_outputs=True allows the graph to be traced.
 
     return GraphPartition(
         num_nodes=num_nodes,
