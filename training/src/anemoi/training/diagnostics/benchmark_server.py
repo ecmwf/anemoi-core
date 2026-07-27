@@ -71,7 +71,7 @@ class BenchmarkValue:
         return f"{self.name}: {self.value:.2f}{self.unit} (date: {self.date}, commit: {self.commit})"
 
     def to_csv(self, include_header: bool = False) -> str:
-        header = "testName,unit,date,commit,value,TestUpdated"
+        header = "testName,unit,date,commit,value,testUpdated"
 
         result = f"{self.name},{self.unit},{self.date},{self.commit},{self.value},False"
         if include_header:
