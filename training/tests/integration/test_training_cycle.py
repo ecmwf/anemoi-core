@@ -76,18 +76,18 @@ def test_config_validation_accepts_unknown_projection_kind(global_config: tuple[
     # projection_kind is a free-form string; unknown values are validated lazily at
     # runtime in Projection.from_kind, not at schema load time.
     cfg, _, _ = global_config
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg.diagnostics.plot.settings.projection_kind = "invalid_projection"
     validated = BaseSchema(**cfg)
-    assert validated.diagnostics.plot.projection_kind == "invalid_projection"
+    assert validated.diagnostics.plot.settings.projection_kind == "invalid_projection"
 
 
 def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     cfg.config_validation = False
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg.diagnostics.plot.settings.projection_kind = "invalid_projection"
     cfg_obj = OmegaConf.to_object(cfg)
     unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
-    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
+    assert unvalidated.diagnostics.plot.settings.projection_kind == "invalid_projection"
 
 
 def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
