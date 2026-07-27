@@ -869,14 +869,14 @@ loss-curve regression check in ``test_accuracy.py``). For example, with
 
 .. code:: yaml
 
-   user: data
-   hostname: ecmwf.int
-   path: /home/data/public/anemoi-integration-tests/training
+   user: myuser
+   hostname: myhost.example.com
+   path: /path/to/benchmark/results
 
 results will be written to
-``/home/data/public/anemoi-integration-tests/training/benchmarks/<test_case>/``
+``/path/to/benchmark/results/benchmarks/<test_case>/``
 and
-``/home/data/public/anemoi-integration-tests/training/accuracy/<test_case>/``
+``/path/to/benchmark/results/accuracy/<test_case>/``
 respectively.
 
 If you need to override the location for a specific kind (for example to
@@ -885,12 +885,12 @@ takes precedence over ``<path>/<kind>``:
 
 .. code:: yaml
 
-   user: data
-   hostname: ecmwf.int
-   path: /home/data/public/anemoi-integration-tests/training
+   user: myuser
+   hostname: myhost.example.com
+   path: /path/to/benchmark/results
    paths:
-     benchmarks: /home/data/public/anemoi-integration-tests/training/benchmarks
-     accuracy:   /home/data/public/anemoi-integration-tests/training/accuracy
+     benchmarks: /path/to/benchmark/results/benchmarks
+     accuracy:   /path/to/benchmark/results/accuracy
 
 The resolution is performed by ``get_benchmark_store(kind)`` in
 ``src/anemoi/training/diagnostics/benchmark_server.py``.
