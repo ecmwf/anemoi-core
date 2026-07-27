@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -361,8 +361,10 @@ class VectorFieldHeunSampler(VectorFieldSampler):
     def __init__(
         self,
         dtype: torch.dtype = torch.float64,
+        euler_final_step: bool = True,
     ) -> None:
         self.dtype = dtype
+        self.euler_final_step = euler_final_step
 
     def sample(
         self,
@@ -380,7 +382,8 @@ class VectorFieldHeunSampler(VectorFieldSampler):
         times = times.to(dtype)
         y_solver = {dataset_name: y_data.to(dtype) for dataset_name, y_data in y.items()}
 
-        for i in range(len(times) - 1):
+        num_steps = len(times) - 1
+        for i in range(num_steps):
             time_i = times[i]
             time_next = times[i + 1]
             dt = time_next - time_i
@@ -399,6 +402,10 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 dataset_name: y_solver[dataset_name] + dt * vector_field_1[dataset_name].to(dtype)
                 for dataset_name in y_solver
             }
+            if self.euler_final_step and i == num_steps - 1:
+                y_solver = y_predictor
+                continue
+
             y_next_model = {
                 dataset_name: y_data.to(x[dataset_name].dtype) for dataset_name, y_data in y_predictor.items()
             }

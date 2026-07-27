@@ -1,6 +1,6 @@
 defaults:
 - data: zarr
-- dataloader: native_grid
+- dataloader: forecast_native_grid
 - diagnostics: evaluation_ens
 - system: example
 - graph: multi_scale
@@ -12,25 +12,48 @@ defaults:
 
 config_validation: True
 
-### This file is for local experimentation.
-##  When you commit your changes, assign the new features and keywords
-##  to the correct defaults.
-# For example to change from default GPU count:
-# system:
-#   hardware:
-#     num_gpus_per_node: 1
+data:
+  frequency: null
+  datasets:
+    data:
+      forcing:
+        - "cos_latitude"
+        - "cos_longitude"
+        - "sin_latitude"
+        - "sin_longitude"
+        - "cos_julian_day"
+        - "cos_local_time"
+        - "sin_julian_day"
+        - "sin_local_time"
+        - "insolation"
+        - "lsm"
+        - "z"
+      processors:
+        normalizer:
+          config:
+            max: ["z"]
+            none:
+              - "cos_latitude"
+              - "cos_longitude"
+              - "sin_latitude"
+              - "sin_longitude"
+              - "cos_julian_day"
+              - "cos_local_time"
+              - "sin_julian_day"
+              - "sin_local_time"
+              - "insolation"
 
+dataloader:
+  trajectory_sampling:
+    stride: 6  # overlapping windows with stride 6 within each forecast
 diagnostics:
   plot:
     callbacks: []
-  callbacks:
-    - _target_: anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics
-      every_n_batches: 20
+  callbacks: []
 
 system:
   input:
     graph: graph_anemoi_new.pt
-    dataset: aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51
     loss_matrices_path: null
   hardware:
     accelerator: auto

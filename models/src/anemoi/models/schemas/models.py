@@ -1,4 +1,4 @@
-# (C) Copyright 2024 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -79,6 +79,11 @@ class Model(BaseModel):
     "Add skip connection in latent space before/after processor."
     convert_: str = Field("none", alias="_convert_")
     "Keep OmegaConf containers when instantiating — model code uses attribute-style access throughout."
+
+
+class SparseProjectorSchema(BaseModel):
+    num_chunks: PositiveInt = Field(default=1, examples=[1])
+    "Number of chunks to use for sparse projection matmuls."
 
 
 class TransportSourceConfig(BaseModel):
@@ -247,6 +252,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Feature tensor size in the hidden space."
     keep_batch_sharded: bool = Field(default=True)
     "Keep the input batch and the output of the model sharded"
+    sparse_projector: SparseProjectorSchema = Field(default_factory=SparseProjectorSchema)
+    "Sparse projection settings."
     model: Model = Field(default_factory=Model)
     "Model schema."
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
@@ -295,6 +302,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
+    recompile_limit: PositiveInt = 8
+    "How many times torch.compile will recompile a function for a given input shape."
 
 
 class NoOpNoiseInjectorSchema(BaseModel):

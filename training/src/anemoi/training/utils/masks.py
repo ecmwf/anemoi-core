@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -28,6 +28,12 @@ class BaseMask:
         return {}
 
     @abstractmethod
+    def as_tuple(self) -> tuple:
+        """Return the range of contiguous True values in the mask as a tuple (start, end)."""
+        error_message = "Method `as_tuple` must be implemented in subclass."
+        raise NotImplementedError(error_message)
+
+    @abstractmethod
     def apply(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         error_message = "Method `apply` must be implemented in subclass."
         raise NotImplementedError(error_message)
@@ -50,6 +56,14 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
     @property
     def supporting_arrays(self) -> dict:
         return {"output_mask": self.mask.numpy()}
+
+    def as_tuple(self) -> tuple:
+        n = int(self.mask.sum())
+        first = int(self.mask.int().argmax())
+        assert bool(
+            self.mask[first : first + n].all(),
+        ), "Currently only output_masks with a contiguous block of True values are supported."
+        return (first, first + n)
 
     def broadcast_like(self, x: torch.Tensor, dim: int, grid_shard_slice: slice | None = None) -> torch.Tensor:
         assert x.shape[dim] == len(
@@ -142,6 +156,9 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
 class NoOutputMask(BaseMask):
     """No output mask."""
+
+    def as_tuple(self) -> tuple:
+        return (None, None)
 
     def apply(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
         return x

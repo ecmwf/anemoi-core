@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -155,7 +155,7 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config, self._graph_data, dynamic_graph_config.edges)
 
         # build residual connection
-        self._build_residual(model_config.model.residual)
+        self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
@@ -366,9 +366,10 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(self, residual_config: DotDict) -> None:
+    def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
+        sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name in self.dataset_names:
             if not self.is_dataset_static[dataset_name]:
                 LOGGER.info(f"Skipping residual connection for static dataset: {dataset_name}")
@@ -382,6 +383,7 @@ class BaseGraphModel(nn.Module):
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
+                sparse_projector_num_chunks=sparse_projector_num_chunks,
             )
 
     @abstractmethod

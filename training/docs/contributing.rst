@@ -319,3 +319,27 @@ To add a new use case, follow these steps:
    test-time modifications. Check if these have overwritten expected
    configurations or are out-of-date with configuration changes in the
    templates.
+
+
+
+****************
+Accuracy testing
+****************
+
+The accuracy test (`training/tests/integration/test_accuracy.py`) trains a
+small global model for a fixed number of steps and compares its training
+loss curve against a reference run stored in MLflow. It runs nightly as
+part of the integration test matrix. Its configuration lives in
+`training/tests/integration/config/accuracy_testing/test_global.yaml`.
+
+When the test fails the loss curve no longer matches the reference. There
+are two cases:
+
+#. Unintended regression: a code or config change altered the loss curve by
+   accident. Investigate and fix the change (see the config-consistency
+   checks above).
+
+#. Genuine algorithm improvement: the loss curve changed for a legitimate
+   reason. Promote the new run as the reference by copying the run ID logged
+   by the test (``Run ID from trainer: ...``) into the ``reference_id``
+   constant in `test_accuracy.py`.
