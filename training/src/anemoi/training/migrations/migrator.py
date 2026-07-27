@@ -15,7 +15,6 @@ import hashlib
 import importlib
 import logging
 from collections.abc import Callable
-from collections.abc import MutableMapping
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -30,6 +29,7 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.training import __version__
+from anemoi.training.migrations.interpolations import get_interpolation_tree
 
 MIGRATION_PATH = Path(__file__).parent / "scripts"
 
@@ -46,7 +46,7 @@ class IncompatibleCheckpointException(BaseException):
     """The provided checkpoint cannot be migrated because it is to old/recent."""
 
 
-CfgType = MutableMapping[str, Any]
+CfgType = dict[str, Any]
 
 
 class Op:
@@ -316,8 +316,10 @@ class Migrator:
             migration.migrate(manifest)
             version += 1
         print(manifest._ops)
-        new_config = manifest.execute(OmegaConf.create(config))
+        cfg = OmegaConf.create(config)
+        interpolation_tree = get_interpolation_tree(cfg)
+        print("@@", interpolation_tree)
+        new_config = manifest.execute(cfg)
         config = OmegaConf.to_container(new_config, resolve=False)
-        # TODO: apply migration
         config[_version_key] = version
         return config
