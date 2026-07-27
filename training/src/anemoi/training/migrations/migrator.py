@@ -29,7 +29,6 @@ from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.training import __version__
-from anemoi.training.migrations.interpolations import get_interpolation_tree
 
 MIGRATION_PATH = Path(__file__).parent / "scripts"
 
@@ -315,10 +314,7 @@ class Migrator:
         for migration in self._migrations[version:]:
             migration.migrate(manifest)
             version += 1
-        print(manifest._ops)
-        cfg = OmegaConf.create(config)
-        interpolation_tree = get_interpolation_tree(cfg)
-        print("@@", interpolation_tree)
+        cfg = OmegaConf.resolve(OmegaConf.create(config))
         new_config = manifest.execute(cfg)
         config = OmegaConf.to_container(new_config, resolve=False)
         config[_version_key] = version
