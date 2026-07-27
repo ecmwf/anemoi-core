@@ -70,7 +70,9 @@ def get_benchmark_store(kind: str, config_path: Path = DEFAULT_BENCHMARK_CONFIG_
     hostname = cfg["hostname"]
     paths = cfg.get("paths") or {}
     base_path = str(cfg["path"]).rstrip("/")
-    remote_path = paths[kind] if kind in paths else (base_path if base_path.endswith(f"/{kind}") else f"{base_path}/{kind}")
+    remote_path = (
+        paths[kind] if kind in paths else (base_path if base_path.endswith(f"/{kind}") else f"{base_path}/{kind}")
+    )
     return f"ssh://{user}@{hostname}:{remote_path}"
 
 
