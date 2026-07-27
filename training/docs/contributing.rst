@@ -349,7 +349,7 @@ summary of each run (currently the final training loss, under the metric name
 ``accuracyFinalLoss``) to the anemoi integration-test data server -- the same
 server used by the performance benchmarks in ``test_benchmark.py``. The push
 happens only when the test is run from the ``main`` branch and is guarded by
-``track_accuracy_results`` in
+``track_accuracy_final_loss`` (a ``track_accuracy_result`` helper) in
 ``src/anemoi/training/diagnostics/benchmark_server.py``.
 
 Accuracy results are written under a separate ``accuracy`` tree on the
