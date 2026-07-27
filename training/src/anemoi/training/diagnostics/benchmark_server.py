@@ -358,13 +358,16 @@ class BenchmarkServer(ABC):
 
         return
 
-    def store_artifacts(self, artifacts: list[Path], commit: str) -> None:
+    def store_artifacts(self, artifacts: list[Path], commit: str, subdir: str = "artifacts") -> None:
         """Takes a list of files and stores them on the server, under a commit folder.
 
         if the files exist already, by default nothing will be stored
         tar-ing reduced the size of an artifact dir from 450MB (420MB was the trace) to 22MB
+        subdir selects which folder under the store the artifacts are saved to
+        (e.g. "artifacts" for successful runs, "failed-test-artifacts" for failed runs).
+        The artifact limit is applied per subdir.
         """
-        artifact_dir = Path(f"{self.store}/artifacts")
+        artifact_dir = Path(f"{self.store}/{subdir}")
         commit_tar = Path(f"./{commit}.tar.gz")  # store commits locally before copuing them to the server
 
         LOGGER.debug("Saving artifacts for commit %s under %s", commit, commit_tar)
@@ -761,6 +764,14 @@ def benchmark(
         artifacts_tar = Path(f"./{test_case}_artifacts.tar.gz")
         _tar_files(artifacts, artifacts_tar)
         LOGGER.info("Profiling artifacts from failed run stored under: %s", artifacts_tar)
+
+        # also store the failed run's artifacts on the server (keeping the last N failed runs)
+        LOGGER.info("Storing failed-run artifacts on server under 'failed-test-artifacts'")
+        benchmark_server.store_artifacts(
+            artifacts,
+            local_benchmark_results[0].commit,
+            subdir="failed-test-artifacts",
+        )
         raise ValueError(msg)
     # the tests have passed, possibly update the data on the server
     update_data = update_data or _is_repo_on_branch("main")  # update if our branch is main
