@@ -17,7 +17,8 @@ from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import graph_transformer_attention
+    from anemoi.models.triton.gt import graph_transformer_attention_conv
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +66,7 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
 
     # Verify output shape
     assert out_triton.shape == (n_dst, h, d), f"Expected shape {(n_dst, h, d)}, got {out_triton.shape}"
@@ -95,7 +96,7 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
     loss = out_triton.pow(2).sum()
     loss.backward()
 
@@ -131,7 +132,7 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
 
     # Reference pyg implementation
     gt_ref = GraphTransformerConv(out_channels=d)
@@ -166,7 +167,7 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     edge_attr = torch.randn((m, h, d), requires_grad=True)
 
     edge_attr_csc = edge_attr[perm]
-    out_triton = GraphTransformerFunction.apply(query, key, value, edge_attr_csc, csc, reverse)
+    out_triton = graph_transformer_attention_conv(query, key, value, edge_attr_csc, csc, reverse)
     loss_triton = out_triton.pow(2).sum()
     loss_triton.backward()
     grads_triton = (query.grad.clone(), key.grad.clone(), value.grad.clone(), edge_attr.grad.clone())
@@ -190,3 +191,38 @@ def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int,
     torch.testing.assert_close(grads_triton[1], grads_ref[1], atol=tolerance, rtol=0)  # keys
     torch.testing.assert_close(grads_triton[2], grads_ref[2], atol=tolerance, rtol=0)  # values
     torch.testing.assert_close(grads_triton[3], grads_ref[3], atol=tolerance, rtol=0)  # edges
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "n_src,n_dst,h,d",
+    [
+        (4, 10, 2, 4),
+        (4, 10, 6, 4),
+        (4, 10, 2, 6),
+        (4, 10, 6, 6),
+    ],
+)
+def test_graph_transformer_attention_opcheck(n_src: int, n_dst: int, h: int, d: int):
+    """Check the ``graph_transformer_attention`` custom op is registered correctly.
+
+    ``torch.library.opcheck`` validates the schema, fake/meta implementation and
+    autograd registration of the operator.
+    """
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    edge_index, m = build_bipartite_graph(n_src, n_dst)
+    (row, colptr), perm, (rowptr, edge_ids, edge_dst) = edge_index_to_csc(
+        edge_index, num_nodes=(n_src, n_dst), reverse=True
+    )
+
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr_csc = torch.randn((m, h, d), requires_grad=True)
+
+    torch.library.opcheck(
+        graph_transformer_attention,
+        (query, key, value, edge_attr_csc, row, colptr, rowptr, edge_ids, edge_dst),
+    )

@@ -376,15 +376,10 @@ def _gt_bwd_src_pass(
     )
 
 
-# TODO(Jan): single bwd pass for non-bipartite graphs
-
-# ---------------------------------------------------------------------------
-# To make the Triton attention compatible with ``torch.compile`` we expose it as
-# an opaque custom operator with a registered fake/meta implementation (so dynamo
-# can propagate shapes without running the kernel) and a registered autograd rule
-# (so the backward is not traced). All tuple arguments are flattened to plain
-# tensors, as required by the ``torch.library`` custom-op schema.
-# ---------------------------------------------------------------------------
+###################################
+# Wrapper functions for Triton GT #
+###################################
+# These functions allocate the required tenosrs and launch the triton kernels.
 
 
 def _gt_forward_impl(
@@ -408,6 +403,7 @@ def _gt_forward_impl(
     return out_saved, m
 
 
+# TODO(Jan): single bwd pass for non-bipartite graphs
 def _gt_backward_impl(
     d_out: Tensor,
     q: Tensor,
@@ -455,50 +451,15 @@ def _gt_backward_impl(
     return dQ, dK, dV, dE
 
 
-@torch.library.custom_op("anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda")
-def graph_transformer_attention_backward(
-    d_out: Tensor,
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    e: Tensor,
-    out_saved: Tensor,
-    m: Tensor,
-    row: Tensor,
-    colptr: Tensor,
-    rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Opaque custom op wrapping the Triton GraphTransformer backward kernels.
-
-    Registered as its own custom op so that AOTAutograd does not trace into the
-    raw Triton kernel launches when compiling the backward graph.
-    """
-    return _gt_backward_impl(d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
-
-
-@graph_transformer_attention_backward.register_fake
-def _graph_transformer_attention_backward_fake(
-    d_out: Tensor,
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    e: Tensor,
-    out_saved: Tensor,
-    m: Tensor,
-    row: Tensor,
-    colptr: Tensor,
-    rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    return (
-        torch.empty_like(q),
-        torch.empty_like(k),
-        torch.empty_like(v),
-        torch.empty_like(e),
-    )
+#########################################
+# PyTorch Custom Operator for Triton GT #
+#########################################
+# These functions wrap the Triton kernels in PyTorch custom ops,
+# so that they can be used in a PyTorch autograd graph and compiled with torch.compile.
+# They include '_fake' versions which just do the relevant memory allocations
+# and return empty tensors, for use in torch.compile tracing.
+# The '_setup_context' function saves the necessary tensors for the backward pass.
+# for more details on pytorch custom ops see https://docs.pytorch.org/tutorials/advanced/python_custom_ops_functional.html
 
 
 @torch.library.custom_op("anemoi::graph_transformer_attention", mutates_args=(), device_types="cuda")
@@ -554,10 +515,50 @@ def _graph_transformer_attention_fake(
     return out, out_saved, m
 
 
-def _graph_transformer_attention_setup_context(ctx, inputs, output):
-    q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst = inputs
-    _out, out_saved, m = output
-    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+@torch.library.custom_op("anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda")
+def graph_transformer_attention_backward(
+    d_out: Tensor,
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    e: Tensor,
+    out_saved: Tensor,
+    m: Tensor,
+    row: Tensor,
+    colptr: Tensor,
+    rowptr: Tensor,
+    edge_ids: Tensor,
+    edge_dst: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Opaque custom op wrapping the Triton GraphTransformer backward kernels.
+
+    Registered as its own custom op so that AOTAutograd does not trace into the
+    raw Triton kernel launches when compiling the backward graph.
+    """
+    return _gt_backward_impl(d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+
+
+@graph_transformer_attention_backward.register_fake
+def _graph_transformer_attention_backward_fake(
+    d_out: Tensor,
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    e: Tensor,
+    out_saved: Tensor,
+    m: Tensor,
+    row: Tensor,
+    colptr: Tensor,
+    rowptr: Tensor,
+    edge_ids: Tensor,
+    edge_dst: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    return (
+        torch.empty_like(q),
+        torch.empty_like(k),
+        torch.empty_like(v),
+        torch.empty_like(e),
+    )
 
 
 def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
@@ -573,10 +574,21 @@ def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
     return dQ, dK, dV, dE, None, None, None, None, None
 
 
+def _graph_transformer_attention_setup_context(ctx, inputs, output):
+    q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst = inputs
+    _out, out_saved, m = output
+    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+
+
 graph_transformer_attention.register_autograd(
     _graph_transformer_attention_backward,
     setup_context=_graph_transformer_attention_setup_context,
 )
+
+
+#######################
+# Triton GT interface #
+#######################
 
 
 def graph_transformer_attention_conv(
@@ -587,11 +599,7 @@ def graph_transformer_attention_conv(
     csc: tuple[Tensor, Tensor],
     reverse: tuple[Tensor, Tensor, Tensor],
 ) -> Tensor:
-    """torch.compile-friendly GraphTransformer attention.
-
-    Drop-in replacement for ``GraphTransformerFunction.apply`` that unpacks the
-    CSC/reverse tuples into plain tensors and dispatches to the opaque custom op.
-    """
+    """torch.compile-friendly GraphTransformer attention."""
     row, colptr = csc
     rowptr, edge_ids, edge_dst = reverse
     out, _out_saved, _m = graph_transformer_attention(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
