@@ -802,8 +802,11 @@ def prune_mlflow_runs(
     client: an mlflow tracking client (e.g. AnemoiMlflowClient) exposing the standard
             MlflowClient interface (get_experiment_by_name, search_runs, delete_run).
     """
-    protected_run_ids = set(protected_run_ids or [])
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping mlflow run pruning: not on main branch")
+        return
 
+    protected_run_ids = set(protected_run_ids or [])
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:
         LOGGER.info("No mlflow experiment named '%s' found, nothing to prune", experiment_name)
