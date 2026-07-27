@@ -376,81 +376,6 @@ def _gt_bwd_src_pass(
     )
 
 
-###################################
-# Wrapper functions for Triton GT #
-###################################
-# These functions allocate the required tenosrs and launch the triton kernels.
-
-
-def _gt_forward_impl(
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    e: Tensor,
-    row: Tensor,
-    colptr: Tensor,
-) -> tuple[Tensor, Tensor]:
-    """Run the Triton forward kernel, returning (out_f32, m_f32)."""
-    q, k, v, e = (x.contiguous() for x in (q, k, v, e))
-    row, colptr = (x.contiguous() for x in (row, colptr))
-
-    N_dst, H, C = q.shape
-    out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
-    m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
-
-    _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
-
-    return out_saved, m
-
-
-# TODO(Jan): single bwd pass for non-bipartite graphs
-def _gt_backward_impl(
-    d_out: Tensor,
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    e: Tensor,
-    out_saved: Tensor,
-    m: Tensor,
-    row: Tensor,
-    colptr: Tensor,
-    rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Run the Triton backward kernels, returning (dQ, dK, dV, dE)."""
-    d_out = d_out.contiguous()
-
-    N_dst, H, C = q.shape
-    N_src = k.shape[0]
-
-    def torch_dtype_to_triton(dtype):
-        if dtype == torch.float16:
-            return tl.float16
-        elif dtype == torch.bfloat16:
-            return tl.bfloat16
-        elif dtype == torch.float32:
-            return tl.float32
-        else:
-            raise ValueError(f"Unsupported dtype: {dtype}")
-
-    grad_dtype = torch_dtype_to_triton(d_out.dtype)
-
-    dQ = torch.empty_like(q)
-    dK = torch.empty_like(k)
-    dV = torch.empty_like(v)
-    dE = torch.empty_like(e)
-    D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
-
-    # Pass A: destination nodes (computes D and dQ)
-    _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
-
-    # Pass B: source nodes (accumulate dK, dV, dE)
-    _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
-
-    return dQ, dK, dV, dE
-
-
 #########################################
 # PyTorch Custom Operator for Triton GT #
 #########################################
@@ -485,7 +410,14 @@ def graph_transformer_attention(
     m : Tensor
         Float32 log-sum-exp normalizer, kept for the backward pass.
     """
-    out_saved, m = _gt_forward_impl(q, k, v, e, row, colptr)
+    q, k, v, e = (x.contiguous() for x in (q, k, v, e))
+    row, colptr = (x.contiguous() for x in (row, colptr))
+
+    N_dst, H, C = q.shape
+    out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
+    m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+
+    _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
 
     out = out_saved.to(q.dtype)
     # Custom-op outputs must not alias one another; ``.to`` returns ``self`` when
@@ -515,6 +447,7 @@ def _graph_transformer_attention_fake(
     return out, out_saved, m
 
 
+# TODO(Jan): single bwd pass for non-bipartite graphs
 @torch.library.custom_op("anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda")
 def graph_transformer_attention_backward(
     d_out: Tensor,
@@ -535,7 +468,36 @@ def graph_transformer_attention_backward(
     Registered as its own custom op so that AOTAutograd does not trace into the
     raw Triton kernel launches when compiling the backward graph.
     """
-    return _gt_backward_impl(d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+    d_out = d_out.contiguous()
+
+    N_dst, H, C = q.shape
+    N_src = k.shape[0]
+
+    def torch_dtype_to_triton(dtype):
+        if dtype == torch.float16:
+            return tl.float16
+        elif dtype == torch.bfloat16:
+            return tl.bfloat16
+        elif dtype == torch.float32:
+            return tl.float32
+        else:
+            raise ValueError(f"Unsupported dtype: {dtype}")
+
+    grad_dtype = torch_dtype_to_triton(d_out.dtype)
+
+    dQ = torch.empty_like(q)
+    dK = torch.empty_like(k)
+    dV = torch.empty_like(v)
+    dE = torch.empty_like(e)
+    D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+
+    # Pass A: destination nodes (computes D and dQ)
+    _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+
+    # Pass B: source nodes (accumulate dK, dV, dE)
+    _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
+
+    return dQ, dK, dV, dE
 
 
 @graph_transformer_attention_backward.register_fake
