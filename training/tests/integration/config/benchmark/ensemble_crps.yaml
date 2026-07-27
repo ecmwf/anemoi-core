@@ -4,7 +4,7 @@ system:
     num_gpus_per_model: 1
     num_gpus_per_ensemble: 2
   input:
-    dataset:  /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    dataset: "${oc.env:DATASET_ROOT_PATH}/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr"
     graph: ./ens-bm-graph.pt
     truncation: null
     truncation_inv: null
