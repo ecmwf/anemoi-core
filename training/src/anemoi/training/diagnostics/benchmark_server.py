@@ -37,7 +37,7 @@ from torch.cuda import memory_stats
 LOGGER = logging.getLogger(__name__)
 
 BENCHMARK_SERVER_ARTIFACT_LIMIT: Final = 10
-MLFLOW_LOG_RETENTION_LIMIT: Final = 10
+MLFLOW_LOG_RETENTION_LIMIT: Final = 60
 
 
 def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
