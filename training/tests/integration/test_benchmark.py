@@ -60,6 +60,32 @@ def restore_base_seed(original_seed: str | None) -> None:
 
 @pytest.mark.multigpu
 @pytest.mark.slow
+def test_benchmark_training_cycle(
+    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase, task
+) -> None:
+    """Runs a benchmark and then compares them against the values stored on a server."""
+    cfg, test_case = benchmark_config
+    LOGGER.info("Benchmarking the configuration: %s", test_case)
+
+    # Reset memory logging and free all possible memory between runs
+    # this ensures we report the peak memory used during each run,
+    # and not the peak memory used by the run with the highest memory usage
+    reset_peak_memory_stats()
+    empty_cache()
+    gc.collect()
+    # Run model with profiler
+    AnemoiProfiler(cfg).profile()
+
+    # determine store from benchmark config
+    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+    user, hostname, path = parse_benchmark_config(config_path)
+    store: str = f"ssh://{user}@{hostname}:{path}"
+
+    benchmark(cfg, test_case, store)
+
+
+@pytest.mark.multigpu
+@pytest.mark.slow
 def test_benchmark_dataloader(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase,
 ) -> None:
@@ -67,6 +93,10 @@ def test_benchmark_dataloader(
     from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 
     cfg, test_case = benchmark_config
+
+    # Just run for graphtransformer configuration, in order to minimize test runtime.
+    if test_case != "graphtransformer":
+        pytest.skip("Dataloader benchmark only runs for the graphtransformer configuration")
 
     original_seed, random_seed = set_temp_base_seed()
     LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, random_seed)
@@ -130,29 +160,3 @@ def test_benchmark_dataloader(
         track_dataloader_benchmark_results(test_case, batches_per_second)
     finally:
         restore_base_seed(original_seed)
-
-
-@pytest.mark.multigpu
-@pytest.mark.slow
-def test_benchmark_training_cycle(
-    benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase, task
-) -> None:
-    """Runs a benchmark and then compares them against the values stored on a server."""
-    cfg, test_case = benchmark_config
-    LOGGER.info("Benchmarking the configuration: %s", test_case)
-
-    # Reset memory logging and free all possible memory between runs
-    # this ensures we report the peak memory used during each run,
-    # and not the peak memory used by the run with the highest memory usage
-    reset_peak_memory_stats()
-    empty_cache()
-    gc.collect()
-    # Run model with profiler
-    AnemoiProfiler(cfg).profile()
-
-    # determine store from benchmark config
-    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
-    user, hostname, path = parse_benchmark_config(config_path)
-    store: str = f"ssh://{user}@{hostname}:{path}"
-
-    benchmark(cfg, test_case, store)
