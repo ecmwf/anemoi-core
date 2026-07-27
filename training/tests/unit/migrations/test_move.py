@@ -8,7 +8,7 @@ from anemoi.training.migrations.migrator import MigrationManifest
 from anemoi.training.migrations.migrator import Migrator
 
 
-def test_base_add(migrator_from_funcs: Callable[..., Migrator]):
+def test_add(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_add(m: MigrationManifest) -> None:
         m.add("c", 2)
 
@@ -19,7 +19,7 @@ def test_base_add(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_add_nested(migrator_from_funcs: Callable[..., Migrator]):
+def test_add_nested(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_add(m: MigrationManifest) -> None:
         m.add("c.a", 2)
 
@@ -30,7 +30,7 @@ def test_base_add_nested(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_delete(migrator_from_funcs: Callable[..., Migrator]):
+def test_delete(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_delete(m: MigrationManifest) -> None:
         m.remove("a")
 
@@ -41,7 +41,7 @@ def test_base_delete(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_delete_nested(migrator_from_funcs: Callable[..., Migrator]):
+def test_delete_nested(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_delete(m: MigrationManifest) -> None:
         m.remove("a.b")
 
@@ -52,7 +52,7 @@ def test_base_delete_nested(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_move(migrator_from_funcs: Callable[..., Migrator]):
+def test_move(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_move(m: MigrationManifest) -> None:
         m.move("a", "b")
 
@@ -63,7 +63,7 @@ def test_base_move(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_move_nested(migrator_from_funcs: Callable[..., Migrator]):
+def test_move_nested(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_move(m: MigrationManifest) -> None:
         m.move("a.b", "b.b")
         m.move("a.c", "b.c")
@@ -75,7 +75,7 @@ def test_base_move_nested(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_move_nested_self(migrator_from_funcs: Callable[..., Migrator]):
+def test_move_nested_self(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_move(m: MigrationManifest) -> None:
         m.move("a", "a.a")
 
@@ -86,7 +86,18 @@ def test_base_move_nested_self(migrator_from_funcs: Callable[..., Migrator]):
     assert out == target
 
 
-def test_base_transform(migrator_from_funcs: Callable[..., Migrator]):
+def test_nest_in_list(migrator_from_funcs: Callable[..., Migrator]):
+    def migrate_move(m: MigrationManifest) -> None:
+        m.nest_in_list("a")
+
+    migrator = migrator_from_funcs(migrate_move)
+    config = {"a": {"b": 0, "c": 1}, "version": 0}
+    target = {"a": [{"b": 0, "c": 1}], "version": 1}
+    out = migrator.sync(config)
+    assert out == target
+
+
+def test_transform(migrator_from_funcs: Callable[..., Migrator]):
     def transform_callback(cfg: DictConfig | ListConfig, val: Any) -> Any:
         return val + cfg.b
 
@@ -96,5 +107,16 @@ def test_base_transform(migrator_from_funcs: Callable[..., Migrator]):
     migrator = migrator_from_funcs(migrate_transform)
     config = {"a": 1, "b": 1, "version": 0}
     target = {"a": 2, "b": 1, "version": 1}
+    out = migrator.sync(config)
+    assert out == target
+
+
+def test_move_interpolation(migrator_from_funcs: Callable[..., Migrator]):
+    def migrate_move(m: MigrationManifest) -> None:
+        m.move("a", "b")
+
+    migrator = migrator_from_funcs(migrate_move)
+    config = {"a": {"b": 0, "c": 1}, "version": 0}
+    target = {"b": {"b": 0, "c": 1}, "version": 1}
     out = migrator.sync(config)
     assert out == target

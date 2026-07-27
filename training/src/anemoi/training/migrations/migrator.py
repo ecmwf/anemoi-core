@@ -74,6 +74,11 @@ class MoveOp(Op):
 class TransformOp(Op):
     source: list[str]
     func: Callable[..., Any]
+    merge: bool = True
+
+
+def _nest_in_list(_: DictConfig | ListConfig, val: Any) -> Any:
+    return [val]
 
 
 class MigrationManifest:
@@ -91,10 +96,13 @@ class MigrationManifest:
     def move(self, source: str, target: str) -> None:
         self._ops.append(MoveOp(source, target))
 
-    def transform(self, source: str | list[str], func: Callable[..., Any]) -> None:
+    def transform(self, source: str | list[str], func: Callable[..., Any], merge: bool = True) -> None:
         if isinstance(source, str):
             source = [source]
-        self._ops.append(TransformOp(source, func))
+        self._ops.append(TransformOp(source, func, merge))
+
+    def nest_in_list(self, source: str | list[str]) -> None:
+        return self.transform(source, _nest_in_list, merge=False)
 
     def execute(self, cfg: DictConfig | ListConfig):
         for op in self._ops:
@@ -121,7 +129,7 @@ class MigrationManifest:
         elif isinstance(op, TransformOp):
             for source in op.source:
                 new_val = op.func(cfg, OmegaConf.select(cfg, source))
-                OmegaConf.update(cfg, source, new_val)
+                OmegaConf.update(cfg, source, new_val, merge=op.merge)
 
 
 # migration is the version of the migration module to allow future update of
