@@ -250,7 +250,7 @@ class GraphScoreGraph(nn.Module):
         # Source and destination nodes must describe the same forecast grid.
         num_src_nodes = graph_data[edges_name[0]].num_nodes
         num_dst_nodes = graph_data[edges_name[2]].num_nodes
-        cls._validate_node_space(
+        cls._validate_node_pairing(
             edges_name,
             num_src_nodes,
             num_dst_nodes,
@@ -305,7 +305,7 @@ class GraphScoreGraph(nn.Module):
         )
 
     @staticmethod
-    def _validate_node_space(
+    def _validate_node_pairing(
         edges_name: tuple[str, ...],
         num_src_nodes: int,
         num_dst_nodes: int,

@@ -22,6 +22,7 @@ are averaged unless a summation is requested.
 """
 
 from abc import abstractmethod
+from contextlib import nullcontext
 
 import einops
 import torch
@@ -156,17 +157,6 @@ class BaseGraphScoreLoss(BaseLoss):
             )
             raise ValueError(msg)
 
-    def _compute_local_score_tensor_with_precision_control(
-        self,
-        y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
-    ) -> torch.Tensor:
-        if not self.no_autocast:
-            return self._compute_local_score_tensor(y_pred_ens, y)
-
-        with torch.amp.autocast(device_type=y_pred_ens.device.type, enabled=False):
-            return self._compute_local_score_tensor(y_pred_ens, y)
-
     @abstractmethod
     def _compute_local_score_tensor(
         self,
@@ -242,10 +232,16 @@ class BaseGraphScoreLoss(BaseLoss):
         # score.
         self._validate_graph_grid_size(pred_for_score)
         target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
-        score = self._compute_local_score_tensor_with_precision_control(
-            pred_for_score,
-            target_for_score,
+        context = (
+            torch.amp.autocast(device_type=pred_for_score.device.type, enabled=False)
+            if self.no_autocast
+            else nullcontext()
         )
+        with context:
+            score = self._compute_local_score_tensor(
+                pred_for_score,
+                target_for_score,
+            )
 
         # Return scores to their original nodes, then apply node and variable
         # weights.
