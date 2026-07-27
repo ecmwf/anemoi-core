@@ -23,9 +23,12 @@ if is_triton_available():
 
 @pytest.fixture(autouse=True)
 def setup_torch():
-    """Set up torch defaults for all tests."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.set_default_device(device)
+    """Skip when CUDA/Triton are unavailable and set up torch defaults for all tests."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    if not is_triton_available():
+        pytest.skip("Triton not available")
+    torch.set_default_device("cuda")
     torch.set_default_dtype(torch.float32)
     yield
 
@@ -54,9 +57,6 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
 )
 def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     """Test forward pass of Triton GT."""
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA not available")
-
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
@@ -84,9 +84,6 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
 )
 def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     """Test backward pass of Triton GT."""
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA not available")
-
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
@@ -119,9 +116,6 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
 )
 def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int):
     """Test that triton Triton GT matches reference implementation."""
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA not available")
-
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
@@ -154,9 +148,6 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
 )
 def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int):
     """Test that triton Triton GT matches reference implementation."""
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA not available")
-
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
 
@@ -209,9 +200,6 @@ def test_graph_transformer_attention_opcheck(n_src: int, n_dst: int, h: int, d: 
     ``torch.library.opcheck`` validates the schema, fake/meta implementation and
     autograd registration of the operator.
     """
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA not available")
-
     edge_index, m = build_bipartite_graph(n_src, n_dst)
     (row, colptr), perm, (rowptr, edge_ids, edge_dst) = edge_index_to_csc(
         edge_index, num_nodes=(n_src, n_dst), reverse=True
