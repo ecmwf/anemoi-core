@@ -16,6 +16,7 @@ from pathlib import Path
 
 import psutil
 import pytest
+import torch.distributed as dist
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.cuda import empty_cache
@@ -27,7 +28,6 @@ from anemoi.training.diagnostics.benchmark_server import track_dataloader_benchm
 from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def restore_base_seed(original_seed: str | None) -> None:
 
 @pytest.mark.multigpu
 @pytest.mark.slow
-def test_benchmark_dataloader(
+def test_benchmark_training_dataloader(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase,
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
@@ -157,3 +157,9 @@ def test_benchmark_training_cycle(
     store: str = f"ssh://{user}@{hostname}:{path}"
 
     benchmark(cfg, test_case, store)
+
+    # barrier to ensure all processes have completed before finishing the test
+    # otherwise process 0 will finish the final test before process 0
+    # has finished comparing the results against the benchmark server
+    # torch.dist is initialized in the benchmark function, so we can use it here
+    dist.barrier()

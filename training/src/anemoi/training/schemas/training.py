@@ -395,6 +395,7 @@ class MultiScaleLossSchema(BaseModel):
     per_scale_loss: CRPSSchema | TimeAggregateLossWrapperSchema | BaseLossSchema
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    sparse_projector_num_chunks: PositiveInt = 1
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -637,6 +638,8 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
     "Number of GPUs per reader group. Defaults to number of GPUs."
+    use_local_synchronization: bool = Field(default=True, example=True)
+    "Use synchronization local to the group when creating process groups."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -713,8 +716,6 @@ class BaseTrainingSchema(BaseModel):
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     optimization: OptimizationSchema
     "Optimizer and LR scheduler configuration."
-    recompile_limit: PositiveInt = 32
-    "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1

@@ -178,6 +178,39 @@ def test_scale_tensor_subset_indices_requires_tuple(method_name: str) -> None:
         getattr(scale, method_name)(x, subset_indices=[Ellipsis, [1, 3]])
 
 
+@pytest.mark.parametrize("method_name", ["scale", "scale_iteratively"])
+def test_scale_tensor_subset_indices_select_last_dimension(method_name: str) -> None:
+    scale = ScaleTensor(
+        batch=(0, torch.tensor([10.0, 20.0])),
+        variable=(-1, torch.tensor([1.0, 2.0, 3.0, 4.0])),
+    )
+    x = torch.arange(2 * 3 * 4, dtype=torch.float32).reshape(2, 3, 4)
+    subset_indices = (..., torch.tensor([0, 2]))
+
+    out = getattr(scale, method_name)(x, subset_indices=subset_indices)
+
+    expected_scaler = scale.get_scaler(x.ndim).expand_as(x).index_select(-1, subset_indices[-1])
+    expected = x.index_select(-1, subset_indices[-1]) * expected_scaler
+    torch.testing.assert_close(out, expected)
+
+
+@pytest.mark.parametrize("method_name", ["scale", "scale_iteratively"])
+def test_scale_tensor_subset_indices_select_first_dimension(method_name: str) -> None:
+    scale = ScaleTensor(
+        batch=(0, torch.tensor([10.0, 20.0])),
+        variable=(-1, torch.tensor([1.0, 2.0, 3.0, 4.0])),
+    )
+    x = torch.arange(2 * 3 * 4, dtype=torch.float32).reshape(2, 3, 4)
+    subset_indices = ([1, 0],)
+
+    out = getattr(scale, method_name)(x, subset_indices=subset_indices)
+
+    subset_index = torch.tensor(subset_indices[0], dtype=torch.long)
+    expected_scaler = scale.get_scaler(x.ndim).expand_as(x).index_select(0, subset_index)
+    expected = x.index_select(0, subset_index) * expected_scaler
+    torch.testing.assert_close(out, expected)
+
+
 @pytest.mark.parametrize("subset_id", ["test", 0])
 def test_scaler_subset(subset_id) -> None:  # noqa: ANN001
     scale = ScaleTensor(test=(0, torch.tensor([2.0])), wow=(1, torch.tensor([3.0])))

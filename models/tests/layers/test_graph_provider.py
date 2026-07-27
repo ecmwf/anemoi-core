@@ -9,6 +9,8 @@
 
 import pytest
 import torch
+from scipy.sparse import csr_matrix
+from scipy.sparse import save_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -32,7 +34,10 @@ def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
         row_normalize=False,
     )
 
-    matrix = provider.get_edges().to_dense()
+    edges = provider.get_edges()
+    assert edges.layout == torch.sparse_csr
+
+    matrix = edges.to_dense()
     assert matrix.shape == (graph["dst"].num_nodes, graph["src"].num_nodes)
 
     row_sums = matrix.sum(dim=1)
@@ -58,7 +63,10 @@ def test_projection_graph_provider_accepts_int32_edge_index() -> None:
         row_normalize=False,
     )
 
-    matrix = provider.get_edges().to_dense()
+    edges = provider.get_edges()
+    assert edges.layout == torch.sparse_csr
+
+    matrix = edges.to_dense()
     assert matrix.shape == (graph["dst"].num_nodes, graph["src"].num_nodes)
     row_sums = matrix.sum(dim=1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
@@ -85,10 +93,12 @@ def test_from_config_returns_none_for_empty_dict() -> None:
 
 def test_from_config_file_mode(mocker) -> None:
     import numpy as np
-    from scipy.sparse import csr_matrix
 
     # rows do not sum to 1, so row_normalize (forwarded to the file path) is observable.
-    mocker.patch("scipy.sparse.load_npz", return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])))
+    mocker.patch(
+        "anemoi.models.layers.graph_provider.load_npz",
+        return_value=csr_matrix(np.array([[2.0, 2.0], [1.0, 3.0]])),
+    )
 
     normalized = ProjectionGraphProvider.from_config({"matrix_path": "/fake/path.npz", "row_normalize": True})
     assert isinstance(normalized, ProjectionGraphProvider)
@@ -103,7 +113,10 @@ def test_from_config_file_mode(mocker) -> None:
 def test_from_config_edges_mode() -> None:
     graph = _make_graph_with_edges()
     provider = ProjectionGraphProvider.from_config(
-        {"edges_name": ("data", "to", "target"), "edge_weight_attribute": "gauss_weight"},
+        {
+            "edges_name": ("data", "to", "target"),
+            "edge_weight_attribute": "gauss_weight",
+        },
         graph_data=graph,
     )
     assert isinstance(provider, ProjectionGraphProvider)
@@ -126,3 +139,40 @@ def test_from_config_ambiguous_raises() -> None:
 def test_from_config_invalid_raises() -> None:
     with pytest.raises(ValueError, match="must specify"):
         ProjectionGraphProvider.from_config({"unknown_key": "value"})
+
+
+def test_projection_graph_provider_row_normalizes_csr_matrix() -> None:
+    graph = HeteroData()
+    graph["src"].num_nodes = 3
+    graph["dst"].num_nodes = 2
+
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]])
+    graph[("src", "to", "dst")].gauss_weight = torch.tensor([2.0, 8.0, 6.0, 4.0])
+
+    provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="gauss_weight",
+        row_normalize=True,
+    )
+
+    edges = provider.get_edges()
+    assert edges.layout == torch.sparse_csr
+
+    expected = torch.tensor([[0.2, 0.8, 0.0], [0.4, 0.0, 0.6]])
+    assert torch.allclose(edges.to_dense(), expected, atol=1e-6)
+
+
+def test_projection_graph_provider_loads_npz_as_csr(tmp_path) -> None:
+    file_path = tmp_path / "projection.npz"
+    expected = torch.tensor([[0.25, 0.75, 0.0], [0.4, 0.0, 0.6]], dtype=torch.float32)
+    save_npz(file_path, csr_matrix(expected.numpy()))
+
+    provider = ProjectionGraphProvider(
+        file_path=file_path,
+        row_normalize=False,
+    )
+
+    edges = provider.get_edges()
+    assert edges.layout == torch.sparse_csr
+    assert torch.allclose(edges.to_dense(), expected)

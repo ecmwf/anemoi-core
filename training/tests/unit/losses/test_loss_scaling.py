@@ -69,8 +69,9 @@ def fake_data(
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {
-        "lead_times": ["6h"],
+        "lead_times": ["6h", "12h"],
         "6h": {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]},
+        "12h": {"stdev": [0.0, 2, 2, 2, 8.0, 9.0, 4.0, 2, 10]},
     }
     return config, data_indices, statistics, statistics_tendencies
 
@@ -230,6 +231,10 @@ std_dev_scaler = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScale
 
 var_scaler = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "6h"}
 
+std_dev_scaler_12h = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler", "timestep": "12h"}
+
+var_scaler_12h = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "12h"}
+
 no_tend_scaler = {"_target_": "anemoi.training.losses.scalers.NoTendencyScaler"}
 
 graph_node_scaler = {
@@ -377,6 +382,36 @@ def test_variable_loss_scaling_vals(
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
     assert torch.allclose(final_variable_scaling, expected_scaling)
+
+
+@pytest.mark.parametrize(
+    ("fake_data", "expected_scaling"),
+    [
+        (std_dev_scaler_12h, 5.0),
+        (var_scaler_12h, 25.0),
+    ],
+    indirect=["fake_data"],
+)
+def test_tendency_scaler_uses_configured_timestep(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    expected_scaling: float,
+    graph_with_nodes: HeteroData,
+) -> None:
+    config, data_indices, statistics, statistics_tendencies = fake_data
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        metadata_extractor=ExtractVariableGroupAndLevel(config.training.variable_groups),
+        output_mask=NoOutputMask(),
+    )
+
+    variable_idx = data_indices.model.output.name_to_index["y_50"]
+
+    assert scalers["additional_scaler"][1][variable_idx] == expected_scaling
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])

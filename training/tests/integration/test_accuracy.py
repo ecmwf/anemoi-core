@@ -69,7 +69,7 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
-    reference_id: Final = "684814cd86ed45f383bed3f0a87a782b"
+    reference_id: Final = "527c02a5f2554f1a96faa0f3e3a9f1a3"
     metric: Final = "train_multi_dataset_loss_step"
 
     # Printed so a failing run's ID can be promoted to the new reference_id.

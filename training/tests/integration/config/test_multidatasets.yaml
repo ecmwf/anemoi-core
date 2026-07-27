@@ -57,32 +57,32 @@ diagnostics:
     parameters: ["tp"]
     datasets_to_plot: ["era5", "cerra"] # Default dataset names to use in the plot callbacks
     callbacks:
-      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
+      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         every_n_epochs: 5
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         parameter_groups:
           moisture: []
         every_n_batches: ${diagnostics.plot.frequency.batch}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSample
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
-        per_sample : 6
         parameters: ${diagnostics.plot.parameters}
         every_n_batches: ${diagnostics.plot.frequency.batch}
-        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
-        precip_and_related_fields: []
-        colormaps: ${diagnostics.plot.colormaps}
-      #! DEACTIVATING UNTIL PYSHTOOLS FIX FOR 3.13
-      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-      #   dataset_names: ${diagnostics.plot.datasets_to_plot}
-      #   sample_idx: ${diagnostics.plot.sample_idx}
-      #   every_n_batches: ${diagnostics.plot.frequency.batch}
-      #   parameters: ${diagnostics.plot.parameters}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
+        with_auxiliary: true
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+          per_sample: 6
+          accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: histogram
         dataset_names: ${diagnostics.plot.datasets_to_plot}
         sample_idx: ${diagnostics.plot.sample_idx}
         every_n_batches: ${diagnostics.plot.frequency.batch}
-        precip_and_related_fields: []
         parameters: ${diagnostics.plot.parameters}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
+          _partial_: true

@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/models-0.16.0...models-0.17.0) (2026-07-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **training:** speedup multiscale loss ([#1212](https://github.com/ecmwf/anemoi-core/issues/1212))
+
+### Features
+
+* **models:** Add wrapper class for InverseReducedSHT ([#1146](https://github.com/ecmwf/anemoi-core/issues/1146)) ([ada6641](https://github.com/ecmwf/anemoi-core/commit/ada6641b527bb33ab4755a6989f4e04536950029))
+* **models:** GT processor halo exchange ([#1162](https://github.com/ecmwf/anemoi-core/issues/1162)) ([0c0ab86](https://github.com/ecmwf/anemoi-core/commit/0c0ab86f4fa64ff8444ea6f97794fd12017c16ea))
+* Projections for spectral losses ([#1087](https://github.com/ecmwf/anemoi-core/issues/1087)) ([a4ea5df](https://github.com/ecmwf/anemoi-core/commit/a4ea5df2f6281e9a706c70d379ca88c36fe31b80))
+* **training:** Speedup multiscale loss ([#1212](https://github.com/ecmwf/anemoi-core/issues/1212)) ([bc89ef3](https://github.com/ecmwf/anemoi-core/commit/bc89ef3c58f2646ff3385fc6881946693e6ab732))
+
+
+### Bug Fixes
+
+* Failing sht test ([#1194](https://github.com/ecmwf/anemoi-core/issues/1194)) ([133cb25](https://github.com/ecmwf/anemoi-core/commit/133cb253628c65de23a46ecfb02100b75aa8ef92))
+* Missing dependency ([#1222](https://github.com/ecmwf/anemoi-core/issues/1222)) ([bb8fd10](https://github.com/ecmwf/anemoi-core/commit/bb8fd10d0c9b6135d674d9d4e411a20e4db53109))
+* **models:** Fix test file discovery and add missing test coverage ([#1185](https://github.com/ecmwf/anemoi-core/issues/1185)) ([7b3b3b1](https://github.com/ecmwf/anemoi-core/commit/7b3b3b167855360faa8859c87f49d0197df1d9c0))
+* **models:** Make last step euler in VectorFieldHeunSampler ([#1182](https://github.com/ecmwf/anemoi-core/issues/1182)) ([01dd751](https://github.com/ecmwf/anemoi-core/commit/01dd751e64dfd774b2a591c2fe6fd39dae06e9a7))
+* **models:** Normalized relu bounding multidataset ([#1248](https://github.com/ecmwf/anemoi-core/issues/1248)) ([40bed7b](https://github.com/ecmwf/anemoi-core/commit/40bed7b407ed630ce042dde7666074c1c866469d))
+* **models:** Triton GT stability ([#1172](https://github.com/ecmwf/anemoi-core/issues/1172)) ([bbca174](https://github.com/ecmwf/anemoi-core/commit/bbca17482d6176f53c16adb1d268ff1874840397))
+* Remove version limit ([#1178](https://github.com/ecmwf/anemoi-core/issues/1178)) ([821b1f0](https://github.com/ecmwf/anemoi-core/commit/821b1f0ee73d1fb4310d3f8a679001697e2331f0))
+* Revert torch limit ([#1204](https://github.com/ecmwf/anemoi-core/issues/1204)) ([8308654](https://github.com/ecmwf/anemoi-core/commit/8308654424a0dca1cc28274cace3e00c21fc5088))
+
 ## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/models-0.15.1...models-0.16.0) (2026-06-08)
 
 

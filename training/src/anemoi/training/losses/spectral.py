@@ -183,7 +183,8 @@ class SpectralLoss(BaseLoss):
         x = self._select_subgrid(x)
         LOGGER.debug("Spectral loss: shape after subgrid selection: %s", tuple(x.shape))
         if self.projection_provider is not None:
-            x = self.projector.project(x, self.projection_provider)
+            projection_matrix = self.projection_provider.get_edges(device=x.device)
+            x = self.projector(x, projection_matrix)
             LOGGER.debug("Spectral loss: shape after projection: %s", tuple(x.shape))
         return x
 

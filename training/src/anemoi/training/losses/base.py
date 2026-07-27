@@ -118,7 +118,8 @@ class BaseLoss(nn.Module, ABC):
             Scaled error tensor
         """
         if subset_indices is None:
-            subset_indices = (Ellipsis,)
+            if len(self.scaler) == 0:
+                return x
         elif not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)

@@ -11,6 +11,7 @@
 import gc
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Union
 
@@ -29,6 +30,33 @@ from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
 LOGGER = logging.getLogger(__name__)
+
+
+# NOTE: Do not delete
+# It is not called explictly, but
+# is run by pytest during initalisation
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    # suppress logging spam when using torch compile
+    logging.getLogger("torch.__trace").setLevel(logging.WARNING)
+    logging.getLogger("torch.__trace").propagate = False
+
+
+# NOTE: Do not delete
+# It is not called explictly, but
+# it runs before every integration test
+@pytest.fixture(autouse=True)
+def _reset_torch_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset torch compile state before each test."""
+    import torch._dynamo
+
+    inductor_cache = tmp_path / "torchinductor_cache"
+    shutil.rmtree(inductor_cache, ignore_errors=True)
+    inductor_cache.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
+
+    torch._dynamo.reset()
+    return
 
 
 @pytest.fixture(autouse=True)
