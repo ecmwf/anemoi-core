@@ -232,7 +232,7 @@ class Forecaster(BaseTask):
             )
         return x.with_data(new_data)
 
-    def log_extra(self, logger: Callable, logger_enabled: bool) -> None:
+    def log_extra(self, logger: Callable, logger_enabled: bool, batch_size: int | None = None) -> None:
         """Log any task-specific information."""
         logger(
             "rollout",
@@ -242,6 +242,7 @@ class Forecaster(BaseTask):
             logger=logger_enabled,
             rank_zero_only=True,
             sync_dist=False,
+            batch_size=batch_size,
         )
 
     def training_runtime_state_dict(self) -> dict:

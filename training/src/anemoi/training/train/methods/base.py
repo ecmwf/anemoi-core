@@ -1118,7 +1118,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
-        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled, batch_size=batch.size)
 
         return train_loss
 
