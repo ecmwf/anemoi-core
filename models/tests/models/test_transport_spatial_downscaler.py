@@ -321,7 +321,7 @@ def test_before_sampling_applies_spatial_preprocessor_and_pre_processors() -> No
         post_processors={"in_lres": post_lres, "out_hres": post_out},
     )
 
-    xs, x_lres_denorm = result
+    xs, x_lres_denorm, lres_name_to_index = result
     # The projector must have been called with the raw lres batch first,
     # before any normalization.
     assert len(projector.calls) == 1
@@ -332,6 +332,8 @@ def test_before_sampling_applies_spatial_preprocessor_and_pre_processors() -> No
     # x_lres_denorm caches the denormalized projected lres:
     # normalized (batch + 10) then denormalized (subtract 10) = batch.
     torch.testing.assert_close(x_lres_denorm, batch_lres.unsqueeze(2))
+    # The LRES dataset's name_to_index is threaded through for _after_sampling.
+    assert lres_name_to_index == model.data_indices["in_lres"].name_to_index
 
 
 def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> None:
@@ -353,7 +355,11 @@ def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> Non
     result = model._after_sampling(
         out,
         post_processors={"out_hres": post_state},
-        before_sampling_data=({"in_lres": None, "in_hres": None, "out_hres": None}, x_lres_denorm),
+        before_sampling_data=(
+            {"in_lres": None, "in_hres": None, "out_hres": None},
+            x_lres_denorm,
+            model.data_indices["in_lres"].name_to_index,
+        ),
         model_comm_group=None,
         grid_shard_sizes=None,
         gather_out=False,
@@ -464,6 +470,7 @@ def test_compute_residual_uses_residual_pre_for_prognostic_and_state_pre_for_dia
         x_lres_denorm={"out_hres": x_lres_denorm},
         pre_processors_state={"out_hres": state_pre},
         pre_processors_residual={"out_hres": residual_pre},
+        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
         input_post_processor={"out_hres": input_post},
         skip_imputation=True,
     )
@@ -497,6 +504,7 @@ def test_add_residual_to_state_denormalizes_prognostic_with_residual_and_diagnos
         residual={"out_hres": residual},
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
+        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
         output_pre_processor=None,
         skip_imputation=True,
     )
@@ -531,6 +539,7 @@ def test_compute_residual_and_add_residual_to_state_round_trip() -> None:
         x_lres_denorm={"out_hres": x_lres_denorm},
         pre_processors_state={"out_hres": state_pre},
         pre_processors_residual={"out_hres": residual_pre},
+        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
         input_post_processor={"out_hres": input_post},
         skip_imputation=True,
     )
@@ -540,11 +549,106 @@ def test_compute_residual_and_add_residual_to_state_round_trip() -> None:
         residual=residual,
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
+        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
         output_pre_processor=None,
         skip_imputation=True,
     )
 
     torch.testing.assert_close(reconstructed["out_hres"], y)
+
+
+def test_compute_residual_aligns_lres_columns_by_name_when_layouts_differ() -> None:
+    """LRES and target may store variables at different column positions.
+
+    ``compute_residual`` must map the target's prognostic variables to LRES
+    columns by *name*, using the provided ``lres_name_to_index`` mapping.
+    """
+    model = _make_mixed_bare_model()
+
+    input_post = _IndexAwareProcessor(offset=0.0)
+    state_pre = _IndexAwareProcessor(offset=0.0)
+    residual_pre = _IndexAwareProcessor(offset=0.0)
+
+    # Target layout: [t2m, u10, precip]. LRES layout: [u10, foo, t2m] (t2m is at column 2, u10 at 0).
+    lres_name_to_index = {"u10": 0, "foo": 1, "t2m": 2}
+    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])  # target t2m, u10, precip
+    x_lres_denorm = torch.tensor([[[[[4.0, 999.0, 3.0]]]]])  # u10=4, foo (unused), t2m=3
+
+    out = model.compute_residual(
+        y={"out_hres": y},
+        x_lres_denorm={"out_hres": x_lres_denorm},
+        pre_processors_state={"out_hres": state_pre},
+        pre_processors_residual={"out_hres": residual_pre},
+        lres_name_to_index=lres_name_to_index,
+        input_post_processor={"out_hres": input_post},
+        skip_imputation=True,
+    )
+
+    # Prognostic: t2m residual = 10 - 3 = 7; u10 residual = 20 - 4 = 16.
+    # Diagnostic: precip kept as-is = 30.
+    expected = torch.tensor([[[[[7.0, 16.0, 30.0]]]]])
+    torch.testing.assert_close(out["out_hres"], expected)
+
+
+def test_add_residual_to_state_aligns_lres_columns_by_name_when_layouts_differ() -> None:
+    """Round-trip counterpart to the layout-mismatch test above."""
+    model = _make_mixed_bare_model()
+
+    residual_post = _IndexAwareProcessor(offset=0.0)
+    state_post = _IndexAwareProcessor(offset=0.0)
+
+    lres_name_to_index = {"u10": 0, "foo": 1, "t2m": 2}
+    residual = torch.tensor([[[[[7.0, 16.0, 30.0]]]]])
+    x_lres_denorm = torch.tensor([[[[[4.0, 999.0, 3.0]]]]])
+
+    state = model.add_residual_to_state(
+        x_lres_denorm={"out_hres": x_lres_denorm},
+        residual={"out_hres": residual},
+        post_processors_state={"out_hres": state_post},
+        post_processors_residual={"out_hres": residual_post},
+        lres_name_to_index=lres_name_to_index,
+        output_pre_processor=None,
+        skip_imputation=True,
+    )
+
+    # Prognostic: t2m = 7 + 3 = 10; u10 = 16 + 4 = 20. Diagnostic: precip = 30.
+    expected = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
+    torch.testing.assert_close(state["out_hres"], expected)
+
+
+def test_compute_residual_raises_when_target_prognostic_missing_from_lres() -> None:
+    """A clear error is raised if the LRES dataset lacks a target prognostic variable."""
+    model = _make_mixed_bare_model()
+
+    # LRES has u10 but not t2m — the model can't compute the t2m residual.
+    lres_name_to_index = {"u10": 0}
+
+    with pytest.raises(ValueError, match=r"t2m.*LRES"):
+        model.compute_residual(
+            y={"out_hres": torch.zeros(1, 1, 1, 1, 3)},
+            x_lres_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
+            pre_processors_state={"out_hres": _IndexAwareProcessor(offset=0.0)},
+            pre_processors_residual={"out_hres": _IndexAwareProcessor(offset=0.0)},
+            lres_name_to_index=lres_name_to_index,
+            input_post_processor={"out_hres": _IndexAwareProcessor(offset=0.0)},
+            skip_imputation=True,
+        )
+
+
+def test_add_residual_to_state_raises_when_target_prognostic_missing_from_lres() -> None:
+    """Same validation as ``compute_residual`` but on the reverse operation."""
+    model = _make_mixed_bare_model()
+    lres_name_to_index = {"u10": 0}
+    with pytest.raises(ValueError, match=r"t2m.*LRES"):
+        model.add_residual_to_state(
+            x_lres_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
+            residual={"out_hres": torch.zeros(1, 1, 1, 1, 3)},
+            post_processors_state={"out_hres": _IndexAwareProcessor(offset=0.0)},
+            post_processors_residual={"out_hres": _IndexAwareProcessor(offset=0.0)},
+            lres_name_to_index=lres_name_to_index,
+            output_pre_processor=None,
+            skip_imputation=True,
+        )
 
 
 # ── _after_sampling with mixed target ───────────────────────────────────────
@@ -564,7 +668,11 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
     result = model._after_sampling(
         {"out_hres": residual_pred},
         post_processors={"out_hres": state_post},
-        before_sampling_data=({"in_lres": None, "in_hres": None, "out_hres": None}, x_lres_denorm),
+        before_sampling_data=(
+            {"in_lres": None, "in_hres": None, "out_hres": None},
+            x_lres_denorm,
+            model.data_indices["in_lres"].name_to_index,
+        ),
         model_comm_group=None,
         grid_shard_sizes=None,
         gather_out=False,

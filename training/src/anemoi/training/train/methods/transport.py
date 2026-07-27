@@ -375,11 +375,13 @@ class ResidualPredictionMode(PredictionMode):
 
         # Delegate the residual / diagnostic split to the model.
         residual_pre = self._residual_pre_processors()
+        lres_name_to_index = self.module.data_indices[lres_name].name_to_index
         model_residual_data_output = self.module.model.model.compute_residual(
             y=target_data_output,
             x_lres_denorm=dict.fromkeys(target_data_output, x_lres_on_hres),
             pre_processors_state=self.module.model.pre_processors,
             pre_processors_residual=residual_pre,
+            lres_name_to_index=lres_name_to_index,
             input_post_processor=self.module.model.post_processors,
             skip_imputation=True,
         )
@@ -394,6 +396,9 @@ class ResidualPredictionMode(PredictionMode):
                 # Denormalized projected lres, cached for reconstruction so we do
                 # not have to denormalize twice.
                 "x_lres_on_hres": x_lres_on_hres,
+                # Cache the LRES name_to_index alongside so ``reconstruct_prediction``
+                # can re-align columns by name without another lookup.
+                "lres_name_to_index": lres_name_to_index,
                 "transport_reference_source": self._reference_state_target_space(batch),
             },
         )
@@ -427,12 +432,14 @@ class ResidualPredictionMode(PredictionMode):
         same normalized state space as ``metric_target``.
         """
         x_lres_on_hres = prepared.aux["x_lres_on_hres"]
+        lres_name_to_index = prepared.aux["lres_name_to_index"]
         residual_post = self._residual_post_processors()
         return self.module.model.model.add_residual_to_state(
             x_lres_denorm=dict.fromkeys(prediction, x_lres_on_hres),
             residual=prediction,
             post_processors_state=self.module.model.post_processors,
             post_processors_residual=residual_post,
+            lres_name_to_index=lres_name_to_index,
             # Re-normalize with the state pre-processor so metric code sees the
             # same normalized state space as ``prepared.metric_target``.
             output_pre_processor=self.module.model.pre_processors,

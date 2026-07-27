@@ -1221,12 +1221,67 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
     # ── residual math (mirror of tendency model's compute_tendency pair) ─────
 
+    def _lres_prognostic_indices(
+        self,
+        target_dataset_name: str,
+        lres_name_to_index: dict[str, int],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Return the LRES column indices that align with the target's prognostic outputs.
+
+        The LRES tensor lives in the LRES dataset's raw DATA_FULL layout, which
+        need not share variable positions with the target dataset.  For each
+        target prognostic variable we look up its column in the LRES tensor by
+        name, so the two datasets only need to agree on the *names* of the
+        prognostic variables — not on their positions.
+
+        Parameters
+        ----------
+        target_dataset_name : str
+            Name of the target dataset whose prognostic outputs should be
+            aligned against the LRES source.
+        lres_name_to_index : dict[str, int]
+            The LRES dataset's ``name_to_index`` mapping (variable name to
+            column position in the raw LRES tensor).
+        device : torch.device
+            Device on which to place the returned index tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Long tensor of LRES column indices, one per prognostic output of
+            the target dataset, in the same order as
+            ``self.data_indices[target_dataset_name].prognostic`` (which also
+            matches the order of ``indices.model.output.prognostic``).
+
+        Raises
+        ------
+        ValueError
+            If any target prognostic variable is not present in
+            ``lres_name_to_index``.
+        """
+        target_prognostic_names = self.data_indices[target_dataset_name].prognostic
+        missing = [name for name in target_prognostic_names if name not in lres_name_to_index]
+        if missing:
+            msg = (
+                f"Target prognostic variables {missing} are not present in the LRES dataset "
+                f"(available: {sorted(lres_name_to_index)}). "
+                "The LRES dataset must contain every prognostic variable of the target dataset."
+            )
+            raise ValueError(msg)
+        return torch.tensor(
+            [lres_name_to_index[name] for name in target_prognostic_names],
+            dtype=torch.long,
+            device=device,
+        )
+
     def compute_residual(
         self,
         y: dict[str, torch.Tensor],
         x_lres_denorm: dict[str, torch.Tensor],
         pre_processors_state: dict[str, Callable],
         pre_processors_residual: dict[str, Callable],
+        lres_name_to_index: dict[str, int],
         input_post_processor: dict[str, Callable | None] | None = None,
         skip_imputation: bool = False,
     ) -> dict[str, torch.Tensor]:
@@ -1243,15 +1298,21 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             Normalized state target in the target dataset's DATA_OUTPUT layout.
         x_lres_denorm : dict[str, torch.Tensor]
             De-normalized low-resolution input already projected onto the
-            target grid.  Channels aligned with the target dataset's DATA_FULL
-            variable layout so that
-            ``x_lres_denorm[..., data.output.prognostic]`` picks the low-res
-            counterparts of the target's prognostic output variables.
+            target grid.  Channels follow the *LRES* dataset's raw DATA_FULL
+            layout — variable positions can differ from the target dataset.
+            Alignment against the target's prognostic outputs is done by
+            *variable name* via ``lres_name_to_index``.
         pre_processors_state : dict[str, Callable]
             State pre-processor applied to diagnostic output channels.
         pre_processors_residual : dict[str, Callable]
             Residual (typically tendency-space) pre-processor applied to
             prognostic output channels.
+        lres_name_to_index : dict[str, int]
+            The LRES dataset's ``name_to_index`` mapping.  Used to locate the
+            column in ``x_lres_denorm`` corresponding to each target
+            prognostic variable — so LRES and target datasets can have their
+            variables in any order, provided the prognostic variable names
+            match.
         input_post_processor : Optional[Callable], optional
             State post-processor used to de-normalize ``y`` before computing the
             residual.  If ``None``, ``y`` is treated as already de-normalized.
@@ -1272,10 +1333,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             indices = self.data_indices[dataset_name]
             prog_model_idx = indices.model.output.prognostic
             diag_model_idx = indices.model.output.diagnostic
-            # Channel-match: positions in the target's DATA namespace where the
-            # target's prognostic output variables live.  We assume the low-res
-            # tensor uses the same variable positions for those variables.
-            lres_prog_idx = indices.data.output.prognostic
 
             input_post_proc = input_post_processor[dataset_name] if input_post_processor is not None else None
             y_denorm = y[dataset_name]
@@ -1287,11 +1344,18 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                     skip_imputation=skip_imputation,
                 )
 
+            # Match each target prognostic variable to the corresponding column
+            # in the LRES tensor by name (LRES layout may differ from target).
+            lres_prog_idx = self._lres_prognostic_indices(
+                dataset_name,
+                lres_name_to_index,
+                device=y_denorm.device,
+            )
+
             residual = y_denorm.clone()
             # Prognostic channels: normalized residual against the low-res source.
             residual[..., prog_model_idx] = pre_processors_residual[dataset_name](
-                y_denorm[..., prog_model_idx]
-                - x_lres_denorm[dataset_name].index_select(-1, lres_prog_idx.to(device=y_denorm.device)),
+                y_denorm[..., prog_model_idx] - x_lres_denorm[dataset_name].index_select(-1, lres_prog_idx),
                 in_place=False,
                 data_index=indices.data.output.prognostic,
                 skip_imputation=skip_imputation,
@@ -1313,6 +1377,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         residual: dict[str, torch.Tensor],
         post_processors_state: dict[str, Callable],
         post_processors_residual: dict[str, Callable],
+        lres_name_to_index: dict[str, int],
         output_pre_processor: dict[str, Callable | None] | None = None,
         skip_imputation: bool = False,
     ) -> dict[str, torch.Tensor]:
@@ -1327,12 +1392,20 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         ----------
         x_lres_denorm : dict[str, torch.Tensor]
             De-normalized low-resolution input, projected onto the target grid.
+            Channels follow the LRES dataset's raw DATA_FULL layout — variable
+            positions can differ from the target dataset.  Alignment against
+            the target's prognostic outputs is done by name via
+            ``lres_name_to_index``.
         residual : dict[str, torch.Tensor]
             Normalized model prediction in the target's DATA_OUTPUT layout.
         post_processors_state : dict[str, Callable]
             State post-processor used to de-normalize diagnostic channels.
         post_processors_residual : dict[str, Callable]
             Residual post-processor used to de-normalize prognostic channels.
+        lres_name_to_index : dict[str, int]
+            The LRES dataset's ``name_to_index`` mapping.  Used to locate the
+            column in ``x_lres_denorm`` corresponding to each target
+            prognostic variable.
         output_pre_processor : Optional[Callable], optional
             State pre-processor applied to the full recovered state before
             returning.  Used by training's ``reconstruct_prediction`` to hand a
@@ -1352,7 +1425,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             indices = self.data_indices[dataset_name]
             prog_model_idx = indices.model.output.prognostic
             diag_model_idx = indices.model.output.diagnostic
-            lres_prog_idx = indices.data.output.prognostic
 
             # De-normalize the whole tensor with the residual post-processor,
             # then overwrite diagnostic channels with the state post-processed
@@ -1369,10 +1441,17 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 data_index=indices.data.output.diagnostic,
                 skip_imputation=skip_imputation,
             )
-            # Add the low-res source back into the prognostic channels only.
+            # Add the low-res source back into the prognostic channels only,
+            # matching each target prognostic to its corresponding LRES column
+            # by variable name (LRES layout may differ from target).
+            lres_prog_idx = self._lres_prognostic_indices(
+                dataset_name,
+                lres_name_to_index,
+                device=outp.device,
+            )
             outp[..., prog_model_idx] = outp[..., prog_model_idx] + x_lres_denorm[dataset_name].index_select(
                 -1,
-                lres_prog_idx.to(device=outp.device),
+                lres_prog_idx,
             )
 
             output_pre_proc = output_pre_processor[dataset_name] if output_pre_processor is not None else None
@@ -1629,8 +1708,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             x = pre_processors[dataset_name](x, in_place=False)
             xs[dataset_name] = x
 
-        # 5. Cache the denormalized projected lres for reconstruction.
+        # 5. Cache the denormalized projected lres for reconstruction, along
+        #    with the LRES dataset's name_to_index so ``_after_sampling`` can
+        #    align its columns against the target's prognostic outputs by name.
         x_lres_denorm: torch.Tensor | None = None
+        lres_name_to_index: dict[str, int] | None = None
         if spatial_pre_processors:
             assert (
                 post_processors is not None
@@ -1641,8 +1723,9 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             )
             lres_name = lres_names[0]
             x_lres_denorm = post_processors[lres_name](xs[lres_name], in_place=False)
+            lres_name_to_index = self.data_indices[lres_name].name_to_index
 
-        return (xs, x_lres_denorm), grid_shard_sizes
+        return (xs, x_lres_denorm, lres_name_to_index), grid_shard_sizes
 
     def _after_sampling(
         self,
@@ -1664,10 +1747,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         """
         del kwargs
 
-        assert (
-            isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 2
-        ), "Downscaler _after_sampling expects _before_sampling to return (xs, x_lres_denorm)."
+        assert isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 3, (
+            "Downscaler _after_sampling expects _before_sampling to return " "(xs, x_lres_denorm, lres_name_to_index)."
+        )
         x_lres_denorm = before_sampling_data[1]
+        lres_name_to_index = before_sampling_data[2]
 
         # Choose residual (tendency) post-processors when present; fall back to
         # state post-processors otherwise — mirrors ResidualPredictionMode.
@@ -1678,6 +1762,10 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         )
 
         if x_lres_denorm is not None:
+            assert lres_name_to_index is not None, (
+                "Downscaler _after_sampling received x_lres_denorm without a "
+                "lres_name_to_index mapping from _before_sampling."
+            )
             # Delegate to the residual/state split; returns de-normalized state
             # (no output_pre_processor at inference time — callers expect the
             # de-normalized field).
@@ -1686,6 +1774,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 residual=out,
                 post_processors_state=post_processors,
                 post_processors_residual=residual_post,
+                lres_name_to_index=lres_name_to_index,
                 output_pre_processor=None,
                 skip_imputation=True,
             )
