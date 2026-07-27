@@ -93,6 +93,9 @@ jobs:
             # propagate to the sbatch job); secrets are valid inside this template.
             export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
             export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
+            # Set up a persistent cache for TorchInductor and Triton, to be reused across jobs.
+            export TORCHINDUCTOR_CACHE_DIR=$SCRATCH/torch-compile-cache
+            export TRITON_CACHE_DIR=$SCRATCH/torch-compile-cache
             ${{ matrix.pytest_cmd }}
             deactivate
             rm -rf $REPO_NAME
