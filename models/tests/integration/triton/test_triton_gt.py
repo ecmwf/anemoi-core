@@ -53,7 +53,7 @@ def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
     ],
 )
 def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
-    """Test forward pass of GraphTransformerFunction."""
+    """Test forward pass of Triton GT."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
@@ -83,7 +83,7 @@ def test_graph_transformer_forward(n_src: int, n_dst: int, h: int, d: int):
     ],
 )
 def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
-    """Test backward pass of GraphTransformerFunction."""
+    """Test backward pass of Triton GT."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
@@ -118,7 +118,7 @@ def test_graph_transformer_backward(n_src: int, n_dst: int, h: int, d: int):
     ],
 )
 def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, d: int):
-    """Test that triton GraphTransformerFunction matches reference implementation."""
+    """Test that triton Triton GT matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
@@ -153,7 +153,7 @@ def test_graph_transformer_vs_reference_forward(n_src: int, n_dst: int, h: int, 
     ],
 )
 def test_graph_transformer_vs_reference_backward(n_src: int, n_dst: int, h: int, d: int):
-    """Test that triton GraphTransformerFunction matches reference implementation."""
+    """Test that triton Triton GT matches reference implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
 
