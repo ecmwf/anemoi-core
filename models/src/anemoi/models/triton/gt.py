@@ -539,6 +539,14 @@ def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
 def _graph_transformer_attention_setup_context(ctx, inputs, output):
     q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst = inputs
     _out, out_saved, m = output
+
+    # The forward op makes contiguous copies internally, but those are not the tensors
+    # passed here (setup_context receives the original op inputs). Save contiguous
+    # versions so the Triton backward kernels, which assume a contiguous layout, receive
+    # contiguous inputs.
+    q, k, v, e = (x.contiguous() for x in (q, k, v, e))
+    row, colptr, rowptr, edge_ids, edge_dst = (x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst))
+
     ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
 
 
