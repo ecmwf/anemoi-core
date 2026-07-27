@@ -16,7 +16,6 @@ import importlib
 import logging
 from collections.abc import Callable
 from collections.abc import Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from inspect import getsource
 from os import PathLike
@@ -26,7 +25,7 @@ from typing import TypedDict
 
 from omegaconf import DictConfig
 from omegaconf import ListConfig
-from omegaconf import OmegaConf
+from ruamel.yaml import YAML
 
 from anemoi.training import __version__
 
@@ -46,6 +45,52 @@ class IncompatibleCheckpointException(BaseException):
 
 
 CfgType = dict[str, Any]
+
+
+def select(cfg: Any, keys: str, create: bool = False) -> Any:
+    if keys == "":
+        return cfg
+    parts = keys.split(".")
+    for part in parts:
+        if isinstance(cfg, dict) and part in cfg:
+            cfg = cfg[part]
+        elif isinstance(cfg, dict) and create:
+            cfg[part] = {}
+            cfg = cfg[part]
+        elif isinstance(cfg, list) and part.isdigit() and len(cfg) > int(part):
+            cfg = cfg[int(part)]
+        elif isinstance(cfg, list) and part.isdigit() and len(cfg) == int(part) and create:
+            cfg.append({})
+            cfg = cfg[-1]
+        else:
+            raise ValueError(f"{keys} not in config.")
+    return cfg
+
+
+def update(config: Any, keys: str, val: Any) -> None:
+    parts = keys.split(".")
+    parent = select(config, ".".join(parts[:-1]), create=True)
+    key = parts[-1]
+    if isinstance(parent, dict):
+        parent[key] = val
+    elif isinstance(parent, list) and len(parent) > int(key):
+        parent[int(key)] = val
+    elif isinstance(parent, list) and len(parent) == int(key):
+        parent.append(val)
+    else:
+        raise ValueError(f"{keys} not in config.")
+
+
+def delete(config: Any, keys: str) -> None:
+    parts = keys.split(".")
+    parent = select(config, ".".join(parts[:-1]))
+    key = parts[-1]
+    if isinstance(parent, dict):
+        del parent[key]
+    elif isinstance(parent, list) and key.isdigit():
+        parent.pop(int(key))
+    else:
+        raise ValueError(f"{keys} not in config.")
 
 
 class Op:
@@ -73,7 +118,6 @@ class MoveOp(Op):
 class TransformOp(Op):
     source: list[str]
     func: Callable[..., Any]
-    merge: bool = True
 
 
 def _nest_in_list(_: DictConfig | ListConfig, val: Any) -> Any:
@@ -95,40 +139,34 @@ class MigrationManifest:
     def move(self, source: str, target: str) -> None:
         self._ops.append(MoveOp(source, target))
 
-    def transform(self, source: str | list[str], func: Callable[..., Any], merge: bool = True) -> None:
+    def transform(self, source: str | list[str], func: Callable[..., Any]) -> None:
         if isinstance(source, str):
             source = [source]
-        self._ops.append(TransformOp(source, func, merge))
+        self._ops.append(TransformOp(source, func))
 
     def nest_in_list(self, source: str | list[str]) -> None:
-        return self.transform(source, _nest_in_list, merge=False)
+        return self.transform(source, _nest_in_list)
 
-    def execute(self, cfg: DictConfig | ListConfig):
+    def execute(self, cfg: Any):
         for op in self._ops:
             self._exec_step(cfg, op)
         return cfg
 
-    def _exec_step(self, cfg: DictConfig | ListConfig, op: Op):
+    def _exec_step(self, cfg: Any, op: Op):
         if isinstance(op, AddOp):
-            OmegaConf.update(cfg, op.target, op.value, merge=False)
+            update(cfg, op.target, op.value)
             return
         if isinstance(op, RemoveOp):
             for source in op.source:
-                steps = source.split(".")
-                if len(steps) < 2:
-                    del cfg[source]
-                    return
-                parent_path = ".".join(steps[:-1])
-                parent = OmegaConf.select(cfg, parent_path)
-                del parent[steps[-1]]
+                delete(cfg, source)
         elif isinstance(op, MoveOp):
-            val = OmegaConf.select(cfg, op.source)
+            val = select(cfg, op.source)
             self._exec_step(cfg, RemoveOp([op.source]))
             self._exec_step(cfg, AddOp(op.target, val))
         elif isinstance(op, TransformOp):
             for source in op.source:
-                new_val = op.func(cfg, OmegaConf.select(cfg, source))
-                OmegaConf.update(cfg, source, new_val, merge=op.merge)
+                new_val = op.func(cfg, select(cfg, source))
+                update(cfg, source, new_val)
 
 
 # migration is the version of the migration module to allow future update of
@@ -291,7 +329,7 @@ class Migrator:
                 return False
         return True
 
-    def sync(self, config: CfgType) -> CfgType:
+    def sync(self, migrated_config: str | Path) -> CfgType:
         """Migrate the checkpoint using provided migrations
 
         Parameters
@@ -304,7 +342,9 @@ class Migrator:
         CkptType
             The migrated checkpoint
         """
-        config = deepcopy(config)
+        path = Path(migrated_config)
+        yaml = YAML()
+        config = yaml.load(path.read_text())
 
         manifest = MigrationManifest()
 
@@ -314,8 +354,6 @@ class Migrator:
         for migration in self._migrations[version:]:
             migration.migrate(manifest)
             version += 1
-        cfg = OmegaConf.resolve(OmegaConf.create(config))
-        new_config = manifest.execute(cfg)
-        config = OmegaConf.to_container(new_config, resolve=False)
-        config[_version_key] = version
-        return config
+        migrated_config = manifest.execute(config)
+        migrated_config[_version_key] = version
+        return migrated_config

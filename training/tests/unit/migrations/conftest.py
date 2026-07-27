@@ -1,6 +1,10 @@
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 import pytest
+import yaml
 
 from anemoi.training.migrations.migrator import Migration
 from anemoi.training.migrations.migrator import MigrationManifest
@@ -41,3 +45,14 @@ def dummy_config():
     return {
         "a": {"a": 0, "b": 1, "c": 2},
     }
+
+
+@pytest.fixture
+def config_to_yaml(tmp_path: Path) -> Callable[[Any], str]:
+    def func(obj: Any) -> str:
+        hash = uuid4().hex
+        path = tmp_path / f"{hash}.yaml"
+        path.write_text(yaml.dump(obj))
+        return str(path.resolve())
+
+    return func
