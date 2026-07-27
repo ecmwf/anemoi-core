@@ -113,10 +113,10 @@ def test_transform(migrator_from_funcs: Callable[..., Migrator]):
 
 def test_move_interpolation(migrator_from_funcs: Callable[..., Migrator]):
     def migrate_move(m: MigrationManifest) -> None:
-        m.move("a", "b")
+        m.move("a.c", "a.d")
 
     migrator = migrator_from_funcs(migrate_move)
-    config = {"a": {"b": 0, "c": 1}, "version": 0}
-    target = {"b": {"b": 0, "c": 1}, "version": 1}
+    config = {"a": {"a": [0, 1], "b": "${a.a[0]} and ${a.c}", "c": 1}, "version": 0}
+    target = {"b": {"a": [0, 1], "b": "${a.a[0]} and ${a.d}", "d": 1}, "version": 1}
     out = migrator.sync(config)
     assert out == target
