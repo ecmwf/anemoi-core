@@ -80,13 +80,48 @@ def sample_plot_fn(
     accumulation_levels_plot: list | None = None,
     prediction_label: str = "pred",
     auxiliary_label: str = "corrupted targets",
+    sparse: bool = False,
+    output_latlons: np.ndarray | None = None,
     **_kwargs: Any,
 ) -> Figure:
-    """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample)."""
-    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
+    """Adapter for ``plot_predicted_multilevel_flat_sample`` (PlotSample).
+
+    Supports both dense gridded datasets and sparse/observation datasets. For
+    sparse datasets (``sparse=True``) the input and target/prediction points live
+    at different scattered locations, so the sparse-capable plotter in
+    ``diagnostics.plots`` is used with ``output_latlons`` giving the target
+    observation coordinates.
+    """
     from anemoi.training.diagnostics.evaluation.plotting.settings import DEFAULT_ACCUMULATION_LEVELS
 
     levels = accumulation_levels_plot if accumulation_levels_plot is not None else DEFAULT_ACCUMULATION_LEVELS
+
+    if sparse:
+        # The sparse scatter layout (differing input/output point sets) lives in
+        # diagnostics.plots, which carries the full observation plotting machinery.
+        from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample as plot_sparse
+
+        return plot_sparse(
+            parameters,
+            per_sample,
+            latlons,
+            levels,
+            x,
+            y_true,
+            y_pred,
+            datashader=getattr(settings, "datashader", True),
+            precip_and_related_fields=getattr(settings, "precip_and_related_fields", None),
+            colormaps=getattr(settings, "colormaps", None),
+            projection_kind=getattr(settings, "projection_kind", "equirectangular"),
+            prediction_label=prediction_label,
+            auxiliary=auxiliary,
+            auxiliary_label=auxiliary_label,
+            sparse=True,
+            output_latlons=output_latlons,
+        )
+
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
+
     return plot_predicted_multilevel_flat_sample(
         parameters,
         per_sample,
@@ -115,9 +150,17 @@ def spectrum_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,  # noqa: ARG001
     min_delta: float | None = None,
+    sparse: bool = False,
     **_kwargs: Any,
-) -> Figure:
-    """Adapter for ``plot_power_spectrum`` (PlotSpectrum)."""
+) -> Figure | None:
+    """Adapter for ``plot_power_spectrum`` (PlotSpectrum).
+
+    Spectra assume a single shared lat/lon grid, which does not hold for
+    scattered observations. Returns ``None`` for sparse datasets so the callback
+    skips them.
+    """
+    if sparse:
+        return None
     from anemoi.training.diagnostics.evaluation.plotting.spectrum import plot_power_spectrum
 
     return plot_power_spectrum(parameters, latlons, x, y_true, y_pred, min_delta=min_delta)
@@ -133,9 +176,16 @@ def histogram_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,
     log_scale: bool = False,
+    sparse: bool = False,
     **_kwargs: Any,
-) -> Figure:
-    """Adapter for ``plot_histogram`` (PlotHistogram)."""
+) -> Figure | None:
+    """Adapter for ``plot_histogram`` (PlotHistogram).
+
+    Gridded histogram binning is not supported for scattered observations;
+    returns ``None`` for sparse datasets so the callback skips them.
+    """
+    if sparse:
+        return None
     from anemoi.training.diagnostics.evaluation.plotting.histogram import plot_histogram
 
     return plot_histogram(

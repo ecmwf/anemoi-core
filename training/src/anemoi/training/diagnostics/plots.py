@@ -546,8 +546,8 @@ def _resolve_variable_colormaps(
     tuple[Colormap, Colormap]
         (cmap, error_cmap)
     """
-    cmap = colormaps.default.get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
-    error_cmap = colormaps.error.get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
+    cmap = colormaps["default"].get_cmap() if colormaps.get("default") else cm.get_cmap("viridis")
+    error_cmap = colormaps["error"].get_cmap() if colormaps.get("error") else cm.get_cmap("bwr")
     for key in colormaps:
         if key not in ["default", "error"] and variable_name in colormaps[key].variables:
             cmap = colormaps[key].get_cmap()

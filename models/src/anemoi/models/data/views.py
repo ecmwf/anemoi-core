@@ -127,6 +127,10 @@ class SourceView(ABC):
                 )
         return source
 
+    def contiguous(self) -> "SourceView":
+        """Return a new view whose underlying data tensors are contiguous."""
+        return self.apply_func(lambda t, **_: t.contiguous())
+
     @abstractmethod
     def select_time(self, indices: slice | Sequence[int] | int) -> "SourceView":
         """Return a new view restricted to the given time indices."""

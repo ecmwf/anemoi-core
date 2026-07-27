@@ -173,18 +173,6 @@ def test_tendency_roundtrip_skips_imputation() -> None:
     model.data_indices = {"data": data_indices}
     indices = data_indices
 
-    x_full = torch.tensor(
-        [
-            [
-                [
-                    [float("nan"), 1.0, 2.0, 3.0, 4.0, 5.0],
-                    [6.0, float("nan"), 8.0, 9.0, 10.0, 11.0],
-                ]
-            ]
-        ]
-    )
-    imputer.transform(x_full, in_place=False)
-
     input_post = Processors([["imputer", imputer]], inverse=True)
     identity = IdentityProcessor()
 
@@ -220,18 +208,6 @@ def test_tendency_roundtrip_skips_imputation() -> None:
 
 def test_apply_imputer_inverse_reinserts_nans() -> None:
     imputer, data_indices = _make_imputer_settings()
-
-    x_full = torch.tensor(
-        [
-            [
-                [
-                    [float("nan"), 1.0, 2.0, 3.0, 4.0, 5.0],
-                    [6.0, float("nan"), 8.0, 9.0, 10.0, 11.0],
-                ]
-            ]
-        ]
-    )
-    imputer.transform(x_full, in_place=False)
 
     post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
 
@@ -367,18 +343,6 @@ def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
 
 def test_after_sampling_reinserts_nans() -> None:
     imputer, data_indices = _make_imputer_settings()
-
-    x_full = torch.tensor(
-        [
-            [
-                [
-                    [float("nan"), 1.0, 2.0, 3.0, 4.0, 5.0],
-                    [6.0, float("nan"), 8.0, 9.0, 10.0, 11.0],
-                ]
-            ]
-        ]
-    )
-    imputer.transform(x_full, in_place=False)
 
     post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
 
