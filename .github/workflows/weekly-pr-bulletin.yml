@@ -281,8 +281,6 @@ jobs:
                 : summaries[String(pr.number)];
               const line = `- [#${pr.number}](${pr.url})${flag} **${pr.title.trim()}** \u2014 ${pr.author}`;
               return summary ? `${line}\n  > ${summary}` : line;
-            }](${pr.url})${flag} **${pr.title.trim()}** \u2014 ${pr.author}`;
-              return summary ? `${line}\n  > ${summary}` : line;
             }
 
             const lines = [];
