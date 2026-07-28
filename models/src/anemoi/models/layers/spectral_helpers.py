@@ -153,12 +153,12 @@ class SphericalHarmonicTransform(Module):
 
     Methods
     -------
-    rfft_rings_reduced_naive(x: Tensor) -> Tensor
-        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using a naive loop.
+    rfft_rings_reduced_eager(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using a eager loop.
     rfft_rings_reduced_banded(x: Tensor) -> Tensor
-        Performs direct real-to-complex FFT on each of a band of latitudes of a reduced grid using a naive loop.
-    rfft_rings_reduced_cuda(x: Tensor) -> Tensor
-        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using the CUDA backend.
+        Performs direct real-to-complex FFT on each of a band of latitudes of a reduced grid using a eager loop.
+    rfft_rings_reduced_native(x: Tensor) -> Tensor
+        Performs direct real-to-complex FFT on each latitude ring of a reduced grid using a native compiled backend.
     rfft_rings_reduced_graphed(x: Tensor) -> Tensor
         Performs direct real-to-complex FFT on each latitude ring of a reduced grid with a graphed implementation.
     rfft_rings_regular(x: Tensor) -> Tensor
@@ -175,8 +175,7 @@ class SphericalHarmonicTransform(Module):
         self,
         lons_per_lat: list[int],
         truncation: int,
-        use_cuda_fft: bool = False,
-        use_graphed_rfft: bool = False,
+        fft_backend: str = "eager",
     ) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
@@ -186,10 +185,9 @@ class SphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
-        use_cuda_fft : bool, optional
-            Whether to use the CUDA FFT extension for supported reduced grids. Default is False.
-        use_graphed_rfft : bool, optional
-            Whether to use CUDA graphs for the reduced grid rFFT. Default is False.
+        fft_backend : str, optional
+            Which FFT backend to use for the reduced grid rFFT. Options are "eager", "graphed", or "native".
+            Default is "eager". Option only applies for reduced grids.
         """
 
         super().__init__()
@@ -212,13 +210,16 @@ class SphericalHarmonicTransform(Module):
         # Determine the FFT backend
         unique_nlons = set(self.lons_per_lat)
         if len(unique_nlons) > 1:
-            # Reduced grids have different ring lengths; regular grids can use one batched FFT.
-            if use_graphed_rfft:
+            if fft_backend not in ["eager", "graphed", "native"]:
+                raise ValueError(
+                    f"Invalid fft_backend {fft_backend}. Must be one of 'eager', 'graphed', or 'native' for reduced grids."
+                )
+            if fft_backend == "graphed":
                 self.rfft_rings = self.rfft_rings_reduced_graphed
-            elif use_cuda_fft:
-                self.rfft_rings = self.rfft_rings_reduced_cuda
+            elif fft_backend == "native":
+                self.rfft_rings = self.rfft_rings_reduced_native
             else:
-                self.rfft_rings = self.rfft_rings_reduced_naive
+                self.rfft_rings = self.rfft_rings_reduced_eager
         else:
             self.rfft_rings = self.rfft_rings_regular
         LOGGER.info(f"SphericalHarmonicTransform: Using {self.rfft_rings.__name__} for rfft_rings")
@@ -251,9 +252,9 @@ class SphericalHarmonicTransform(Module):
 
         self.register_buffer("weight", weight, persistent=False)
 
-    def rfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
+    def rfft_rings_reduced_eager(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
-        Naive (eager) implementation using rfft_rings_reduced_banded with a single band.
+        Eager implementation using rfft_rings_reduced_banded with a single band.
 
         Parameters
         ----------
@@ -270,7 +271,7 @@ class SphericalHarmonicTransform(Module):
 
     def rfft_rings_reduced_banded(self, x: Tensor, start_lat: int, end_lat: int) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid, from start_lat to end_lat.
-        Naive (eager) implementation.
+        Eager implementation.
 
         Parameters
         ----------
@@ -297,9 +298,10 @@ class SphericalHarmonicTransform(Module):
 
         return output_tensor
 
-    def rfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
+    def rfft_rings_reduced_native(self, x: Tensor) -> Tensor:
         r"""Performs direct real-to-complex FFT on each latitude ring of a reduced grid.
-        Uses the CUDA backend.
+        Uses the native compiled backend.
+        Note: currently only CUDA is supported.
 
         Parameters
         ----------
@@ -416,12 +418,12 @@ class InverseSphericalHarmonicTransform(Module):
 
     Methods
     -------
-    irfft_rings_reduced_naive(x: Tensor) -> Tensor
+    irfft_rings_reduced_eager(x: Tensor) -> Tensor
         Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
     irfft_rings_reduced_banded(x: Tensor) -> Tensor
-        Performs inverse complex-to-real FFT on each of a band of latitudes of a reduced grid using a naive loop.
-    irfft_rings_reduced_cuda(x: Tensor) -> Tensor
-        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid using the CUDA backend.
+        Performs inverse complex-to-real FFT on each of a band of latitudes of a reduced grid using a eager loop.
+    irfft_rings_reduced_native(x: Tensor) -> Tensor
+        Performs inverse complex-to-real FFT on each latitude ring of a reduced grid using the native compiled backend.
     irfft_rings_reduced_graphed(x: Tensor) -> Tensor
         Performs inverse complex-to-real FFT on each latitude ring of a reduced grid with a graphed implementation.
     irfft_rings_regular(x: Tensor) -> Tensor
@@ -438,8 +440,7 @@ class InverseSphericalHarmonicTransform(Module):
         self,
         lons_per_lat: list[int],
         truncation: int,
-        use_cuda_fft: bool = False,
-        use_graphed_irfft: bool = False,
+        fft_backend: str = "eager",
     ) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
 
@@ -449,10 +450,9 @@ class InverseSphericalHarmonicTransform(Module):
             Number of longitudinal points on each latitude ring, from pole to pole.
         truncation : int
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
-        use_cuda_fft : bool, optional
-            Whether to use the CUDA FFT extension for supported reduced grids. Default is False.
-        use_graphed_irfft : bool, optional
-            Whether to use CUDA graphs for the reduced grid irFFT. Default is False.
+        fft_backend : str, optional
+            Backend to use for the inverse FFT on reduced grids. Options are "eager", "native", and "graphed".
+            Default is "eager". Option only applies for reduced grids.
         """
 
         super().__init__()
@@ -468,13 +468,16 @@ class InverseSphericalHarmonicTransform(Module):
         self.slon = [0] + list(np.cumsum(self.lons_per_lat))[:-1]
 
         if len(set(self.lons_per_lat)) > 1:
-            # Reduced grids need per-ring inverse FFTs.
-            if use_graphed_irfft:
+            if fft_backend not in ["eager", "graphed", "native"]:
+                raise ValueError(
+                    f"Invalid fft_backend {fft_backend}. Must be one of 'eager', 'graphed', or 'native' for reduced grids."
+                )
+            if fft_backend == "graphed":
                 self.irfft_rings = self.irfft_rings_reduced_graphed
-            elif use_cuda_fft:
-                self.irfft_rings = self.irfft_rings_reduced_cuda
+            elif fft_backend == "native":
+                self.irfft_rings = self.irfft_rings_reduced_native
             else:
-                self.irfft_rings = self.irfft_rings_reduced_naive
+                self.irfft_rings = self.irfft_rings_reduced_eager
         else:
             self.irfft_rings = self.irfft_rings_regular
         LOGGER.info(f"InverseSphericalHarmonicTransform: Using {self.irfft_rings.__name__} for irfft_rings")
@@ -503,9 +506,9 @@ class InverseSphericalHarmonicTransform(Module):
 
         self.register_buffer("pct", pct, persistent=False)
 
-    def irfft_rings_reduced_naive(self, x: Tensor) -> Tensor:
+    def irfft_rings_reduced_eager(self, x: Tensor) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
-        Naive (eager) implementation using irfft_rings_reduced_banded with a single band.
+        Eager implementation using irfft_rings_reduced_banded with a single band.
 
         Parameters
         ----------
@@ -522,7 +525,7 @@ class InverseSphericalHarmonicTransform(Module):
 
     def irfft_rings_reduced_banded(self, x: Tensor, start_lat: int, end_lat: int) -> Tensor:
         """Performs inverse complex-to-real FFT on each latitude ring of a reduced grid, from start_lat to end_lat.
-        Naive (eager) implementation.
+        Eager implementation.
 
         Parameters
         ----------
@@ -551,7 +554,21 @@ class InverseSphericalHarmonicTransform(Module):
 
         return output_tensor
 
-    def irfft_rings_reduced_cuda(self, x: Tensor) -> Tensor:
+    def irfft_rings_reduced_native(self, x: Tensor) -> Tensor:
+        r"""Performs inverse complex-to-real FFT on each latitude ring of a reduced grid.
+        Uses the native compiled backend.
+        Note: currently only CUDA is supported.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Fourier space field [..., latitude, zonal wavenumber m]
+
+        Returns
+        -------
+        torch.Tensor
+            field [..., grid]
+        """
         from anemoi.models.layers.cuda_fft import cuda_irfft
 
         if x.device.type != "cuda":

@@ -121,6 +121,7 @@ def sht_setup(request):
         "tolerance": tolerance,
         "direct": direct,
         "inverse": inverse,
+        "device": device,
     }
 
 
@@ -165,8 +166,8 @@ def test_idempotency_inverse_direct(sht_setup):
 
 
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
-def test_optimised_rffts_match_naive(sht_setup):
-    """Optimised FFT implementations should match the naive implementation."""
+def test_optimised_rffts_match_eager(sht_setup):
+    """Optimised FFT implementations should match the eager implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available, skipping test")
 
@@ -175,13 +176,13 @@ def test_optimised_rffts_match_naive(sht_setup):
 
     x = torch.randn(2, direct.n_grid_points, dtype=dtype, device="cuda")
 
-    torch.testing.assert_close(direct.rfft_rings_reduced_cuda(x), direct.rfft_rings_reduced_naive(x))
-    torch.testing.assert_close(direct.rfft_rings_reduced_graphed(x), direct.rfft_rings_reduced_naive(x))
+    torch.testing.assert_close(direct.rfft_rings_reduced_native(x), direct.rfft_rings_reduced_eager(x))
+    torch.testing.assert_close(direct.rfft_rings_reduced_graphed(x), direct.rfft_rings_reduced_eager(x))
 
 
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
-def test_optimised_irffts_match_naive(sht_setup):
-    """Optimised FFT implementations should match the naive implementation."""
+def test_optimised_irffts_match_eager(sht_setup):
+    """Optimised FFT implementations should match the eager implementation."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available, skipping test")
 
@@ -194,20 +195,27 @@ def test_optimised_irffts_match_naive(sht_setup):
     x = torch.complex(torch.randn(shape, dtype=dtype), torch.randn(shape, dtype=dtype))
     x[0, :, 0].imag = 0.0  # m = 0 modes must be real
 
-    torch.testing.assert_close(inverse.irfft_rings_reduced_cuda(x), inverse.irfft_rings_reduced_naive(x))
-    torch.testing.assert_close(inverse.irfft_rings_reduced_graphed(x), inverse.irfft_rings_reduced_naive(x))
+    torch.testing.assert_close(inverse.irfft_rings_reduced_native(x), inverse.irfft_rings_reduced_eager(x))
+    torch.testing.assert_close(inverse.irfft_rings_reduced_graphed(x), inverse.irfft_rings_reduced_eager(x))
 
 
 @pytest.mark.skip(reason="CUDA graphs are experimental so this test is disabled by default")
 @pytest.mark.parametrize("sht_setup", ["reduced", "octahedral"], indirect=True)
 def test_multiple_direct_calls(sht_setup):
-    """Test direct transform can be called multiple times, to verify the CUDA graph functionality works correctly.
+    """Test direct transform can be called multiple times, to verify the graphed functionality works correctly.
     Reduced grids only.
     """
+    grid_kind = sht_setup["grid_kind"]
+    truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
-    direct = sht_setup["direct"]
+    device = sht_setup["device"]
 
-    before = torch.randn((1, 1, direct.n_grid_points), dtype=dtype)
+    nlat = 2 * (truncation + 1)
+    direct = SphericalHarmonicTransform(
+        lons_per_lat=_lons_per_lat(nlat=nlat, grid_kind=grid_kind), truncation=truncation, fft_backend="graphed"
+    ).to(device)
+
+    before = torch.randn((1, 1, direct.n_grid_points), dtype=dtype, device=device)
 
     once = direct(before)
 
