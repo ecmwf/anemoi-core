@@ -22,14 +22,9 @@ import torch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
-# from anemoi.training.diagnostics.callbacks.plot import GraphTrainableFeaturesPlot
-# from anemoi.training.diagnostics.callbacks.plot import PlotEnsSample
-# from anemoi.training.diagnostics.callbacks.plot import PlotHistogram
-# from anemoi.training.diagnostics.callbacks.plot import PlotLoss
-# from anemoi.training.diagnostics.callbacks.plot import PlotSample
-# from anemoi.training.diagnostics.callbacks.plot import PlotSpectrum
-# from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
-# from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
+
+from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
+from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.diagnostics.evaluation.plotting.batch_output import ensemble_plot_fn
@@ -44,105 +39,68 @@ from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
 
-# --- Legacy-name shims used only by this test module ------------------------
+# --- BatchOutputPlot builders used by this test module ----------------------
 #
-# The historic PlotSample/PlotEnsSample/PlotHistogram/PlotSpectrum callback
-# classes were consolidated into a single BatchOutputPlot callback + pluggable
-# ``plot_fn``. These shim factories rebuild the old-style constructors so
-# the existing test bodies keep working without touching every call site.
-def _wrap_plot_callback(
-    *,
-    plot_fn,
-    tag_infix,
-    with_auxiliary=False,
-    plot_fn_kwargs=None,
-) -> Callable[..., BatchOutputPlot]:
-    """Return a callable that builds a BatchOutputPlot wired to ``plot_fn``.
-
-    ``plot_fn_kwargs`` is a mapping of legacy kwargs → default sentinel that
-    the constructor pops from ``**kwargs``, binds into ``plot_fn`` via
-    ``functools.partial`` (dropping ``None`` values), and mirrors as
-    attributes on the callback so legacy assertions such as ``callback.log_scale``
-    keep working.
-    """
-    plot_fn_kwargs = plot_fn_kwargs or {}
-
-    def _factory(**kwargs) -> BatchOutputPlot:
-        bound = {}
-        for name, default in plot_fn_kwargs.items():
-            if name in kwargs:
-                bound[name] = kwargs.pop(name)
-            else:
-                bound.setdefault(name, default)
-        cb = BatchOutputPlot(
-            plot_fn=partial(plot_fn, **{k: v for k, v in bound.items() if v is not None}) or plot_fn,
-            tag_infix=tag_infix,
-            with_auxiliary=with_auxiliary,
-            **kwargs,
-        )
-        for name, value in bound.items():
-            setattr(cb, name, value)
-        return cb
-
-    return _factory
+# The single ``BatchOutputPlot`` callback serves the sample / spectrum /
+# histogram / ensemble map plots via a pluggable ``plot_fn``. These thin
+# builders construct it with the right ``plot_fn`` and route the plot-specific
+# kwargs (accumulation levels, log-scale, ...) into the function via
+# ``functools.partial``. ``sample_idx`` / ``parameters`` / ``dataset_names`` /
+# ``members`` are forwarded straight to the callback constructor.
+def _sample_plot(*, accumulation_levels_plot=None, **kwargs) -> BatchOutputPlot:
+    plot_fn = sample_plot_fn if accumulation_levels_plot is None else partial(
+        sample_plot_fn,
+        accumulation_levels_plot=accumulation_levels_plot,
+    )
+    return BatchOutputPlot(plot_fn=plot_fn, tag_infix="sample", with_auxiliary=True, **kwargs)
 
 
-PlotSample = _wrap_plot_callback(
-    plot_fn=sample_plot_fn,
-    tag_infix="sample",
-    with_auxiliary=True,
-    # legacy tests occasionally pass ensemble-only kwargs to PlotSample; accept-and-ignore
-    plot_fn_kwargs={"accumulation_levels_plot": None, "plot_members": None},
-)
-PlotEnsSample = _wrap_plot_callback(
-    plot_fn=ensemble_plot_fn,
-    tag_infix="ens_sample",
-    plot_fn_kwargs={
-        "accumulation_levels_plot": None,
-        "n_plots_per_sample": 4,
-        "plot_members": None,
-    },
-)
-PlotHistogram = _wrap_plot_callback(
-    plot_fn=histogram_plot_fn,
-    tag_infix="histo",
-    plot_fn_kwargs={"log_scale": False, "precip_and_related_fields": None},
-)
-PlotSpectrum = _wrap_plot_callback(
-    plot_fn=spectrum_plot_fn,
-    tag_infix="spec",
-    plot_fn_kwargs={"min_delta": None},
-)
+def _ens_sample_plot(*, accumulation_levels_plot=None, **kwargs) -> BatchOutputPlot:
+    plot_fn = partial(ensemble_plot_fn, accumulation_levels_plot=accumulation_levels_plot)
+    return BatchOutputPlot(plot_fn=plot_fn, tag_infix="ens_sample", **kwargs)
+
+
+def _histogram_plot(*, log_scale=False, precip_and_related_fields=None, **kwargs) -> BatchOutputPlot:
+    plot_fn = partial(histogram_plot_fn, log_scale=log_scale, precip_and_related_fields=precip_and_related_fields)
+    return BatchOutputPlot(plot_fn=plot_fn, tag_infix="histo", **kwargs)
+
+
+def _spectrum_plot(*, min_delta=None, **kwargs) -> BatchOutputPlot:
+    plot_fn = partial(spectrum_plot_fn, min_delta=min_delta)
+    return BatchOutputPlot(plot_fn=plot_fn, tag_infix="spec", **kwargs)
+
 
 # Suite of Unit Tests for Plotting Callbacks
 # ------------------------------------------
-# Tests to check PlotHistogram, PlotSpectrum, LossCurvePlot, PlotSample instantiation
-# Tests to check PlotHistogram, PlotSpectrum, LossCurvePlot, PlotSample plot methods
+# Tests to check BatchOutputPlot (sample/spectrum/histogram plot_fns) + LossCurvePlot instantiation
+# Tests to check BatchOutputPlot + LossCurvePlot plot methods
 # Tests to check plot_loss, plot_histogram, plot_spectrum, plot_predicted_multilevel_flat_sample return a figure
 
 
 def test_plot_histogram_instantiation():
-    """PlotHistogram can be instantiated with parameters."""
-    callback = PlotHistogram(
+    """BatchOutputPlot with the histogram plot_fn can be instantiated with parameters."""
+    callback = _histogram_plot(
         sample_idx=0,
         parameters=["t2m", "tp", "u10"],
         dataset_names=["data"],
     )
     assert callback.sample_idx == 0
     assert callback.parameters == ["t2m", "tp", "u10"]
-    assert callback.log_scale is False
+    assert callback.tag_infix == "histo"
+    assert callback.plot_fn.keywords["log_scale"] is False
 
 
 def test_plot_spectrum_instantiation():
-    """PlotSpectrum can be instantiated with parameters."""
-    callback = PlotSpectrum(
+    """BatchOutputPlot with the spectrum plot_fn can be instantiated with parameters."""
+    callback = _spectrum_plot(
         sample_idx=0,
         parameters=["t2m", "tp"],
         dataset_names=["data"],
     )
     assert callback.sample_idx == 0
     assert callback.parameters == ["t2m", "tp"]
-    assert callback.min_delta is None
+    assert callback.tag_infix == "spec"
+    assert callback.plot_fn.keywords["min_delta"] is None
 
 
 def test_plot_loss_instantiation():
@@ -237,23 +195,7 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
     assert edge_modules == {}
 
 
-# ---- Config and mocks for BasePlotAdditionalMetrics.process and task-type tests ----
-
-_PLOT_PROCESS_CONFIG = {
-    "system": {"output": {"plots": None}},
-    "diagnostics": {
-        "plot": {
-            "datashader": False,
-            "asynchronous": False,
-            "frequency": {"batch": 1, "epoch": 1},
-        },
-    },
-    "data": {
-        "datasets": {
-            "data": {"diagnostic": None},
-        },
-    },
-}
+# ---- Mocks for BasePlotAdditionalMetrics.process and task-type tests ----
 
 
 def _make_pl_module_forecaster(
@@ -280,11 +222,17 @@ def _make_pl_module_forecaster(
     pl_module.n_step_output = pl_module.task.num_output_timesteps
     pl_module.plot_adapter = pl_module.task._plot_adapter
 
-    # Mock data_indices
-    # data_indices[dataset_name].data.output.full, model.output.name_to_index for plot_parameters_dict
+    # Single-process gather is a no-op (grid-shard metadata lives on the SourceView).
+    pl_module.model_comm_group = None
+    # Targets are consumed as a Batch of SourceViews; keep them unchanged in tests.
+    pl_module.preprocess_targets = lambda batch: batch
+
+    # Mock data_indices: data.output.full (view-var subset), model.output.name_to_index
+    # (loss/spatial parameter lookup) and data.input.todict() (diagnostic flags).
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
-    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
+    data_indices.data.input.todict.return_value = {"name_to_index": {"a": 0, "b": 1, "c": 2}, "diagnostic": []}
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph latlons (radians), converted to deg in process
@@ -311,10 +259,15 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     pl_module.n_step_output = pl_module.task.num_output_timesteps
     pl_module.plot_adapter = pl_module.task._plot_adapter
 
+    # Single-process gather is a no-op; targets pass through unchanged.
+    pl_module.model_comm_group = None
+    pl_module.preprocess_targets = lambda batch: batch
+
     # Mock data_indices
     data_indices = MagicMock()
     data_indices.data.output.full = slice(None)
-    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
+    data_indices.data.input.todict.return_value = {"name_to_index": {"a": 0, "b": 1, "c": 2}, "diagnostic": []}
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph data
@@ -354,10 +307,19 @@ def _step_output(
     predictions: list[dict[str, torch.Tensor]],
     plot_kwargs: dict[str, Any] | None = None,
 ) -> TrainingStepOutput:
+    # The callbacks consume predictions as per-dataset SourceViews; wrap any raw
+    # prediction tensors so tests can keep declaring them as plain tensors.
+    wrapped = [
+        {
+            name: (pred if not isinstance(pred, torch.Tensor) else _pred_view(pred, dataset_name=name))
+            for name, pred in step.items()
+        }
+        for step in predictions
+    ]
     return TrainingStepOutput(
         loss=torch.tensor(0.0),
         metrics={},
-        predictions=predictions,
+        predictions=wrapped,
         plot_kwargs={} if plot_kwargs is None else plot_kwargs,
     )
 
@@ -381,12 +343,22 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     )
 
 
+def _pred_view(tensor: torch.Tensor, *, dataset_name: str = "data"):
+    """Wrap a prediction tensor as a per-dataset SourceView.
+
+    BatchOutputPlot / LossCurvePlot consume outputs.predictions as a
+    list of {dataset_name: SourceView} dicts (grid-shard metadata lives on
+    the view), so tests build predictions with this helper.
+    """
+    return _make_gridded_batch(tensor, dataset_name=dataset_name)[dataset_name]
+
+
 # ---- BasePlotAdditionalMetrics.process: input/output shapes ----
 
 
 def test_process_forecaster_output_shapes():
     """BasePlotAdditionalMetrics.process: forecaster task yields expected data and output_tensor shapes."""
-    callback = PlotSample(
+    callback = _sample_plot(
         sample_idx=0,
         parameters=["a", "b", "c"],
         accumulation_levels_plot=[0.5],
@@ -422,9 +394,9 @@ def test_process_forecaster_output_shapes():
     assert output_tensor.shape == (output_times, n_step_output, n_ens, nlatlon, nvar), output_tensor.shape
 
 
-def test_plot_sample_uses_auxiliary_output_from_validation_output():
-    """PlotSample forwards auxiliary output from validation metadata."""
-    callback = PlotSample(
+def test_batch_output_plot_forwards_auxiliary_from_validation_output():
+    """BatchOutputPlot forwards the auxiliary output (SourceView) from validation metadata."""
+    callback = _sample_plot(
         sample_idx=0,
         parameters=["a", "b"],
         accumulation_levels_plot=[0.5],
@@ -433,11 +405,10 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
 
     batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
     pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
-    pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
     pl_module.model.post_processors = {"data": _IdentityProcessor()}
-    conditioned_target = {"data": torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0)}
+    conditioned_target = {"data": _pred_view(torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0))}
 
-    batch = {"data": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, 3, n_ens, nlatlon, nvar))
     output = _step_output(
         [{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}],
         plot_kwargs={"auxiliary_output": conditioned_target},
@@ -450,14 +421,15 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
 
     plotted_output = callback.plot.call_args.args[3]
     plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
-    torch.testing.assert_close(plotted_output.predictions[0]["data"], output.predictions[0]["data"])
-    torch.testing.assert_close(plotted_auxiliary["data"], conditioned_target["data"])
+    # predictions / auxiliary are per-dataset SourceViews (single-process allgather is a no-op).
+    torch.testing.assert_close(plotted_output.predictions[0]["data"].data, output.predictions[0]["data"].data)
+    torch.testing.assert_close(plotted_auxiliary["data"].data, conditioned_target["data"].data)
     assert plotted_output.plot_kwargs == {}
 
 
 def test_process_time_interpolator_output_shapes():
     """BasePlotAdditionalMetrics.process: time-interpolator task yields expected shapes."""
-    callback = PlotSample(
+    callback = _sample_plot(
         sample_idx=0,
         parameters=["a", "b"],
         accumulation_levels_plot=[0.5],
@@ -487,7 +459,7 @@ def test_process_time_interpolator_output_shapes():
 
 def test_process_temporal_downscaler_multi_out_squeeze():
     """BasePlotAdditionalMetrics.process: temporal downscaler multi-out (ndim=5, shape[0]=1) squeezes to 4D."""
-    callback = PlotSample(
+    callback = _sample_plot(
         sample_idx=0,
         parameters=["a"],
         accumulation_levels_plot=[0.5],
@@ -516,147 +488,8 @@ def test_process_temporal_downscaler_multi_out_squeeze():
     assert output_tensor.shape == (pl_module.task.num_output_timesteps, 1, 1, nlatlon, nvar), output_tensor.shape
 
 
-# ---- process() cache ----
-
-
-def test_process_cache_shared_across_callbacks():
-    """A shared processed_cache avoids redundant post-processing across PlotSample, PlotSpectrum, PlotHistogram.
-
-    Verifies:
-    - post-processor called once per (dataset, members) pair despite N callbacks
-    - cache hit returns the identical tuple object (not a copy)
-    - different members values get separate cache entries
-    - no cache (None) falls back to recomputing on every call
-    """
-    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
-    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
-
-    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
-    outputs = _step_output(
-        [
-            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
-            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
-        ],
-    )
-
-    call_count = 0
-    real_processor = _identity_post_processor()
-
-    def counting_processor(x, **kwargs) -> torch.Tensor | Any:
-        nonlocal call_count
-        call_count += 1
-        return real_processor(x, **kwargs)
-
-    shared_post_processors = {"data": counting_processor}
-    shared_latlons = {"data": np.zeros((nlatlon, 2))}
-
-    plot_sample = PlotSample(
-        sample_idx=0,
-        parameters=["a", "b"],
-        accumulation_levels_plot=[0.5],
-        dataset_names=["data"],
-    )
-    plot_spectrum = PlotSpectrum(sample_idx=0, parameters=["a", "b"], min_delta=0.0, dataset_names=["data"])
-    plot_histogram = PlotHistogram(
-        sample_idx=0,
-        parameters=["a", "b"],
-        precip_and_related_fields=[],
-        dataset_names=["data"],
-    )
-
-    for cb in (plot_sample, plot_spectrum, plot_histogram):
-        cb.post_processors = shared_post_processors
-        cb.latlons = shared_latlons
-
-    cache: dict = {}
-
-    # --- shared cache: post-processor must fire only once across all three callbacks ---
-    result_sample = plot_sample.process(pl_module, "data", outputs, batch, processed_cache=cache)
-    calls_after_first = call_count
-
-    result_spectrum = plot_spectrum.process(pl_module, "data", outputs, batch, processed_cache=cache)
-    result_histogram = plot_histogram.process(pl_module, "data", outputs, batch, processed_cache=cache)
-
-    assert (
-        call_count == calls_after_first
-    ), f"post-processor called {call_count - calls_after_first} extra time(s) on cache hits"
-    assert result_sample is result_spectrum is result_histogram, "cache hits must return the identical tuple object"
-    assert len(cache) == 1, f"expected 1 cache entry for (dataset, members=0), got {len(cache)}"
-
-    # --- different members value gets a separate entry, not a cache hit ---
-    result_all_members = plot_sample.process(pl_module, "data", outputs, batch, members=None, processed_cache=cache)
-    assert result_all_members is not result_sample, "different members must not share a cache entry"
-    assert len(cache) == 2, f"expected 2 cache entries after adding members=None, got {len(cache)}"
-
-    # --- no cache: recomputes on every call ---
-    call_count = 0
-    plot_sample.process(pl_module, "data", outputs, batch)
-    plot_sample.process(pl_module, "data", outputs, batch)
-    assert call_count >= 2, "expected post-processor to be called on each process() call without a cache"
-
-
-def test_process_cache_ensemble_list_members():
-    """process() with members as a list (PlotEnsSample) hashes correctly and hits cache on repeat."""
-    batch_size, n_ens, nlatlon, nvar = 2, 1, 50, 3
-    pl_module = _make_pl_module_forecaster(nlatlon=nlatlon)
-
-    batch = {"data": torch.randn(batch_size, 4, n_ens, nlatlon, nvar)}
-    outputs = _step_output(
-        [
-            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
-            {"data": torch.randn(batch_size, 1, n_ens, nlatlon, nvar)},
-        ],
-    )
-
-    call_count = 0
-    real_processor = _identity_post_processor()
-
-    def counting_processor(x, **kwargs) -> torch.Tensor | Any:
-        nonlocal call_count
-        call_count += 1
-        return real_processor(x, **kwargs)
-
-    plot_ens = PlotEnsSample(
-        sample_idx=0,
-        parameters=["a", "b"],
-        accumulation_levels_plot=[0.5],
-        members=[0, 1],
-        dataset_names=["data"],
-    )
-    plot_ens.post_processors = {"data": counting_processor}
-    plot_ens.latlons = {"data": np.zeros((nlatlon, 2))}
-
-    cache: dict = {}
-
-    # first call populates the cache
-    result_first = plot_ens.process(pl_module, "data", outputs, batch, members=[0, 1], processed_cache=cache)
-    assert len(cache) == 1, f"expected 1 cache entry for members=[0, 1], got {len(cache)}"
-    calls_after_first = call_count
-
-    # second call with the same list must hit the cache
-    result_second = plot_ens.process(pl_module, "data", outputs, batch, members=[0, 1], processed_cache=cache)
-    assert call_count == calls_after_first, "post-processor called again despite list-members cache hit"
-    assert result_first is result_second, "list-members cache hit must return the identical tuple"
-
-    # a different list gets a separate entry
-    result_other = plot_ens.process(pl_module, "data", outputs, batch, members=[0], processed_cache=cache)
-    assert result_other is not result_first, "different member lists must not share a cache entry"
-    assert len(cache) == 2, f"expected 2 cache entries after adding members=[0], got {len(cache)}"
-
-
 # ---- LossCurvePlot ----
 
-_PLOT_LOSS_CONFIG = {
-    "system": {"output": {"plots": None}},
-    "diagnostics": {
-        "plot": {
-            "datashader": False,
-            "asynchronous": False,
-            "frequency": {"batch": 1, "epoch": 1},
-        },
-    },
-    "data": {"datasets": {"data": {"diagnostic": None}}},
-}
 
 
 def test_plot_loss_sort_and_color_by_parameter_group_small_list():
@@ -697,8 +530,6 @@ def test_plot_loss_temporal_downscaler():
     """LossCurvePlot._plot uses output_times=1 only one figure is produced."""
     from unittest.mock import patch
 
-    from anemoi.training.losses.mse import MSELoss
-
     callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
@@ -711,17 +542,24 @@ def test_plot_loss_temporal_downscaler():
     pl_module.n_step_output = pl_module.task.num_output_timesteps
     pl_module.plot_adapter = pl_module.task._plot_adapter
     pl_module.local_rank = 0
+    pl_module.preprocess_targets = lambda batch: batch
     pl_module.data_indices = {"data": MagicMock()}
     pl_module.data_indices["data"].model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
     pl_module.data_indices["data"].data.output.full = torch.arange(nvar)
     pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
     batch_size, nlatlon = 2, 10
     n_time = 4
-    batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, n_time, 1, nlatlon, nvar))
     outputs = _step_output(
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
-    callback.loss = {"data": MSELoss()}
+    # get_targets returns (target, target_forcing); the callback keeps the target SourceView.
+    target_batch = _make_gridded_batch(torch.randn(batch_size, 1, 1, nlatlon, nvar))
+    pl_module.task.get_targets = MagicMock(return_value=(target_batch, None))
+    pl_module.task.get_metric_name = MagicMock(return_value="")
+    # The loss value is irrelevant here (we assert on the figure count); return a plain tensor
+    # so ``reduce_to_last_dim`` yields a per-variable vector.
+    callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, 1, 1, nlatlon, nvar))}
 
     with (
         patch.object(callback, "_output_figure") as mock_output_figure,
@@ -748,8 +586,6 @@ def test_plot_loss_single_step_transport():
     """LossCurvePlot._plot with a one-step transport model produces one figure."""
     from unittest.mock import patch
 
-    from anemoi.training.losses.mse import MSELoss
-
     callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
@@ -762,6 +598,7 @@ def test_plot_loss_single_step_transport():
     pl_module.n_step_input = n_step_input
     pl_module.n_step_output = n_step_output
     pl_module.local_rank = 0
+    pl_module.preprocess_targets = lambda batch: batch
     pl_module.plot_adapter = MagicMock()
     pl_module.plot_adapter.loss_plot_times = 1
     pl_module.plot_adapter.get_loss_plot_batch_start = lambda r: n_step_input + r * n_step_output
@@ -771,14 +608,15 @@ def test_plot_loss_single_step_transport():
     pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
     batch_size, nlatlon = 2, 10
     n_time = n_step_input + n_step_output + 1
-    batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, n_time, 1, nlatlon, nvar))
     # Single output (no rollout)
     outputs = _step_output(
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}],
     )
-    callback.loss = {"data": MSELoss()}
+    target_batch = _make_gridded_batch(torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))
+    callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))}
     pl_module.task.steps.return_value = [{}]
-    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
+    pl_module.task.get_targets.return_value = (target_batch, None)
     pl_module.task.get_metric_name.return_value = ""
 
     with (
@@ -806,8 +644,6 @@ def test_plot_loss_forecaster():
     """LossCurvePlot._plot uses one figure per rollout step."""
     from unittest.mock import patch
 
-    from anemoi.training.losses.mse import MSELoss
-
     callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
     callback.latlons = {}
 
@@ -821,6 +657,7 @@ def test_plot_loss_forecaster():
     pl_module.n_step_input = n_step_input
     pl_module.n_step_output = n_step_output
     pl_module.local_rank = 0
+    pl_module.preprocess_targets = lambda batch: batch
     pl_module.plot_adapter = MagicMock()
     pl_module.plot_adapter.loss_plot_times = output_times
     pl_module.plot_adapter.get_loss_plot_batch_start = lambda r: n_step_input + r * n_step_output
@@ -831,14 +668,15 @@ def test_plot_loss_forecaster():
     batch_size, nlatlon = 2, 10
     # Batch needs at least n_step_input + output_times * n_step_output time steps
     n_time = n_step_input + output_times * n_step_output + 1
-    batch = {"data": torch.randn(batch_size, n_time, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(batch_size, n_time, 1, nlatlon, nvar))
     # One prediction per rollout step
     outputs = _step_output(
         [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
     )
-    callback.loss = {"data": MSELoss()}
+    target_batch = _make_gridded_batch(torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))
+    callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))}
     pl_module.task.steps.return_value = [{"rollout_step": i} for i in range(output_times)]
-    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
+    pl_module.task.get_targets.return_value = (target_batch, None)
     pl_module.task.get_metric_name.return_value = ""
 
     with (
@@ -862,59 +700,6 @@ def test_plot_loss_forecaster():
         assert mock_output_figure.call_count == output_times
 
 
-def test_plot_loss_accepts_processed_cache_kwarg():
-    """LossCurvePlot._plot accepts and ignores processed_cache without error and still produces figures."""
-    from unittest.mock import patch
-
-    from anemoi.training.losses.mse import MSELoss
-
-    callback = LossCurvePlot(parameter_groups={}, dataset_names=["data"])
-    callback.latlons = {}
-
-    nvar = 3
-    output_times = 2
-    n_step_input, n_step_output = 1, 1
-    trainer = MagicMock()
-    trainer.logger = MagicMock()
-    pl_module = MagicMock()
-    pl_module.n_step_input = n_step_input
-    pl_module.n_step_output = n_step_output
-    pl_module.local_rank = 0
-    pl_module.data_indices = {"data": MagicMock()}
-    pl_module.data_indices["data"].model.output.name_to_index = {"a": 0, "b": 1, "c": 2}
-    pl_module.data_indices["data"].data.output.full = torch.arange(nvar)
-    pl_module.model.metadata = {"dataset": {"variables_metadata": None}}
-    batch_size, nlatlon = 2, 10
-    batch = {"data": torch.randn(batch_size, n_step_input + output_times * n_step_output + 1, 1, nlatlon, nvar)}
-    outputs = _step_output(
-        [{"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)} for _ in range(output_times)],
-    )
-    callback.loss = {"data": MSELoss()}
-    pl_module.task.steps.return_value = [{"rollout_step": i} for i in range(output_times)]
-    pl_module.task.get_targets.return_value = {"data": torch.randn(batch_size, n_step_output, 1, nlatlon, nvar)}
-    pl_module.task.get_metric_name.return_value = ""
-
-    with (
-        patch.object(callback, "_output_figure") as mock_output_figure,
-        patch(
-            "anemoi.training.diagnostics.evaluation.plotting.loss.argsort_variablename_variablelevel",
-            return_value=np.arange(nvar),
-        ),
-        patch("anemoi.training.diagnostics.evaluation.plotting.loss.plot_loss", return_value=MagicMock()),
-    ):
-        callback._plot(
-            trainer,
-            pl_module,
-            ["data"],
-            outputs,
-            batch,
-            batch_idx=0,
-            epoch=0,
-            processed_cache={},
-        )
-        assert mock_output_figure.call_count == output_times
-
-
 # ---- PlotSpectrum ----
 
 
@@ -922,7 +707,7 @@ def test_plot_spectrum_temporal_downscaler():
     """PlotSpectrum._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
-    callback = PlotSpectrum(
+    callback = _spectrum_plot(
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -933,7 +718,7 @@ def test_plot_spectrum_temporal_downscaler():
 
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
-    batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(2, 10, 1, nlatlon, nvar))
     outputs = _step_output(
         [
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
@@ -963,7 +748,7 @@ def test_plot_spectrum_forecaster():
     """PlotSpectrum._plot produces one figure per (rollout_step, out_step) for forecaster."""
     from unittest.mock import patch
 
-    callback = PlotSpectrum(
+    callback = _spectrum_plot(
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -980,7 +765,7 @@ def test_plot_spectrum_forecaster():
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
-    batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(2, sample_idx, 1, nlatlon, nvar))
     outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(rollout_steps)],
     )
@@ -1011,7 +796,7 @@ def test_plot_histogram_temporal_downscaler():
     """PlotHistogram._plot produces one figure per output_times for temporal downscaler."""
     from unittest.mock import patch
 
-    callback = PlotHistogram(
+    callback = _histogram_plot(
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -1022,7 +807,7 @@ def test_plot_histogram_temporal_downscaler():
 
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
-    batch = {"data": torch.randn(2, 10, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(2, 10, 1, nlatlon, nvar))
     outputs = _step_output(
         [
             {"data": torch.randn(2, 1, 1, nlatlon, nvar)},
@@ -1052,7 +837,7 @@ def test_plot_histogram_forecaster():
     """PlotHistogram._plot produces one figure per (rollout_step, out_step) for forecaster."""
     from unittest.mock import patch
 
-    callback = PlotHistogram(
+    callback = _histogram_plot(
         sample_idx=0,
         parameters=["a", "b"],
         dataset_names=["data"],
@@ -1069,7 +854,7 @@ def test_plot_histogram_forecaster():
     callback.post_processors = {"data": _identity_post_processor()}
     callback.latlons = {"data": np.zeros((nlatlon, 2))}
     sample_idx = 10
-    batch = {"data": torch.randn(2, sample_idx, 1, nlatlon, nvar)}
+    batch = _make_gridded_batch(torch.randn(2, sample_idx, 1, nlatlon, nvar))
     outputs = _step_output(
         [{"data": torch.randn(2, n_step_output, 1, nlatlon, nvar)} for _ in range(validation_rollout)],
     )
@@ -1372,15 +1157,15 @@ def test_base_adapter_prepare_loss_batch_is_noop():
 
 
 def test_ensemble_plot_ens_sample_instantiation():
-    """Test that PlotEnsSample can be instantiated."""
-    plot_ens_sample = PlotEnsSample(
+    """Test that BatchOutputPlot with the ensemble plot_fn can be instantiated with members=None."""
+    plot_ens_sample = _ens_sample_plot(
         sample_idx=0,
         parameters=["temperature", "pressure"],
         accumulation_levels_plot=[0.1, 0.5, 0.9],
         members=None,
     )
     assert plot_ens_sample is not None
-    assert plot_ens_sample.plot_members is None
+    assert plot_ens_sample._members is None
 
 
 @pytest.mark.parametrize("projection_kind", ["robinson", "mollweide"])

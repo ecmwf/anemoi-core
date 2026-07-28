@@ -88,39 +88,13 @@ def sample_plot_fn(
 
     Supports both dense gridded datasets and sparse/observation datasets. For
     sparse datasets (``sparse=True``) the input and target/prediction points live
-    at different scattered locations, so the sparse-capable plotter in
-    ``diagnostics.plots`` is used with ``output_latlons`` giving the target
-    observation coordinates.
+    at different scattered locations; ``output_latlons`` gives the target
+    observation coordinates and the sample plotter renders scattered panels.
     """
+    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
     from anemoi.training.diagnostics.evaluation.plotting.settings import DEFAULT_ACCUMULATION_LEVELS
 
     levels = accumulation_levels_plot if accumulation_levels_plot is not None else DEFAULT_ACCUMULATION_LEVELS
-
-    if sparse:
-        # The sparse scatter layout (differing input/output point sets) lives in
-        # diagnostics.plots, which carries the full observation plotting machinery.
-        from anemoi.training.diagnostics.plots import plot_predicted_multilevel_flat_sample as plot_sparse
-
-        return plot_sparse(
-            parameters,
-            per_sample,
-            latlons,
-            levels,
-            x,
-            y_true,
-            y_pred,
-            datashader=getattr(settings, "datashader", True),
-            precip_and_related_fields=getattr(settings, "precip_and_related_fields", None),
-            colormaps=getattr(settings, "colormaps", None),
-            projection_kind=getattr(settings, "projection_kind", "equirectangular"),
-            prediction_label=prediction_label,
-            auxiliary=auxiliary,
-            auxiliary_label=auxiliary_label,
-            sparse=True,
-            output_latlons=output_latlons,
-        )
-
-    from anemoi.training.diagnostics.evaluation.plotting.sample import plot_predicted_multilevel_flat_sample
 
     return plot_predicted_multilevel_flat_sample(
         parameters,
@@ -137,6 +111,8 @@ def sample_plot_fn(
         prediction_label=prediction_label,
         auxiliary=auxiliary,
         auxiliary_label=auxiliary_label,
+        sparse=sparse,
+        output_latlons=output_latlons,
     )
 
 

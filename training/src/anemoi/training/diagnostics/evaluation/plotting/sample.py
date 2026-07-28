@@ -80,6 +80,48 @@ def _compute_main_norm(
     )
 
 
+def _plot_empty_map(
+    ax: plt.Axes,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    title: str | None,
+    data_crs: object | None,
+) -> None:
+    """Render map context and an explanatory label for an all-NaN field.
+
+    Used by :func:`single_plot` when every observation value is non-finite (common
+    for sparse observation targets), so the panel still shows coastlines/borders and
+    a clear "no data" label instead of erroring on an empty scatter.
+    """
+    finite_coords = np.isfinite(lon) & np.isfinite(lat)
+    lon = lon[finite_coords]
+    lat = lat[finite_coords]
+    if lon.size > 0:
+        ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
+        dy, dx = ymax - ymin, xmax - xmin
+        ybuffer = max(dy * 0.05, 1e-6)
+        xbuffer = max(dx * 0.05, 1e-6)
+        if data_crs is not None:
+            is_global = dy > 150 or dx > 340
+            if not is_global:
+                ax.set_extent([xmin - xbuffer, xmax + xbuffer, ymin - ybuffer, ymax + ybuffer], crs=data_crs)
+        else:
+            ax.set_xlim((xmin - xbuffer, xmax + xbuffer))
+            ax.set_ylim((ymin - ybuffer, ymax + ybuffer))
+    elif hasattr(ax, "set_global"):
+        ax.set_global()
+    else:
+        ax.set_xlim((-np.pi, np.pi))
+        ax.set_ylim((-np.pi / 2, np.pi / 2))
+
+    map_features.plot(ax, data_crs=data_crs)
+    if title is not None:
+        ax.set_title(title)
+    ax.text(0.5, 0.5, "No finite observations", ha="center", va="center", transform=ax.transAxes)
+    ax.set_aspect("auto", adjustable=None)
+    _hide_axes_ticks(ax)
+
+
 def single_plot(
     fig: Figure,
     ax: plt.Axes,
@@ -91,6 +133,7 @@ def single_plot(
     title: str | None = None,
     datashader: bool = False,
     data_crs: object | None = None,
+    marker_size: float = 1,
 ) -> None:
     """Plot a single lat-lon map.
 
@@ -117,6 +160,9 @@ def single_plot(
     data_crs:
         Cartopy CRS describing the coordinate system of lon/lat (always PlateCarree when
         using a non-equirectangular axes projection), by default None
+    marker_size : float, optional
+        Scatter marker area in points squared, by default 1. Sparse observation panels
+        use a larger value so scattered points remain visible.
 
     Returns
     -------
@@ -124,8 +170,26 @@ def single_plot(
     """
     if cmap is None:
         cmap = "viridis"
+
+    # Omit non-finite values (NaN targets / forecast errors) from the plot and drop the
+    # corresponding coordinates so the arrays stay aligned. Falls back to an empty map
+    # when nothing finite remains (dense fields are all-finite, so behaviour is unchanged).
+    data = np.asarray(data)
+    lon = np.asarray(lon)
+    lat = np.asarray(lat)
+    source_lon = lon
+    source_lat = lat
+    finite = np.isfinite(data)
+    if not finite.all():
+        data = data[finite]
+        lon = lon[finite]
+        lat = lat[finite]
+    if data.size == 0:
+        _plot_empty_map(ax, source_lon, source_lat, title, data_crs)
+        return
+
     if not datashader:
-        scatter_kwargs = {"c": data, "cmap": cmap, "s": 1, "alpha": 1.0, "norm": norm, "rasterized": False}
+        scatter_kwargs = {"c": data, "cmap": cmap, "s": marker_size, "alpha": 1.0, "norm": norm, "rasterized": False}
         if data_crs is not None:
             scatter_kwargs["transform"] = data_crs
         psc = ax.scatter(lon, lat, **scatter_kwargs)
@@ -370,6 +434,190 @@ def plot_flat_sample(
             ax[ii].axis("off")
 
 
+def _build_flat_sparse_sample_data(
+    ax: plt.Axes,
+    input_: np.ndarray,
+    truth: np.ndarray | None,
+    pred: np.ndarray,
+    auxiliary: np.ndarray | None,
+    diagnostic_only: bool,
+) -> list[np.ndarray | None]:
+    """Build sparse-observation sample panels before normalization and plotting.
+
+    Sparse panels are ``[input, target, pred, pred-err]`` (+ ``auxiliary``). Unlike the
+    gridded layout there are no increment or persistence-error panels, because input and
+    output observations are not guaranteed to share locations.
+    """
+    n_panels = 5 if auxiliary is not None else 4
+    data: list[np.ndarray | None] = [None for _ in range(n_panels)]
+
+    if truth is not None:
+        data[1] = truth
+        data[2] = pred
+        data[3] = truth - pred
+    else:
+        data[2] = pred
+        ax[1].axis("off")
+        ax[3].axis("off")
+
+    if not diagnostic_only:
+        data[0] = input_
+    else:
+        ax[0].axis("off")
+
+    if auxiliary is not None:
+        # Auxiliary (e.g. corrupted targets) lives at the output observation locations,
+        # so it is plotted as-is rather than as a delta against the input.
+        data[4] = auxiliary
+
+    return data
+
+
+def plot_flat_sparse_sample(
+    fig: Figure,
+    ax: plt.Axes,
+    input_lon: np.ndarray,
+    input_lat: np.ndarray,
+    output_lon: np.ndarray,
+    output_lat: np.ndarray,
+    input_: np.ndarray,
+    truth: np.ndarray | None,
+    pred: np.ndarray,
+    vname: str,
+    clevels: float,
+    datashader: bool = False,
+    precip_and_related_fields: list | None = None,
+    cmap: Colormap | None = None,
+    error_cmap: Colormap | None = None,
+    data_crs: object | None = None,
+    prediction_label: str = "pred",
+    auxiliary: np.ndarray | None = None,
+    auxiliary_label: str = "corrupted targets",
+    diagnostic_only: bool = False,
+    marker_size: float = 4,
+) -> None:
+    """Plot a "flat" 1D sample for sparse observations.
+
+    Similar to :func:`plot_flat_sample`, but the input observations and the
+    target/prediction observations are not necessarily co-located: the input panel is
+    drawn at ``(input_lon, input_lat)`` while the target / prediction / error / auxiliary
+    panels are drawn at ``(output_lon, output_lat)``. The increment and persistence-error
+    panels are omitted.
+
+    Parameters
+    ----------
+    fig : Figure
+        Figure object handle.
+    ax : matplotlib.axes
+        Row of axis handles (one per panel).
+    input_lon, input_lat : np.ndarray
+        Projected coordinates of the input observations.
+    output_lon, output_lat : np.ndarray
+        Projected coordinates of the target / prediction observations.
+    input_ : np.ndarray
+        Input observation field of shape (n_in,).
+    truth : np.ndarray or None
+        Target observation field of shape (n_out,). If None, only input and pred are plotted.
+    pred : np.ndarray
+        Predicted observation field of shape (n_out,).
+    vname : str
+        Variable name.
+    clevels : float
+        Accumulation levels used for precipitation related plots.
+    datashader : bool, optional
+        Datashader plot, by default False.
+    precip_and_related_fields : list, optional
+        List of precipitation-like variables, by default [].
+    cmap : Colormap, optional
+        Colormap for the field plots.
+    error_cmap : Colormap, optional
+        Colormap for the error plot.
+    data_crs : object, optional
+        Cartopy CRS describing the coordinate system of the coordinates, by default None.
+    prediction_label : str, optional
+        Label for the prediction panel, by default "pred".
+    auxiliary : np.ndarray or None, optional
+        Auxiliary field (at output locations), by default None.
+    auxiliary_label : str, optional
+        Label for the auxiliary panel, by default "corrupted targets".
+    diagnostic_only : bool, optional
+        Whether the variable is diagnostic-only and should omit the input panel.
+    marker_size : float, optional
+        Scatter marker area in points squared, by default 4.
+
+    Returns
+    -------
+    None
+    """
+    precip_and_related_fields = precip_and_related_fields or []
+    input_, truth, pred = _scale_precip_fields(
+        vname,
+        precip_and_related_fields,
+        input_,
+        truth,
+        pred,
+    )
+    auxiliary = _scale_auxiliary_precip_field(vname, precip_and_related_fields, auxiliary)
+
+    n_panels = 5 if auxiliary is not None else 4
+    data = _build_flat_sparse_sample_data(ax, input_, truth, pred, auxiliary, diagnostic_only)
+
+    titles = [
+        f"{vname} input",
+        f"{vname} target",
+        f"{vname} {prediction_label}",
+        f"{vname} {prediction_label} err",
+    ]
+    if auxiliary is not None:
+        titles.append(f"{vname} {auxiliary_label}")
+
+    # Field panels (input, target, pred, auxiliary) share the main colormap; the
+    # prediction-error panel uses the diverging error colormap centred at zero.
+    cmaps = [cmap, cmap, cmap, error_cmap] + ([cmap] if auxiliary is not None else [])
+
+    main_norm = _compute_main_norm(
+        vname,
+        precip_and_related_fields,
+        clevels,
+        input_,
+        truth,
+        pred,
+    )
+    norms: list[object | None] = [None for _ in range(n_panels)]
+    norms[0] = main_norm
+    norms[1] = main_norm
+    norms[2] = main_norm
+    norms[3] = TwoSlopeNorm(vcenter=0.0)
+
+    # Each panel is drawn at its own observation locations: the input panel at the input
+    # coordinates, the target / prediction / error / auxiliary panels at the output coords.
+    panel_coords = [
+        (input_lon, input_lat),
+        (output_lon, output_lat),
+        (output_lon, output_lat),
+        (output_lon, output_lat),
+    ]
+    if auxiliary is not None:
+        panel_coords.append((output_lon, output_lat))
+
+    for ii in range(n_panels):
+        if data[ii] is not None:
+            lon_ii, lat_ii = panel_coords[ii]
+            single_plot(
+                fig,
+                ax[ii],
+                lon_ii,
+                lat_ii,
+                data[ii],
+                cmap=cmaps[ii],
+                norm=norms[ii],
+                title=titles[ii],
+                datashader=datashader,
+                data_crs=data_crs,
+                marker_size=marker_size,
+            )
+
+
 def plot_predicted_multilevel_flat_sample(
     parameters: dict[int, tuple[str, bool]],
     n_plots_per_sample: int,
@@ -385,6 +633,9 @@ def plot_predicted_multilevel_flat_sample(
     prediction_label: str = "pred",
     auxiliary: np.ndarray | None = None,
     auxiliary_label: str = "corrupted targets",
+    *,
+    sparse: bool = False,
+    output_latlons: np.ndarray | None = None,
 ) -> Figure:
     """Plots data for one multilevel latlon-"flat" sample.
 
@@ -429,11 +680,25 @@ def plot_predicted_multilevel_flat_sample(
         The figure object handle.
 
     """
+    if sparse:
+        assert output_latlons is not None, "output_latlons must be provided when sparse=True"
+        # Sparse observations: input | target | pred | pred-err (+ auxiliary). No increment
+        # or persistence-error panels: input and output observation locations may differ.
+        n_panels = 5 if auxiliary is not None else 4
+    else:
+        n_panels = 7 if auxiliary is not None else 6
+
     n_plots_x = len(parameters)
-    n_plots_y = max(n_plots_per_sample, 7 if auxiliary is not None else 6)
+    n_plots_y = n_panels if sparse else max(n_plots_per_sample, n_panels)
 
     plot_kind = "equirectangular" if datashader else projection_kind
     (pc_lon, pc_lat), proj, data_crs = MapProjection.for_plot(latlons, plot_kind)
+
+    # Sparse: project the (potentially different) output coordinates with the same
+    # projection so the target/prediction panels are drawn at their own locations.
+    pc_lon_out, pc_lat_out = pc_lon, pc_lat
+    if sparse:
+        (pc_lon_out, pc_lat_out), _, _ = MapProjection.for_plot(output_latlons, plot_kind)
 
     figsize = (n_plots_y * 4, n_plots_x * 3)
     subplot_kw = {"projection": proj} if proj is not None else {}
@@ -461,24 +726,49 @@ def plot_predicted_multilevel_flat_sample(
                 break
 
         ax = axs[plot_idx, :] if n_plots_x > 1 else axs
-        plot_flat_sample(
-            fig=fig,
-            ax=ax,
-            lon=pc_lon,
-            lat=pc_lat,
-            input_=xt,
-            truth=yt,
-            pred=yp,
-            vname=variable_name,
-            clevels=clevels,
-            datashader=datashader,
-            precip_and_related_fields=precip_and_related_fields,
-            cmap=cmap,
-            error_cmap=error_cmap,
-            data_crs=data_crs,
-            prediction_label=prediction_label,
-            auxiliary=ya,
-            auxiliary_label=auxiliary_label,
-            diagnostic_only=diagnostic_only,
-        )
+        if sparse:
+            plot_flat_sparse_sample(
+                fig=fig,
+                ax=ax,
+                input_lon=pc_lon,
+                input_lat=pc_lat,
+                output_lon=pc_lon_out,
+                output_lat=pc_lat_out,
+                input_=xt,
+                truth=yt,
+                pred=yp,
+                vname=variable_name,
+                clevels=clevels,
+                datashader=datashader,
+                precip_and_related_fields=precip_and_related_fields,
+                cmap=cmap,
+                error_cmap=error_cmap,
+                data_crs=data_crs,
+                prediction_label=prediction_label,
+                auxiliary=ya,
+                auxiliary_label=auxiliary_label,
+                diagnostic_only=diagnostic_only,
+                marker_size=4,
+            )
+        else:
+            plot_flat_sample(
+                fig=fig,
+                ax=ax,
+                lon=pc_lon,
+                lat=pc_lat,
+                input_=xt,
+                truth=yt,
+                pred=yp,
+                vname=variable_name,
+                clevels=clevels,
+                datashader=datashader,
+                precip_and_related_fields=precip_and_related_fields,
+                cmap=cmap,
+                error_cmap=error_cmap,
+                data_crs=data_crs,
+                prediction_label=prediction_label,
+                auxiliary=ya,
+                auxiliary_label=auxiliary_label,
+                diagnostic_only=diagnostic_only,
+            )
     return fig
