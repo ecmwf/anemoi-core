@@ -126,8 +126,10 @@ class GraphPartition:
         self._relabel_dst_nodes(edge_index_subset, partition_id)
 
         # if (torch.compile.is_compiling() and model_comm_group is None):
-        if model_comm_group is None:
-            # skip dropping unconnected src nodes when compiling, since that is a data-dependent operation
+        if not model_is_distributed(model_comm_group):
+            # skip dropping unconnected src nodes when not distributed (single partition):
+            # torch.unique makes x_src_subset.shape[0] a data-dependent (unbacked) size,
+            # which breaks torch.compile(fullgraph=True) downstream in index2ptr.
             x_src_subset, edge_index_subset, src_ids = x_src, edge_index_subset, torch.arange(x_src.size(0))
         else:
             # drop src nodes with no edges in this partition
