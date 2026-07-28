@@ -684,7 +684,7 @@ def test_sht_powerspectraldensity_loss(loss_target: str) -> None:
     with pytest.raises(AssertionError):
         _ = loss(pred_wrong, target_wrong, squash=True)
 
-    # fail for transform without PSD method (e.g. FFT2D)
+    # fail for transform without power spectral density method (e.g. FFT2D)
     with pytest.raises(hydra.errors.InstantiationException):
         _ = get_loss_function(
             DictConfig(
