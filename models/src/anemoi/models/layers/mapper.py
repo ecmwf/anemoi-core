@@ -311,7 +311,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     ) -> Tensor:
         # O(1) slicing: extract subgraph for this chunk
         (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
-            chunk_id, x, edge_attr, edge_index, cond=cond
+            chunk_id, x, edge_attr, edge_index, cond=cond, model_comm_group=model_comm_group
         )
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
@@ -354,12 +354,12 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     ) -> PairTensor:
 
         if self.gradient_checkpointing and torch.compiler.is_compiling():
-            LOGGER.warning(
-                "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
-                "Disabling explicit gradient checkpointing for this function."
-                "Note: torch.compile will apply its own implicit checkpointing, determined by "
-                "'torch._dynamo.config.activation_memory_budget'"
-            )
+            # LOGGER.warning(
+            #    "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
+            #    "Disabling explicit gradient checkpointing for this function."
+            #    "Note: torch.compile will apply its own implicit checkpointing, determined by "
+            #    "'torch._dynamo.config.activation_memory_budget'"
+            # )
             self.gradient_checkpointing = False
 
         x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
