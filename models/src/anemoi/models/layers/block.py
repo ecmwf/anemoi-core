@@ -51,7 +51,7 @@ from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
 
 if is_triton_available():
-    from anemoi.models.triton.gt import GraphTransformerFunction
+    from anemoi.models.triton.gt import graph_transformer_attention_conv
 
 LOGGER = logging.getLogger(__name__)
 
@@ -613,7 +613,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         if self.graph_attention_backend == "triton":
             LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
-            self.conv = GraphTransformerFunction.apply
+            self.conv = graph_transformer_attention_conv
         else:
             self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
