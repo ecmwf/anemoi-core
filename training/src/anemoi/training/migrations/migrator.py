@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib
+import io
 import logging
 from collections.abc import Callable
 from collections.abc import Sequence
@@ -23,9 +24,11 @@ from pathlib import Path
 from typing import Any
 from typing import TypedDict
 
-from omegaconf import DictConfig
-from omegaconf import ListConfig
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedBase
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.error import CommentMark
+from ruamel.yaml.tokens import CommentToken
 
 from anemoi.training import __version__
 
@@ -47,43 +50,114 @@ class IncompatibleCheckpointException(BaseException):
 CfgType = dict[str, Any]
 
 
-def select(cfg: Any, keys: str, create: bool = False) -> Any:
+def set_before_comment(parent: CommentedBase, key: Any, comments: list[str]):
+    """Custom function to set comment before a key in the yaml. Reimplemented
+    because ruamel functions don't work.
+
+    Parameters
+    ----------
+    parent : CommentedBase
+        The parent object.
+    key : Any
+        The key to add comment before.
+    comment : str
+        The comment.
+    """
+    comment = "".join([f"# {c}\n" for c in comments])
+    ca = parent.ca.items.setdefault(key, [None, None, None, None])
+    if ca[1] is None:
+        ca[1] = []
+    ca[1].append(CommentToken(comment, CommentMark(0)))
+
+
+def set_after_comment(parent: CommentedBase, key: Any, comments: list[str]):
+    """Custom function to set comment after a key in the yaml. Reimplemented
+    because ruamel functions don't work.
+
+    Parameters
+    ----------
+    parent : CommentedBase
+        The parent object.
+    key : Any
+        The key to add comment after.
+    comment : str
+        The comment.
+    """
+    ca = parent.ca.items.setdefault(key, [None, None, None, None])
+    existing_comments = ""
+    if ca[2] is not None:
+        existing_comments = f"\n{ca[2].value}"
+
+    comment = "".join([f"\n# {c}" for c in comments]) + existing_comments
+    ca[2] = CommentToken(f"{comment}\n", CommentMark(0))
+
+
+def select(cfg: Any, keys: str, create: bool = False, new_comment_before: list[str] | None = None) -> Any:
     if keys == "":
         return cfg
+    has_before_comment = False
     parts = keys.split(".")
+    parent = cfg
     for part in parts:
         if isinstance(cfg, dict) and part in cfg:
-            cfg = cfg[part]
+            parent, cfg = cfg, cfg[part]
         elif isinstance(cfg, dict) and create:
-            cfg[part] = {}
-            cfg = cfg[part]
+            cfg[part] = CommentedMap()
+            if new_comment_before is not None and not has_before_comment:
+                set_before_comment(cfg, part, new_comment_before)
+                has_before_comment = True
+            parent, cfg = cfg, cfg[part]
         elif isinstance(cfg, list) and part.isdigit() and len(cfg) > int(part):
-            cfg = cfg[int(part)]
+            parent, cfg = cfg, cfg[int(part)]
         elif isinstance(cfg, list) and part.isdigit() and len(cfg) == int(part) and create:
-            cfg.append({})
-            cfg = cfg[-1]
+            cfg.append(CommentedMap())
+            if new_comment_before is not None and not has_before_comment:
+                set_before_comment(parent, part, new_comment_before)
+                has_before_comment = True
+            parent, cfg = cfg, cfg[-1]
         else:
             raise ValueError(f"{keys} not in config.")
+
+    if new_comment_before is not None and not has_before_comment:
+        set_before_comment(parent, part, new_comment_before)
     return cfg
 
 
-def update(config: Any, keys: str, val: Any) -> None:
+def update(
+    config: Any,
+    keys: str,
+    val: Any,
+    new_comment_before: list[str] | None = None,
+    new_comment_after: list[str] | None = None,
+) -> None:
     parts = keys.split(".")
-    parent = select(config, ".".join(parts[:-1]), create=True)
+    parent = select(config, ".".join(parts[:-1]), create=True, new_comment_before=new_comment_before)
     key = parts[-1]
-    if isinstance(parent, dict):
+    if isinstance(parent, CommentedMap):
         parent[key] = val
+        if len(parts) == 1 and new_comment_before is not None:
+            set_before_comment(parent, key, new_comment_before)
+        if new_comment_after is not None:
+            set_after_comment(parent, key, new_comment_after)
     elif isinstance(parent, list) and len(parent) > int(key):
         parent[int(key)] = val
+        if len(parts) == 1 and new_comment_before is not None:
+            set_before_comment(parent, int(key), new_comment_before)
+        if new_comment_after is not None:
+            set_after_comment(parent, int(key), new_comment_after)
     elif isinstance(parent, list) and len(parent) == int(key):
         parent.append(val)
+        if len(parts) == 1 and new_comment_before is not None:
+            set_before_comment(parent, int(key), new_comment_before)
+        if new_comment_after is not None:
+            set_after_comment(parent, int(key), new_comment_after)
     else:
         raise ValueError(f"{keys} not in config.")
 
 
-def delete(config: Any, keys: str) -> None:
+def delete(config: Any, keys: str, new_comment: list[str] | None = None) -> None:
     parts = keys.split(".")
-    parent = select(config, ".".join(parts[:-1]))
+    parent = select(config, ".".join(parts[:-1]), new_comment_before=new_comment)
     key = parts[-1]
     if isinstance(parent, dict):
         del parent[key]
@@ -93,59 +167,69 @@ def delete(config: Any, keys: str) -> None:
         raise ValueError(f"{keys} not in config.")
 
 
+def parent_key(keys: str) -> tuple[str, str]:
+    parts = keys.split(".")
+    return ".".join(parts[:-1]), parts[-1]
+
+
 class Op:
-    pass
+    comment: str | None
 
 
 @dataclass
 class AddOp(Op):
     target: str
     value: Any
+    comment: list[str] | None
 
 
 @dataclass
 class RemoveOp(Op):
     source: list[str]
+    comment: list[str] | None
 
 
 @dataclass
 class MoveOp(Op):
     source: str
     target: str
+    comment: list[str] | None
 
 
 @dataclass
 class TransformOp(Op):
     source: list[str]
     func: Callable[..., Any]
+    comment: list[str] | None
 
 
-def _nest_in_list(_: DictConfig | ListConfig, val: Any) -> Any:
+def _nest_in_list(_: Any, val: Any) -> Any:
     return [val]
 
 
 class MigrationManifest:
-    def __init__(self):
+    def __init__(self, version: str):
         self._ops: list[Op] = []
+        self._version = version
 
-    def add(self, target: str, value: Any = "???") -> None:
-        self._ops.append(AddOp(target, value))
+    def add(self, target: str, value: Any = "???", comment: list[str] | None = None) -> None:
+        self._ops.append(AddOp(target, value, comment))
 
-    def remove(self, source: str | list[str]) -> None:
+    def remove(self, source: str | list[str], comment: list[str] | None = None) -> None:
         if isinstance(source, str):
             source = [source]
-        self._ops.append(RemoveOp(source))
+        self._ops.append(RemoveOp(source, comment))
 
-    def move(self, source: str, target: str) -> None:
-        self._ops.append(MoveOp(source, target))
+    def move(self, source: str, target: str, comment: list[str] | None = None) -> None:
+        self._ops.append(MoveOp(source, target, comment))
 
-    def transform(self, source: str | list[str], func: Callable[..., Any]) -> None:
+    def transform(self, source: str | list[str], func: Callable[..., Any], comment: list[str] | None = None) -> None:
         if isinstance(source, str):
             source = [source]
-        self._ops.append(TransformOp(source, func))
+        self._ops.append(TransformOp(source, func, comment))
 
-    def nest_in_list(self, source: str | list[str]) -> None:
-        return self.transform(source, _nest_in_list)
+    def nest_in_list(self, source: str | list[str], comment: list[str] | None = None) -> None:
+        return self.transform(source, _nest_in_list, comment)
 
     def execute(self, cfg: Any):
         for op in self._ops:
@@ -153,20 +237,57 @@ class MigrationManifest:
         return cfg
 
     def _exec_step(self, cfg: Any, op: Op):
+        start_comment = f"<<< MIGRATION {self._version}"
+        end_comment = f">>> MIGRATION {self._version}"
+        op_comment = [] if op.comment is None else op.comment
         if isinstance(op, AddOp):
-            update(cfg, op.target, op.value)
-            return
-        if isinstance(op, RemoveOp):
+            update(
+                cfg,
+                op.target,
+                op.value,
+                new_comment_before=[f"{start_comment}: added key {op.target}.", *op_comment],
+                new_comment_after=[end_comment],
+            )
+        elif isinstance(op, RemoveOp):
             for source in op.source:
-                delete(cfg, source)
+                delete(
+                    cfg, source, new_comment=[f"{start_comment}: removed key {op.source}.", *op_comment, end_comment]
+                )
         elif isinstance(op, MoveOp):
+            parent, key = parent_key(op.source)
+            parent = select(cfg, parent)
+            ca_comments_before = []
+            ca_comments_after = []
+            if isinstance(parent, CommentedBase):
+                ca = parent.ca.items.setdefault(key, [None, None, None, None])
+                if ca[1] is not None:
+                    ca_comments_before = [c.value.strip().lstrip("# ") for c in ca[1]]
+                if ca[2] is not None:
+                    ca_comments_after = [ca[2].value.strip().lstrip("# ")]
+
             val = select(cfg, op.source)
-            self._exec_step(cfg, RemoveOp([op.source]))
-            self._exec_step(cfg, AddOp(op.target, val))
+            self._exec_step(cfg, RemoveOp([op.source], comment=None))
+            update(
+                cfg,
+                op.target,
+                val,
+                new_comment_before=[
+                    *ca_comments_before,
+                    f"{start_comment}: moved key from {op.source} to {op.target}.",
+                    *op_comment,
+                ],
+                new_comment_after=[end_comment, *ca_comments_after],
+            )
         elif isinstance(op, TransformOp):
             for source in op.source:
                 new_val = op.func(cfg, select(cfg, source))
-                update(cfg, source, new_val)
+                update(
+                    cfg,
+                    source,
+                    new_val,
+                    new_comment_before=[f"{start_comment}: key changed.", *op_comment],
+                    new_comment_after=[end_comment],
+                )
 
 
 # migration is the version of the migration module to allow future update of
@@ -321,39 +442,47 @@ class Migrator:
         # No migration means checkpoint too old, no migrations available.
         if _version_key not in config:
             return False
-        if config[_version_key] > len(self._migrations):
-            raise ValueError(f"version cannot be higher than {len(self._migrations)}.")
+        # Migration key to None means compatible but without any migration registered.
+        if config[_version_key] is None:
+            return True
 
-        for migration in self._migrations[config[_version_key] :]:
+        key = None
+        for k, migration in enumerate(self._migrations):
             if migration.metadata.final:
                 return False
+
+            if migration.signature[:8] == config[_version_key]:
+                key = k
+                break
+        if key is None:
+            raise ValueError(f"The config migration version {config[_version_key]} does not exist.")
+
         return True
 
-    def sync(self, migrated_config: str | Path) -> CfgType:
+    def sync(self, config: str) -> str:
         """Migrate the checkpoint using provided migrations
 
         Parameters
         ----------
-        config : CfgType
-            The config to migrate.
+        config : str
+            The yaml config.
 
         Returns
         -------
-        CkptType
-            The migrated checkpoint
+        str
+            The migrated yaml
         """
-        path = Path(migrated_config)
         yaml = YAML()
-        config = yaml.load(path.read_text())
+        yaml_config = yaml.load(config)
 
-        manifest = MigrationManifest()
-
-        if not self.is_compatible(config):
+        if not self.is_compatible(yaml_config):
             raise IncompatibleCheckpointException("No compatible migration available")
-        version = config[_version_key]
+        version = yaml_config[_version_key]
         for migration in self._migrations[version:]:
+            manifest = MigrationManifest(migration.signature[:8])
             migration.migrate(manifest)
-            version += 1
-        migrated_config = manifest.execute(config)
-        migrated_config[_version_key] = version
-        return migrated_config
+            migrated_config = manifest.execute(yaml_config)
+            migrated_config[_version_key] = migration.signature[:8]
+        buf = io.StringIO()
+        yaml.dump(migrated_config, buf)
+        return buf.getvalue()
