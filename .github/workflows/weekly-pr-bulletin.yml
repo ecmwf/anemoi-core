@@ -112,15 +112,16 @@ jobs:
               { owner, repo, state: 'all', sort: 'created', direction: 'desc' }
             );
 
-            const opened = allPRs.filter(pr => new Date(pr.created_at) >= weekAgo);
+            const opened = allPRs.filter(pr => new Date(pr.created_at) >= weekAgo && pr.base.ref === 'main' && !(pr.state === 'closed' && !pr.merged_at));
 
             const merged = allPRs.filter(
-              pr => pr.merged_at && new Date(pr.merged_at) >= weekAgo
+              pr => pr.merged_at && new Date(pr.merged_at) >= weekAgo && pr.base.ref === 'main'
             );
 
             // ── separate release PRs ──────────────────────────────────────────
             const releasePRs = merged.filter(pr => isReleasePR(pr));
-            const nonReleaseOpened = opened.filter(pr => !isReleasePR(pr));
+            const mergedNumbers = new Set(merged.map(pr => pr.number));
+            const nonReleaseOpened = opened.filter(pr => !isReleasePR(pr) && !mergedNumbers.has(pr.number) && !pr.draft);
             const nonReleaseMerged = merged.filter(pr => !isReleasePR(pr));
 
             // ── classify each PR by component ────────────────────────────────────
