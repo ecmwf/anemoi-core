@@ -9,6 +9,7 @@
 
 from collections.abc import Callable
 
+import einops
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -91,6 +92,16 @@ def _aggregate_edges(
     out = torch.zeros((*values.shape[:-2], num_nodes, values.shape[-1]), dtype=values.dtype)
     out.index_add_(-2, dst, values * weights.to(dtype=values.dtype).view(1, 1, -1, 1))
     return out
+
+
+def _batched_provider_edges(loss: BaseLoss, batch_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    edge_attributes, edge_index, edge_shard_sizes = loss.graph_provider.get_edges(
+        batch_size=batch_size,
+        shard_edges=False,
+        act_checkpoint=False,
+    )
+    assert edge_shard_sizes is None
+    return edge_index, edge_attributes[:, 0]
 
 
 def _graph_energy_reference(
@@ -245,10 +256,61 @@ def test_graph_scores_match_reference(
     pred, target = score_inputs
     loss = loss_factory(graph_data, loss_graph)
 
-    actual = loss._compute_local_score_tensor(pred, target.squeeze(2))
+    batch_size, _, _, num_nodes, _ = pred.shape
+    edge_index, edge_weights = _batched_provider_edges(loss, batch_size)
+    pred_flat = einops.rearrange(pred, "b t m n v -> t m (b n) v")
+    target_flat = einops.rearrange(target.squeeze(2), "b t n v -> t (b n) v")
+    actual = loss._compute_local_score_tensor(
+        pred_flat,
+        target_flat,
+        edge_index,
+        edge_weights,
+    )
+    actual = einops.rearrange(
+        actual,
+        "t (b n) v -> b t n v",
+        b=batch_size,
+        n=num_nodes,
+    )
     expected = reference(pred, target, graph_data)
 
     torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "loss_cls",
+    [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],
+)
+def test_graph_scores_expand_the_graph_across_batch(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    loss_cls: type[BaseLoss],
+) -> None:
+    pred, target = score_inputs
+    pred = torch.cat((pred, pred + 0.25), dim=0)
+    target = torch.cat((target, target - 0.5), dim=0)
+    loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
+
+    batched = loss(pred, target, squash=False)
+    separate = torch.stack(
+        [loss(pred[i : i + 1], target[i : i + 1], squash=False) for i in range(pred.shape[0])],
+    ).mean(dim=0)
+
+    torch.testing.assert_close(batched, separate)
+
+
+def test_graph_provider_returns_disjoint_batch_copies(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+) -> None:
+    loss = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
+    edge_index, edge_weights = _batched_provider_edges(loss, batch_size=2)
+    num_edges = graph_data["data", "to", "data"].num_edges
+    num_nodes = graph_data["data"].num_nodes
+
+    torch.testing.assert_close(edge_index[:, num_edges:], edge_index[:, :num_edges] + num_nodes)
+    torch.testing.assert_close(edge_weights[num_edges:], edge_weights[:num_edges])
 
 
 @pytest.mark.parametrize(
@@ -407,7 +469,9 @@ def test_graph_definition_applies_and_normalizes_weights(graph_data: HeteroData)
         },
     )
 
-    row_sums = torch.zeros(3).scatter_add_(0, loss.graph.edge_dst_index, loss.graph.edge_weights)
+    edge_index = loss.graph_provider.edge_index_base
+    edge_weights = loss.graph_provider.edge_attr[:, 0]
+    row_sums = torch.zeros(3).scatter_add_(0, edge_index[1], edge_weights)
     torch.testing.assert_close(row_sums, torch.ones(3))
 
 
@@ -417,7 +481,7 @@ def test_graph_definition_defaults_to_unnormalized_unit_weights(graph_data: Hete
         loss_graph={"edges_name": ["data", "to", "data"]},
     )
 
-    torch.testing.assert_close(loss.graph.edge_weights, torch.ones(5))
+    torch.testing.assert_close(loss.graph_provider.edge_attr[:, 0], torch.ones(5))
     assert not loss.graph.row_normalize
 
 
@@ -434,7 +498,8 @@ def test_graph_definition_applies_source_node_weights(graph_data: HeteroData) ->
     src = graph_data["data", "to", "data"].edge_index[0]
     expected = graph_data["data", "to", "data"].weight * graph_data["data"].area[src]
 
-    torch.testing.assert_close(loss.graph.edge_weights, expected)
+    expected = expected.index_select(0, loss.graph_provider.perm)
+    torch.testing.assert_close(loss.graph_provider.edge_attr[:, 0], expected)
 
 
 @pytest.mark.parametrize(
@@ -605,7 +670,7 @@ def test_graph_score_factory_and_nested_losses(
     pred, target = score_inputs
 
     assert isinstance(combined, CombinedLoss)
-    assert all(loss.graph is not None for loss in combined.losses)
+    assert all(loss.graph_provider is not None for loss in combined.losses)
     assert torch.isfinite(combined(pred, target))
     assert isinstance(multiscale, MultiscaleLossWrapper)
     assert multiscale.needs_shard_layout_info

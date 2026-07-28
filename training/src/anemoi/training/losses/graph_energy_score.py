@@ -73,6 +73,8 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
     def _stable_neighbourhood_norm(
         self,
         node_differences: torch.Tensor,
+        edge_index: torch.Tensor | None,
+        edge_weights: torch.Tensor | None,
         node_valid: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return the weighted distance over each incoming neighbourhood."""
@@ -80,24 +82,30 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
             neighbourhood_norms = torch.abs(node_differences)
             if node_valid is not None:
                 neighbourhood_norms = neighbourhood_norms.masked_fill(
-                    ~node_valid.unsqueeze(2),
+                    ~node_valid.unsqueeze(1),
                     torch.nan,
                 )
             return neighbourhood_norms
 
+        assert edge_index is not None
+        assert edge_weights is not None
+
         valid_edges = None
         expanded_node_valid = None
         if node_valid is not None:
-            expanded_node_valid = node_valid.unsqueeze(2).expand(
+            expanded_node_valid = node_valid.unsqueeze(1).expand(
                 *node_differences.shape[:-2],
                 node_valid.shape[-2],
                 node_valid.shape[-1],
             )
-            valid_edges = expanded_node_valid[..., self.graph.edge_src_index, :]
+            valid_edges = expanded_node_valid[..., edge_index[0], :]
 
-        edge_values = node_differences[..., self.graph.edge_src_index, :]
+        edge_values = node_differences[..., edge_index[0], :]
         neighbourhood_norms = self.graph.weighted_row_l2_norm(
             edge_values,
+            edge_index,
+            edge_weights,
+            node_differences.shape[-2],
             valid_edges=valid_edges,
         )
         if expanded_node_valid is not None:
@@ -111,33 +119,39 @@ class GraphEnergyScoreLoss(BaseGraphScoreLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
+        edge_index: torch.Tensor | None,
+        edge_weights: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Return one graph energy score per batch, output step, node, and variable."""
-        ensemble_size = y_pred_ens.shape[2]
+        """Return one graph energy score per output step, batched node, and variable."""
+        ensemble_size = y_pred_ens.shape[1]
 
         # Leave out a node if its observation or any ensemble value is missing.
         # Both parts of the score then use the same ensemble members.
         node_valid = None
         if self.ignore_nans:
-            node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
+            node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=1)
 
         # Mean distance from each ensemble member to the observation.
-        obs_distance = y_pred_ens - y.unsqueeze(2)
+        obs_distance = y_pred_ens - y.unsqueeze(1)
         obs_term = self._stable_neighbourhood_norm(
             obs_distance,
+            edge_index,
+            edge_weights,
             node_valid=node_valid,
-        ).mean(dim=2)
+        ).mean(dim=1)
 
         # Sum of distances over unordered pairs of ensemble members.
         pair_distance_sum = torch.zeros_like(obs_term)
         for i in range(ensemble_size):
-            pair_distance = y_pred_ens[:, :, i].unsqueeze(2) - y_pred_ens[:, :, i + 1 :]
-            if pair_distance.shape[2] == 0:
+            pair_distance = y_pred_ens[:, i].unsqueeze(1) - y_pred_ens[:, i + 1 :]
+            if pair_distance.shape[1] == 0:
                 continue
             pair_distance_sum = pair_distance_sum + self._stable_neighbourhood_norm(
                 pair_distance,
+                edge_index,
+                edge_weights,
                 node_valid=node_valid,
-            ).sum(dim=2)
+            ).sum(dim=1)
 
         pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
         return obs_term - pair_coefficient * pair_distance_sum

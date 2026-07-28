@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Graph edges, weights, and neighbourhood distances.
+"""Graph providers, weights, and neighbourhood distances for graph scores.
 
 Shapes use ``N`` for nodes, ``E`` for edges, and ``V`` for variables. Any
 leading dimensions are left unchanged.
@@ -18,28 +18,29 @@ from collections.abc import Mapping
 
 import torch
 from torch import nn
+from torch_geometric.data import Data
 from torch_geometric.data import HeteroData
+
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 
 LOGGER = logging.getLogger(__name__)
 
+_SCORE_WEIGHT_ATTRIBUTE = "score_weight"
+
 
 class GraphScoreGraph(nn.Module):
-    """Hold graph edges and weights and calculate neighbourhood distances."""
+    """Hold the graph provider and score-specific graph metadata."""
 
     def __init__(
         self,
-        edge_index: torch.Tensor,
-        edge_weights: torch.Tensor,
+        graph_provider: StaticGraphProvider,
         *,
         num_src_nodes: int,
         num_dst_nodes: int,
         row_normalize: bool,
     ) -> None:
         super().__init__()
-        self.register_buffer("edge_index", edge_index.long(), persistent=False)
-        self.register_buffer("edge_src_index", edge_index[0].long(), persistent=False)
-        self.register_buffer("edge_dst_index", edge_index[1].long(), persistent=False)
-        self.register_buffer("edge_weights", edge_weights, persistent=False)
+        self.graph_provider = graph_provider
         self.num_src_nodes = num_src_nodes
         self.num_dst_nodes = num_dst_nodes
         self.row_normalize = row_normalize
@@ -49,14 +50,12 @@ class GraphScoreGraph(nn.Module):
         """Return the graph shape as ``(destination nodes, source nodes)``."""
         return (self.num_dst_nodes, self.num_src_nodes)
 
-    @property
-    def num_nodes(self) -> int:
-        """Return the number of destination nodes."""
-        return self.num_dst_nodes
-
     def weighted_row_l2_norm(
         self,
         edge_values: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weights: torch.Tensor,
+        num_nodes: int,
         valid_edges: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute ``sqrt(sum_e w_e x_e**2)`` for edges entering each node.
@@ -65,6 +64,12 @@ class GraphScoreGraph(nn.Module):
         ----------
         edge_values : torch.Tensor
             Edge values with shape ``(..., E, V)``.
+        edge_index : torch.Tensor
+            Batched graph connectivity with shape ``(2, E)``.
+        edge_weights : torch.Tensor
+            One scalar weight per edge with shape ``(E,)``.
+        num_nodes : int
+            Number of destination nodes in the batched graph.
         valid_edges : torch.Tensor | None
             ``True`` where an edge value is available. It has the same shape
             as ``edge_values``. Missing edge values are left out.
@@ -83,8 +88,8 @@ class GraphScoreGraph(nn.Module):
         """
         input_shape = edge_values.shape
         flat_edge_values = edge_values.reshape(-1, *input_shape[-2:])
-        row_index = self.edge_dst_index
-        weights = self.edge_weights.to(dtype=edge_values.dtype)
+        row_index = edge_index[1]
+        weights = edge_weights.to(dtype=edge_values.dtype)
         row_indices = row_index.view(1, -1, 1).expand(
             flat_edge_values.shape[0],
             -1,
@@ -95,7 +100,7 @@ class GraphScoreGraph(nn.Module):
         gathered_abs = torch.abs(flat_edge_values)
         active_edge_count = torch.zeros(
             flat_edge_values.shape[0],
-            self.num_nodes,
+            num_nodes,
             flat_edge_values.shape[-1],
             dtype=flat_edge_values.dtype,
             device=flat_edge_values.device,
@@ -296,9 +301,20 @@ class GraphScoreGraph(nn.Module):
                 num_dst_nodes,
             )
 
-        return cls(
+        provider_graph = Data(
             edge_index=edge_index,
-            edge_weights=edge_weights,
+            **{_SCORE_WEIGHT_ATTRIBUTE: edge_weights.reshape(-1, 1)},
+        )
+        graph_provider = StaticGraphProvider(
+            graph=provider_graph,
+            edge_attributes=[_SCORE_WEIGHT_ATTRIBUTE],
+            src_size=num_src_nodes,
+            dst_size=num_dst_nodes,
+            trainable_size=0,
+        )
+
+        return cls(
+            graph_provider=graph_provider,
             num_src_nodes=num_src_nodes,
             num_dst_nodes=num_dst_nodes,
             row_normalize=row_normalize,

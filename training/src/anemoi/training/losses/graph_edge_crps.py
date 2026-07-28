@@ -85,19 +85,21 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weights: torch.Tensor,
     ) -> torch.Tensor:
-        """Return one edge CRPS value per batch, output step, node, and variable."""
-        ensemble_size = y_pred_ens.shape[2]
-        edge_valid = self._valid_edges(y_pred_ens, y)
+        """Return one edge CRPS value per output step, batched node, and variable."""
+        ensemble_size = y_pred_ens.shape[1]
+        edge_valid = self._valid_edges(y_pred_ens, y, edge_index)
 
-        obs_edge_difference = self._edge_difference(y)
+        obs_edge_difference = self._edge_difference(y, edge_index)
         obs_term = torch.zeros_like(obs_edge_difference)
         pair_term = torch.zeros_like(obs_edge_difference)
 
         # The CRPS is the mean member-to-observation distance minus a weighted
         # sum of distances over unordered member pairs.
         for i in range(ensemble_size):
-            member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
+            member_edge_difference = self._edge_difference(y_pred_ens[:, i], edge_index)
 
             member_obs_error = torch.abs(member_edge_difference - obs_edge_difference)
             if edge_valid is not None:
@@ -109,7 +111,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
             obs_term = obs_term + member_obs_error
 
             for j in range(i + 1, ensemble_size):
-                pair_edge_difference = self._edge_difference(y_pred_ens[:, :, j])
+                pair_edge_difference = self._edge_difference(y_pred_ens[:, j], edge_index)
                 pair_distance = torch.abs(member_edge_difference - pair_edge_difference)
                 if edge_valid is not None:
                     pair_distance = torch.where(
@@ -124,4 +126,10 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         if edge_valid is not None:
             score_edges = score_edges.masked_fill(~edge_valid, torch.nan)
 
-        return self._aggregate_edges(score_edges, valid_edges=edge_valid)
+        return self._aggregate_edges(
+            score_edges,
+            edge_index,
+            edge_weights,
+            y.shape[-2],
+            valid_edges=edge_valid,
+        )

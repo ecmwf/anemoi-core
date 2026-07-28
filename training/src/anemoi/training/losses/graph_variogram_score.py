@@ -78,10 +78,11 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
     def _edge_variogram(
         self,
         x: torch.Tensor,
+        edge_index: torch.Tensor,
         valid_edges: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return ``|x[src] - x[dst]|**p`` with shape ``(..., E, V)``."""
-        edge_difference = self._edge_difference(x)
+        edge_difference = self._edge_difference(x, edge_index)
         if valid_edges is not None:
             # Set missing edge differences to zero before raising them to the
             # variogram power.
@@ -96,12 +97,14 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weights: torch.Tensor,
     ) -> torch.Tensor:
-        """Return one variogram score per batch, output step, node, and variable."""
-        ensemble_size = y_pred_ens.shape[2]
-        edge_valid = self._valid_edges(y_pred_ens, y)
+        """Return one variogram score per output step, batched node, and variable."""
+        ensemble_size = y_pred_ens.shape[1]
+        edge_valid = self._valid_edges(y_pred_ens, y, edge_index)
 
-        obs_variogram = self._edge_variogram(y, edge_valid)
+        obs_variogram = self._edge_variogram(y, edge_index, edge_valid)
 
         member_sum = torch.zeros_like(obs_variogram)
         if self.fair:
@@ -111,7 +114,7 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         # Before member i, running_sum equals sum(v_j, j < i). Their product
         # therefore adds every unordered term v_i * v_j exactly once.
         for i in range(ensemble_size):
-            member_variogram = self._edge_variogram(y_pred_ens[:, :, i], edge_valid)
+            member_variogram = self._edge_variogram(y_pred_ens[:, i], edge_index, edge_valid)
             member_sum = member_sum + member_variogram
             if self.fair:
                 member_cross_sum = member_cross_sum + member_variogram * running_sum
@@ -130,4 +133,10 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         if edge_valid is not None:
             score_edges = score_edges.masked_fill(~edge_valid, torch.nan)
 
-        return self._aggregate_edges(score_edges, valid_edges=edge_valid)
+        return self._aggregate_edges(
+            score_edges,
+            edge_index,
+            edge_weights,
+            y.shape[-2],
+            valid_edges=edge_valid,
+        )

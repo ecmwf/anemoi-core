@@ -72,24 +72,26 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weights: torch.Tensor,
     ) -> torch.Tensor:
-        """Return one edge energy score per batch, output step, node, and variable."""
-        ensemble_size = y_pred_ens.shape[2]
-        edge_valid = self._valid_edges(y_pred_ens, y)
+        """Return one edge energy score per output step, batched node, and variable."""
+        ensemble_size = y_pred_ens.shape[1]
+        num_nodes = y.shape[-2]
+        edge_valid = self._valid_edges(y_pred_ens, y, edge_index)
 
-        obs_edge_difference = self._edge_difference(y)
+        obs_edge_difference = self._edge_difference(y, edge_index)
 
         # Mean distance between each member and the observation, measured over
         # the incoming edge differences of each node.
-        obs_term_sum = torch.zeros(
-            (*y.shape[:2], self.num_nodes, y.shape[-1]),
-            dtype=y_pred_ens.dtype,
-            device=y_pred_ens.device,
-        )
+        obs_term_sum = torch.zeros_like(y)
         for i in range(ensemble_size):
-            member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
+            member_edge_difference = self._edge_difference(y_pred_ens[:, i], edge_index)
             obs_term_sum = obs_term_sum + self.graph.weighted_row_l2_norm(
                 member_edge_difference - obs_edge_difference,
+                edge_index,
+                edge_weights,
+                num_nodes,
                 valid_edges=edge_valid,
             )
         obs_term = obs_term_sum / ensemble_size
@@ -97,11 +99,14 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
         # Sum of distances over unordered pairs of ensemble members.
         pair_distance_sum = torch.zeros_like(obs_term)
         for i in range(ensemble_size):
-            member_edge_difference = self._edge_difference(y_pred_ens[:, :, i])
+            member_edge_difference = self._edge_difference(y_pred_ens[:, i], edge_index)
             for j in range(i + 1, ensemble_size):
-                pair_edge_difference = self._edge_difference(y_pred_ens[:, :, j])
+                pair_edge_difference = self._edge_difference(y_pred_ens[:, j], edge_index)
                 pair_distance_sum = pair_distance_sum + self.graph.weighted_row_l2_norm(
                     member_edge_difference - pair_edge_difference,
+                    edge_index,
+                    edge_weights,
+                    num_nodes,
                     valid_edges=edge_valid,
                 )
 

@@ -16,6 +16,13 @@ ensemble members, ``N`` for nodes, and ``V`` for variables:
 - targets: ``(B, T, 1, N, V)``
 - scores for each output step, node, and variable: ``(B, T, N, V)``
 
+Graph-backed kernels flatten batch and nodes to operate on the batched
+disjoint graph returned by the graph provider:
+
+- ensemble predictions: ``(T, M, B*N, V)``
+- targets: ``(T, B*N, V)``
+- local scores: ``(T, B*N, V)``
+
 Each forecast output step is scored independently. The configured weights are
 then applied, the values are summed over output steps and nodes, and variables
 are averaged unless a summation is requested.
@@ -31,6 +38,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
@@ -58,6 +66,11 @@ class BaseGraphScoreLoss(BaseLoss):
     @property
     def row_normalize(self) -> bool:
         return self.graph.row_normalize if self.graph is not None else False
+
+    @property
+    def graph_provider(self) -> StaticGraphProvider | None:
+        """Return the graph provider used by graph-backed scores."""
+        return self.graph.graph_provider if self.graph is not None else None
 
     def compile_for_training(self, **options) -> None:
         """Compile the score calculation used during training."""
@@ -157,17 +170,39 @@ class BaseGraphScoreLoss(BaseLoss):
             )
             raise ValueError(msg)
 
+    def _get_batched_graph(
+        self,
+        batch_size: int,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Return batch-expanded edges and scalar weights without sharding."""
+        if self.graph_provider is None:
+            return None, None
+
+        edge_attributes, edge_index, edge_shard_sizes = self.graph_provider.get_edges(
+            batch_size=batch_size,
+            shard_edges=False,
+            act_checkpoint=False,
+        )
+        assert edge_attributes is not None
+        assert edge_index is not None
+        assert edge_shard_sizes is None
+        assert edge_attributes.shape[-1] == 1, "Graph score providers require one scalar edge weight."
+        return edge_index, edge_attributes[:, 0]
+
     @abstractmethod
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
+        edge_index: torch.Tensor | None,
+        edge_weights: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Return the score ``S[B, T, N, V]`` before weights and sums.
+        """Return the flattened score ``S[T, B*N, V]`` before weights and sums.
 
-        ``y_pred_ens`` has shape ``(B, T, M, N, V)`` and ``y`` has shape
-        ``(B, T, N, V)``. No weights or sums over ``T`` and ``N`` are applied
-        at this stage.
+        ``y_pred_ens`` has shape ``(T, M, B*N, V)`` and ``y`` has shape
+        ``(T, B*N, V)``. Graph-backed scores receive batch-expanded edges;
+        the pointwise graph energy score receives ``None`` for both graph
+        tensors. No weights or sums over ``T`` and ``N`` are applied here.
         """
 
     def _format_and_scale_score(
@@ -228,10 +263,23 @@ class BaseGraphScoreLoss(BaseLoss):
                 grid_shard_sizes,
             )
 
-        # Remove the observation's length-one ensemble axis and calculate the
-        # score.
+        # Expand the graph across the batch, then flatten batch and nodes into
+        # the provider's disjoint-graph node space. Provider execution and
+        # reshaping remain eager; only the numerical score kernel is compiled.
         self._validate_graph_grid_size(pred_for_score)
+        batch_size = pred_for_score.shape[TensorDim.BATCH_SIZE]
+        num_nodes = pred_for_score.shape[TensorDim.GRID]
+        edge_index, edge_weights = self._get_batched_graph(batch_size)
+
         target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
+        pred_for_score = einops.rearrange(
+            pred_for_score,
+            "bs t ensemble latlon v -> t ensemble (bs latlon) v",
+        )
+        target_for_score = einops.rearrange(
+            target_for_score,
+            "bs t latlon v -> t (bs latlon) v",
+        )
         context = (
             torch.amp.autocast(device_type=pred_for_score.device.type, enabled=False)
             if self.no_autocast
@@ -241,7 +289,16 @@ class BaseGraphScoreLoss(BaseLoss):
             score = self._compute_local_score_tensor(
                 pred_for_score,
                 target_for_score,
+                edge_index,
+                edge_weights,
             )
+
+        score = einops.rearrange(
+            score,
+            "t (bs latlon) v -> bs t latlon v",
+            bs=batch_size,
+            latlon=num_nodes,
+        )
 
         # Return scores to their original nodes, then apply node and variable
         # weights.
