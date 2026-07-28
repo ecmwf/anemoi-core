@@ -202,6 +202,7 @@ jobs:
                 files: (files || []).slice(0, 20),
                 labels: pr.labels.map(l => l.name),
                 merged: !!pr.merged_at,
+                breaking: isBreakingConfigPR(pr, files),
               });
             }
             for (const pr of releasePRs) {
@@ -240,7 +241,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          copilot --yolo -p "Read the file pr_data.json. For each PR, write a concise one-sentence summary (max 30 words) of what the PR does based on its title, body excerpt, changed files, and labels. Output a JSON file called pr_summaries.json with the format: { \"<pr_number>\": \"<summary>\" }. Only output the JSON file, nothing else." --allow-tool='shell(cat:*)' --allow-tool=write --no-ask-user
+          # Regular PRs: concise one-sentence summaries
+          copilot --yolo -p "Read the file pr_data.json. For each PR where breaking is false, write a concise one-sentence summary (max 30 words) of what the PR does based on its title, body_excerpt, changed files, and labels. Output a JSON file called pr_summaries.json with the format: { \"<pr_number>\": \"<summary>\" }. Only include non-breaking PRs. Only output the JSON file, nothing else." --allow-tool='shell(cat:*)' --allow-tool=write --no-ask-user
+
+          # Breaking PRs: detailed config-impact summaries
+          copilot --yolo -p "Read the file pr_data.json. For each PR where breaking is true, write a detailed summary (max 100 words) that specifically explains: (1) what configuration changes are introduced, (2) what users need to update in their configs, and (3) what will break if they do not update. Base this on the title, body_excerpt, changed files, and labels. Output a JSON file called pr_breaking_summaries.json with the format: { \"<pr_number>\": \"<summary>\" }. Only include breaking PRs. Only output the JSON file, nothing else." --allow-tool='shell(cat:*)' --allow-tool=write --no-ask-user
 
       - name: Build bulletin and post
         uses: actions/github-script@v7
@@ -260,12 +265,23 @@ jobs:
               console.log('No AI summaries found, continuing without them.');
             }
 
+            let breakingSummaries = {};
+            try {
+              breakingSummaries = JSON.parse(fs.readFileSync('pr_breaking_summaries.json', 'utf8'));
+            } catch (_) {
+              console.log('No AI breaking summaries found, continuing without them.');
+            }
+
             const compEmoji = { core: '\u2699\ufe0f', training: '\ud83c\udfcb\ufe0f', models: '\ud83e\udde0', graphs: '\ud83d\udd78\ufe0f' };
 
             function prLine(pr) {
               const flag = pr.breaking ? ' \u26a0\ufe0f' : '';
-              const summary = summaries[String(pr.number)];
+              const summary = pr.breaking
+                ? breakingSummaries[String(pr.number)]
+                : summaries[String(pr.number)];
               const line = `- [#${pr.number}](${pr.url})${flag} **${pr.title.trim()}** \u2014 ${pr.author}`;
+              return summary ? `${line}\n  > ${summary}` : line;
+            }](${pr.url})${flag} **${pr.title.trim()}** \u2014 ${pr.author}`;
               return summary ? `${line}\n  > ${summary}` : line;
             }
 
@@ -280,6 +296,8 @@ jobs:
             lines.push(`| \ud83d\ude80 Releases | ${data.counts.releases} |`);
             lines.push(`| \u26a0\ufe0f Breaking / config | ${data.counts.breakingMerged + data.counts.breakingOpen} |`);
             lines.push(`| Contributors | ${data.counts.contributors} |`);
+            lines.push('');
+            lines.push(`> **Note:** If a PR is opened and merged within the same 7-day period, it will only appear in the merged list below.`);
 
             if (data.breakingMerged.length > 0 || data.breakingOpen.length > 0) {
               lines.push('');
