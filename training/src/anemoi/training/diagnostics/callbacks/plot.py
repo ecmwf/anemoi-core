@@ -456,6 +456,12 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
+            # Share one processed_cache across all callbacks on the same batch
+            # so post-processing runs once per (dataset, members) pair.
+            if getattr(pl_module, "_plot_cache_batch_idx", None) != batch_idx:
+                pl_module._plot_cache = {}
+                pl_module._plot_cache_batch_idx = batch_idx
+
             plot_kwargs = self._plot_kwargs_from_output(pl_module, output)
             output = TrainingStepOutput(
                 loss=output.loss,
@@ -470,7 +476,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                processed_cache={},
+                processed_cache=pl_module._plot_cache,
                 **plot_kwargs,
                 **kwargs,
             )
