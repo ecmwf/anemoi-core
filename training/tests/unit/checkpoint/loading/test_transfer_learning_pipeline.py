@@ -75,6 +75,41 @@ class TargetArch(nn.Module):
         return self.head(self.encoder(x))
 
 
+# --- issue #838: fine-tuning into a model with FEWER variables -----------------
+# The encoder's input projection is sized by the number of variables, so reducing
+# the variable count is a same-key mismatch on the *input* dimension of the weight
+# (second dim). A variable-independent processor block is shared. This is the shape
+# the ``head`` mismatch above does not cover (that one mismatches the output dim).
+
+_N_CKPT_VARS = 5
+_N_TARGET_VARS = 3
+_HIDDEN = 8
+
+
+class ManyVarSource(nn.Module):
+    """Pretrained on _N_CKPT_VARS variables."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Linear(_N_CKPT_VARS, _HIDDEN)  # weight [_HIDDEN, _N_CKPT_VARS]
+        self.processor = nn.Linear(_HIDDEN, _HIDDEN)  # variable-independent, transfers
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.processor(self.encoder(x))
+
+
+class FewerVarTarget(nn.Module):
+    """Fine-tuned on _N_TARGET_VARS (< _N_CKPT_VARS) variables."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Linear(_N_TARGET_VARS, _HIDDEN)  # weight [_HIDDEN, _N_TARGET_VARS]
+        self.processor = nn.Linear(_HIDDEN, _HIDDEN)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.processor(self.encoder(x))
+
+
 @pytest.fixture
 def source_model() -> SourceArch:
     """A pretrained source model with deterministic weights."""
@@ -243,3 +278,48 @@ async def test_pipeline_discards_optimizer_scheduler_and_progress(
     # (contrast WarmStartLoader, which does).
     assert result.metadata.get("epoch") is None
     assert "global_step" not in result.metadata
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pipeline_fine_tunes_into_fewer_variables(tmp_path: Path) -> None:
+    """Issue #838: a checkpoint with MORE variables loads into a model with FEWER.
+
+    The variable-sized encoder input projection is a same-key mismatch on the input
+    dimension ([_HIDDEN, 5] vs [_HIDDEN, 3]) and must be skipped, while the
+    variable-independent processor transfers. The reduced-variable encoder is left at
+    its fresh initialisation and the fine-tuned model runs on the smaller input.
+
+    This was breaking before: without shape-aware filtering, load_state_dict raised a
+    size-mismatch RuntimeError on the encoder weight.
+    """
+    torch.manual_seed(0)
+    source = ManyVarSource()
+    ckpt_path = tmp_path / "many_vars.ckpt"
+    torch.save({"state_dict": source.state_dict()}, ckpt_path)
+
+    target = FewerVarTarget()
+    original_encoder = target.encoder.weight.detach().clone()
+
+    context = CheckpointContext(model=target, checkpoint_path=ckpt_path)
+    result = await _pipeline().execute(context)
+
+    skipped = result.metadata["skipped_params"]
+    transferred = result.metadata["transferred_params"]
+
+    # The variable-sized input projection is skipped on a shape mismatch...
+    assert "Shape mismatch" in skipped["encoder.weight"]
+    assert "encoder.weight" not in transferred
+    # ...but the output-sized bias and the variable-independent processor transfer.
+    assert "encoder.bias" in transferred
+    assert "processor.weight" in transferred
+    assert torch.equal(result.model.processor.weight, source.processor.weight)
+
+    # Positive control: the reduced-variable encoder kept its fresh init, so a silent
+    # wrong-shape overwrite would fail here.
+    assert torch.equal(result.model.encoder.weight, original_encoder)
+
+    # The fine-tuned model runs on the REDUCED variable count and stays trainable.
+    assert result.model(torch.randn(2, _N_TARGET_VARS)).shape == (2, _HIDDEN)
+    assert all(p.requires_grad for p in result.model.parameters())
+    assert getattr(result.model, "weights_initialized", False) is True
