@@ -529,6 +529,10 @@ def test_process_temporal_downscaler_multi_out_squeeze():
 def test_process_cache_shared_across_callbacks():
     """A shared processed_cache avoids redundant post-processing across PlotSample, PlotSpectrum, PlotHistogram.
 
+    Note: this test exercises the process() caching mechanism in isolation by passing a dict directly.
+    It does not test the production wiring (pl_module._plot_cache shared via on_validation_batch_end);
+    that is covered by test_on_validation_batch_end_shares_cache_across_callbacks.
+
     Verifies:
     - post-processor called once per (dataset, members) pair despite N callbacks
     - cache hit returns the identical tuple object (not a copy)
