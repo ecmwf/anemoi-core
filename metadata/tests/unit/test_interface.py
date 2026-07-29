@@ -817,6 +817,40 @@ class TestDatasetView:
 
 
 # ---------------------------------------------------------------------------
+# Invalid dataset name handling on per-dataset getters
+# ---------------------------------------------------------------------------
+
+
+class TestInvalidDatasetName:
+    """Per-dataset getters raise KeyError for unknown dataset names."""
+
+    @pytest.fixture()
+    def meta(self, sample_v1_dict):
+        """Return a Metadata instance from the sample V1 dict."""
+        return Metadata.from_dict(sample_v1_dict)
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda m: m.variables_metadata("nope"),
+            lambda m: m.accumulations("nope"),
+            lambda m: m.computed_forcings("nope"),
+            lambda m: m.data_request("nope"),
+            lambda m: m.data_frequency("nope"),
+            lambda m: m.sources("nope"),
+            lambda m: m.open_dataset_args("nope"),
+            lambda m: m.dataloader_config("training", "nope"),
+            lambda m: m.variable_categories("nope"),
+            lambda m: m.select_variables(include=["prognostic"], dataset_name="nope"),
+        ],
+    )
+    def test_invalid_dataset_name_raises_key_error(self, meta, call):
+        """Every per-dataset getter raises KeyError for an unknown name."""
+        with pytest.raises(KeyError, match="nope"):
+            call(meta)
+
+
+# ---------------------------------------------------------------------------
 # Multi-dataset fixture tests
 # ---------------------------------------------------------------------------
 

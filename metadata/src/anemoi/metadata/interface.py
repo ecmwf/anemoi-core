@@ -19,6 +19,8 @@ all inference data is accessed through the contract methods that each schema
 version implements.
 """
 
+import sys
+from collections import defaultdict
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
@@ -26,9 +28,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from packaging.version import Version
-
-from .mixins import ValidationMixin
-from .mixins import VariablesMixin
 
 if TYPE_CHECKING:
     from .base import MetadataContract
@@ -169,6 +168,39 @@ class DatasetView:
         return self._raw.get_output_variable_indices(self._name)
 
     @cached_property
+    def variables(self) -> list[str]:
+        """List of all variable names for this dataset (input and output).
+
+        Names are taken from the union of input and output index mappings,
+        ordered by their input tensor index first, then output-only variables
+        appended in their output index order.
+
+        Returns
+        -------
+        list[str]
+            All variable names from both input and output index mappings.
+        """
+        input_vars = self.variable_indices
+        output_vars = self.output_variable_indices
+        # Start with input vars in order
+        result = list(input_vars.keys())
+        # Append output-only vars in their output index order
+        output_only = {k: v for k, v in output_vars.items() if k not in input_vars}
+        result.extend(k for k, _ in sorted(output_only.items(), key=lambda x: x[1]))
+        return result
+
+    @cached_property
+    def num_variables(self) -> int:
+        """Number of variables for this dataset.
+
+        Returns
+        -------
+        int
+            Count of variables.
+        """
+        return len(self.variables)
+
+    @cached_property
     def variable_types(self) -> dict[str, list[str]]:
         """Variable categories by role for this dataset.
 
@@ -304,6 +336,245 @@ class DatasetView:
         """
         return self._raw.get_dataloader_config(partition, self._name)
 
+    def variable_categories(self, *, per_variable: bool = False) -> dict[str, list[str]]:
+        """Categorize variables by their role in the model for this dataset.
+
+        In addition to the base categories returned by the contract
+        (``"forcing"``, ``"prognostic"``, ``"diagnostic"``, ``"target"``),
+        three derived categories are computed and merged in:
+
+        * ``"computed"``  — variables flagged as computed forcings.
+        * ``"accumulation"`` — variables whose ``process`` is ``"accumulated"``.
+        * ``"constant"`` — variables whose ``constant_in_time`` flag is ``True``.
+
+        Parameters
+        ----------
+        per_variable : bool, optional
+            If ``True``, return a variable-keyed dict where each variable name
+            maps to its sorted list of category strings.  If ``False`` (default),
+            return a category-keyed dict where each category maps to a list of
+            variable names belonging to it.
+
+        Returns
+        -------
+        dict[str, list[str]]
+            Category mapping.  Format depends on *per_variable*:
+
+            * ``per_variable=False`` (default) — ``{category: [var, ...]}``.
+              Only categories that contain at least one variable are present,
+              except for the four base categories which are always included
+              (possibly empty) for backward compatibility.
+            * ``per_variable=True`` — ``{variable: [category, ...]}``.
+              Categories are sorted alphabetically.
+
+        Examples
+        --------
+        >>> cats = view.variable_categories()
+        >>> cats["prognostic"]
+        ['u', 'v', 't', 'q']
+
+        >>> cats = view.variable_categories(per_variable=True)
+        >>> cats["u"]
+        ['prognostic', 'target']
+        """
+        # Base categories from the contract (category -> [variables]).
+        # Always returns the four canonical keys, possibly with empty lists.
+        base = self.variable_types
+
+        if not per_variable:
+            # Start from a shallow copy so we never mutate the contract's data.
+            result: dict[str, list[str]] = {k: list(v) for k, v in base.items()}
+
+            # -- computed forcings -------------------------------------------
+            existing_computed: set[str] = set(result.setdefault("computed", []))
+            for name in self.computed_forcings:
+                if name not in existing_computed:
+                    result["computed"].append(name)
+                    existing_computed.add(name)
+
+            # -- accumulations -----------------------------------------------
+            existing_accum: set[str] = set(result.setdefault("accumulation", []))
+            for name in self.accumulations:
+                if name not in existing_accum:
+                    result["accumulation"].append(name)
+                    existing_accum.add(name)
+
+            # -- constant-in-time --------------------------------------------
+            existing_const: set[str] = set(result.setdefault("constant", []))
+            for name, meta in self.variables_metadata.items():
+                if meta.get("constant_in_time") and name not in existing_const:
+                    result["constant"].append(name)
+                    existing_const.add(name)
+
+            # Drop augmented keys that ended up empty to keep the output tidy
+            # (the four base keys are always kept for backward compatibility).
+            for aug_key in ("computed", "accumulation", "constant"):
+                if not result[aug_key]:
+                    del result[aug_key]
+
+            return result
+
+        # -- per_variable=True: invert to variable -> sorted[categories] -----
+        inverted: defaultdict[str, set[str]] = defaultdict(set)
+
+        for cat, names in base.items():
+            for name in names:
+                inverted[name].add(cat)
+
+        for name in self.computed_forcings:
+            inverted[name].add("computed")
+
+        for name in self.accumulations:
+            inverted[name].add("accumulation")
+
+        for name, meta in self.variables_metadata.items():
+            if meta.get("constant_in_time"):
+                inverted[name].add("constant")
+
+        return {name: sorted(cats) for name, cats in inverted.items()}
+
+    def select_variables(
+        self,
+        *,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+    ) -> list[str]:
+        """Select variables by category expression or substring pattern.
+
+        Each entry in *include* / *exclude* is first parsed as a category
+        expression:
+
+        * A single category name (e.g. ``"prognostic"``) matches all variables
+          belonging to that category.
+        * A compound expression with ``+`` (e.g. ``"prognostic+forcing"``)
+          matches variables belonging to **all** of the listed categories
+          (conjunction / intersection).
+
+        If an entry does not match any known category expression it is treated
+        as a substring pattern matched against variable names (backward-compat).
+
+        Parameters
+        ----------
+        include : list[str] | None, optional
+            If provided, only variables matching at least one of these
+            expressions are kept.
+        exclude : list[str] | None, optional
+            If provided, variables matching any of these expressions are removed.
+
+        Returns
+        -------
+        list[str]
+            Filtered list of variable names, in original order.
+
+        Raises
+        ------
+        ValueError
+            If a compound expression (containing ``+``) references one or more
+            unknown category names.
+
+        Examples
+        --------
+        >>> view.select_variables(include=["prognostic"])
+        ['u', 'v', 't', 'q']
+
+        >>> view.select_variables(include=["prognostic+forcing"])
+        []  # no variable is both prognostic and forcing
+        """
+        # Per-variable mapping used for compound (intersection) matching.
+        per_var = self.variable_categories(per_variable=True)
+        # Category-keyed mapping used to enumerate known category names.
+        cat_keyed = self.variable_categories()
+
+        all_variables = list(self.variables)
+
+        known_categories: set[str] = set(cat_keyed.keys()) | {
+            "computed",
+            "accumulation",
+            "constant",
+        }
+
+        def _parse_expression(expr: str) -> frozenset[str] | None:
+            """Parse a category expression into a frozenset of category names.
+
+            Returns a frozenset when *all* ``+``-separated parts are known
+            category names, or ``None`` when the expression is a single token
+            that does not match any category (substring fallback).
+
+            Raises ``ValueError`` for compound expressions that contain at
+            least one unknown category name.
+            """
+            parts = expr.split("+")
+            if all(p in known_categories for p in parts):
+                return frozenset(parts)
+            if len(parts) == 1:
+                # Single unrecognised token — fall back to substring matching.
+                return None
+            # Compound expression with at least one unknown part: raise.
+            unknown = [p for p in parts if p not in known_categories]
+            raise ValueError(
+                f"Unknown category(ies) {unknown!r} in compound expression "
+                f"{expr!r}. Known: {sorted(known_categories)}"
+            )
+
+        def _matches(variable: str, expressions: list[str]) -> bool:
+            """Return True if *variable* matches any expression in the list."""
+            var_cats = set(per_var.get(variable, []))
+            for expr in expressions:
+                parsed = _parse_expression(expr)
+                if parsed is not None:
+                    # Category expression: variable must belong to ALL parts.
+                    if parsed.issubset(var_cats):
+                        return True
+                else:
+                    # Substring fallback for backward compatibility.
+                    if expr in variable:
+                        return True
+            return False
+
+        result = list(all_variables)
+
+        if include is not None:
+            result = [v for v in result if _matches(v, include)]
+
+        if exclude is not None:
+            result = [v for v in result if not _matches(v, exclude)]
+
+        return result
+
+    def typed_variables(self) -> dict[str, Any]:
+        """Return strongly-typed Variable objects for each variable in this dataset.
+
+        Each variable is wrapped in an :class:`anemoi.transform.variables.Variable`
+        instance constructed from its per-variable metadata dict.  This gives
+        typed access to properties such as ``is_accumulation``,
+        ``is_computed_forcing``, ``is_constant_in_time``, etc.
+
+        Returns
+        -------
+        dict[str, Variable]
+            Mapping of variable names to ``Variable`` instances.
+
+        Raises
+        ------
+        ImportError
+            If ``anemoi-transform`` is not installed.
+
+        Examples
+        --------
+        >>> tvars = view.typed_variables()
+        >>> tvars["cos_latitude"].is_computed_forcing
+        True
+        """
+        try:
+            from anemoi.transform.variables import Variable
+        except ImportError as exc:
+            raise ImportError(
+                "typed_variables() requires anemoi-transform. " "Install it with: pip install anemoi-transform"
+            ) from exc
+
+        var_meta = self.variables_metadata
+        return {name: Variable.from_dict(name, var_meta.get(name, {})) for name in self.variables}
+
     def __repr__(self) -> str:
         """String representation.
 
@@ -315,7 +586,7 @@ class DatasetView:
         return f"DatasetView(name={self._name!r})"
 
 
-class Metadata(VariablesMixin, ValidationMixin):
+class Metadata:
     """User-facing metadata interface.
 
     Primary API exposes typed properties via the version-agnostic contract
@@ -390,7 +661,7 @@ class Metadata(VariablesMixin, ValidationMixin):
         """
         from .checkpoint import load_metadata
 
-        raw = load_metadata(path, migrate=migrate)
+        raw = load_metadata(path, migrate=migrate)  # type: ignore[reportCallIssue]
         return cls(raw)
 
     @classmethod
@@ -682,8 +953,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         dict[str, dict[str, Any]]
             Mapping of variable names to their metadata dicts.
             Returns an empty dict if not available.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_variables_metadata(dataset_name)
+        return self.dataset(dataset_name).variables_metadata
 
     def accumulations(self, dataset_name: str | None = None) -> list[str]:
         """Variables that are accumulations (need de-accumulation).
@@ -697,8 +975,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         -------
         list[str]
             Variable names that require de-accumulation at inference time.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_accumulations(dataset_name)
+        return self.dataset(dataset_name).accumulations
 
     def computed_forcings(self, dataset_name: str | None = None) -> list[str]:
         """Variables computed at inference time (not retrieved from data).
@@ -712,8 +997,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         -------
         list[str]
             Variable names that are computed on the fly during inference.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_computed_forcings(dataset_name)
+        return self.dataset(dataset_name).computed_forcings
 
     def data_request(self, dataset_name: str | None = None) -> dict[str, Any]:
         """Data request parameters (grid, area, etc.).
@@ -727,8 +1019,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         -------
         dict[str, Any]
             Data request parameters.  Returns an empty dict if not available.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_data_request(dataset_name)
+        return self.dataset(dataset_name).data_request
 
     def provenance(self) -> dict[str, Any]:
         """Code and data provenance information.
@@ -753,8 +1052,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         -------
         str or None
             Frequency string (e.g. ``"6h"``), or ``None`` if not recorded.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_data_frequency(dataset_name)
+        return self.dataset(dataset_name).data_frequency
 
     def sources(self, dataset_name: str | None = None) -> list[dict[str, Any]]:
         """Source dataset configurations.
@@ -769,8 +1075,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         list[dict[str, Any]]
             Source dataset configurations.  Returns an empty list if not
             available.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_sources(dataset_name)
+        return self.dataset(dataset_name).sources
 
     def open_dataset_args(self, dataset_name: str | None = None) -> dict[str, Any]:
         """Arguments for opening the training dataset.
@@ -785,8 +1098,15 @@ class Metadata(VariablesMixin, ValidationMixin):
         dict[str, Any]
             Arguments for opening the training dataset.  Returns an empty dict
             if not available.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_open_dataset_args(dataset_name)
+        return self.dataset(dataset_name).open_dataset_args
 
     def dataloader_config(
         self,
@@ -812,8 +1132,258 @@ class Metadata(VariablesMixin, ValidationMixin):
         dict[str, Any]
             The dataloader dataset configuration.  Returns an empty dict
             if the partition or config section is absent.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
         """
-        return self._raw.get_dataloader_config(partition, dataset_name)
+        return self.dataset(dataset_name).dataloader_config(partition)
+
+    # ------------------------------------------------------------------
+    # Variable selection and categorisation
+    # ------------------------------------------------------------------
+
+    @cached_property
+    def variables(self) -> list[str]:
+        """List of all variable names in the dataset (input and output).
+
+        Names are taken from the union of input and output index mappings,
+        ordered by their input tensor index first, then output-only variables
+        appended in their output index order.  Uses the first dataset.
+
+        Returns
+        -------
+        list[str]
+            All variable names from both input and output index mappings.
+        """
+        return self.dataset().variables
+
+    @cached_property
+    def num_variables(self) -> int:
+        """Number of variables in the dataset.
+
+        Returns
+        -------
+        int
+            Count of variables.
+        """
+        return len(self.variables)
+
+    def variable_categories(
+        self,
+        dataset_name: str | None = None,
+        *,
+        per_variable: bool = False,
+    ) -> dict[str, list[str]]:
+        """Categorize variables by their role in the model.
+
+        In addition to the base categories returned by the contract
+        (``"forcing"``, ``"prognostic"``, ``"diagnostic"``, ``"target"``),
+        three derived categories are computed and merged in:
+
+        * ``"computed"``  — variables flagged as computed forcings.
+        * ``"accumulation"`` — variables whose ``process`` is ``"accumulated"``.
+        * ``"constant"`` — variables whose ``constant_in_time`` flag is ``True``.
+
+        Parameters
+        ----------
+        dataset_name : str | None, optional
+            Dataset to query.  Defaults to the first dataset.
+        per_variable : bool, optional
+            If ``True``, return a variable-keyed dict where each variable name
+            maps to its sorted list of category strings.  If ``False`` (default),
+            return a category-keyed dict where each category maps to a list of
+            variable names belonging to it.
+
+        Returns
+        -------
+        dict[str, list[str]]
+            Category mapping.  Format depends on *per_variable*:
+
+            * ``per_variable=False`` (default) — ``{category: [var, ...]}``.
+              Only categories that contain at least one variable are present,
+              except for the four base categories which are always included
+              (possibly empty) for backward compatibility.
+            * ``per_variable=True`` — ``{variable: [category, ...]}``.
+              Categories are sorted alphabetically.
+
+        Raises
+        ------
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
+
+        Examples
+        --------
+        >>> cats = metadata.variable_categories()
+        >>> cats["prognostic"]
+        ['u', 'v', 't', 'q']
+
+        >>> cats = metadata.variable_categories(per_variable=True)
+        >>> cats["u"]
+        ['prognostic', 'target']
+        >>> cats["cos_latitude"]
+        ['computed', 'constant', 'forcing']
+        """
+        return self.dataset(dataset_name).variable_categories(per_variable=per_variable)
+
+    def select_variables(
+        self,
+        *,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        dataset_name: str | None = None,
+    ) -> list[str]:
+        """Select variables by category expression or substring pattern.
+
+        Each entry in *include* / *exclude* is first parsed as a category
+        expression:
+
+        * A single category name (e.g. ``"prognostic"``) matches all variables
+          belonging to that category.
+        * A compound expression with ``+`` (e.g. ``"prognostic+forcing"``)
+          matches variables belonging to **all** of the listed categories
+          (conjunction / intersection).
+
+        If an entry does not match any known category expression it is treated
+        as a substring pattern matched against variable names (backward-compat).
+
+        Parameters
+        ----------
+        include : list[str] | None, optional
+            If provided, only variables matching at least one of these
+            expressions are kept.
+        exclude : list[str] | None, optional
+            If provided, variables matching any of these expressions are removed.
+        dataset_name : str | None, optional
+            Dataset to query.  Defaults to the first dataset.
+
+        Returns
+        -------
+        list[str]
+            Filtered list of variable names, in original order.
+
+        Raises
+        ------
+        ValueError
+            If a compound expression (containing ``+``) references one or more
+            unknown category names.
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
+
+        Examples
+        --------
+        >>> metadata.select_variables(include=["prognostic"])
+        ['u', 'v', 't', 'q']
+
+        >>> metadata.select_variables(include=["prognostic+forcing"])
+        []  # no variable is both prognostic and forcing
+
+        >>> metadata.select_variables(include=["computed+constant"])
+        ['cos_latitude', 'sin_latitude']
+        """
+        return self.dataset(dataset_name).select_variables(include=include, exclude=exclude)
+
+    def typed_variables(self, dataset_name: str | None = None) -> dict[str, Any]:
+        """Return strongly-typed Variable objects for each variable.
+
+        Each variable is wrapped in an :class:`anemoi.transform.variables.Variable`
+        instance constructed from its per-variable metadata dict.  This gives
+        typed access to properties such as ``is_accumulation``,
+        ``is_computed_forcing``, ``is_constant_in_time``, etc.
+
+        Parameters
+        ----------
+        dataset_name : str | None, optional
+            Dataset to query.  Defaults to the first dataset.
+
+        Returns
+        -------
+        dict[str, Variable]
+            Mapping of variable names to ``Variable`` instances.
+
+        Raises
+        ------
+        ImportError
+            If ``anemoi-transform`` is not installed.
+        IndexError
+            If *dataset_name* is ``None`` and there are no datasets.
+        KeyError
+            If *dataset_name* is not a known dataset.
+
+        Examples
+        --------
+        >>> tvars = metadata.typed_variables()
+        >>> tvars["cos_latitude"].is_computed_forcing
+        True
+        >>> tvars["cos_latitude"].is_constant_in_time
+        True
+        """
+        return self.dataset(dataset_name).typed_variables()
+
+    # ------------------------------------------------------------------
+    # Environment validation
+    # ------------------------------------------------------------------
+
+    def validate_environment(self) -> list[str]:
+        """Check checkpoint environment against current environment.
+
+        Compares the Python version recorded in the checkpoint's environment
+        dict against the current runtime.  Returns an empty list when the
+        environment dict is missing or empty.
+
+        Returns
+        -------
+        list[str]
+            List of warning messages for any mismatches found.
+            Empty list if environments match or no environment info is stored.
+
+        Examples
+        --------
+        >>> warnings = metadata.validate_environment()
+        >>> if warnings:
+        ...     for w in warnings:
+        ...         print(f"Warning: {w}")
+        """
+        warnings: list[str] = []
+
+        env: dict = getattr(self._raw, "environment", {})
+        if not env:
+            return warnings
+
+        checkpoint_python: str | None = env.get("python_version")
+        if checkpoint_python is not None:
+            current_python = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            if checkpoint_python != current_python:
+                warnings.append(f"Python version mismatch: checkpoint={checkpoint_python}, current={current_python}")
+
+        return warnings
+
+    def get_environment_info(self) -> dict:
+        """Get environment information from the checkpoint.
+
+        Returns the raw environment dict stored in the checkpoint.  The
+        contents are version-dependent; callers should use ``.get()`` for
+        optional keys.
+
+        Returns
+        -------
+        dict
+            Dictionary containing environment details, or an empty dict if
+            no environment information was recorded.
+
+        Examples
+        --------
+        >>> info = metadata.get_environment_info()
+        >>> print(info.get("python_version"))
+        """
+        return getattr(self._raw, "environment", {})
 
     # ------------------------------------------------------------------
     # Safe access for permissive sections
