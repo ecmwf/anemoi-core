@@ -364,12 +364,20 @@ class AnemoiTrainer(ABC):
         if not isinstance(model._ckpt_model_name_to_index, dict):
             return
 
+        # Opt-in: allow fine-tuning into a model with FEWER variables (the current data is a
+        # strict subset of the checkpoint's variables, issue #838) instead of raising.
+        allow_subset = bool(self.config.training.get("allow_variable_subset", False))
+
         # Validate each dataset in current config against checkpoint
         for dataset_name, data_indices in self.data_indices.items():
             if dataset_name in model._ckpt_model_name_to_index:
                 # Dataset found in checkpoint - validate variables match
                 ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
-                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                data_indices.compare_variables(
+                    ckpt_name_to_index,
+                    data_indices.name_to_index,
+                    allow_subset=allow_subset,
+                )
                 loaded_datasets.append(dataset_name)
             else:
                 # Dataset not found in checkpoint - will be randomly initialized

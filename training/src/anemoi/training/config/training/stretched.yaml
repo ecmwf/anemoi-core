@@ -23,6 +23,11 @@ check_variables_compatibility:
   ignore_units: False
   ignore_processing_period: False
 
+# Fine-tuning into a model with FEWER variables (issue #838): set True to accept a
+# checkpoint whose variable set is a superset of the current dataset's (shared variables
+# must keep the same relative order); variable-dependent layers are re-initialised.
+allow_variable_subset: False
+
 # run in deterministic mode ; slows down
 deterministic: False
 

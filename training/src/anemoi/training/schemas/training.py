@@ -698,6 +698,11 @@ class BaseTrainingSchema(BaseModel):
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
+    allow_variable_subset: bool = Field(default=False)
+    "Allow fine-tuning into a model with FEWER variables (issue #838). When True, a checkpoint"
+    " whose variable set is a superset of the current dataset's is accepted instead of raising,"
+    " provided the shared variables keep the same relative order; the variable-dependent layers"
+    " are re-initialised for the reduced set. Default False keeps the strict variable-order check."
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     checkpoint: CheckpointPipelineSchema | None = Field(default=None)

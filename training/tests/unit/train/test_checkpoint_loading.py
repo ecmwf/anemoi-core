@@ -37,10 +37,12 @@ class DummyIndexWithCompare(DummyIndex):
     def __init__(self) -> None:
         super().__init__()
         self.compare_called_with: list[tuple] = []
+        self.compare_allow_subset: list[bool] = []
 
-    def compare_variables(self, ckpt_index: dict, data_index: dict) -> None:
-        """Track that compare was called."""
+    def compare_variables(self, ckpt_index: dict, data_index: dict, *, allow_subset: bool = False) -> None:
+        """Track that compare was called (and with which allow_subset)."""
         self.compare_called_with.append((ckpt_index, data_index))
+        self.compare_allow_subset.append(allow_subset)
 
 
 class DummyProcessor(torch.nn.Module):
@@ -194,7 +196,10 @@ def test_validate_transfer_learning_add_dataset() -> None:
     cerra_index = DummyIndexWithCompare()
     cerra_index.name_to_index = {"t2m": 0, "tp": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index, "cerra": cerra_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index, "cerra": cerra_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(_ckpt_model_name_to_index={"era5": {"t2m": 0, "u10": 1}})
 
     # Call validation method
@@ -214,7 +219,10 @@ def test_validate_transfer_learning_swap_datasets() -> None:
     icon_index = DummyIndexWithCompare()
     icon_index.name_to_index = {"t2m": 0, "msl": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index, "icon": icon_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index, "icon": icon_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(
         _ckpt_model_name_to_index={
             "era5": {"t2m": 0, "u10": 1},
@@ -234,7 +242,10 @@ def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -
     era5_index = DummyIndexWithCompare()
     era5_index.name_to_index = {"t2m": 0, "u10": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(_ckpt_model_name_to_index={"t2m": 0, "u10": 1})
 
     AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
@@ -248,7 +259,10 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     era5_index = DummyIndexWithCompare()
     era5_index.name_to_index = {"t2m": 0, "u10": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(
         _ckpt_model_name_to_index={
             "era5": {"t2m": 0, "u10": 1},
@@ -262,6 +276,36 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     # Assert: compare_variables was called for ERA5
     assert len(era5_index.compare_called_with) == 1
     # Method completes without error (CERRA is silently ignored)
+
+
+def test_validate_transfer_learning_forwards_allow_variable_subset_flag() -> None:
+    """training.allow_variable_subset flows through to compare_variables (issue #838).
+
+    Fine-tuning into a model with FEWER variables must be opt-in: the trainer reads the
+    config flag and forwards it so compare_variables tolerates a strict variable subset.
+    """
+    ckpt_index = {"t2m": 0, "u10": 1, "v10": 2}
+    model = SimpleNamespace(_ckpt_model_name_to_index={"era5": ckpt_index})
+
+    # Gate ON: the flag is forwarded as allow_subset=True.
+    era5_on = DummyIndexWithCompare()
+    era5_on.name_to_index = {"t2m": 0, "u10": 1}
+    trainer_on = SimpleNamespace(
+        data_indices={"era5": era5_on},
+        config=OmegaConf.create({"training": {"allow_variable_subset": True}}),
+    )
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer_on, model)
+    assert era5_on.compare_allow_subset == [True]
+
+    # Default (flag absent): strict, allow_subset=False.
+    era5_off = DummyIndexWithCompare()
+    era5_off.name_to_index = {"t2m": 0, "u10": 1}
+    trainer_off = SimpleNamespace(
+        data_indices={"era5": era5_off},
+        config=OmegaConf.create({"training": {}}),
+    )
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer_off, model)
+    assert era5_off.compare_allow_subset == [False]
 
 
 # ── Rollout state persistence across checkpoint save / load ───────────────────
