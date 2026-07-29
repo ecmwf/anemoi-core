@@ -24,7 +24,7 @@ from typing import Any
 from typing import Literal
 from typing import overload
 
-import anemoi.utils.checkpoints as util_checkpoints
+import anemoi.utils.checkpoints as checkpoints_utils
 
 from .exceptions import CheckpointError
 from .registry import MetadataRegistry
@@ -103,7 +103,7 @@ def has_metadata(path: str | Path) -> bool:
         return False
 
     try:
-        return util_checkpoints.has_metadata(str(checkpoint_path))
+        return checkpoints_utils.has_metadata(str(checkpoint_path))
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
 
@@ -132,9 +132,11 @@ def extract_metadata_dict(path: str | Path) -> dict[str, Any]:
     checkpoint_path = Path(path)
 
     try:
-        return util_checkpoints.load_metadata(str(checkpoint_path), supporting_arrays=False)
+        return checkpoints_utils.load_metadata(str(checkpoint_path), supporting_arrays=False)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+    except FileNotFoundError as exc:
+        raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}") from exc
     except json.JSONDecodeError as exc:
         raise CheckpointError(f"Invalid metadata JSON in {checkpoint_path}") from exc
 
@@ -143,7 +145,7 @@ def extract_metadata_dict(path: str | Path) -> dict[str, Any]:
 def load_metadata(
     path: str | Path,
     *,
-    migrate: bool = True,
+    migrate: bool,
     supporting_arrays: Literal[False],
 ) -> "MetadataContract": ...
 
@@ -152,7 +154,7 @@ def load_metadata(
 def load_metadata(
     path: str | Path,
     *,
-    migrate: bool = True,
+    migrate: bool,
     supporting_arrays: Literal[True],
 ) -> "tuple[MetadataContract, dict[str, Any]]": ...
 
@@ -204,7 +206,7 @@ def load_metadata(
     checkpoint_path = Path(path)
 
     try:
-        data, arrays = util_checkpoints.load_metadata(str(checkpoint_path), supporting_arrays=True)
+        data, arrays = checkpoints_utils.load_metadata(str(checkpoint_path), supporting_arrays=True)
         metadata = MetadataRegistry.load(data, migrate=migrate)
 
         if supporting_arrays:
@@ -213,6 +215,8 @@ def load_metadata(
 
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+    except FileNotFoundError as exc:
+        raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}") from exc
     except json.JSONDecodeError as exc:
         raise CheckpointError(f"Invalid metadata JSON in {checkpoint_path}") from exc
 
@@ -262,9 +266,11 @@ def save_metadata(
         raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
 
     try:
-        util_checkpoints.save_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
+        checkpoints_utils.save_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
+    except ValueError as exc:
+        raise CheckpointError(f"Checkpoint {checkpoint_path} already contains metadata") from exc
 
 
 def replace_metadata(
@@ -307,9 +313,10 @@ def replace_metadata(
 
     metadata_obj = _resolve_metadata(metadata)
     metadata_dict = metadata_obj.to_dict()
+    metadata_dict.setdefault("version", metadata_obj.schema_version)
 
     try:
-        util_checkpoints.replace_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
+        checkpoints_utils.replace_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
 
@@ -336,6 +343,6 @@ def remove_metadata(path: str | Path) -> None:
         raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
 
     try:
-        util_checkpoints.remove_metadata(str(checkpoint_path))
+        checkpoints_utils.remove_metadata(str(checkpoint_path))
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
