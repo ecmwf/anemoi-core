@@ -102,7 +102,6 @@ class MetadataContract(BaseModel, ABC):
     >>> @MetadataRegistry.register("1.0")
     ... class MetadataV1(MetadataContract):
     ...     schema_version: str
-    ...     model_name: str
     ...     ...etc...
     """
 
