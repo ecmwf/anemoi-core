@@ -20,8 +20,8 @@ from torch_geometric.data import HeteroData
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
@@ -358,7 +358,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     target = torch.zeros_like(pred)
 
     mse = WeightedMSELoss()
-    spectral = SpectralL2Loss(
+    spectral = PowerSpectrumLoss(
         transform="octahedral_sht",
         nlat=nlat,
     )

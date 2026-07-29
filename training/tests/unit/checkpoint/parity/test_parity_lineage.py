@@ -515,13 +515,16 @@ def test_http_source_leaves_checkpoint_path_unset() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Seed scaling for an env-sourced seed below the threshold (seeding.py:44-46)
+# An env-sourced base seed is returned unscaled (seeding.py get_base_seed)
 # ---------------------------------------------------------------------------
 
 
-def test_env_seed_below_threshold_is_scaled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_seed_is_returned_unscaled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANEMOI_BASE_SEED", raising=False)
     monkeypatch.delenv("SLURM_JOB_ID", raising=False)
     monkeypatch.setenv("CUSTOM_BASE_SEED", "42")
 
-    assert get_base_seed(base_seed_env="CUSTOM_BASE_SEED") == 42000
+    # get_base_seed returns the configured seed as-is. The legacy "<1000 -> *1000"
+    # scaling was removed in #1228 (seed-overflow fix): small seeds are now expanded
+    # safely by np.random.SeedSequence inside derive_seed, so no pre-scaling is needed.
+    assert get_base_seed(base_seed_env="CUSTOM_BASE_SEED") == 42

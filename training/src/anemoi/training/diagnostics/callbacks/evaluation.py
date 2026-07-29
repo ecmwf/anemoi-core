@@ -146,6 +146,10 @@ class RolloutEval(Callback):
                 if dtype is not None
                 else nullcontext()
             )
-
-            with context:
+            # 'torch.compile.set_stance' tells the compiler to try use compiled code if it exists
+            # but fall back to eager if it doesn't.
+            # This is used because the evaluationRollout callback seems to introduce many different input shapes
+            # These all force recompilation which slows down evaluation and eventually leads to a an error
+            # once the config.model.recompile_limit is reached.
+            with context and torch.compiler.set_stance("eager_on_recompile"):
                 self._eval(pl_module, batch)

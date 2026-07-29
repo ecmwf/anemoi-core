@@ -16,7 +16,6 @@ import pytest
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from omegaconf import open_dict
-from pydantic import ValidationError
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -74,20 +73,22 @@ def test_config_validation_global_config(global_config: tuple[DictConfig, str, s
     BaseSchema(**cfg)
 
 
-def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_accepts_unknown_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    # projection_kind is a free-form string; unknown values are validated lazily at
+    # runtime in Projection.from_kind, not at schema load time.
     cfg, _, _ = global_config
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
-    with pytest.raises(ValidationError, match="projection_kind"):
-        BaseSchema(**cfg)
+    cfg.diagnostics.plot.settings.projection_kind = "invalid_projection"
+    validated = BaseSchema(**cfg)
+    assert validated.diagnostics.plot.settings.projection_kind == "invalid_projection"
 
 
 def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     cfg.config_validation = False
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg.diagnostics.plot.settings.projection_kind = "invalid_projection"
     cfg_obj = OmegaConf.to_object(cfg)
     unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
-    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
+    assert unvalidated.diagnostics.plot.settings.projection_kind == "invalid_projection"
 
 
 def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:

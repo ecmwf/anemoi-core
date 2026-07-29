@@ -4,7 +4,7 @@
 # below) — evaluating a randomly-initialised model is almost certainly an error.
 #
 # Usage:
-#   anemoi-training evaluate --config-dir /path/to/overrides --config-name config_evaluate
+#   anemoi-training evaluate --config-path /path/to/overrides --config-name config_evaluate
 #
 # Or pass individual keys as CLI overrides:
 #   anemoi-training evaluate training/checkpoint/source=run +training.checkpoint.source.run_id=<run_id>
