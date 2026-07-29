@@ -70,29 +70,6 @@ Sequential migration system for metadata versions.
    :show-inheritance:
 
 
-Mixins
-------
-
-Shared functionality for the Metadata interface.
-
-VariablesMixin
-^^^^^^^^^^^^^^
-
-.. autoclass:: anemoi.metadata.mixins.variables.VariablesMixin
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-
-ValidationMixin
-^^^^^^^^^^^^^^^
-
-.. autoclass:: anemoi.metadata.mixins.validation.ValidationMixin
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-
 Exceptions
 ----------
 
