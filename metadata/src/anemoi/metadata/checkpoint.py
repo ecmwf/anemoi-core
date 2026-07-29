@@ -7,22 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Checkpoint I/O for metadata.
+"""Checkpoint functions for metadata.
 
 This module provides functions for reading and writing metadata from/to
-checkpoint files. It handles ZIP archive manipulation and supports
-both the new metadata format and legacy formats.
-
-PyTorch checkpoint files are ZIP archives with a single top-level directory
-(e.g. ``archive/``). Metadata is stored under that directory as
-``<top-dir>/anemoi-metadata/anemoi.json``. Matching is done by **basename**
-so that the exact top-level prefix does not need to be known in advance.
+checkpoint files. It delegates the actual functions handling the I/O
+to anemoi-utils, but provides a higher-level interface for working with checkpoint files in
+the context of the metadata objects.
 """
 
 import json
 import logging
-import os
-import time
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,7 +24,7 @@ from typing import Any
 from typing import Literal
 from typing import overload
 
-import numpy as np
+import anemoi.utils.checkpoints as util_checkpoints
 
 from .exceptions import CheckpointError
 from .registry import MetadataRegistry
@@ -77,346 +71,6 @@ def _resolve_metadata(
     raise TypeError(f"metadata must be a MetadataContract instance or a dict, got {type(metadata).__name__}")
 
 
-DEFAULT_NAME = "anemoi.json"
-DEFAULT_FOLDER = "anemoi-metadata"
-DEPRECATED_NAME = "ai-models.json"
-
-# Convenience aliases used by tests and the public API.
-METADATA_PATH = f"{DEFAULT_FOLDER}/{DEFAULT_NAME}"
-LEGACY_METADATA_PATH = DEPRECATED_NAME
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _find_metadata_path(zf: zipfile.ZipFile, *, name: str = DEFAULT_NAME) -> str | None:
-    """Find the full in-archive path of a metadata file by matching its basename.
-
-    Parameters
-    ----------
-    zf : zipfile.ZipFile
-        Open ZipFile object.
-    name : str, optional
-        Basename to search for (default: ``DEFAULT_NAME``).
-
-    Returns
-    -------
-    str | None
-        Full path within the archive, or ``None`` if not found.
-    """
-    matches = [b for b in zf.namelist() if os.path.basename(b) == name]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        raise CheckpointError(f"Found multiple '{name}' entries in archive.")
-    return None
-
-
-def _find_metadata_path_with_deprecation(zf: zipfile.ZipFile) -> str | None:
-    """Find metadata path, falling back to the deprecated name with a warning.
-
-    Tries ``DEFAULT_NAME`` first; if absent, tries ``DEPRECATED_NAME`` and
-    emits a deprecation warning.
-
-    Parameters
-    ----------
-    zf : zipfile.ZipFile
-        Open ZipFile object.
-
-    Returns
-    -------
-    str | None
-        Full path within the archive, or ``None`` if neither name is found.
-    """
-    path = _find_metadata_path(zf, name=DEFAULT_NAME)
-    if path is not None:
-        return path
-
-    path = _find_metadata_path(zf, name=DEPRECATED_NAME)
-    if path is not None:
-        LOG.warning(
-            "The metadata file '%s' is deprecated. " "New versions of checkpoints will write to '%s' instead.",
-            DEPRECATED_NAME,
-            DEFAULT_NAME,
-        )
-        return path
-
-    return None
-
-
-def _get_top_level_directory(zf: zipfile.ZipFile) -> str:
-    """Determine the single top-level directory in a ZIP archive.
-
-    PyTorch checkpoints are required to have exactly one top-level directory.
-
-    Parameters
-    ----------
-    zf : zipfile.ZipFile
-        Open ZipFile object.
-
-    Returns
-    -------
-    str
-        The top-level directory name (without trailing slash).
-
-    Raises
-    ------
-    CheckpointError
-        If the archive has zero or more than one top-level directory.
-    """
-    directories: set[str] = set()
-    for entry in zf.namelist():
-        directory = os.path.dirname(entry)
-        if not directory:
-            # Flat entry (no directory prefix) -- skip it.
-            continue
-        # Walk up to the top-level component.
-        while os.path.dirname(directory) not in (".", ""):
-            directory = os.path.dirname(directory)
-        directories.add(directory)
-
-    if len(directories) != 1:
-        raise CheckpointError(f"Expected exactly one top-level directory in checkpoint, " f"found: {directories!r}")
-    return list(directories)[0]
-
-
-def _get_supporting_arrays_paths(
-    directory: str,
-    supporting_arrays: dict | np.ndarray | None,
-) -> dict:
-    """Build the ``supporting_arrays_paths`` metadata structure recursively.
-
-    Parameters
-    ----------
-    directory : str
-        Current archive directory (e.g. ``"archive/anemoi-metadata"``).
-    supporting_arrays : dict | np.ndarray | None
-        Arrays to record.  A ``dict`` triggers recursion; an ``ndarray``
-        produces a leaf entry; ``None`` returns ``{}``.
-
-    Returns
-    -------
-    dict
-        Nested dict of ``{"path": ..., "shape": [...], "dtype": "..."}``
-        leaf entries.
-    """
-    if supporting_arrays is None:
-        return {}
-
-    if isinstance(supporting_arrays, dict):
-        return {
-            key: _get_supporting_arrays_paths(f"{directory}/{key}", value) for key, value in supporting_arrays.items()
-        }
-
-    # Leaf: a single numpy array.
-    return {
-        "path": f"{directory}.numpy",
-        "shape": list(supporting_arrays.shape),
-        "dtype": str(supporting_arrays.dtype),
-    }
-
-
-def _write_array_to_bytes(
-    array: dict | np.ndarray | None,
-    name: str,
-    entry: dict,
-    zipf: zipfile.ZipFile,
-) -> None:
-    """Write a supporting array (or nested dict of arrays) into a ZIP file.
-
-    Parameters
-    ----------
-    array : dict | np.ndarray | None
-        Array data to write.
-    name : str
-        Current key name (used for logging).
-    entry : dict
-        Corresponding entry from ``supporting_arrays_paths``.
-    zipf : zipfile.ZipFile
-        Open ZipFile to write into.
-    """
-    if array is None:
-        return
-
-    if isinstance(array, dict):
-        for sub_name, sub_array in array.items():
-            _write_array_to_bytes(sub_array, sub_name, entry.get(sub_name, {}), zipf)
-        return
-
-    LOG.info(
-        "Saving supporting array '%s' to %s (shape=%s, dtype=%s)",
-        name,
-        entry["path"],
-        entry["shape"],
-        entry["dtype"],
-    )
-    zipf.writestr(entry["path"], array.tobytes())
-
-
-def _load_supporting_arrays(zf: zipfile.ZipFile, entries: dict) -> dict[str, Any]:
-    """Load supporting numpy arrays from a ZIP file.
-
-    Recursively handles nested (multi-dataset) structures.  A leaf entry is
-    a dict with exactly the keys ``{"path", "shape", "dtype"}``; anything
-    else is treated as a nested group.
-
-    Parameters
-    ----------
-    zf : zipfile.ZipFile
-        Open ZipFile object.
-    entries : dict
-        The ``supporting_arrays_paths`` dict (or a sub-dict thereof).
-
-    Returns
-    -------
-    dict[str, Any]
-        Mapping of key → numpy array (or nested dict of arrays).
-    """
-    result: dict[str, Any] = {}
-    for key, entry in entries.items():
-        if isinstance(entry, dict) and set(entry.keys()) != {"path", "shape", "dtype"}:
-            # Nested group — recurse.
-            result[key] = _load_supporting_arrays(zf, entry)
-        else:
-            result[key] = np.frombuffer(
-                zf.read(entry["path"]),
-                dtype=entry["dtype"],
-            ).reshape(entry["shape"])
-    return result
-
-
-def _edit_metadata(
-    path: Path,
-    metadata_archive_path: str,
-    new_metadata_json: str | None,
-    supporting_arrays: dict | None = None,
-    *,
-    target_archive_path: str | None = None,
-) -> None:
-    """Rebuild a ZIP archive, replacing or removing the metadata entry.
-
-    Copies every entry from the source archive into a new temporary file,
-    skipping the old metadata entry (and its associated array files).  If
-    ``new_metadata_json`` is not ``None`` the new metadata is written at
-    ``target_archive_path`` (defaults to ``metadata_archive_path`` if not
-    specified, effectively migrating deprecated paths to the canonical one).
-
-    Parameters
-    ----------
-    path : Path
-        Path to the checkpoint file (modified in-place).
-    metadata_archive_path : str
-        In-archive path of the **old** metadata JSON to remove/replace.
-    new_metadata_json : str | None
-        Serialised JSON to write as the new metadata, or ``None`` to remove.
-    supporting_arrays : dict | None, optional
-        New supporting arrays to write alongside the new metadata.
-    target_archive_path : str | None, optional
-        In-archive path where the new metadata should be written.  Defaults
-        to ``metadata_archive_path``.  Set this to migrate from a deprecated
-        path (e.g. ``ai-models.json``) to the canonical path.
-    """
-    if target_archive_path is None:
-        target_archive_path = metadata_archive_path
-
-    tmp_path = path.with_suffix(f".anemoi-edit-{time.time()}-{os.getpid()}.tmp")
-
-    old_directory = os.path.dirname(metadata_archive_path)
-
-    # Determine which archive entries to skip (old metadata + old arrays).
-    skip_paths: set[str] = {metadata_archive_path}
-
-    try:
-        with zipfile.ZipFile(path, "r") as src_zf:
-            # Try to extract supporting array paths from the old metadata JSON.
-            # This is more precise than scanning the directory tree.
-            old_array_paths_extracted = False
-            try:
-                with src_zf.open(metadata_archive_path) as f:
-                    old_metadata = json.load(f)
-                    old_supporting_arrays_paths = old_metadata.get("supporting_arrays_paths", {})
-                    if old_supporting_arrays_paths:
-                        # Recursively collect all array paths from the nested structure.
-                        def _collect_array_paths(entry: dict) -> list[str]:
-                            paths = []
-                            if isinstance(entry, dict):
-                                if "path" in entry:
-                                    # Leaf entry
-                                    paths.append(entry["path"])
-                                else:
-                                    # Nested group
-                                    for value in entry.values():
-                                        paths.extend(_collect_array_paths(value))
-                            return paths
-
-                        for array_path in _collect_array_paths(old_supporting_arrays_paths):
-                            skip_paths.add(array_path)
-                        old_array_paths_extracted = True
-            except (json.JSONDecodeError, KeyError):
-                # If we can't parse the old metadata, fall back to directory scanning.
-                pass
-
-            # Fall back to directory scanning only if we couldn't extract paths
-            # from the metadata AND the old_directory contains a "/" (i.e., it's
-            # not the top-level directory).
-            if not old_array_paths_extracted and "/" in old_directory:
-                for entry in src_zf.namelist():
-                    if entry.startswith(old_directory + "/") and entry.endswith(".numpy"):
-                        skip_paths.add(entry)
-
-            with zipfile.ZipFile(tmp_path, "w") as dst_zf:
-                # Copy everything except the entries being replaced,
-                # preserving original compression method per entry.
-                for entry in src_zf.namelist():
-                    if entry not in skip_paths:
-                        info = src_zf.getinfo(entry)
-                        dst_zf.writestr(info, src_zf.read(entry))
-
-                # Write new metadata at the target path (compressed).
-                if new_metadata_json is not None:
-                    dst_zf.writestr(
-                        target_archive_path,
-                        new_metadata_json,
-                        compress_type=zipfile.ZIP_DEFLATED,
-                    )
-
-                    # Write new supporting arrays (uncompressed -- binary data).
-                    if supporting_arrays:
-                        metadata_dict = json.loads(new_metadata_json)
-                        array_paths = metadata_dict.get("supporting_arrays_paths", {})
-                        _write_array_to_bytes(supporting_arrays, "", array_paths, dst_zf)
-
-        # Flush the temp file's contents to stable storage before the rename,
-        # so a power loss cannot persist the rename while the data is still in
-        # the page cache (which would leave a truncated checkpoint behind).
-        fd = os.open(tmp_path, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
-        tmp_path.replace(path)
-
-        # Make the rename itself durable by syncing the containing directory.
-        # Not supported on Windows; best-effort elsewhere.
-        try:
-            dir_fd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except OSError:  # pragma: no cover - platform dependent
-            pass
-
-        LOG.info("Updated metadata in %s", path)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -449,8 +103,7 @@ def has_metadata(path: str | Path) -> bool:
         return False
 
     try:
-        with zipfile.ZipFile(checkpoint_path, "r") as zf:
-            return _find_metadata_path_with_deprecation(zf) is not None
+        return util_checkpoints.has_metadata(str(checkpoint_path))
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
 
@@ -479,12 +132,7 @@ def extract_metadata_dict(path: str | Path) -> dict[str, Any]:
     checkpoint_path = Path(path)
 
     try:
-        with zipfile.ZipFile(checkpoint_path, "r") as zf:
-            metadata_path = _find_metadata_path_with_deprecation(zf)
-            if metadata_path is None:
-                raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}")
-            with zf.open(metadata_path) as f:
-                return json.load(f)
+        return util_checkpoints.load_metadata(str(checkpoint_path), supporting_arrays=False)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
     except json.JSONDecodeError as exc:
@@ -556,21 +204,12 @@ def load_metadata(
     checkpoint_path = Path(path)
 
     try:
-        with zipfile.ZipFile(checkpoint_path, "r") as zf:
-            metadata_archive_path = _find_metadata_path_with_deprecation(zf)
-            if metadata_archive_path is None:
-                raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}")
+        data, arrays = util_checkpoints.load_metadata(str(checkpoint_path), supporting_arrays=True)
+        metadata = MetadataRegistry.load(data, migrate=migrate)
 
-            with zf.open(metadata_archive_path) as f:
-                data = json.load(f)
-
-            metadata = MetadataRegistry.load(data, migrate=migrate)
-
-            if supporting_arrays:
-                arrays = _load_supporting_arrays(zf, data.get("supporting_arrays_paths", {}))
-                return metadata, arrays
-
-            return metadata
+        if supporting_arrays:
+            return metadata, arrays
+        return metadata
 
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
@@ -623,29 +262,9 @@ def save_metadata(
         raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
 
     try:
-        with zipfile.ZipFile(checkpoint_path, "r") as zf:
-            if _find_metadata_path_with_deprecation(zf) is not None:
-                raise CheckpointError(
-                    f"Checkpoint already contains metadata: {checkpoint_path}. " "Use replace_metadata() to overwrite."
-                )
-            directory = _get_top_level_directory(zf)
+        util_checkpoints.save_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
-
-    folder = DEFAULT_FOLDER
-    name = DEFAULT_NAME
-
-    metadata_dict = metadata_dict.copy()
-    metadata_dict["supporting_arrays_paths"] = _get_supporting_arrays_paths(f"{directory}/{folder}", supporting_arrays)
-
-    LOG.info("Saving metadata to %s/%s/%s", directory, folder, name)
-
-    with zipfile.ZipFile(checkpoint_path, "a", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(
-            f"{directory}/{folder}/{name}",
-            json.dumps(metadata_dict),
-        )
-        _write_array_to_bytes(supporting_arrays, "", metadata_dict["supporting_arrays_paths"], zf)
 
 
 def replace_metadata(
@@ -690,30 +309,9 @@ def replace_metadata(
     metadata_dict = metadata_obj.to_dict()
 
     try:
-        with zipfile.ZipFile(checkpoint_path, "r") as zf:
-            metadata_archive_path = _find_metadata_path_with_deprecation(zf)
-            if metadata_archive_path is None:
-                raise CheckpointError(f"No metadata found in checkpoint: {checkpoint_path}")
-            directory = _get_top_level_directory(zf)
+        util_checkpoints.replace_metadata(str(checkpoint_path), metadata_dict, supporting_arrays=supporting_arrays)
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
-
-    folder = DEFAULT_FOLDER
-    name = DEFAULT_NAME
-
-    metadata_dict = metadata_dict.copy()
-    metadata_dict["supporting_arrays_paths"] = _get_supporting_arrays_paths(f"{directory}/{folder}", supporting_arrays)
-
-    new_archive_path = f"{directory}/{folder}/{name}"
-    new_metadata_json = json.dumps(metadata_dict)
-
-    _edit_metadata(
-        checkpoint_path,
-        metadata_archive_path,
-        new_metadata_json,
-        supporting_arrays,
-        target_archive_path=new_archive_path,
-    )
 
 
 def remove_metadata(path: str | Path) -> None:
@@ -738,12 +336,6 @@ def remove_metadata(path: str | Path) -> None:
         raise CheckpointError(f"Checkpoint file not found: {checkpoint_path}")
 
     try:
-        with zipfile.ZipFile(checkpoint_path, "r") as zf:
-            metadata_archive_path = _find_metadata_path_with_deprecation(zf)
-            if metadata_archive_path is None:
-                # Nothing to remove — treat as a no-op.
-                return
+        util_checkpoints.remove_metadata(str(checkpoint_path))
     except zipfile.BadZipFile as exc:
         raise CheckpointError(f"Invalid checkpoint file: {checkpoint_path}") from exc
-
-    _edit_metadata(checkpoint_path, metadata_archive_path, new_metadata_json=None)
